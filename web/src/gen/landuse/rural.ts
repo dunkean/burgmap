@@ -6,6 +6,7 @@ import { blurGrid, gradientAt, D8 } from '../core/grid';
 import { Vec2, Polygon, Polyline, chaikin, simplify, polygonArea, polygonCentroid, polygonContains, bbox, dist } from '../core/geom';
 import { distanceField, forCellsNearPolyline, smoothstep } from '../core/field';
 import { marchingSquares } from '../terrain/contour';
+import { rasterizePolys } from '../geo/raster';
 import type { World, LandArea, LandKind, Farmstead, LandUseLayer } from '../types';
 
 type Ring = [number, number][];
@@ -95,11 +96,26 @@ export function generateRural(world: World, root: Rng): { layer: LandUseLayer; s
   const dRoadF = distanceField(roadM, n, n, cell, roadAngC);
   const dRoad = dRoadF.dist, roadAng = dRoadF.val!;
 
-  // ---- urban reserve
+  // ---- urban reserve: the actual urban footprint (plus a margin for walls, ditches and lanes) when the town
+  // exists, else the old travel-cost disc. `uDist` = travel cost beyond the footprint edge (von Thünen rings).
   const reserveCost = 1.25 * site.reserveRadius;
   const costC = site.cost.data;
   const reserve = new Uint8Array(N);
-  for (let i = 0; i < N; i++) if (costC[i] <= reserveCost) reserve[i] = 1;
+  const uDist = new Float32Array(N);
+  const foot = world.urban?.footprintH ?? [];
+  if (foot.length) {
+    const rings: Polygon[] = [];
+    for (const ph of foot) { rings.push(ph.outer); for (const hl of ph.holes) rings.push(hl); }
+    rasterizePolys(rings, n, n, cell, reserve);
+    const margin = (world.urban?.walls?.length ? 14 : 5) + 0.5 * cell;
+    const dRes = distanceField(reserve, n, n, cell, costC);
+    for (let i = 0; i < N; i++) {
+      if (dRes.dist[i] <= margin) reserve[i] = 1;
+      uDist[i] = Math.max(0, Math.min(1e5, costC[i]) - (dRes.val![i] || 0));
+    }
+  } else {
+    for (let i = 0; i < N; i++) { if (costC[i] <= reserveCost) reserve[i] = 1; uDist[i] = Math.min(1e5, costC[i]) - reserveCost; }
+  }
 
   // slope thresholds adapt to the relief: the best-drained/flattest ground near the town is always the arable
   const slopeL = blurGrid(terrain.slope, Math.max(1, Math.round(45 / cell)), 1).data;
@@ -135,7 +151,7 @@ export function generateRural(world: World, root: Rng): { layer: LandUseLayer; s
         const p = { x: b.x - t.y * off * side, y: b.y + t.x * off * side };
         if (p.x < 0.06 * S || p.y < 0.06 * S || p.x > 0.94 * S || p.y > 0.94 * S) continue;
         const idx = Math.floor(p.y / cell) * n + Math.floor(p.x / cell);
-        if (terrain.water[idx] || f.dWater[idx] < 60 || f.hab[idx] < 2.5 || slopeL[idx] > fieldMax || costC[idx] < reserveCost + 0.1 * S || costC[idx] > reserveCost + 0.42 * S) continue;
+        if (terrain.water[idx] || f.dWater[idx] < 60 || f.hab[idx] < 2.5 || slopeL[idx] > fieldMax || reserve[idx] || uDist[idx] < 0.1 * S || uDist[idx] > 0.42 * S) continue;
         cand.push({ p, t: { x: t.x * side, y: t.y * side }, score: fr.float() });
       }
     }
@@ -188,7 +204,7 @@ export function generateRural(world: World, root: Rng): { layer: LandUseLayer; s
     const wx = (x + 0.5) * cell, wy = (y + 0.5) * cell;
     const sl = slopeL[i];
     const hab = f.hab[i], dW = f.dWater[i];
-    const u = Math.min(1e5, costC[i]) - reserveCost;
+    const u = uDist[i];
     const soil = noise.fbm(wx / 380, wy / 380, 3); // -1..1
     const nB = noise.fbm(wx / 110 + 40, wy / 110 - 17, 2);
     const nC = noise.fbm(wx / 70 - 9, wy / 70 + 5, 2);
@@ -364,7 +380,7 @@ export function generateRural(world: World, root: Rng): { layer: LandUseLayer; s
   // reserve outline
   const resInd = new Float32Array(N);
   for (let i = 0; i < N; i++) resInd[i] = reserve[i] ? 1 : 0;
-  const reservePolys = vectorize(resInd, n, n, cell, 4000).map((rg) => rg.outer);
+  const reservePolys = foot.length ? foot.map((ph) => ph.outer) : vectorize(resInd, n, n, cell, 4000).map((rg) => rg.outer);
 
   stats['furlongs'] = furlongCount;
   stats['strips'] = stripCount;

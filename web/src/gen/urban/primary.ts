@@ -80,6 +80,37 @@ export function makeMarket(center: Vec2, radials: Polyline[], target: number, rn
   return poly;
 }
 
+function orientedRectP(c: Vec2, ang: number, len: number, wid: number): Polygon {
+  const ca = Math.cos(ang), sa = Math.sin(ang);
+  const pts: [number, number][] = [[-len / 2, -wid / 2], [len / 2, -wid / 2], [len / 2, wid / 2], [-len / 2, wid / 2]];
+  return orientPos(pts.map(([u, w]) => ({ x: c.x + u * ca - w * sa, y: c.y + u * sa + w * ca })));
+}
+
+/**
+ * Planned towns: inside the enclosure a road follows the lattice — from its gate straight along the grid axis
+ * closest to its heading, then along the other axis to the central square (an L, or a straight line).
+ */
+function gridRadial(pl: Polyline, enc: MultiPoly, center: Vec2, ang: number): Polyline | null {
+  let entry = -1;
+  for (let i = 0; i < pl.length; i++) if (inMP(enc, pl[i])) { entry = i; break; }
+  if (entry <= 0) return null;
+  // exact gate point on the enclosure boundary
+  const a = pl[entry - 1], b = pl[entry];
+  let g = b;
+  for (const ph of enc) for (let k = 0; k < ph.outer.length; k++) {
+    const r = segSegT(a, b, ph.outer[k], ph.outer[(k + 1) % ph.outer.length]);
+    if (r) g = { x: a.x + (b.x - a.x) * r.t, y: a.y + (b.y - a.y) * r.t };
+  }
+  const axes = [0, 1, 2, 3].map((k) => ({ x: Math.cos(ang + (k * Math.PI) / 2), y: Math.sin(ang + (k * Math.PI) / 2) }));
+  const toC = { x: center.x - g.x, y: center.y - g.y };
+  let d = axes[0], bd = -Infinity;
+  for (const ax of axes) { const v = ax.x * toC.x + ax.y * toC.y; if (v > bd) { bd = v; d = ax; } }
+  const t1 = d.x * toC.x + d.y * toC.y;
+  const corner = { x: g.x + d.x * t1, y: g.y + d.y * t1 };
+  const tail = dist(corner, center) > 3 ? [g, corner, center] : [g, center];
+  return pl.slice(0, entry).concat(tail);
+}
+
 /** Walk a road path from its end (center side) backward while it stays near the footprint. */
 function radialPath(path: Polyline, near: (p: Vec2) => boolean): Polyline | null {
   let i = path.length - 1;
@@ -141,6 +172,8 @@ export interface PrimaryInput {
   marketArea: number;
   mainAngle: number;
   extraRadials: boolean;
+  /** Zone of the faubourg ribbons (villages use 'village'). */
+  faubZone?: Zone;
 }
 
 export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets, rng: Rng): Primary {
@@ -152,13 +185,17 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
   for (const rd of inp.roads) {
     const pl = radialPath(rd.path, nearFoot);
     if (!pl || polylineLength(pl) < 20) continue;
-    rawRadials.push({ pl: smoothStreet(pl), major: rd.major });
+    let sp = smoothStreet(pl);
+    if (P.streetOp === 'grid') sp = gridRadial(sp, inp.enclosure, ctx.center, inp.mainAngle) ?? sp;
+    rawRadials.push({ pl: sp, major: rd.major });
   }
   // ---- market at the nucleus
   let market: Polygon | null = null;
   const core = inp.phases[0].region;
   if (inp.marketArea > 0) {
-    const mk = makeMarket(ctx.center, rawRadials.map((r) => r.pl), inp.marketArea, rng.fork('market'), inp.mainAngle);
+    const mk = P.streetOp === 'grid'
+      ? orientedRectP(ctx.center, inp.mainAngle, Math.sqrt(inp.marketArea * 1.25), Math.sqrt(inp.marketArea / 1.25))
+      : makeMarket(ctx.center, rawRadials.map((r) => r.pl), inp.marketArea, rng.fork('market'), inp.mainAngle);
     const clipped = intersection(mk, core);
     let best: Polygon | null = null;
     for (const ph of clipped) if (!best || area(ph.outer) > area(best)) best = ph.outer;
@@ -258,7 +295,7 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
   const bands: { mp: MultiPoly; phase: number; zone: Zone; age: number }[] = inp.phases.map((ph, k) => ({
     mp: k === 0 && market ? difference(ph.band, market) : ph.band, phase: ph.id, zone: ph.zone, age: ph.age,
   }));
-  if (inp.faubourg.length) bands.push({ mp: inp.faubourg, phase: n + 1, zone: 'faubourg', age: 0.1 });
+  if (inp.faubourg.length) bands.push({ mp: inp.faubourg, phase: n + 1, zone: inp.faubZone ?? 'faubourg', age: 0.1 });
   // label sources
   const src = new GridIndex<{ a: Vec2; b: Vec2; lab: number }>(20);
   for (const st of streets.list) for (let i = 1; i < st.path.length; i++) src.insertSeg(st.path[i - 1], st.path[i], { a: st.path[i - 1], b: st.path[i], lab: st.id });

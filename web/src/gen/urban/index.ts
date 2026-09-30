@@ -6,9 +6,10 @@ import type { Vec2, Polygon } from '../core/geom';
 import { dist } from '../core/geom';
 import type { Rng } from '../core/rng';
 import type { World, UrbanLayer, UrbanStreet, PolyH as PolyHT } from '../types';
-import { MORPHOLOGIES } from './morphology';
+import { MORPHOLOGIES, MorphologyParams, Zone } from './morphology';
+import { planRibbonVillage } from './villages';
 import { makeCtx } from './context';
-import { choosePopulation, chooseArchetype, planTownPhases, planFaubourgs } from './phases';
+import { choosePopulation, chooseArchetype, planTownPhases, planFaubourgs, EnclosurePlan } from './phases';
 import { buildPrimary } from './primary';
 import { Streets } from './streets';
 import { mpArea, MultiPoly } from '../geo/bool';
@@ -46,25 +47,50 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   const t0 = performance.now();
   const rng = root.fork('urban');
   const opts = world.options;
-  const params = MORPHOLOGIES[opts.culture] ?? MORPHOLOGIES['european-organic'];
+  const base = MORPHOLOGIES[opts.culture] ?? MORPHOLOGIES['european-organic'];
   const pop = choosePopulation(opts.size, opts.population, rng.fork('pop'));
   const roads = (world.roads ?? []).filter((r) => r.kind !== 'track').map((r) => ({ path: r.path, major: r.kind === 'major' }));
   const reaching = roads.filter((r) => dist(r.path[r.path.length - 1], world.site!.center) < 10).length;
-  const archetype = chooseArchetype(pop, reaching, rng.fork('arch'));
-  const walled = opts.walls === 'yes' ? true : opts.walls === 'no' ? false : archetype === 'town' && (pop >= 2500 || rng.fork('walls').chance(0.6));
+  let archetype = chooseArchetype(pop, reaching, rng.fork('arch'));
+  // hamlets: wide farm plots and no block splitting; street villages: long blocks between field lanes
+  const params: MorphologyParams = archetype === 'hamlet'
+    ? { ...base, frontage: { ...base.frontage, village: [26, 55] }, blockSize: { ...base.blockSize, village: [60000, 90000] } }
+    : archetype === 'street-village' ? { ...base, blockSize: { ...base.blockSize, village: [9000, 26000] } } : base;
+  const walled = opts.walls === 'yes' ? archetype === 'town' || archetype === 'nucleated-village' : opts.walls === 'no' ? false : archetype === 'town' && (pop >= 2500 || rng.fork('walls').chance(0.6));
   const estArea = (pop / params.density.middle) * 1e4;
   const ctx = makeCtx(world, params, 2.6 * Math.sqrt(estArea / Math.PI) + 450);
-  const stats: Record<string, number | string> = { pop, archetype, walled: walled ? 1 : 0, morphology: params.id };
   const mainAngle = mainRoadAngle(world);
   const streets = new Streets();
 
-  const plan = planTownPhases(ctx, pop, walled, mainAngle, rng.fork('phases'));
-  const faubPop = pop * (walled ? 0.17 : 0.1);
-  const faub = planFaubourgs(ctx, plan.enclosure, roads, (faubPop / params.density.faubourg) * 1e4, walled ? 22 : 0, rng.fork('faubourg'));
+  let plan: EnclosurePlan | null = null;
+  let faub: { region: MultiPoly } = { region: [] };
+  let marketArea = 0, extraRadials = false;
+  let faubZone: Zone = 'faubourg';
+  if (archetype === 'hamlet' || archetype === 'street-village') {
+    const rv = planRibbonVillage(ctx, roads, pop, archetype, rng.fork('village'));
+    if (rv) {
+      plan = { phases: rv.phases, enclosure: rv.enclosure, walled: false };
+      marketArea = archetype === 'street-village' ? 500 + pop * 0.6 : 0;
+    } else archetype = 'nucleated-village';
+  }
+  if (!plan && archetype === 'nucleated-village') {
+    plan = planTownPhases(ctx, pop, walled, mainAngle, rng.fork('phases'), { nPh: 1, zones: ['village'], faubShare: 0.3 });
+    faub = planFaubourgs(ctx, plan.enclosure, roads, ((pop * 0.3) / params.density.village) * 1e4, 0, rng.fork('faubourg'));
+    marketArea = 500 + pop * 0.8;
+    faubZone = 'village';
+  }
+  if (!plan) {
+    plan = planTownPhases(ctx, pop, walled, mainAngle, rng.fork('phases'));
+    const faubPop = pop * (walled ? 0.17 : 0.1);
+    faub = planFaubourgs(ctx, plan.enclosure, roads, (faubPop / params.density.faubourg) * 1e4, walled ? 22 : 0, rng.fork('faubourg'));
+    marketArea = MARKET_AREA(pop);
+    extraRadials = params.streetOp !== 'grid';
+  }
+  const stats: Record<string, number | string> = { pop, archetype, walled: walled ? 1 : 0, morphology: params.id };
   const t1 = performance.now();
   const prim = buildPrimary(ctx, {
-    phases: plan.phases, enclosure: plan.enclosure, walled, faubourg: faub.region, roads,
-    marketArea: MARKET_AREA(pop), mainAngle, extraRadials: true,
+    phases: plan.phases, enclosure: plan.enclosure, walled: plan.walled, faubourg: faub.region, roads,
+    marketArea, mainAngle, extraRadials, faubZone,
   }, streets, rng.fork('primary'));
   const t2 = performance.now();
   stats['ms.phases'] = Math.round(t1 - t0);
@@ -99,7 +125,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     const br = rng.fork('blk:' + bi);
     const infill = Math.max(0, Math.min(1, params.infill[b.zone] + br.range(-0.08, 0.08)));
     blockInfill.push(infill);
-    if (b.kind !== 'block') { parcels.push({ poly: b.poly, use: b.kind === 'market' ? 'market' : 'place', block: bi, zone: b.zone }); return; }
+    if (b.kind !== 'block') { parcels.push({ poly: b.poly, use: b.kind === 'market' ? (archetype === 'town' ? 'market' : 'green') : 'place', block: bi, zone: b.zone }); return; }
     const r = cutPlots(b.poly, bi, b.zone, infill, params, streets, br);
     for (const p of r.plots) { plots.push(p); parcels.push({ poly: p.poly, use: 'plot', block: bi, front: p.front, zone: b.zone }); }
     for (const g of r.back) parcels.push({ poly: g, use: 'garden', block: bi, zone: b.zone });
@@ -150,7 +176,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     archetype, population: pop, morphology: params.id,
     phases: plan.phases.map((p) => ({ id: p.id, kind: p.kind, zone: p.zone, region: toPH(p.region), walled: p.walled, fossil: p.fossil })),
     quarters: prim.quarters.map((q, qi) => ({ poly: { outer: q.lp.pts, holes: [] }, phase: q.phase, zone: q.zone, streetSpace: toPH(streetSpace[qi]) })),
-    blockInfo: carved.map((b) => ({ quarter: b.quarter, phase: b.phase, zone: b.zone, kind: b.kind })), masses,
+    blockInfo: carved.map((b) => ({ quarter: b.quarter, phase: b.phase, zone: b.zone, kind: b.kind === 'market' && archetype !== 'town' ? 'green' : b.kind })), masses,
     backLand: parcels.filter((p) => p.use === 'garden').map((p) => p.poly).concat(plotGardens).map((p) => ({ outer: p, holes: [] })),
   };
   const debug: UrbanDebug = { quarters: prim.quarters.map((q) => ({ poly: q.lp.pts, phase: q.phase, lab: q.lp.lab })) };

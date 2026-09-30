@@ -70,6 +70,11 @@ export function urbanLayer(world: World, pal: Palette, u: number, debug: boolean
     const d = places.map((p) => pathD(p.poly, true)).join('');
     s += `<g class="u-places"><path d="${d}" fill="${U.place}"/><path d="${d}" fill="url(#p-upave)"/></g>`;
   }
+  const greens = ub.parcels.filter((p) => p.use === 'green');
+  if (greens.length) {
+    const d = greens.map((p) => pathD(p.poly, true)).join('');
+    s += `<g class="u-greens"><path d="${d}" fill="${U.garden}"/><path d="${d}" fill="url(#p-ugarden)" opacity="0.6"/></g>`;
+  }
   const blockD = ub.blocks.filter((_, i) => ub.blockInfo[i]?.kind === 'block').map((b) => pathD(b, true)).join('');
   s += `<path class="u-blocks" d="${blockD}" fill="${U.yard}"/>`;
   if (ub.backLand.length) {

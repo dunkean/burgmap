@@ -155,7 +155,9 @@ export function cutPlots(
       const h = rayHit(B, q, nr[j]);
       if (!h) return dz;
       const farFront = isF(h.edge);
-      const cap = farFront ? 0.5 * h.t + 1.2 : h.t + 0.5;
+      // opposite runs meet near the medial line; a much more important street takes a larger share
+      const frac = Math.max(0.5, Math.min(0.85, 0.5 + 0.17 * (fr[h.edge].rank - run.rank)));
+      const cap = farFront ? frac * h.t + 1.2 : h.t + 0.5;
       return deepFill ? Math.max(Math.min(dz, cap), Math.min(cap, h.t * 0.5 + 1.2)) : Math.min(dz, cap);
     });
     // smooth depths along the run

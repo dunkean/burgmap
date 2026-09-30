@@ -156,11 +156,13 @@ export function orientedRect(c: Vec2, ang: number, len: number, wid: number): Po
 export interface EnclosurePlan { phases: PhasePlan[]; enclosure: MultiPoly; walled: boolean }
 
 /** Nested enclosed phases for a town (european-organic or bastide). */
-export function planTownPhases(ctx: UrbanCtx, pop: number, walled: boolean, mainAngle: number, rng: Rng): EnclosurePlan {
+export interface PhaseOverrides { nPh?: number; zones?: UrbanZone[]; faubShare?: number }
+
+export function planTownPhases(ctx: UrbanCtx, pop: number, walled: boolean, mainAngle: number, rng: Rng, ov: PhaseOverrides = {}): EnclosurePlan {
   const P = ctx.params;
-  const nPh = P.streetOp === 'grid' ? 1 : pop < 5000 ? 2 : pop < 20000 ? 3 : 4;
-  const zones = zonesFor(nPh);
-  const faubShare = walled ? 0.17 : 0.1;
+  const nPh = ov.nPh ?? (P.streetOp === 'grid' ? 1 : pop < 5000 ? 2 : pop < 20000 ? 3 : 4);
+  const zones = ov.zones ?? zonesFor(nPh);
+  const faubShare = ov.faubShare ?? (walled ? 0.17 : 0.1);
   const encPop = pop * (1 - faubShare);
   const shares = SHARES[nPh];
   const f = buildField(ctx, rng);
@@ -192,7 +194,7 @@ export function planTownPhases(ctx: UrbanCtx, pop: number, walled: boolean, main
     R = R.map((ph) => ({ outer: ph.outer, holes: ph.holes }));
     let band: MultiPoly = prev.length ? difference(R, prev) : R;
     band = dropSlivers(band, 400, 5);
-    phases.push({ id: k + 1, kind: k === 0 ? 'core' : 'ring', zone: zones[k], region: R, band, age: 1 - k / Math.max(1, nPh), fossil: k < nPh - 1, walled: walled && k === nPh - 1, pop: ppop });
+    phases.push({ id: k + 1, kind: zones[k] === 'village' ? 'village' : k === 0 ? 'core' : 'ring', zone: zones[k], region: R, band, age: 1 - k / Math.max(1, nPh), fossil: k < nPh - 1, walled: walled && k === nPh - 1, pop: ppop });
     prev = R;
   }
   return { phases, enclosure: prev, walled };
