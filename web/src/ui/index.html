@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Burgmap</title>
+<style>
+  :root { --bg:#2b2620; --panel:#f3ead2; --ink:#3d2f20; --ink2:#7a6247; --accent:#8a5a2b; --line:#d6c7a1; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--ink); font:14px/1.4 Georgia, 'Times New Roman', serif; overflow:hidden; }
+  #app { display:flex; height:100%; }
+  #panel { width:280px; flex:none; background:var(--panel); border-right:1px solid var(--line); padding:16px; overflow:auto; box-shadow:2px 0 12px rgba(0,0,0,.35); z-index:2; }
+  #panel h1 { margin:0 0 2px; font-size:24px; letter-spacing:.04em; }
+  #panel .sub { color:var(--ink2); font-size:12px; margin-bottom:16px; }
+  label { display:block; font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:var(--ink2); margin:12px 0 4px; }
+  select, input[type=text] { width:100%; padding:7px 8px; border:1px solid var(--line); border-radius:4px; background:#fffaf0; color:var(--ink); font:inherit; }
+  .row { display:flex; gap:6px; }
+  button { padding:7px 10px; border:1px solid var(--accent); border-radius:4px; background:var(--accent); color:#fff8ea; font:inherit; cursor:pointer; }
+  button.secondary { background:transparent; color:var(--accent); }
+  button:hover { filter:brightness(1.08); }
+  .check { display:flex; align-items:center; gap:8px; margin-top:12px; font-size:13px; }
+  .btns { display:flex; gap:6px; margin-top:20px; }
+  .btns button { flex:1; }
+  #status { margin-top:16px; font-size:12px; color:var(--ink2); min-height:2.6em; }
+  #map { position:relative; flex:1; overflow:hidden; cursor:grab; touch-action:none; }
+  #map.drag { cursor:grabbing; }
+  #stage { position:absolute; left:0; top:0; transform-origin:0 0; will-change:transform; box-shadow:0 4px 30px rgba(0,0,0,.5); }
+  #stage svg { display:block; width:100%; height:100%; }
+  #busy { position:absolute; right:14px; top:12px; color:#f3ead2; font-size:12px; opacity:0; transition:opacity .2s; pointer-events:none; }
+  #busy.on { opacity:1; }
+  @media (max-width: 700px) { #panel { width:220px; padding:10px; } }
+</style>
+</head>
+<body>
+<div id="app">
+  <aside id="panel">
+    <h1>Burgmap</h1>
+    <div class="sub">Medieval settlement in its landscape</div>
+    <label for="seed">Seed</label>
+    <div class="row"><input id="seed" type="text" spellcheck="false"><button id="dice" class="secondary" title="Random seed">&#127922;</button></div>
+    <label for="size">Size</label>
+    <select id="size"></select>
+    <label for="relief">Relief</label>
+    <select id="relief"></select>
+    <label for="coast">Coast</label>
+    <select id="coast"></select>
+    <label for="river">River</label>
+    <select id="river"></select>
+    <label for="style">Style</label>
+    <select id="style"></select>
+    <div class="check"><input id="contours" type="checkbox"><span>Contour lines</span></div>
+    <div class="btns"><button id="exportSvg">Export SVG</button><button id="exportPng">Export PNG</button></div>
+    <div id="status"></div>
+  </aside>
+  <main id="map"><div id="stage"></div><div id="busy">generating...</div></main>
+</div>
+<script type="module" src="./main.ts"></script>
+</body>
+</html>

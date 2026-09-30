@@ -1,0 +1,141 @@
+<title>Burgmap Journal de chantier</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IM+Fell+English+SC&family=Spectral:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a surveyor's ledger — one reading column, milestones as a survey line, journal as dated entries, previews as plates. */
+:root {
+  --paper: #eceee6; --sheet: #f6f7f2; --ink: #1d2422; --muted: #5d6862; --rule: #c9cec3;
+  --water: #2d5e78; --done: #3c6e47; --doing: #b07a1c; --todo: #8a918b;
+  --f-display: "IM Fell English SC", "Iowan Old Style", Georgia, serif;
+  --f-body: "Spectral", Georgia, "Times New Roman", serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --paper: #141816; --sheet: #1b201e; --ink: #e2e6df; --muted: #9aa49e; --rule: #333b37;
+  --water: #7fb1cc; --done: #7fbf8c; --doing: #e0b050; --todo: #7d857f; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --paper: #141816; --sheet: #1b201e; --ink: #e2e6df; --muted: #9aa49e; --rule: #333b37;
+  --water: #7fb1cc; --done: #7fbf8c; --doing: #e0b050; --todo: #7d857f; color-scheme: dark }
+body { background: var(--paper); color: var(--ink); font: 17px/1.6 var(--f-body); }
+.wrap { max-width: 60rem; margin: 0 auto; padding-inline: 1.25rem; padding-block: 2.5rem 4rem; display: grid; gap: 2.75rem; }
+h1, h2 { font-family: var(--f-display); font-weight: 400; text-wrap: balance; margin: 0; }
+h1 { font-size: clamp(2.2rem, 6vw, 3.4rem); line-height: 1.05; }
+h2 { font-size: 1.6rem; border-bottom: 1px solid var(--rule); padding-bottom: .35rem; }
+p { margin: 0; max-width: 65ch; }
+.lede { display: grid; gap: .9rem; }
+.meta { font: 13px/1.5 var(--f-mono); color: var(--muted); display: flex; flex-wrap: wrap; gap: .4rem 1.5rem; }
+.meta b { color: var(--ink); font-weight: 500; }
+section { display: grid; gap: 1.1rem; }
+.label { font: 500 11px/1 var(--f-mono); letter-spacing: .08em; text-transform: uppercase; }
+/* milestones as a survey line */
+.line { list-style: none; margin: 0; padding: 0; display: grid; }
+.line li { display: grid; grid-template-columns: 1.5rem minmax(0,1fr); gap: 0 .9rem; position: relative; padding-bottom: 1.1rem; }
+.line li::before { content: ""; position: absolute; left: .7rem; top: 1.1rem; bottom: 0; border-left: 1px dashed var(--rule); }
+.line li:last-child::before { display: none; }
+.pin { width: .9rem; height: .9rem; margin: .35rem 0 0 .3rem; border: 2px solid var(--todo); border-radius: 50%; background: var(--paper); z-index: 1; }
+.done .pin { background: var(--done); border-color: var(--done); }
+.doing .pin { border-color: var(--doing); background: repeating-linear-gradient(45deg, var(--doing) 0 2px, transparent 2px 4px); }
+.ms-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: .2rem .8rem; }
+.ms-head strong { font-weight: 600; }
+.chip { font: 500 11px/1 var(--f-mono); letter-spacing: .06em; text-transform: uppercase; padding: .25rem .45rem; border: 1px solid currentColor; border-radius: 2px; }
+.done .chip { color: var(--done); } .doing .chip { color: var(--doing); } .todo .chip { color: var(--todo); }
+.ms-body { color: var(--muted); font-size: .95rem; }
+/* journal */
+.log { display: grid; gap: 1.25rem; }
+.entry { display: grid; grid-template-columns: 7.5rem minmax(0,1fr); gap: .3rem 1.2rem; }
+.entry time { font: 13px/1.9 var(--f-mono); color: var(--water); }
+.entry div { display: grid; gap: .4rem; min-width: 0; }
+@media (max-width: 34rem) { .entry { grid-template-columns: 1fr; } }
+/* plates */
+.plates { display: grid; grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr)); gap: 1.25rem; }
+figure { margin: 0; background: var(--sheet); border: 1px solid var(--rule); padding: .6rem; display: grid; gap: .5rem; }
+figure img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; }
+figcaption { font: 12px/1.45 var(--f-mono); color: var(--muted); }
+.empty { color: var(--muted); font-style: italic; }
+.refs { margin: 0; padding-left: 1.2rem; display: grid; gap: .35rem; font-size: .95rem; }
+.refs span { color: var(--muted); }
+a { color: var(--water); }
+a:focus-visible { outline: 2px solid var(--water); outline-offset: 2px; }
+</style>
+
+<div class="wrap">
+  <header class="lede">
+    <span class="label" style="color:var(--water)">Journal de chantier</span>
+    <h1>Burgmap</h1>
+    <p>Générateur de villes et villages médiévaux dans leur paysage : relief, rivières, côte, champs, routes, parcelles, bâtiments et activités. Tout tourne dans le navigateur, sans serveur : une graine (ou une carte de relief) plus des options donnent une ville.</p>
+    <div class="meta" id="meta"></div>
+  </header>
+
+  <section aria-labelledby="h-ms">
+    <h2 id="h-ms">Jalons</h2>
+    <ol class="line" id="milestones"></ol>
+  </section>
+
+  <section aria-labelledby="h-plates">
+    <h2 id="h-plates">Planches</h2>
+    <div class="plates" id="plates"></div>
+  </section>
+
+  <section aria-labelledby="h-log">
+    <h2 id="h-log">Journal</h2>
+    <div class="log" id="log"></div>
+  </section>
+
+  <section aria-labelledby="h-refs">
+    <h2 id="h-refs">Références</h2>
+    <ul class="refs" id="refs"></ul>
+  </section>
+</div>
+
+<script>
+const DATA = {
+  updated: "2026-09-30",
+  budget: "15 % du quota hebdo · suivi à l'estime",
+  demo: null,
+  milestones: [
+    { s: "done",  t: "M0 · Architecture", d: "Contrat de données, pipeline en 6 étapes, TypeScript + Vite en un seul fichier HTML, graines déterministes par étape." },
+    { s: "doing", t: "M1 · Relief et eaux", d: "Relief paramétrable (plaine, collines, vallée, montagne), côte, écoulement (priority-flood, D8), rivière principale creusée avec méandres, lacs. Rendu SVG, estompage, courbes de niveau, interface minimale." },
+    { s: "todo",  t: "M2 · Site, routes, campagne", d: "Choix du site (gué, port, éperon défensif), routes régionales A* avec ponts, anneaux agricoles : jardins, vergers, champs en lanières, prés inondables, forêts." },
+    { s: "todo",  t: "M3 · Tissu urbain", d: "Rues principales et secondaires, îlots, parcelles en lanières (burgage plots), maisons alignées sur rue, cours et jardins." },
+    { s: "todo",  t: "M4 · Remparts et activités", d: "Enceinte avec tours et portes, château, églises, cathédrale, place du marché, monastère, quais et chantier naval, moulins, tanneries, faubourgs." },
+    { s: "todo",  t: "M5 · Rendu et interface", d: "Styles de carte (parchemin, atlas), légende, toponymes, export SVG/PNG, partage par URL, import d'une carte de relief." },
+    { s: "todo",  t: "M6 · Contrôle qualité", d: "Revue sur 50 graines, invariants (rien dans l'eau, pas de chevauchement), performances, démo publiée." }
+  ],
+  plates: [],
+  log: [
+    { d: "30 sept.", h: "Lancement", b: [
+      "Les prototypes Python (portage de TownGeneratorOS, relief v2, toitures, peupleurs de quartiers) servent de référence. La nouvelle version repart en TypeScript pour tourner sans serveur.",
+      "Choix clé : le paysage d'abord, la ville ensuite. La ville se pose là où le terrain la rend plausible (gué, port, colline), et l'occupation des sols découle du coût d'accès depuis le centre.",
+      "M1 confié à un agent : relief, hydrologie, rendu et interface minimale."
+    ]}
+  ],
+  refs: [
+    ["Barnes, Lehman, Mulla (2014)", "Priority-Flood: an optimal depression-filling algorithm"],
+    ["Parish & Müller (2001)", "Procedural Modeling of Cities"],
+    ["Emilien et al. (2012)", "Procedural generation of villages on arbitrary terrains"],
+    ["Vanegas et al. (2012)", "Procedural generation of parcels in urban modeling"],
+    ["Groenewegen et al. (2009)", "Procedural city layout generation based on urban land use models"],
+    ["Chen et al. (2008)", "Interactive procedural street modeling (tensor fields)"],
+    ["Conzen (1960)", "Alnwick, Northumberland: a study in town-plan analysis (burgage plots)"],
+    ["watabou", "Medieval Fantasy City Generator, la référence à dépasser"]
+  ]
+};
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const LBL = { done: "Fait", doing: "En cours", todo: "À faire" };
+const nDone = DATA.milestones.filter((m) => m.s === "done").length;
+$("meta").innerHTML =
+  `<span>Mis à jour <b>${esc(DATA.updated)}</b></span>` +
+  `<span>Jalons <b>${nDone}/${DATA.milestones.length}</b></span>` +
+  `<span>Budget <b>${esc(DATA.budget)}</b></span>` +
+  (DATA.demo ? `<span><a href="${esc(DATA.demo)}">Ouvrir la démo</a></span>` : "");
+$("milestones").innerHTML = DATA.milestones.map((m) =>
+  `<li class="${m.s}"><span class="pin" aria-hidden="true"></span><div><div class="ms-head"><strong>${esc(m.t)}</strong><span class="chip">${LBL[m.s]}</span></div><p class="ms-body">${esc(m.d)}</p></div></li>`).join("");
+$("plates").innerHTML = DATA.plates.length
+  ? DATA.plates.map((p) => `<figure><img src="${esc(p.src)}" alt="${esc(p.cap)}" loading="lazy"><figcaption>${esc(p.cap)}</figcaption></figure>`).join("")
+  : `<p class="empty">Les premières planches arrivent avec M1.</p>`;
+$("log").innerHTML = DATA.log.map((e) =>
+  `<article class="entry"><time>${esc(e.d)}</time><div><strong>${esc(e.h)}</strong>${e.b.map((x) => `<p>${esc(x)}</p>`).join("")}</div></article>`).join("");
+$("refs").innerHTML = DATA.refs.map(([a, t]) => `<li>${esc(t)} <span>· ${esc(a)}</span></li>`).join("");
+</script>
