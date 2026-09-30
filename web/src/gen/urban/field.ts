@@ -29,8 +29,15 @@ export class GuidanceField {
     const dx = p.x - this.nucleus.x, dy = p.y - this.nucleus.y;
     const r = Math.hypot(dx, dy);
     let th = Math.atan2(dy, dx);
-    // blend (in 4θ space) with the tangent of the nearest primary street
     let cx = Math.cos(4 * th), cy = Math.sin(4 * th);
+    // a random low-frequency orientation field breaks the dartboard (regular concentric arcs and spokes)
+    const wr = P.fieldRandom ?? 0;
+    if (wr > 0) {
+      const psi = Math.PI * this.noise.fbm(p.x / 260 + 31.7, p.y / 260 - 12.3, 2);
+      cx = (1 - wr) * cx + wr * Math.cos(4 * psi);
+      cy = (1 - wr) * cy + wr * Math.sin(4 * psi);
+    }
+    // blend (in 4θ space) with the tangent of the nearest primary street
     const al = this.primaryAlign(p);
     if (al) {
       cx = (1 - al.w) * cx + al.w * al.c;
@@ -49,7 +56,7 @@ export class GuidanceField {
     }
     th = Math.atan2(cy, cx) / 4;
     // near the nucleus the radial field is singular: fade the noise in with distance
-    return th + nz * smoothstep(r, 20, 120);
+    return th + nz * (0.5 + 0.5 * smoothstep(r, 20, 120));
   }
 
   /**

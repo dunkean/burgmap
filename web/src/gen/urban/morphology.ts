@@ -60,6 +60,12 @@ export interface MorphologyParams {
   footprintConformity: Record<Zone, number>;
   /** Probability that the irregular corner left beside an orthogonal footprint is built too. */
   cornerFill: Record<Zone, number>;
+  /** Weight of a random low-frequency orientation field blended into the radial/tangential cross-field. */
+  fieldRandom: number;
+  /** Fossilized ring streets are broken into partial arcs: gaps per km of ring. */
+  ringGaps: number;
+  /** Relative jitter of the phase population shares (ring spacing varies from town to town). */
+  shareJitter: number;
   courtyardMin: number;
   /** Gross densities (inhabitants per ha) per zone, used to size phase regions. */
   density: Record<Zone, number>;
@@ -71,7 +77,7 @@ const EO: MorphologyParams = {
   plotOp: 'burgage',
   buildingOp: 'streetFrontRow',
   curvature: 0.55,
-  fieldNoise: 12,
+  fieldNoise: 17,
   fieldWavelength: 150,
   gridSpacing: [70, 110],
   gridSkew: 0,
@@ -94,9 +100,12 @@ const EO: MorphologyParams = {
   setback: { core: [0, 0.3], middle: [0, 0.8], edge: [0.5, 3], faubourg: [0.5, 3], village: [3, 10] },
   sideGap: { core: [0, 0], middle: [0, 1.2], edge: [0.5, 2.5], faubourg: [0.8, 3], village: [3, 8] },
   infill: { core: 0.92, middle: 0.62, edge: 0.38, faubourg: 0.3, village: 0.12 },
-  coverage: { core: [0.86, 0.94], middle: [0.75, 0.85], edge: [0.53, 0.67], faubourg: [0.38, 0.52], village: [0.12, 0.3] },
+  coverage: { core: [0.86, 0.94], middle: [0.77, 0.86], edge: [0.53, 0.67], faubourg: [0.38, 0.52], village: [0.12, 0.3] },
   bigCourtChance: 0.3,
   footprintConformity: { core: 0.92, middle: 0.75, edge: 0.6, faubourg: 0.4, village: 0.3 },
+  ringGaps: 2.2,
+  fieldRandom: 0.45,
+  shareJitter: 0.22,
   cornerFill: { core: 0.6, middle: 0.35, edge: 0.2, faubourg: 0.1, village: 0 },
   courtyardMin: 9,
   density: { core: 185, middle: 120, edge: 85, faubourg: 55, village: 35 },

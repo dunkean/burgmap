@@ -91,7 +91,7 @@ export function splitQuarter(ctx: UrbanCtx, q: Quarter, qi: number, streets: Str
     const [bmin, bmax] = P.blockSize[pc.zone];
     const dn = dist(ob.c, o.nucleus);
     let target = bmin * Math.pow(bmax / bmin, rng.float());
-    target *= 0.65 + 0.35 * smoothstep(dn, 50, 320);
+    target *= 0.85 + 0.15 * smoothstep(dn, 50, 320);
     const aspect = ob.hu / Math.max(1, ob.hv);
     if ((A0 < target && aspect < 2.6) || A0 < 2 * P.minBlock) { out.push(pc); continue; }
     const cands: Cand[] = [];

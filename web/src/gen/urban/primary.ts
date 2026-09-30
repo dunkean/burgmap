@@ -251,11 +251,17 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
       const er = rng.fork('extraRadials');
       for (const [a, b] of gaps) {
         const gap = b - a;
-        const k = Math.floor(gap / ((70 * Math.PI) / 180));
+        // only wide gaps get a synthetic radial, and it starts at the first old wall line (a T on the ring street),
+        // not at the market: a few true radials (the roads) reach the centre, the rest is infill
+        const k = Math.floor(gap / ((100 * Math.PI) / 180));
         for (let j = 1; j <= k; j++) {
-          const th = a + (gap * j) / (k + 1) + er.range(-0.12, 0.12);
-          const pl = traceRadial(ctx, th, market, inp.enclosure, er);
+          const th = a + (gap * j) / (k + 1) + er.range(-0.2, 0.2);
+          let pl = traceRadial(ctx, th, market, inp.enclosure, er);
           if (!pl) continue;
+          if (inp.phases.length >= 2 && inp.phases[0].fossil) {
+            pl = afterExit(pl, inp.phases[0].region);
+            if (!pl || polylineLength(pl) < 60) continue;
+          }
           const w = P.widthByRank[1] * P.widthScale * 0.9;
           const id = streets.add(pl, jitterWidths(pl, w, P.widthJitter, () => er.float()), 1, 'radial', 1);
           radials.push(id); radialLines.push(pl);
@@ -272,9 +278,12 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
     if (!ph.fossil) continue;
     for (const comp of ph.region) {
       for (const run of ringRuns(comp.outer, encInnerOK, 40)) {
-        const pl = simplify(run, 0.2);
-        const w = P.widthByRank[1] * P.widthScale * 0.95;
-        streets.add(pl, jitterWidths(pl, w, P.widthJitter, () => wr.float()), 1, 'ring', k + 1);
+        // the old wall line survives as partial arcs: stretches were built over (blocks straddle the line)
+        for (const pl0 of breakRing(simplify(run, 0.2), radialLines, P.ringGaps ?? 0, wr)) {
+          const pl = pl0;
+          const w = P.widthByRank[1] * P.widthScale * 0.95;
+          streets.add(pl, jitterWidths(pl, w, P.widthJitter, () => wr.float()), 1, 'ring', k + 1);
+        }
       }
     }
   }
@@ -436,3 +445,81 @@ function traceRadial(ctx: UrbanCtx, th: number, market: Polygon | null, enc: Mul
 }
 
 export { polygonCentroid };
+
+/** Arclength slice of a polyline. */
+function slicePl(pl: Polyline, cum: number[], s0: number, s1: number): Polyline {
+  const at = (s: number): Vec2 => {
+    let i = 1;
+    while (i < pl.length - 1 && cum[i] < s) i++;
+    const t = (s - cum[i - 1]) / (cum[i] - cum[i - 1] || 1);
+    return { x: pl[i - 1].x + (pl[i].x - pl[i - 1].x) * t, y: pl[i - 1].y + (pl[i].y - pl[i - 1].y) * t };
+  };
+  const out = [at(s0)];
+  for (let i = 1; i < pl.length - 1; i++) if (cum[i] > s0 && cum[i] < s1) out.push(pl[i]);
+  out.push(at(s1));
+  return out;
+}
+
+/**
+ * Ring street broken into partial arcs: `perKm` gaps per km of ring (50–130 m each), kept away from the radial
+ * crossings so that every arc stays joined to the network.
+ */
+export function breakRing(pl: Polyline, radials: Polyline[], perKm: number, rng: Rng): Polyline[] {
+  const cum = [0];
+  for (let i = 1; i < pl.length; i++) cum.push(cum[i - 1] + dist(pl[i - 1], pl[i]));
+  const L = cum[cum.length - 1];
+  const nGaps = Math.floor((L / 1000) * perKm + rng.float());
+  if (nGaps <= 0 || L < 200) return [pl];
+  // arclength of the radial crossings
+  const cross: number[] = [];
+  for (let i = 1; i < pl.length; i++) for (const r of radials) {
+    for (let j = 1; j < r.length; j++) {
+      const x = segSegT(pl[i - 1], pl[i], r[j - 1], r[j]);
+      if (x) cross.push(cum[i - 1] + x.t * (cum[i] - cum[i - 1]));
+    }
+    // radials starting or ending on the ring (T junctions)
+    for (const e of [r[0], r[r.length - 1]]) {
+      const a = pl[i - 1], b = pl[i];
+      const dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy || 1;
+      const t = Math.max(0, Math.min(1, ((e.x - a.x) * dx + (e.y - a.y) * dy) / l2));
+      if (Math.hypot(e.x - a.x - t * dx, e.y - a.y - t * dy) < 1) cross.push(cum[i - 1] + t * Math.sqrt(l2));
+    }
+  }
+  if (!cross.length) return [pl];
+  const gaps: [number, number][] = [];
+  for (let g = 0; g < nGaps * 4 && gaps.length < nGaps; g++) {
+    const len = rng.range(50, 130);
+    const s0 = rng.range(20, L - len - 20);
+    if (s0 < 20) continue;
+    const s1 = s0 + len;
+    if (cross.some((c) => c > s0 - 35 && c < s1 + 35)) continue;
+    if (gaps.some(([a, b]) => s0 < b + 60 && s1 > a - 60)) continue;
+    gaps.push([s0, s1]);
+  }
+  if (!gaps.length) return [pl];
+  gaps.sort((a, b) => a[0] - b[0]);
+  const out: Polyline[] = [];
+  let s = 0;
+  // every arc keeps at least one radial crossing (it stays joined to the network)
+  const keep = (a: number, b: number) => b - a > 25 && cross.some((c) => c >= a - 0.5 && c <= b + 0.5);
+  for (const [a, b] of gaps) { if (keep(s, a)) out.push(slicePl(pl, cum, s, a)); s = b; }
+  if (keep(s, L)) out.push(slicePl(pl, cum, s, L));
+  return out;
+}
+
+/** The part of a polyline (starting inside `region`) after it first leaves the region, starting on its boundary. */
+function afterExit(pl: Polyline, region: MultiPoly): Polyline | null {
+  for (let i = 1; i < pl.length; i++) {
+    const a = pl[i - 1], b = pl[i];
+    let bt = Infinity;
+    for (const comp of region) for (let k = 0; k < comp.outer.length; k++) {
+      const r = segSegT(a, b, comp.outer[k], comp.outer[(k + 1) % comp.outer.length]);
+      if (r && r.t < bt) bt = r.t;
+    }
+    if (bt < Infinity) {
+      const e = { x: a.x + (b.x - a.x) * bt, y: a.y + (b.y - a.y) * bt };
+      return [e, ...pl.slice(i)];
+    }
+  }
+  return null;
+}

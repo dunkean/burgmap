@@ -261,7 +261,12 @@ export function planTownPhases(ctx: UrbanCtx, pop: number, walled: boolean, main
   const zones = ov.zones ?? zonesFor(nPh);
   const faubShare = ov.faubShare ?? (walled ? 0.17 : 0.1);
   const encPop = pop * (1 - faubShare);
-  const shares = SHARES[nPh];
+  // ring spacing varies from town to town
+  const sj = P.shareJitter ?? 0;
+  const sr = rng.fork('shares');
+  const raw = SHARES[nPh].map((x) => x * (1 + sj * (2 * sr.float() - 1)));
+  const rs = raw.reduce((a, b) => a + b, 0);
+  const shares = raw.map((x) => x / rs);
   // enclosed area target; on scarce land (steep valleys) buildability is relaxed step by step (hillside towns)
   let total = 0;
   for (let k = 0; k < nPh; k++) total += ((encPop * shares[k]) / ctx.params.density[zones[k]]) * 1e4;
