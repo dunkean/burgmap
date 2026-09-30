@@ -79,7 +79,7 @@ function hash2(x: number, y: number): number {
   return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
 }
 
-export interface RasterResult { png: Uint8Array; w: number; h: number }
+export interface RasterResult { png: Uint8Array; w: number; h: number; /** Raw 8-bit RGB pixels (w*h*3), used by the canvas renderer. */ rgb?: Uint8Array }
 
 /** Hillshaded, hypsometric-tinted land image covering the whole map. */
 export function renderTerrainRaster(world: World, pal: Palette): RasterResult {
@@ -161,5 +161,5 @@ export function renderTerrainRaster(world: World, pal: Palette): RasterResult {
       out[o + 2] = Math.max(0, Math.min(255, c[2] * k));
     }
   }
-  return { png: encodePng(out, W, H, 3), w: W, h: H };
+  return { png: encodePng(out, W, H, 3), w: W, h: H, rgb: out };
 }

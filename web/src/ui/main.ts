@@ -1,6 +1,11 @@
 import { Options, SIZE_PRESETS, DEFAULT_ROADS, fromQuery, toQuery } from '../gen/options';
 import { generate } from '../gen/pipeline';
 import { renderSvg } from '../render/svg';
+// CANVAS-VIEWER (begin imports)
+import { createCanvasRenderer } from '../render/canvas';
+import { createViewer } from './viewer';
+import type { World } from '../gen/types';
+// CANVAS-VIEWER (end imports)
 import GenWorker from './worker?worker&inline';
 import type { WorkerResponse } from './worker';
 
@@ -71,11 +76,14 @@ let worker: Worker | null = null;
 try { worker = new GenWorker(); } catch { worker = null; }
 let reqId = 0;
 let timer: number | undefined;
-let currentSvg = '';
+// CANVAS-VIEWER (begin show)
+let currentWorld: World | null = null;
+const currentSvg = (): string => (currentWorld ? renderSvg(currentWorld, { style: opts.style }) : '');
 
-function show(svg: string, stats: Record<string, number | string>, ms: number): void {
-  currentSvg = svg;
-  stage.innerHTML = svg;
+function show(world: World, stats: Record<string, number | string>, ms: number): void {
+  currentWorld = world;
+  viewer.setRenderer(createCanvasRenderer(canvasEl, world, opts.style), world.mapSize, true);
+// CANVAS-VIEWER (end show)
   busyEl.classList.remove('on');
   const seaPct = Math.round(Number(stats.seaFraction ?? 0) * 100);
   statusEl.textContent = `${ms} ms total (terrain ${stats['ms.terrain']} ms) - ${stats.rivers} rivers, ${stats.lakes} lakes, sea ${seaPct}% - ${stats.roads ?? 0} roads, ${stats.bridges ?? 0} bridges, ${stats['landuse.furlongs'] ?? 0} furlongs`;
@@ -86,7 +94,7 @@ if (worker) {
     const r = e.data;
     if (r.id !== reqId) return;
     if (r.error) { busyEl.classList.remove('on'); statusEl.textContent = 'Error: ' + r.error.split('\n')[0]; console.error(r.error); return; }
-    show(r.svg!, r.stats!, r.ms!);
+    show(r.world!, r.stats!, r.ms!);
   };
   worker.onerror = (e) => { console.error(e); worker = null; run(); };
 }
@@ -101,8 +109,7 @@ function run(): void {
       if (id !== reqId) return;
       const t0 = performance.now();
       const world = generate(opts);
-      const svg = renderSvg(world, { style: opts.style });
-      show(svg, world.stats, Math.round(performance.now() - t0));
+      show(world, world.stats, Math.round(performance.now() - t0));
     }, 10);
   }
 }
@@ -111,46 +118,17 @@ function schedule(): void {
   timer = window.setTimeout(run, 180);
 }
 
-// ---------- viewer: wheel zoom toward cursor + drag pan ----------
+// ---------- viewer (canvas, LOD) ----------
+// CANVAS-VIEWER (begin viewer)
 const map = $('map');
-const stage = $('stage');
-let scale = 1, tx = 0, ty = 0, base = 600;
-
-function apply(): void { stage.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`; }
-function fit(): void {
-  const r = map.getBoundingClientRect();
-  base = Math.max(200, Math.min(r.width, r.height) - 24);
-  stage.style.width = base + 'px'; stage.style.height = base + 'px';
-  scale = 1; tx = (r.width - base) / 2; ty = (r.height - base) / 2;
-  apply();
-}
-window.addEventListener('resize', fit);
-fit();
-map.addEventListener('wheel', (e) => {
-  e.preventDefault();
-  const r = map.getBoundingClientRect();
-  const mx = e.clientX - r.left, my = e.clientY - r.top;
-  const k = Math.exp(-e.deltaY * 0.0015);
-  const ns = Math.max(0.3, Math.min(30, scale * k));
-  const f = ns / scale;
-  tx = mx - (mx - tx) * f; ty = my - (my - ty) * f; scale = ns;
-  apply();
-}, { passive: false });
-let drag: { x: number; y: number; tx: number; ty: number } | null = null;
-map.addEventListener('pointerdown', (e) => {
-  drag = { x: e.clientX, y: e.clientY, tx, ty };
-  map.setPointerCapture(e.pointerId);
-  map.classList.add('drag');
+const canvasEl = $<HTMLCanvasElement>('view');
+const hudEl = $('hud');
+const viewer = createViewer({
+  container: map, canvas: canvasEl, minimap: $<HTMLCanvasElement>('minimap'),
+  onFrame: (ms, band, scale) => { hudEl.textContent = `${['far', 'mid', 'near'][band]} - ${scale.toFixed(3)} px/m - ${ms.toFixed(1)} ms`; },
 });
-map.addEventListener('pointermove', (e) => {
-  if (!drag) return;
-  tx = drag.tx + e.clientX - drag.x; ty = drag.ty + e.clientY - drag.y;
-  apply();
-});
-const endDrag = () => { drag = null; map.classList.remove('drag'); };
-map.addEventListener('pointerup', endDrag);
-map.addEventListener('pointercancel', endDrag);
-map.addEventListener('dblclick', fit);
+$('fit').addEventListener('click', () => viewer.fit());
+// CANVAS-VIEWER (end viewer)
 
 // ---------- export ----------
 function download(blob: Blob, name: string): void {
@@ -162,12 +140,12 @@ function download(blob: Blob, name: string): void {
 }
 const fname = () => `burgmap-${opts.seed}-${opts.size}`;
 $('exportSvg').addEventListener('click', () => {
-  if (currentSvg) download(new Blob([currentSvg], { type: 'image/svg+xml' }), fname() + '.svg');
+  if (currentWorld) download(new Blob([currentSvg()], { type: 'image/svg+xml' }), fname() + '.svg');
 });
 $('exportPng').addEventListener('click', () => {
-  if (!currentSvg) return;
+  if (!currentWorld) return;
   const img = new Image();
-  const url = URL.createObjectURL(new Blob([currentSvg], { type: 'image/svg+xml' }));
+  const url = URL.createObjectURL(new Blob([currentSvg()], { type: 'image/svg+xml' }));
   img.onload = () => {
     const S = 3000;
     const c = document.createElement('canvas');
