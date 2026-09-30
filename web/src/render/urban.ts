@@ -1,5 +1,5 @@
 /** SVG rendering of the urban layer (streets as space, blocks, plots, building masses, walls). */
-import type { World, PolyH } from '../gen/types';
+import type { World, PolyH, UrbanWall } from '../gen/types';
 import type { Polygon } from '../gen/core/geom';
 import type { Palette } from './styles';
 import { f1, pathD } from './util';
@@ -57,6 +57,37 @@ function patterns(pal: Palette): string {
     `<pattern id="p-upave" patternUnits="userSpaceOnUse" width="3" height="3"><circle cx="1.5" cy="1.5" r="0.28" fill="${U.placeInk}" opacity="0.55"/></pattern></defs>`;
 }
 
+/** Direction of the nearest edge of a ring at p (for square towers). */
+function edgeDir(ring: Polygon, p: { x: number; y: number }): number {
+  let best = 0, bd = Infinity;
+  for (let i = 0; i < ring.length; i++) {
+    const a = ring[i], b = ring[(i + 1) % ring.length];
+    const dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy || 1;
+    const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / l2));
+    const d = Math.hypot(p.x - a.x - t * dx, p.y - a.y - t * dy);
+    if (d < bd) { bd = d; best = Math.atan2(dy, dx); }
+  }
+  return best;
+}
+
+/** Straight curtain bands with mitred joins, towers at the vertices (round or square), flanking gate towers. */
+export function wallSvg(w: UrbanWall, ink: string, fill: string): string {
+  const th = w.thickness;
+  const d = (w.pieces ?? [w.path]).map((p) => pathD(p, false)).join('');
+  let s = `<g class="u-walls"><path d="${d}" fill="none" stroke="${ink}" stroke-width="${f1(th + 1.4)}" stroke-linecap="butt" stroke-linejoin="miter" stroke-miterlimit="6"/>` +
+    `<path d="${d}" fill="none" stroke="${fill}" stroke-width="${f1(Math.max(0.6, th - 1))}" stroke-linecap="butt" stroke-linejoin="miter" stroke-miterlimit="6"/>`;
+  const tower = (t: { x: number; y: number }, r: number): string => {
+    if (w.towerShape !== 'square') return `<circle cx="${f1(t.x)}" cy="${f1(t.y)}" r="${f1(r)}"/>`;
+    const a = edgeDir(w.path, t), c = Math.cos(a), sn = Math.sin(a), h = r * 0.95;
+    const pts = [[-h, -h], [h, -h], [h, h], [-h, h]].map(([x, y]) => `${f1(t.x + x * c - y * sn)} ${f1(t.y + x * sn + y * c)}`);
+    return `<path d="M${pts.join('L')}Z"/>`;
+  };
+  const tw = w.towers.map((t, i) => tower(t, th * 1.6 * (w.towerScale?.[i] ?? 1))).join('');
+  const gt = (w.gateTowers ?? []).map((t) => tower(t, th * 1.5)).join('');
+  s += `<g fill="${fill}" stroke="${ink}" stroke-width="0.9">${tw}${gt}</g></g>`;
+  return s;
+}
+
 export function urbanLayer(world: World, pal: Palette, u: number, debug: boolean): string {
   if (debug) return urbanDebugLayer(world, u);
   const ub = world.urban;
@@ -112,15 +143,7 @@ export function urbanLayer(world: World, pal: Palette, u: number, debug: boolean
   const wide = mains.filter((st) => st.width < minW);
   if (wide.length) s += `<path class="u-main-streets" d="${wide.map((st) => pathD(st.path, false)).join('')}" fill="none" stroke="${U.street}" stroke-width="${f1(minW)}" stroke-linecap="round" stroke-linejoin="round"/>`;
   s += `<path class="u-block-edges" d="${ub.blocks.map((b) => pathD(b, true)).join('')}" fill="none" stroke="${U.blockEdge}" stroke-width="${lw(0.4, 0.3)}"/>`;
-  for (const w of ub.walls ?? []) {
-    const th = w.thickness;
-    const d = (w.pieces ?? [w.path]).map((p) => pathD(p, false)).join('');
-    s += `<g class="u-walls"><path d="${d}" fill="none" stroke="${U.wall}" stroke-width="${f1(th + 1.4)}" stroke-linecap="butt"/>` +
-      `<path d="${d}" fill="none" stroke="${U.wallFill}" stroke-width="${f1(Math.max(0.6, th - 1))}" stroke-linecap="butt"/>`;
-    const tw = w.towers.map((t) => `<circle cx="${f1(t.x)}" cy="${f1(t.y)}" r="${f1(th * 1.6)}"/>`).join('');
-    const gt = (w.gateTowers ?? []).map((t) => `<circle cx="${f1(t.x)}" cy="${f1(t.y)}" r="${f1(th * 1.45)}"/>`).join('');
-    s += `<g fill="${U.wallFill}" stroke="${U.wall}" stroke-width="0.9">${tw}${gt}</g></g>`;
-  }
+  for (const w of ub.walls ?? []) s += wallSvg(w, U.wall, U.wallFill);
   s += '</g>';
   return s;
 }

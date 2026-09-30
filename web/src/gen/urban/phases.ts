@@ -19,6 +19,7 @@ import type { MorphologyParams } from './morphology';
 import { MinHeap } from '../core/pq';
 import { rasterizePolys } from '../geo/raster';
 import { insidePieces } from '../geo/split';
+import { fortifyRegion } from './fortify';
 import { D8 } from '../core/grid';
 
 export const POP_RANGE: Record<SizeName, [number, number]> = {
@@ -250,6 +251,8 @@ export interface PhaseOverrides {
   blocked?: Uint8Array;
   /** Multiplies the region areas (compensates water and smoothing losses on scarce land). */
   areaBoost?: number;
+  /** Keep the smoothed isoline outlines (no polygonal wall fit). */
+  organicOutline?: boolean;
 }
 
 export function planTownPhases(ctx: UrbanCtx, pop: number, walled: boolean, mainAngle: number, rng: Rng, ov: PhaseOverrides = {}): EnclosurePlan {
@@ -291,6 +294,9 @@ export function planTownPhases(ctx: UrbanCtx, pop: number, walled: boolean, main
       R = union(R, prev);
       // keep R_{k-1} strictly nested
     }
+    // wall lines (the walled outer phase, and older lines that fossilize into ring streets) are polygons of
+    // straight curtains that circumscribe the region
+    if (!ov.organicOutline && (k < nPh - 1 || walled)) R = keepMain(fortifyRegion(ctx, R, prev), ctx.center, 0.1);
     R = R.map((ph) => ({ outer: ph.outer, holes: ph.holes }));
     let band: MultiPoly = prev.length ? difference(R, prev) : R;
     band = dropSlivers(band, 400, 5);

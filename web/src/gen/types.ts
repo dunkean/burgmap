@@ -99,6 +99,12 @@ export interface UrbanWall {
   /** Wall stretches between the gate openings, and the towers flanking each gate. */
   pieces?: Polyline[];
   gateTowers?: Vec2[];
+  /** Relative size of each tower in `towers` (corner towers are bigger). */
+  towerScale?: number[];
+  /** Straight curtains between consecutive towers (M3b: polygonal fortifications). */
+  curtains?: [Vec2, Vec2][];
+  /** Tower plan shape (culture / era dependent). */
+  towerShape?: 'round' | 'square';
 }
 export interface UrbanPhase { id: number; kind: 'core' | 'ring' | 'faubourg' | 'village'; zone: UrbanZone; region: PolyH[]; walled: boolean; fossil: boolean }
 export interface UrbanQuarter { poly: PolyH; phase: number; zone: UrbanZone; streetSpace: PolyH[] }
