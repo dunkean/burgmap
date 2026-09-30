@@ -4,6 +4,10 @@ Goal: `(seed | heightmap image) + options → a medieval settlement in its lands
 
 The Python code in `../town_generator/` is a prototype/reference only (algorithms for roofs, populators, terrain_v2 rivers, etc. can be read for ideas). Do not import or port it wholesale.
 
+**Urban form rule (from the user, non-negotiable):** towns must look like *medieval European* towns — intricate, organic, grown in successive stages, often radio-concentric (older wall lines survive as curved ring streets), irregular blocks, Y-forks and small triangular places. Never modern North-American straight-line subdivisions; a regular (bastide) grid only as an explicit option or very sporadically.
+
+**Scale & cultures:** population is continuous from 10 to 5 000 000 inhabitants, and plans come from mixable cultural morphologies (historical and fantasy). See `URBAN_MORPHOLOGY.md` (§3d: scale ladder, lazy per-district generation, Canvas LOD above ~50 k).
+
 ## Tech
 
 - TypeScript (strict), Vite, `vite-plugin-singlefile` → `web/dist/index.html` is one self-contained file that works from `file://` and as a static page.

@@ -90,19 +90,35 @@ a:focus-visible { outline: 2px solid var(--water); outline-offset: 2px; }
 <script>
 const DATA = {
   updated: "2026-09-30",
-  budget: "15 % du quota hebdo · suivi à l'estime",
+  budget: "sans limite · arrêt sur demande",
   demo: "https://claude.ai/artifact/Fo7zTzCgxysLYrGKjoZCHQ",
   milestones: [
     { s: "done",  t: "M0 · Architecture", d: "Contrat de données, pipeline en 6 étapes, TypeScript + Vite en un seul fichier HTML, graines déterministes par étape." },
     { s: "done",  t: "M1 · Relief et eaux", d: "Relief paramétrable (plaine, collines, vallée, montagne), côte, écoulement (priority-flood, D8), rivière principale creusée avec méandres, lacs. Rendu SVG, estompage, courbes de niveau, interface minimale." },
-    { s: "doing", t: "M2 · Site, routes, campagne", d: "Choix du site (gué, port, éperon défensif), routes régionales A* avec ponts, anneaux agricoles : jardins, vergers, champs en lanières, prés inondables, forêts." },
-    { s: "todo",  t: "M3 · Tissu urbain", d: "Rues principales et secondaires, îlots, parcelles en lanières (burgage plots), maisons alignées sur rue, cours et jardins." },
+    { s: "done",  t: "M2 · Site, routes, campagne", d: "Choix du site (gué, port, éperon défensif), routes régionales A* avec ponts, anneaux agricoles : jardins, vergers, champs en lanières, prés inondables, forêts." },
+    { s: "doing", t: "M3 · Tissu urbain", d: "Rues principales et secondaires, îlots, parcelles en lanières (burgage plots), maisons alignées sur rue, cours et jardins." },
+    { s: "todo",  t: "M3b · Cultures urbaines (Opus)", d: "Plans configurables et mélangeables. Historiques : européenne organique (défaut), bastide, noyau romain, médina, chinoise, jōkamachi, ville-temple indienne, nordique, oppidum celte, byzantine, kremlin russe, hanséatique, lagune vénitienne, persane, ottomane, sahélienne, swahilie, aztèque, maya, inca, khmère, coréenne, camp nomade. Imaginaires : elfes, nains, semi-hommes, orques, gnomes, cité sur pilotis, cité des mages, nécropole. Un plan = une suite de phases de croissance, chacune avec sa morphologie." },
+    { s: "todo",  t: "M3c · De 10 habitants à 5 millions", d: "La forme change avec l'échelle : ferme isolée, hameau, village-rue, village-tas ou circulade, bourg, ville, métropole polycentrique, mégapole. Au-delà d'environ 50 000 habitants, génération à deux niveaux : trame globale, puis quartiers détaillés à la demande au zoom. Rendu Canvas avec niveaux de détail." },
     { s: "todo",  t: "M4 · Remparts et activités", d: "Enceinte avec tours et portes, château, églises, cathédrale, place du marché, monastère, quais et chantier naval, moulins, tanneries, faubourgs." },
     { s: "todo",  t: "M5 · Rendu et interface", d: "Styles de carte (parchemin, atlas), légende, toponymes, export SVG/PNG, partage par URL, import d'une carte de relief." },
     { s: "todo",  t: "M6 · Contrôle qualité", d: "Revue sur 50 graines, invariants (rien dans l'eau, pas de chevauchement), performances, démo publiée." }
   ],
-  plates: [],
+  plates: [
+    { src: "m2_cote.png", cap: "M2 · graine 1, bourg · collines, côte sud, rivière. Routes qui convergent sur le gué, champs en lanières, bois sur les pentes." },
+    { src: "m2_village.png", cap: "M2 · graine 5, village · plaine, rivière à méandres, deux étangs, fermes isolées le long des routes." },
+    { src: "m1_vallee.png", cap: "M1 · graine 2 · vallée et grande rivière, affluents, estompage et courbes de niveau." }
+  ],
   log: [
+    { d: "30 sept.", h: "Réorientation du tissu urbain", b: [
+      "Retour utilisateur : les maisons en lignes droites évoquent des lotissements nord-américains. Règle désormais inscrite au contrat : villes médiévales européennes intriquées, croissance par étapes, souvent radioconcentriques ; les anciennes enceintes deviennent des rues circulaires. Le quadrillage n'existe qu'en option (bastide).",
+      "Nouvelle exigence : plans d'autres cultures (arabe, chinois, japonais, indien…) mélangeables. Conception faite par Opus (URBAN_MORPHOLOGY.md) : un plan est une histoire de phases de croissance sur un graphe de rues commun ; chaque phase a sa morphologie, composée d'opérateurs de rues (radiales, anneaux, remplissage organique, grille, axe, impasses en arbre, quartiers clos, chicanes défensives), d'un découpage parcellaire (lanières, maisons à cour, siheyuan, machiya, enclos) et d'un type de bâti. Les cultures sont des données éditables, mélangeables par phase, par quartier ou par interpolation."
+    ]},
+    { d: "30 sept.", h: "M2 terminé : site, routes, campagne", b: [
+      "Le site est choisi par score : terrain plat et sec, gué sur un tronçon étroit de rivière ou anse abritée, éminence défendable, éloignement des bords. Un champ de coût de déplacement (Dijkstra) sert ensuite à toutes les étapes.",
+      "Routes régionales en A* avec pénalité de pente et bonus de fusion : elles se rejoignent en arbre avant d'entrer en ville, comme les vraies routes. Ponts limités à un ou deux, près du centre.",
+      "Campagne en anneaux de von Thünen : jardins et vergers près de la ville, champs ouverts en lanières groupées en quartiers de culture, prés inondables, pâtures et communaux, bois sur les pentes et les hauteurs. Textures en motifs SVG. Capitale complète en 2,3 s.",
+      "À revoir : les quartiers de culture sont trop polygonaux (cellules de Voronoï), et en montagne une route traverse le torrent plusieurs fois."
+    ]},
     { d: "30 sept.", h: "M1 terminé : relief et eaux", b: [
       "Relief à partir de bruit fractal déformé, quatre types (plaine, collines, vallée, montagne). Côte naturelle avec baies et caps. Hydrologie : comblement des cuvettes (priority-flood), directions d'écoulement, accumulation ; la rivière principale creuse sa vallée et sa plaine, méandre en terrain plat et s'élargit vers l'aval.",
       "Estompage et teinte hypsométrique encodés en PNG sans DOM, courbes de niveau, échelle et flèche du nord. Build : un seul fichier HTML de 87 Ko. Relief d'une capitale en 1,2 s.",
