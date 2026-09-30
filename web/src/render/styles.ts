@@ -21,6 +21,17 @@ export interface Palette {
   contourOpacity: number;
   frame: string;
   fontFamily: string;
+  /** Land-use base fills (drawn semi-transparent over the terrain). */
+  land: Record<'field' | 'meadow' | 'pasture' | 'forest' | 'orchard' | 'garden' | 'marsh' | 'commons', string>;
+  landOpacity: number;
+  stripA: string; stripB: string;
+  furrow: string; hedge: string;
+  treeFill: string; treeInk: string;
+  grass: string; reed: string; orchardDot: string;
+  roadEdge: string; roadFill: string; trackFill: string;
+  bridgeDeck: string; bridgeInk: string;
+  farmRoof: string; farmInk: string; farmYard: string;
+  marker: string;
 }
 
 export const PALETTES: Record<StyleName, Palette> = {
@@ -43,6 +54,16 @@ export const PALETTES: Record<StyleName, Palette> = {
     contourOpacity: 0.5,
     frame: '#4e3b28',
     fontFamily: "Georgia, 'Times New Roman', serif",
+    land: { field: '#e1cf94', meadow: '#bfca8e', pasture: '#cdd097', forest: '#94a86e', orchard: '#c6cb8a', garden: '#cdc78c', marsh: '#b4c5a6', commons: '#d3cc9b' },
+    landOpacity: 0.62,
+    stripA: '#e8d9a4', stripB: '#d9c488',
+    furrow: '#8d7443', hedge: '#5f6d3d',
+    treeFill: '#8aa065', treeInk: '#4a5a33',
+    grass: '#5f7a3c', reed: '#4f7a72', orchardDot: '#55703a',
+    roadEdge: '#4e3b28', roadFill: '#f6edd0', trackFill: '#6b5236',
+    bridgeDeck: '#f6edd0', bridgeInk: '#3b2c1c',
+    farmRoof: '#c69b70', farmInk: '#4e3b28', farmYard: '#d8c79a',
+    marker: '#8b2f1f',
   },
   atlas: {
     name: 'atlas',
@@ -63,8 +84,17 @@ export const PALETTES: Record<StyleName, Palette> = {
     contourOpacity: 0.55,
     frame: '#33404a',
     fontFamily: "'Segoe UI', Helvetica, Arial, sans-serif",
-  },
-};
+    land: { field: '#f0e6a6', meadow: '#b9dc95', pasture: '#cfe3a2', forest: '#7fba78', orchard: '#c5dc8a', garden: '#d5e3a0', marsh: '#a6d1b8', commons: '#dde3aa' },
+    landOpacity: 0.72,
+    stripA: '#f4ecb4', stripB: '#e6dc92',
+    furrow: '#a89a55', hedge: '#4f8a4a',
+    treeFill: '#5fa35a', treeInk: '#2f6a34',
+    grass: '#4c8f3f', reed: '#3a8f88', orchardDot: '#3f8a3a',
+    roadEdge: '#5a4a3c', roadFill: '#fffdf4', trackFill: '#8a7660',
+    bridgeDeck: '#fffdf4', bridgeInk: '#3b3b3b',
+    farmRoof: '#d9a678', farmInk: '#5a4a3c', farmYard: '#e8dcae',
+    marker: '#b3261e',
+  },};
 
 export function hexToRgb(hex: string): [number, number, number] {
   const v = parseInt(hex.slice(1), 16);

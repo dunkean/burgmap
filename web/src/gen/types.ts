@@ -29,13 +29,49 @@ export interface TerrainLayer {
   seaSide: 'N' | 'E' | 'S' | 'W' | null;
 }
 
+export interface SiteFields {
+  /** Distance (m) to any water / sea / main river. */
+  dWater: Float32Array; dSea: Float32Array; dMain: Float32Array;
+  /** Height above the nearest water surface (m). */
+  hab: Float32Array;
+  /** Slope smoothed over ~100 m. */
+  slopeS: Float32Array;
+  /** 1 = main river cell, 2 = brook cell (0 elsewhere). */
+  riverMask: Uint8Array;
+  /** 1 on cells where the main river may be bridged (near the crossing). */
+  bridgeZone: Uint8Array;
+}
+
+export interface SiteLayer {
+  center: Vec2; crossing?: Vec2; harbor?: Vec2; citadelSpot?: Vec2;
+  /** Travel cost (m-equivalents) from the center; Infinity where unreachable. */
+  cost: Grid;
+  /** Approximate radius (m) of the urban footprint reserved for the town (M3). */
+  reserveRadius: number;
+  fields: SiteFields;
+}
+
+export type LandKind = 'field' | 'meadow' | 'pasture' | 'forest' | 'orchard' | 'garden' | 'marsh' | 'commons';
+export interface LandArea {
+  kind: LandKind; poly: Polygon; holes?: Polygon[];
+  /** Furlongs (kind 'field'): strip direction in radians and the strips themselves. */
+  stripAngle?: number; strips?: Polygon[];
+}
+export interface Farmstead { pos: Vec2; angle: number; buildings: Polygon[]; yard: Polygon; drive: Polyline }
+export interface LandUseLayer {
+  areas: LandArea[];
+  farmsteads: Farmstead[];
+  /** Outline(s) of the urban reserve (kept free of rural land use). */
+  reserve: Polygon[];
+}
+
 export interface World {
   seed: string;
   options: Options;
   mapSize: number;
   terrain: TerrainLayer;
   // later stages
-  site?: { center: Vec2; crossing?: Vec2; harbor?: Vec2; citadelSpot?: Vec2; cost: Grid };
+  site?: SiteLayer;
   roads?: { path: Polyline; kind: 'major' | 'minor' | 'track'; width: number }[];
   bridges?: { a: Vec2; b: Vec2; width: number }[];
   urban?: {
@@ -48,8 +84,6 @@ export interface World {
     landmarks: { kind: string; poly: Polygon; name?: string }[];
     squares: Polygon[];
   };
-  landuse?: {
-    areas: { kind: 'field' | 'meadow' | 'pasture' | 'forest' | 'orchard' | 'garden' | 'marsh' | 'commons'; poly: Polygon; stripAngle?: number }[];
-  };
+  landuse?: LandUseLayer;
   stats: Record<string, number | string>;
 }

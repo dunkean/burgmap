@@ -91,11 +91,11 @@ a:focus-visible { outline: 2px solid var(--water); outline-offset: 2px; }
 const DATA = {
   updated: "2026-09-30",
   budget: "15 % du quota hebdo · suivi à l'estime",
-  demo: null,
+  demo: "https://claude.ai/artifact/Fo7zTzCgxysLYrGKjoZCHQ",
   milestones: [
     { s: "done",  t: "M0 · Architecture", d: "Contrat de données, pipeline en 6 étapes, TypeScript + Vite en un seul fichier HTML, graines déterministes par étape." },
-    { s: "doing", t: "M1 · Relief et eaux", d: "Relief paramétrable (plaine, collines, vallée, montagne), côte, écoulement (priority-flood, D8), rivière principale creusée avec méandres, lacs. Rendu SVG, estompage, courbes de niveau, interface minimale." },
-    { s: "todo",  t: "M2 · Site, routes, campagne", d: "Choix du site (gué, port, éperon défensif), routes régionales A* avec ponts, anneaux agricoles : jardins, vergers, champs en lanières, prés inondables, forêts." },
+    { s: "done",  t: "M1 · Relief et eaux", d: "Relief paramétrable (plaine, collines, vallée, montagne), côte, écoulement (priority-flood, D8), rivière principale creusée avec méandres, lacs. Rendu SVG, estompage, courbes de niveau, interface minimale." },
+    { s: "doing", t: "M2 · Site, routes, campagne", d: "Choix du site (gué, port, éperon défensif), routes régionales A* avec ponts, anneaux agricoles : jardins, vergers, champs en lanières, prés inondables, forêts." },
     { s: "todo",  t: "M3 · Tissu urbain", d: "Rues principales et secondaires, îlots, parcelles en lanières (burgage plots), maisons alignées sur rue, cours et jardins." },
     { s: "todo",  t: "M4 · Remparts et activités", d: "Enceinte avec tours et portes, château, églises, cathédrale, place du marché, monastère, quais et chantier naval, moulins, tanneries, faubourgs." },
     { s: "todo",  t: "M5 · Rendu et interface", d: "Styles de carte (parchemin, atlas), légende, toponymes, export SVG/PNG, partage par URL, import d'une carte de relief." },
@@ -103,6 +103,11 @@ const DATA = {
   ],
   plates: [],
   log: [
+    { d: "30 sept.", h: "M1 terminé : relief et eaux", b: [
+      "Relief à partir de bruit fractal déformé, quatre types (plaine, collines, vallée, montagne). Côte naturelle avec baies et caps. Hydrologie : comblement des cuvettes (priority-flood), directions d'écoulement, accumulation ; la rivière principale creuse sa vallée et sa plaine, méandre en terrain plat et s'élargit vers l'aval.",
+      "Estompage et teinte hypsométrique encodés en PNG sans DOM, courbes de niveau, échelle et flèche du nord. Build : un seul fichier HTML de 87 Ko. Relief d'une capitale en 1,2 s.",
+      "À corriger : trop de ruisseaux à cette échelle, artefacts à 45°, montagnes encore grumeleuses. Les deux premiers points sont confiés à l'agent M2."
+    ]},
     { d: "30 sept.", h: "Lancement", b: [
       "Les prototypes Python (portage de TownGeneratorOS, relief v2, toitures, peupleurs de quartiers) servent de référence. La nouvelle version repart en TypeScript pour tourner sans serveur.",
       "Choix clé : le paysage d'abord, la ville ensuite. La ville se pose là où le terrain la rend plausible (gué, port, colline), et l'occupation des sols découle du coût d'accès depuis le centre.",

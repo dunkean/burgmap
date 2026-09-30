@@ -20,6 +20,8 @@ export interface Options {
   roads: number;
   style: StyleName;
   contours: boolean;
+  /** Show the rural land-use layer (fields, forest, ...). */
+  landuse: boolean;
 }
 
 export interface SizePreset { mapSize: number; grid: number; label: string }
@@ -43,7 +45,12 @@ export const DEFAULTS: Options = {
   roads: 0,
   style: 'parchment',
   contours: true,
+  landuse: true,
 };
+
+/** Number of regional road exits when the `roads` option is 0 (auto). */
+export const DEFAULT_ROADS: Record<SizeName, number> = { hamlet: 2, village: 3, town: 4, city: 5, capital: 6 };
+export const roadCount = (o: Pick<Options, 'roads' | 'size'>): number => (o.roads > 0 ? o.roads : DEFAULT_ROADS[o.size]);
 
 const RELIEFS: Relief[] = ['flat', 'hills', 'valley', 'mountains'];
 const COASTS: CoastOpt[] = ['none', 'N', 'E', 'S', 'W', 'random'];
@@ -63,6 +70,7 @@ export function toQuery(o: Options): string {
   for (const k of keys) if (o[k] !== DEFAULTS[k]) p.set(k, String(o[k]));
   if (o.seaLevel !== undefined) p.set('seaLevel', String(o.seaLevel));
   if (o.contours !== DEFAULTS.contours) p.set('contours', o.contours ? '1' : '0');
+  if (o.landuse !== DEFAULTS.landuse) p.set('landuse', o.landuse ? '1' : '0');
   return p.toString();
 }
 
@@ -86,6 +94,8 @@ export function fromQuery(q: string | URLSearchParams): Options {
   if (sl !== null && Number.isFinite(Number(sl))) o.seaLevel = Math.max(-1, Math.min(1, Number(sl)));
   const c = p.get('contours');
   o.contours = c === null ? DEFAULTS.contours : c === '1' || c === 'true';
+  const lu = p.get('landuse');
+  o.landuse = lu === null ? DEFAULTS.landuse : lu === '1' || lu === 'true';
   return o;
 }
 
@@ -93,6 +103,6 @@ export function fromQuery(q: string | URLSearchParams): Options {
 export function applyOverride(o: Options, k: string, v: string): void {
   const rec = o as unknown as Record<string, unknown>;
   if (k === 'roads' || k === 'seaLevel') rec[k] = Number(v);
-  else if (k === 'contours') rec[k] = v === '1' || v === 'true';
+  else if (k === 'contours' || k === 'landuse') rec[k] = v === '1' || v === 'true';
   else rec[k] = v;
 }

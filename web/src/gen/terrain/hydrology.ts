@@ -375,11 +375,13 @@ function incise(height: Grid, amp: number, strength: number): void {
   const depthMax = amp * strength;
   const fine = createGrid(height.w, height.h, height.cell);
   for (let i = 0; i < N; i++) fine.data[i] = depthMax * Math.min(1.4, raw[i] / (norm || 1));
-  const broad = blurGrid(fine, 3, 2);
-  const mid = blurGrid(fine, 1, 1);
+  // D8 flow paths are 45-degree biased: blur the incision delta so no diagonal channels show in the shading
+  const fineS = blurGrid(fine, 2, 2);
+  const broad = blurGrid(fine, 4, 2);
+  const mid = blurGrid(fine, 2, 1);
   for (let i = 0; i < N; i++) {
     if (sea[i]) continue;
-    const dh = 0.2 * fine.data[i] + 0.6 * mid.data[i] + 1.4 * broad.data[i];
+    const dh = 0.15 * fineS.data[i] + 0.55 * mid.data[i] + 1.4 * broad.data[i];
     const cur = height.data[i];
     height.data[i] = Math.max(Math.min(cur, 0.4), cur - dh);
   }
@@ -503,7 +505,9 @@ export function generateTerrain(opts: Options, root: Rng): { terrain: TerrainLay
 
   // ---- natural streams
   const recv = flood.receiver;
-  const thr = Math.max(180, N * (cls ? 0.010 : 0.014));
+  // displayed-stream threshold scales with map size: only meaningful brooks are drawn (all of it stays in `flow`)
+  const sizeK = preset.mapSize / 2400;
+  const thr = Math.max(180, N * (cls ? 0.024 : 0.03) * Math.max(0.6, sizeK));
   const isStream = new Uint8Array(N);
   for (let i = 0; i < N; i++) if (acc[i] >= thr && !sea2[i] && lakeField[i] <= 0) isStream[i] = 1;
   const hasUp = new Uint8Array(N);
@@ -527,6 +531,15 @@ export function generateTerrain(opts: Options, root: Rng): { terrain: TerrainLay
       c = r;
     }
     if (cells.length >= 4) naturalRaw.push({ cells, endsAt });
+  }
+  // cap the number of tributaries by upstream area
+  const maxTrib = ({ hamlet: 2, village: 2, town: 3, city: 4, capital: 5 } as const)[opts.size] + (cls ? 0 : 1);
+  if (naturalRaw.length > maxTrib) {
+    const ranked = naturalRaw.map((r, k) => ({ k, a: acc[r.cells[r.cells.length - 1]] }))
+      .sort((p, q) => q.a - p.a || p.k - q.k).slice(0, maxTrib);
+    const keepK = new Set(ranked.map((e) => e.k));
+    const kept = naturalRaw.filter((_, k) => keepK.has(k));
+    naturalRaw.length = 0; naturalRaw.push(...kept);
   }
   const refMouth = cls ? accMouth : Math.max(thr * 2, ...naturalRaw.map((r) => acc[r.cells[r.cells.length - 1]]));
   const wRefMouth = cls ? cls.wMouth : 4.6;

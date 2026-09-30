@@ -5,19 +5,11 @@ import { sampleGrid } from '../gen/core/grid';
 import { marchingSquares } from '../gen/terrain/contour';
 import { PALETTES, Palette } from './styles';
 import { renderTerrainRaster, pngDataUrl } from './raster';
+import { f1, pathD } from './util';
+import { landuseLayer, roadsLayer, siteLayer } from './landuse';
 
-export interface RenderOptions { style?: StyleName; contours?: boolean; raster?: boolean }
-
-const f1 = (v: number): string => {
-  const r = Math.round(v * 10) / 10;
-  return Object.is(r, -0) ? '0' : String(r);
-};
-
-function pathD(pts: Vec2[], closed: boolean): string {
-  if (pts.length < 2) return '';
-  let d = 'M' + f1(pts[0].x) + ' ' + f1(pts[0].y);
-  for (let i = 1; i < pts.length; i++) d += 'L' + f1(pts[i].x) + ' ' + f1(pts[i].y);
-  return closed ? d + 'Z' : d;
+export interface RenderOptions {
+  style?: StyleName; contours?: boolean; raster?: boolean; landuse?: boolean; debug?: boolean;
 }
 
 const CONTOUR_INTERVAL: Record<Relief, number> = { flat: 2, hills: 5, valley: 5, mountains: 20 };
@@ -132,6 +124,8 @@ export function renderSvg(world: World, opts: RenderOptions = {}): string {
   }
   if (opts.contours ?? world.options.contours) parts.push(contourLayer(world, pal, u));
 
+  if (opts.landuse ?? world.options.landuse) parts.push(landuseLayer(world, pal, u));
+
   // rivers: casing first, then fill so confluences merge cleanly
   const minW = 1.1 * u;
   const ribbons: string[] = [];
@@ -159,6 +153,9 @@ export function renderSvg(world: World, opts: RenderOptions = {}): string {
   }
   water += '</g>';
   parts.push(water);
+
+  parts.push(roadsLayer(world, pal, u));
+  parts.push(siteLayer(world, pal, u, !!opts.debug));
 
   parts.push('</g>');
   parts.push(decor(world, pal, u));

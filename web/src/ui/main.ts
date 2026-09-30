@@ -1,4 +1,4 @@
-import { Options, SIZE_PRESETS, fromQuery, toQuery } from '../gen/options';
+import { Options, SIZE_PRESETS, DEFAULT_ROADS, fromQuery, toQuery } from '../gen/options';
 import { generate } from '../gen/pipeline';
 import { renderSvg } from '../render/svg';
 import GenWorker from './worker?worker&inline';
@@ -25,6 +25,8 @@ const coastEl = $<HTMLSelectElement>('coast');
 const riverEl = $<HTMLSelectElement>('river');
 const styleEl = $<HTMLSelectElement>('style');
 const contoursEl = $<HTMLInputElement>('contours');
+const landuseEl = $<HTMLInputElement>('landuse');
+const roadsEl = $<HTMLSelectElement>('roads');
 const statusEl = $('status');
 const busyEl = $('busy');
 
@@ -32,9 +34,11 @@ fill(sizeEl, Object.entries(SIZE_PRESETS).map(([k, v]) => [k, `${v.label} (${v.m
 fill(reliefEl, [['flat', 'Flat'], ['hills', 'Rolling hills'], ['valley', 'Valley'], ['mountains', 'Mountains']], opts.relief);
 fill(coastEl, [['none', 'None'], ['random', 'Random side'], ['N', 'North'], ['E', 'East'], ['S', 'South'], ['W', 'West']], opts.coast);
 fill(riverEl, [['none', 'None'], ['stream', 'Stream'], ['river', 'River'], ['major', 'Major river']], opts.river);
+fill(roadsEl, [['0', `Auto (${DEFAULT_ROADS[opts.size]})`], ...[1, 2, 3, 4, 5, 6, 7, 8].map((k) => [String(k), String(k)] as [string, string])], String(opts.roads));
 fill(styleEl, [['parchment', 'Parchment'], ['atlas', 'Atlas']], opts.style);
 seedEl.value = opts.seed;
 contoursEl.checked = opts.contours;
+landuseEl.checked = opts.landuse;
 
 function readControls(): void {
   opts = {
@@ -46,11 +50,14 @@ function readControls(): void {
     river: riverEl.value as Options['river'],
     style: styleEl.value as Options['style'],
     contours: contoursEl.checked,
+    landuse: landuseEl.checked,
+    roads: Number(roadsEl.value),
   };
+  roadsEl.options[0].textContent = `Auto (${DEFAULT_ROADS[opts.size]})`;
   history.replaceState(null, '', '?' + toQuery(opts));
   schedule();
 }
-for (const el of [seedEl, sizeEl, reliefEl, coastEl, riverEl, styleEl, contoursEl]) {
+for (const el of [seedEl, sizeEl, reliefEl, coastEl, riverEl, styleEl, contoursEl, landuseEl, roadsEl]) {
   el.addEventListener('input', readControls);
   el.addEventListener('change', readControls);
 }
@@ -71,7 +78,7 @@ function show(svg: string, stats: Record<string, number | string>, ms: number): 
   stage.innerHTML = svg;
   busyEl.classList.remove('on');
   const seaPct = Math.round(Number(stats.seaFraction ?? 0) * 100);
-  statusEl.textContent = `${ms} ms total (terrain ${stats['ms.terrain']} ms) - ${stats.rivers} rivers, ${stats.lakes} lakes, sea ${seaPct}%`;
+  statusEl.textContent = `${ms} ms total (terrain ${stats['ms.terrain']} ms) - ${stats.rivers} rivers, ${stats.lakes} lakes, sea ${seaPct}% - ${stats.roads ?? 0} roads, ${stats.bridges ?? 0} bridges, ${stats['landuse.furlongs'] ?? 0} furlongs`;
 }
 
 if (worker) {

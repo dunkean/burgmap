@@ -2,6 +2,9 @@ import { Rng } from './core/rng';
 import { Options, SIZE_PRESETS } from './options';
 import type { World } from './types';
 import { generateTerrain } from './terrain/hydrology';
+import { chooseSite } from './site/site';
+import { routeRoads } from './roads/regional';
+import { generateRural } from './landuse/rural';
 
 export function generate(options: Options): World {
   const t0 = performance.now();
@@ -9,6 +12,7 @@ export function generate(options: Options): World {
   const { terrain, timings } = generateTerrain(options, root);
   const stats: Record<string, number | string> = {};
   const r = (v: number) => Math.round(v);
+  const mapSize = SIZE_PRESETS[options.size].mapSize;
   stats['ms.height'] = r(timings.height);
   stats['ms.hydrology'] = r(timings.hydrology);
   stats['ms.rivers'] = r(timings.rivers);
@@ -17,6 +21,33 @@ export function generate(options: Options): World {
   stats['seaFraction'] = Math.round(terrain.seaFraction * 1000) / 1000;
   stats['rivers'] = terrain.rivers.length;
   stats['lakes'] = terrain.lakes.length;
+
+  const world: World = { seed: options.seed, options, mapSize, terrain, stats };
+
+  const t1 = performance.now();
+  world.site = chooseSite(terrain, options, mapSize, root);
+  const t2 = performance.now();
+  stats['ms.site'] = r(t2 - t1);
+  stats['site.x'] = r(world.site.center.x);
+  stats['site.y'] = r(world.site.center.y);
+  stats['site.crossing'] = world.site.crossing ? 1 : 0;
+  stats['site.harbor'] = world.site.harbor ? 1 : 0;
+  stats['site.citadel'] = world.site.citadelSpot ? 1 : 0;
+
+  const rr = routeRoads(terrain, world.site, options, mapSize, root);
+  world.roads = rr.roads;
+  world.bridges = rr.bridges;
+  const t3 = performance.now();
+  stats['ms.roads'] = r(t3 - t2);
+  stats['roads'] = rr.roads.length;
+  stats['bridges'] = rr.bridges.length;
+
+  const lu = generateRural(world, root);
+  world.landuse = lu.layer;
+  const t4 = performance.now();
+  stats['ms.landuse'] = r(t4 - t3);
+  for (const [k, v] of Object.entries(lu.stats)) stats['landuse.' + k] = v;
+
   stats['ms.total'] = r(performance.now() - t0);
-  return { seed: options.seed, options, mapSize: SIZE_PRESETS[options.size].mapSize, terrain, stats };
+  return world;
 }
