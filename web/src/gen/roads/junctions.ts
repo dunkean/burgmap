@@ -119,6 +119,8 @@ export function attachEnd(joiner: Polyline, atStart: boolean, host: Polyline, ct
   return atStart ? result.slice().reverse() : result;
 }
 
+export const bridgeDebug: { fallbacks: { x: number; y: number; w: number }[] } = { fallbacks: [] };
+
 export interface BridgeCtx {
   rivers: River[];
   wet: (p: Vec2) => boolean;
@@ -151,7 +153,8 @@ export function bridgeRoad(path: Polyline, ctx: BridgeCtx, fordW = 3.0): { path:
     const runs: [number, number][] = [];
     let s = 0, open = -1, lastWet = -1;
     for (; s <= L; s += 1.5) {
-      const w = ctx.wet(pointAt(cur, s).pt);
+      const pp0 = pointAt(cur, s).pt;
+      const w = ctx.wet(pp0) || ctx.rivers.some((rv) => { const nr = nearestOn(rv.path, pp0); const wv = Math.max(rv.width[nr.i], rv.width[Math.min(rv.width.length - 1, nr.i + 1)]); return wv >= 3.7 && nr.d < wv / 2; });
       if (w) { if (open < 0) open = s; lastWet = s; }
       else if (open >= 0 && s - lastWet > 10) { runs.push([open, lastWet]); open = -1; }
     }
@@ -238,6 +241,7 @@ export function bridgeRoad(path: Polyline, ctx: BridgeCtx, fordW = 3.0): { path:
       }
     }
     if (built) { cur = built.path; bridges.push(built.br); continue; }
+    bridgeDebug.fallbacks.push({ x: M.x, y: M.y, w: wLoc });
     // fallback: bridge the wet run as it lies
     const sa = Math.max(0, target[0] - 3), sb = Math.min(L, target[1] + 3);
     const pa = pointAt(cur, sa).pt, pb = pointAt(cur, sb).pt;
@@ -246,4 +250,33 @@ export function bridgeRoad(path: Polyline, ctx: BridgeCtx, fordW = 3.0): { path:
     bridges.push({ a: cur[ia], b: cur[ib > ia ? ib : ib], width: ctx.roadWidth + 1 });
   }
   return { path: cur, bridges };
+}
+
+/**
+ * Push road vertices that graze a river ribbon (outside bridges and brook fords) out to the bank. Extra vertices are
+ * inserted where the road between two vertices dips into the ribbon. Endpoints and junction vertices are kept.
+ */
+export function clearRibbons(path: Polyline, rivers: River[], bridges: BridgeSeg[], margin = 1.6): Polyline {
+  const out = path.slice();
+  const onBridge = (p: Vec2): boolean => bridges.some((b) => nearestOn([b.a, b.b], p).d < 4);
+  const L0 = polylineLength(out);
+  for (let s = 0; s <= L0; s += 2) {
+    const p = pointAt(out, s).pt;
+    if (onBridge(p)) continue;
+    for (const r of rivers) {
+      const nn = nearestOn(r.path, p);
+      if (nn.d > 40) continue;
+      const w = Math.max(r.width[nn.i], r.width[Math.min(r.width.length - 1, nn.i + 1)]);
+      if (w < 3.7 || nn.d >= w / 2 + margin - 0.2) continue;
+      const dd = nn.d || 0.01;
+      const q = { x: nn.pt.x + ((p.x - nn.pt.x) / dd) * (w / 2 + margin), y: nn.pt.y + ((p.y - nn.pt.y) / dd) * (w / 2 + margin) };
+      const na = nearestOn(out, p);
+      // move a close vertex (unless it is a path end), else insert one
+      const cand = [na.i, na.i + 1].filter((k) => k > 0 && k < out.length - 1 && dist(out[k], p) < 2.5);
+      if (cand.length && !bridges.some((b) => dist(out[cand[0]], b.a) < 0.3 || dist(out[cand[0]], b.b) < 0.3)) out[cand[0]] = q;
+      else out.splice(na.i + 1, 0, q);
+      break;
+    }
+  }
+  return out;
 }
