@@ -2,7 +2,7 @@
 import type { World, UrbanStreet } from '../src/gen/types';
 import type { Vec2, Polygon } from '../src/gen/core/geom';
 import { area, interiorAngle, inscribed, bboxOf, distToSeg, pointInRing, distToRing, segSegT } from '../src/gen/geo/poly';
-import { intersection, difference, differenceS, mpArea } from '../src/gen/geo/bool';
+import { intersectionS, difference, differenceS, mpArea } from '../src/gen/geo/bool';
 import { GridIndex } from '../src/gen/geo/spatial';
 import { StreetGraph } from '../src/gen/geo/graph';
 
@@ -30,7 +30,7 @@ function overlaps(polys: Polygon[], tol: number, limit = 1e9): { n: number; wors
       if (j <= i) continue;
       const b = bbs[j], a = bbs[i];
       if (b.x0 > a.x1 || b.x1 < a.x0 || b.y0 > a.y1 || b.y1 < a.y0) continue;
-      const ar = mpArea(intersection(p, polys[j]));
+      const ar = mpArea(intersectionS(p, polys[j]));
       if (ar > tol) { n++; worst = Math.max(worst, ar); }
       if (n >= limit) return;
     }
@@ -49,7 +49,7 @@ export function checkWorld(w: World): Report {
   // 1. blocks inside their quarter; blocks → parcels conservation
   ub.blocks.forEach((b, i) => {
     const q = ub.quarters[ub.blockInfo[i].quarter];
-    const out = mpArea(difference(b, q.poly.outer));
+    const out = mpArea(differenceS(b, q.poly.outer));
     if (out > 0.05) { r.blockOutside += out; det.push(`block ${i} outside quarter by ${out.toFixed(2)} m²`); }
   });
   const byBlock = new Map<number, number>();

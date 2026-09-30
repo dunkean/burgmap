@@ -281,6 +281,21 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
   // ---- market ring street (frontage around the square)
   let marketStreet = -1;
   if (market) marketStreet = streets.add(market.concat([market[0]]), P.widthByRank[2] * P.widthScale, 1, 'ring', 1);
+  // ---- network connectivity seed: radials, the market ring, and rings crossed by a radial
+  for (const id of radials) streets.connected.add(id);
+  if (marketStreet >= 0) streets.connected.add(marketStreet);
+  for (const st of streets.list) {
+    if (st.role !== 'ring' || streets.connected.has(st.id)) continue;
+    let hit = false;
+    for (const rid of radials) {
+      const r = streets.list[rid];
+      for (let i = 1; i < r.path.length && !hit; i++) for (let j = 1; j < st.path.length && !hit; j++) {
+        if (segSegT(r.path[i - 1], r.path[i], st.path[j - 1], st.path[j])) hit = true;
+      }
+      if (hit) break;
+    }
+    if (hit) streets.connected.add(st.id);
+  }
   // ---- walls and gates
   const walls: WallLine[] = [];
   if (inp.walled) {

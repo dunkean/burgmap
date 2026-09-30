@@ -23,6 +23,8 @@ export interface StreetRec {
 
 export class Streets {
   list: StreetRec[] = [];
+  /** Street ids reachable from the radials (the network seed); cuts may only hang off connected streets. */
+  connected = new Set<number>();
   private idx = new GridIndex<{ s: number; i: number }>(30);
 
   add(path: Polyline, width: number | number[], rank: number, role: StreetRole, phase: number, ribbon = true): number {
@@ -38,7 +40,7 @@ export class Streets {
     let bs = -1, bd = r, bseg = 0, bt = 0;
     this.idx.forEachIn(p.x - r, p.y - r, p.x + r, p.y + r, (ref) => {
       const st = this.list[ref.s];
-      if (filter && !filter(st)) return;
+      if (!st.ribbon || (filter && !filter(st))) return;
       const a = st.path[ref.i], b = st.path[ref.i + 1];
       const dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy;
       const t = l2 === 0 ? 0 : Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / l2));
@@ -50,6 +52,9 @@ export class Streets {
     const hw = (st.widths[bseg] * (1 - bt) + st.widths[bseg + 1] * bt) / 2;
     return { s: bs, d: bd, hw, seg: bseg };
   }
+
+  /** Demotes a street that never joined the network: it stays a partition boundary but is no longer a street. */
+  demote(id: number): void { this.list[id].ribbon = false; }
 
   query(poly: Polygon, margin: number): StreetRec[] {
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;

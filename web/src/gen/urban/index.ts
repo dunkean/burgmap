@@ -11,7 +11,7 @@ import { planRibbonVillage } from './villages';
 import { makeCtx } from './context';
 import { choosePopulation, chooseArchetype, planTownPhases, planFaubourgs, EnclosurePlan } from './phases';
 import { buildPrimary } from './primary';
-import { Streets } from './streets';
+import { Streets, LAB_OPEN } from './streets';
 import { mpArea, MultiPoly } from '../geo/bool';
 import { GuidanceField } from './field';
 import { splitQuarter, addCloses, carveBlocks, buildRibbonIndex, Piece, CarvedBlock } from './blocks';
@@ -102,8 +102,28 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   // ---- level 2: blocks
   const nucleus = prim.market ? polygonCentroid(prim.market) : ctx.center;
   const field = new GuidanceField(ctx, nucleus, streets, mainAngle, rng.fork('field'));
-  const pieces: Piece[][] = prim.quarters.map((q, qi) => splitQuarter(ctx, q, qi, streets, field, { nucleus, gridAngle: mainAngle }, rng.fork('q:' + qi)));
+  // quarters are split in rounds: a quarter is processed once one of its streets is connected to the network
+  // (its splits may connect further rings); quarters that never connect are not urbanized
+  const pieces: Piece[][] = prim.quarters.map(() => []);
+  const done = prim.quarters.map(() => false);
+  for (let round = 0; round < 6; round++) {
+    let progress = false;
+    prim.quarters.forEach((q, qi) => {
+      if (done[qi]) return;
+      if (q.kind !== 'market' && !q.lp.lab.some((l) => l >= 0 && streets.connected.has(l))) return;
+      pieces[qi] = splitQuarter(ctx, q, qi, streets, field, { nucleus, gridAngle: mainAngle }, rng.fork('q:' + qi));
+      done[qi] = true;
+      progress = true;
+    });
+    if (!progress) break;
+  }
   const t3 = performance.now();
+  // streets that never joined the network (a ring no cut reached, a lane opening a hole) are demoted to plain
+  // boundaries, so the street graph stays connected
+  let demoted = 0;
+  for (const st of streets.list) if (!streets.connected.has(st.id) && st.ribbon) { streets.demote(st.id); demoted++; }
+  if (demoted) for (const list of pieces) for (const pc of list) pc.lp.lab = pc.lp.lab.map((l) => (l >= 0 && !streets.list[l].ribbon ? LAB_OPEN : l));
+  stats['demotedStreets'] = demoted;
   const closes = addCloses(ctx, pieces.flat(), streets, rng.fork('closes'));
   const carved: CarvedBlock[] = [];
   const streetSpace: MultiPoly[] = [];
@@ -189,7 +209,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   stats['closes'] = closes;
 
   const toPH = (m: { outer: Polygon; holes: Polygon[] }[]): PolyHT[] => m.map((p) => ({ outer: p.outer, holes: p.holes }));
-  const layerStreets: UrbanStreet[] = streets.list.map((s) => ({
+  const layerStreets: UrbanStreet[] = streets.list.filter((s) => s.ribbon).map((s) => ({
     path: s.path, width: s.widths.reduce((a, b) => a + b, 0) / s.widths.length, widths: s.widths,
     kind: s.rank <= 1 ? 'main' : s.rank <= 2 ? 'street' : 'alley', rank: s.rank, role: s.role, phase: s.phase,
   }));

@@ -12,10 +12,10 @@ import type { Quarter } from './primary';
 import type { GuidanceField } from './field';
 import { Streets, jitterWidths, LAB_WALL } from './streets';
 import { polygonArea } from '../core/geom';
-import { LPoly, splitByChord, rayHit, locate, isConvex } from '../geo/split';
+import { LPoly, splitByChord, rayHit, locate, isConvex, segCrossesRing } from '../geo/split';
 import { area, obb, inscribed, interiorAngle, pointInRing, cleanRing, bboxOf, isSimple, convexWidth } from '../geo/poly';
 import { GridIndex } from '../geo/spatial';
-import { MultiPoly, union, difference, differenceS, mpArea } from '../geo/bool';
+import { MultiPoly, union, difference, differenceS, intersectionS, mpArea } from '../geo/bool';
 import { ribbon, disk } from '../geo/offset';
 
 export type PieceKind = 'block' | 'place' | 'market' | 'church';
@@ -128,7 +128,7 @@ export function splitQuarter(ctx: UrbanCtx, q: Quarter, qi: number, streets: Str
     if (P.streetOp === 'organic') {
       const n = pts.length;
       for (let i = 0; i < n; i++) {
-        if (pc.lp.lab[i] < 0) continue;
+        if (pc.lp.lab[i] < 0 || !streets.connected.has(pc.lp.lab[i])) continue;
         const a = pts[i], b = pts[(i + 1) % n];
         const l = dist(a, b);
         if (l < 12) continue;
@@ -185,7 +185,9 @@ export function splitQuarter(ctx: UrbanCtx, q: Quarter, qi: number, streets: Str
       if (!res) { res = splitByChord(pc.lp, chord, TMP_LABEL); used = chord; }
       if (!res) continue;
       const la = endLabel(pc.lp, used[0]), lb = endLabel(pc.lp, used[used.length - 1]);
-      if (la < 0 && lb < 0) continue; // must connect to the network
+      // must hang off the connected network
+      const ca = la >= 0 && streets.connected.has(la), cb = lb >= 0 && streets.connected.has(lb);
+      if (!ca && !cb) continue;
       if ((la === LAB_WALL && lb < 0) || (lb === LAB_WALL && la < 0)) continue;
       const [A, B] = res;
       const aA = area(A.pts), aB = area(B.pts);
@@ -223,6 +225,9 @@ export function splitQuarter(ctx: UrbanCtx, q: Quarter, qi: number, streets: Str
     const role = best.rank <= 2 ? 'street' : 'lane';
     const w = P.widthByRank[best.rank] * P.widthScale;
     const id = streets.add(best.chord, jitterWidths(best.chord, w, P.widthJitter, () => rng.float()), best.rank, role, pc.phase);
+    streets.connected.add(id);
+    // the far end joins its street to the network too
+    for (const e of [best.chord[0], best.chord[best.chord.length - 1]]) { const l = endLabel(pc.lp, e); if (l >= 0) streets.connected.add(l); }
     for (const X of [best.A, best.B]) X.lab = X.lab.map((l) => (l === TMP_LABEL ? id : l));
     if (best.placeA || best.placeB) places++;
     queue.push({ ...pc, lp: best.A, level: pc.level + 1, kind: best.placeA ? 'place' : 'block' });
@@ -247,7 +252,7 @@ export function addCloses(ctx: UrbanCtx, pieces: Piece[], streets: Streets, rng:
     let bi = -1, bl = 0;
     const pts = pc.lp.pts;
     for (let i = 0; i < pts.length; i++) {
-      if (pc.lp.lab[i] < 0) continue;
+      if (pc.lp.lab[i] < 0 || !streets.connected.has(pc.lp.lab[i])) continue;
       const l = dist(pts[i], pts[(i + 1) % pts.length]);
       if (l > bl) { bl = l; bi = i; }
     }
@@ -266,7 +271,7 @@ export function addCloses(ctx: UrbanCtx, pieces: Piece[], streets: Streets, rng:
     const st = streets.list[pc.lp.lab[bi]];
     const hw = (st?.widths[0] ?? 4) / 2;
     const s0 = { x: s.x - nrm.x * hw * 0.8, y: s.y - nrm.y * hw * 0.8 };
-    streets.add([s0, e], 2.6 * P.widthScale, 4, 'close', pc.phase);
+    streets.connected.add(streets.add([s0, e], 2.6 * P.widthScale, 4, 'close', pc.phase));
     n++;
   }
   return n;
@@ -331,7 +336,7 @@ export function insetPiece(lp: LPoly, streets: Streets, wallHalf: number): Polyg
       const ns = streets.nearest(m, 20, (st) => st.id === lab);
       const st = streets.list[lab];
       d.push(ns ? ns.hw : (st?.widths[0] ?? 4) / 2);
-    } else d.push(lab === LAB_WALL ? wallHalf : 0);
+    } else d.push(lab === LAB_WALL ? wallHalf : 0.03);
   }
   const out: Vec2[] = [];
   for (let i = 0; i < n; i++) {
@@ -351,8 +356,10 @@ export function insetPiece(lp: LPoly, streets: Streets, wallHalf: number): Polyg
     if (dist(q, P[i]) > 6 * Math.max(d[i], d[j], 0.5)) return null;
     out.push(q);
   }
-  // validity: positive, simple, every original edge keeps its direction
+  // validity: positive, simple, inside the piece, every original edge keeps its direction
   if (polygonArea(out) <= 0 || !isSimple(out)) return null;
+  for (const q of out) if (!pointInRing(P, q)) return null;
+  for (let i = 0; i < out.length; i++) if (segCrossesRing(P, out[i], out[(i + 1) % out.length], 1e-9)) return null;
   const m = out.length;
   if (m === n) {
     for (let i = 0; i < n; i++) {
@@ -392,16 +399,20 @@ export function buildRibbonIndex(streets: Streets, extraLines: { path: Polygon; 
 }
 
 export function carveBlocks(q: Quarter, pieces: Piece[], ribbonIndex: RibbonIndex, streets: Streets, wallHalf: number): { blocks: CarvedBlock[]; streetSpace: MultiPoly } {
-  const closes = streets.list.filter((s) => s.role === 'close').map((s) => { const b = bboxOf(s.path); return { x0: b.x0 - 3, y0: b.y0 - 3, x1: b.x1 + 3, y1: b.y1 + 3 }; });
+  const closes = streets.list.filter((s) => s.role === 'close' && s.ribbon).map((s) => { const b = bboxOf(s.path); return { x0: b.x0 - 3, y0: b.y0 - 3, x1: b.x1 + 3, y1: b.y1 + 3, ribbon: ribbon(s.path, s.widths) }; });
   const blocks: CarvedBlock[] = [];
   for (const pc of pieces) {
     const bb = bboxOf(pc.lp.pts);
     // fast exact path: inset every edge by the half-width of the street it borders
-    const hasClose = closes.some((c) => !(c.x0 > bb.x1 || c.x1 < bb.x0 || c.y0 > bb.y1 || c.y1 < bb.y0));
-    const ins = hasClose ? null : insetPiece(pc.lp, streets, wallHalf);
+    const near = closes.filter((c) => !(c.x0 > bb.x1 || c.x1 < bb.x0 || c.y0 > bb.y1 || c.y1 < bb.y0));
+    const ins = insetPiece(pc.lp, streets, wallHalf);
     if (ins) {
-      let poly = truncateAcute(ins, (22 * Math.PI) / 180, 5);
-      if (poly.length >= 3 && area(poly) >= 40 && (isConvex(poly, 1e-3) ? convexWidth(poly) / 2 : inscribed(poly, [], 0.5).r) >= 2.2) {
+      // closes (slits) notch the inset block
+      let polys: Polygon[] = [ins];
+      if (near.length) polys = differenceS(ins, ...near.map((c) => [{ outer: c.ribbon, holes: [] }] as MultiPoly)).map((ph) => ph.outer);
+      for (const p0 of polys) {
+        let poly = truncateAcute(p0, (22 * Math.PI) / 180, 5);
+        if (poly.length < 3 || area(poly) < 40 || (isConvex(poly, 1e-3) ? convexWidth(poly) / 2 : inscribed(poly, [], 0.5).r) < 2.2) continue;
         poly = cleanRing(poly, 0.05, 0.5, 0.002, false);
         if (poly.length >= 3) blocks.push({ poly, kind: pc.kind, phase: pc.phase, zone: pc.zone, age: pc.age, quarter: pc.quarter });
       }
@@ -419,6 +430,10 @@ export function carveBlocks(q: Quarter, pieces: Piece[], ribbonIndex: RibbonInde
       // acute tips at forks become street space (a small open triangle), never needle blocks
       poly = truncateAcute(poly, (22 * Math.PI) / 180, 5);
       if (poly.length < 3) continue;
+      // clamp to the piece (boolean cleanup must never let a block creep past its piece)
+      const cl = intersectionS(poly, pc.lp.pts);
+      if (!cl.length) continue;
+      poly = cl.reduce((b, x) => (area(x.outer) > area(b.outer) ? x : b)).outer;
       const a = area(poly);
       if (a < 40) continue;
       if (inscribed(poly, [], 0.5).r < 2.2) continue;
