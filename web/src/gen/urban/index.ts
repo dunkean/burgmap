@@ -182,6 +182,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     spineAmp: allStreetOps.has('gateToGate') ? coreM.spineAmp : 0,
     kinks: allStreetOps.has('defensiveKinks') ? Math.max(...phaseMorphs.map((m) => m.kinks)) : 0,
     spiral: allStreetOps.has('spiral') ? { arms: pop > 6000 ? 5 : 4, turns: 0.32 } : undefined,
+    nucleusRings: coreM.ringSpacing > 0 ? { spacing: coreM.ringSpacing, width: coreM.widthByRank[1] * coreM.widthScale } : undefined,
   }, streets, rng.fork('primary'));
   const t2 = performance.now();
   stats['ms.phases'] = Math.round(t1 - t0);

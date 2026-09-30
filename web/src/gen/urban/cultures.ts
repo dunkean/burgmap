@@ -74,8 +74,8 @@ M['jp-merchant'] = morph('jp-merchant', MORPHOLOGIES['bastide'], {
 
 M['indian-temple'] = morph('indian-temple', MORPHOLOGIES['bastide'], {
   streets: ['axis', 'rings', 'grid'], closeOp: 'none', plotOp: 'burgage', buildingOp: 'streetFrontRow', orientation: 'cardinal',
-  gridSpacing: [95, 48], gridSkew: 0.0, blockSize: { core: [3000, 7000], middle: [3500, 8000], edge: [4000, 9000], faubourg: [4000, 12000] },
-  widthByRank: [12, 9, 5, 3.4, 2.5], ringGaps: 0,
+  gridSkew: 0.0, blockSize: { core: [3000, 7000], middle: [3500, 8000], edge: [4000, 9000], faubourg: [4000, 12000] },
+  widthByRank: [12, 8.5, 3.6, 3, 2.5], ringGaps: 0, gridSpacing: [88, 88], ringSpacing: 64,
   frontage: { core: [5, 8], middle: [6, 9], edge: [7, 11] }, plotDepth: { core: [18, 26], middle: [20, 28], edge: [22, 32] },
   coverage: { core: [0.8, 0.9], middle: [0.72, 0.82], edge: [0.58, 0.7] }, footprintConformity: { core: 0.4, middle: 0.4, edge: 0.4 },
   bigCourtChance: 0.35, density: { core: 190, middle: 160, edge: 120 },
@@ -190,5 +190,23 @@ export const CULTURE_LIST: Culture[] = [
     village: { form: 'auto', morphology: 'jp-merchant' },
     hamlet: { form: 'auto', morphology: 'jp-merchant' },
     render: { towerShape: 'square', compoundWalls: true },
+  },
+  {
+    id: 'indian-temple', label: 'Indian temple town',
+    nucleus: { kind: 'temple', shape: 'square', area: [16000, 60000], compound: true, ring: 10, orientation: 'cardinal' },
+    core: { morphology: 'indian-temple', enclosure: { shape: 'square', wall: 'none', fossil: 'street', orientation: 'cardinal' } },
+    ring: { morphology: 'indian-temple', enclosure: { shape: 'square', wall: 'none', fossil: 'street', orientation: 'cardinal' } },
+    phaseCount: [[0, 1]],
+    faubourg: 'indian-temple', faubShare: [0.1, 0.1],
+    landmarks: [
+      { role: 'extra', kind: 'tank', place: 'near-nucleus', area: [3500, 14000], minPop: 1200 },
+      { role: 'power', kind: 'palace', place: 'near-nucleus', area: [5000, 20000], minPop: 8000 },
+    ],
+    village: {
+      form: 'walled', morphology: 'indian-temple', enclosure: { shape: 'square', wall: 'none', fossil: 'none', orientation: 'cardinal' },
+      nucleus: { kind: 'temple', shape: 'square', area: [2500, 4500], compound: true, ring: 6, orientation: 'cardinal' },
+    },
+    hamlet: { form: 'auto', morphology: 'indian-temple' },
+    render: { towerShape: 'square' },
   },
 ];

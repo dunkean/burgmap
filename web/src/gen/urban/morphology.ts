@@ -50,6 +50,8 @@ export interface MorphologyParams {
   fieldTwist: number;
   /** Synthetic radials in wide angular gaps. */
   extraRadials: boolean;
+  /** rings(square): concentric streets offset from the nucleus every `ringSpacing` m (0 = none). */
+  ringSpacing: number;
   /** Architecture of the ordinary buildings. */
   arch: ArchSpec;
   /**
@@ -130,6 +132,7 @@ const EO: MorphologyParams = {
   accessDepth: 30,
   fieldTwist: 0,
   extraRadials: true,
+  ringSpacing: 0,
   arch: { typology: 'gabled-row-house', roof: 'gable', storeys: [2, 4], material: 'timber' },
   growth: { road: 0.3, water: 0.18, noise: 0.26, wavelength: 300, elongation: 0.25, wet: 0.5, bipolar: 0.3 },
   curvature: 0.55,

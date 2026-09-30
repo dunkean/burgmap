@@ -15,7 +15,7 @@ import { ribbon } from '../geo/offset';
 import { LPoly, insidePieces } from '../geo/split';
 import { GridIndex } from '../geo/spatial';
 import { Streets, LAB_OPEN, LAB_WALL, LAB_WATER, jitterWidths } from './streets';
-import { wiggle, crank, axisLines, spiralArm } from './streetops';
+import { wiggle, crank, axisLines, spiralArm, outsetConvex } from './streetops';
 import { disk } from '../geo/offset';
 
 export interface Quarter {
@@ -195,6 +195,8 @@ export interface PrimaryInput {
   kinks?: number;
   /** spiral: arms instead of extra radials (count, turns). */
   spiral?: { arms: number; turns: number };
+  /** rings(square): concentric streets around the nucleus every `spacing` m. */
+  nucleusRings?: { spacing: number; width: number };
 }
 
 export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets, rng: Rng): Primary {
@@ -378,6 +380,26 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
           const w = P.widthByRank[1] * P.widthScale * 0.95;
           streets.add(pl, jitterWidths(pl, w, P.widthJitter, () => wr.float()), 1, 'ring', k + 1);
         }
+      }
+    }
+  }
+  // ---- concentric rings around the nucleus (pradakshina streets: Madurai's Chitrai, Avani Moola, Masi streets)
+  if (inp.nucleusRings && market) {
+    const encOK = (p: Vec2) => inMP(enc, p) && enc.every((ph) => distToRing(ph.outer, p) > 6) && !nearWater(ctx, p, 5);
+    const nr = rng.fork('nrings');
+    for (let k = 1; k < 20; k++) {
+      const ringP = outsetConvex(convexHull(market), k * inp.nucleusRings.spacing * nr.range(0.92, 1.08) + inp.nucleusRings.width / 2);
+      if (!ringP.some(encOK)) break;
+      // dense resample so the runs are cut close to the enclosure and the water
+      const dense: Vec2[] = [];
+      for (let i = 0; i < ringP.length; i++) {
+        const a = ringP[i], b = ringP[(i + 1) % ringP.length];
+        const m = Math.max(1, Math.ceil(dist(a, b) / 6));
+        for (let j = 0; j < m; j++) dense.push({ x: a.x + ((b.x - a.x) * j) / m, y: a.y + ((b.y - a.y) * j) / m });
+      }
+      for (const run of ringRuns(dense, encOK, 50)) {
+        const pl = simplify(run, 0.3);
+        streets.add(pl, jitterWidths(pl, inp.nucleusRings.width, P.widthJitter, () => nr.float()), 1, 'ring', 1);
       }
     }
   }

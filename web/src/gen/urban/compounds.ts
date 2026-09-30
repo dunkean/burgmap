@@ -15,6 +15,7 @@ import { MultiPoly, differenceS, intersectionS, unionS } from '../geo/bool';
 import { disk } from '../geo/offset';
 import { churchFootprint } from './landmarks';
 import type { ArchBldg } from './bops';
+import { dropOverlaps } from './buildings';
 import type { UrbanLine } from '../types';
 
 export interface CompoundOut {
@@ -354,15 +355,18 @@ function hinduTemple(lot: Polygon, cx: CompoundCtx): CompoundOut {
 function tank(lot: Polygon, cx: CompoundCtx): CompoundOut {
   const out: CompoundOut = { parcels: [], buildings: [], lines: [], water: [], landmarks: [] };
   const f = lotFrame(lot, cx.angle);
-  const h = Math.min(f.hu, f.hv) - 5;
-  if (h < 8) return emptyOut(lot, 'place');
-  const water = rectAt(f.c, cx.angle, -h, h, -h, h);
-  const ghats = differenceS(lot, water);
+  const hu = f.hu - 5, hvv = f.hv - 5;
+  const h = Math.min(hu, hvv);
+  if (h < 6) return emptyOut(lot, 'place');
+  const water = rectAt(f.c, cx.angle, -hu, hu, -hvv, hvv);
+  // the ghat ring is cut open by a thin slit (parcels have no holes)
+  const slit = rectAt(f.c, cx.angle, -hu - 400, 0, -0.01, 0.01);
+  const ghats = differenceS(lot, water, slit);
   for (const ph of ghats) if (!ph.holes.length) out.parcels.push({ poly: ph.outer, use: 'ghat' });
   if (!out.parcels.length) return emptyOut(lot, 'place');
   out.parcels.push({ poly: water, use: 'tank' });
   out.water.push(water);
-  for (const k of [0.7, 0.4]) out.lines.push({ kind: 'ghat-steps', path: rectAt(f.c, cx.angle, -h - 4 * k, h + 4 * k, -h - 4 * k, h + 4 * k), closed: true, width: 0.3 });
+  for (const k of [0.7, 0.4]) out.lines.push({ kind: 'ghat-steps', path: rectAt(f.c, cx.angle, -hu - 4 * k, hu + 4 * k, -hvv - 4 * k, hvv + 4 * k), closed: true, width: 0.3 });
   // pavilion (mandapa) in the middle of the water
   const ms = Math.min(4, h * 0.2);
   out.buildings.push({ poly: rectAt(f.c, cx.angle, -ms, ms, -ms, ms), kind: 'landmark', parcel: out.parcels.length - 1, arch: 'tank-mandapa', roof: 'pyramidal', material: 'stone', storeys: 1 });
@@ -450,11 +454,26 @@ function church(lot: Polygon, cx: CompoundCtx): CompoundOut {
   return out;
 }
 
+/** Palace (Indian nayak palace, generic): courtyard ranges around a large court with a pillared hall. */
+function palace(lot: Polygon, cx: CompoundCtx): CompoundOut {
+  const out = emptyOut(lot, 'compound:palace');
+  const f = lotFrame(lot, cx.angle);
+  const hu = f.hu - 2, hv = f.hv - 2;
+  if (hu < 14 || hv < 14) return out;
+  const d = Math.min(9, Math.min(hu, hv) * 0.22);
+  for (const r of [rectAt(f.c, cx.angle, -hu, hu, -hv, -hv + d), rectAt(f.c, cx.angle, -hu, hu, hv - d, hv), rectAt(f.c, cx.angle, -hu, -hu + d, -hv + d + 0.01, hv - d - 0.01), rectAt(f.c, cx.angle, hu - d, hu, -hv + d + 0.01, hv - d - 0.01)]) {
+    out.buildings.push({ poly: r, kind: 'landmark', parcel: 0, arch: 'palace-range', roof: 'flat', material: 'brick', storeys: 2 });
+  }
+  out.buildings.push({ poly: rectAt(f.c, cx.angle, -hu * 0.35, hu * 0.35, -hv * 0.3, hv * 0.3), kind: 'landmark', parcel: 0, arch: 'durbar-hall', roof: 'dome', material: 'stone', storeys: 2 });
+  out.lines.push({ kind: 'compound-wall', path: lot, closed: true, width: 1.4 });
+  return out;
+}
+
 export const COMPOUND_BUILDERS: Record<string, (lot: Polygon, cx: CompoundCtx) => CompoundOut> = {
   church, 'great-mosque': greatMosque, kasbah, hammam, 'drum-tower': drumTower,
   yamen: (l, c) => axialCompound(l, c, 'yamen'), 'chinese-temple': (l, c) => axialCompound(l, c, 'chinese-temple'),
   'walled-market': walledMarket, castle: jpCastle, 'jp-temple': jpTemple, 'hindu-temple': hinduTemple, tank,
-  basilica, 'roman-temple': romanTemple, grove, 'dwarf-gate': dwarfGate, forge,
+  basilica, 'roman-temple': romanTemple, grove, 'dwarf-gate': dwarfGate, forge, palace,
 };
 
 /** Builds a compound; unknown kinds leave the lot as one parcel of that use. */
@@ -467,6 +486,8 @@ export function buildCompound(kind: string, lot: Polygon, cx: CompoundCtx): Comp
     const par = out.parcels[bd.parcel]?.poly;
     return par && bd.poly.every((p) => pointInRing(par, p) || distToRing(par, p) < 0.01) && area(bd.poly) > 2;
   });
+  // no overlapping footprints (small lots squeeze nested layouts)
+  out.buildings = dropOverlaps(out.buildings) as typeof out.buildings;
   return out;
 }
 
