@@ -104,6 +104,7 @@ const DATA = {
     { s: "todo",  t: "M6 · Contrôle qualité", d: "Revue sur 50 graines, invariants (rien dans l'eau, pas de chevauchement), performances, démo publiée." }
   ],
   plates: [
+    { src: "m5_ui.png", cap: "Interface · Sauville, bourg de 4 300 habitants : toponymes générés, étiquettes le long des routes et rivières, cartouche, légende, relief sous la végétation." },
     { src: "m3_coeur.png", cap: "M3 · graine 4, ville · cœur dense : radiales courbes, marché en fuseau, église et cimetière au pont, parcelles en lanières, masses bâties percées de cours." },
     { src: "m3_ville.png", cap: "M3 · graine 4, ville · vue d'ensemble : enceinte compacte, faubourgs le long des routes, campagne recalée sur l'emprise réelle." },
     { src: "m3_faubourg.png", cap: "M3 · faubourg hors les murs : porte, tours, rangées sur rue et jardins en fond de parcelle." },
@@ -113,6 +114,11 @@ const DATA = {
     { src: "m1_vallee.png", cap: "M1 · graine 2 · vallée et grande rivière, affluents, estompage et courbes de niveau." }
   ],
   log: [
+    { d: "30 sept.", h: "Habillage, retours utilisateur, nouvelles tâches", b: [
+      "Toponymes par familles de langues (13 grammaires), noms de rues selon leur rôle, portes nommées d'après la ville vers laquelle mène la route, église dédiée à un saint. Étiquettes courbes, cartouche, légende, import de carte de relief, lien de partage.",
+      "Retours : trop de jardins et des bâtiments « allumettes » au centre, remparts trop organiques, bâti moins bon que chez watabou. Consignes chiffrées transmises à l'agent Opus : 85 à 95 % de bâti dans le cœur ancien ; bâtiments larges d'au moins 4,5 m ; courtines rectilignes de 25 à 80 m entre tours ; bâtiments individuels contournés, comparés côte à côte avec watabou (dont le portage Python est dans le dépôt).",
+      "Styles de carte en cours : watabou, gravure à la Merian, cadastre napoléonien, bleu d'architecte, enluminure, carte topographique moderne, nocturne. Export fonctionnel dans la visionneuse en ligne."
+    ]},
     { d: "30 sept.", h: "M3 terminé : tissu urbain par partition exacte", b: [
       "Réécrit par un agent Opus selon URBAN_GEOMETRY.md : phases de croissance emboîtées sur le champ de coût, anciennes enceintes devenues rues circulaires, radiales issues des routes, marché au point de convergence. Découpage récursif guidé par un champ radial et tangentiel, places aux fourches, impasses. Îlots exacts, parcelles en lanières avec coins attribués à la rue principale. Remplissage du bâti selon l'âge et la densité.",
       "Invariants vérifiés par 48 cas de test : aires conservées à 0,05 % près, aucun chevauchement, 3 m de façade minimum, bâti contenu dans sa parcelle, réseau connexe, déterminisme. Ville de 11 000 à 24 000 habitants en 2 à 3,5 s ; une capitale de 50 000 habitants reste un peu lente (5,5 à 7 s).",
