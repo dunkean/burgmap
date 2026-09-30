@@ -21,6 +21,7 @@ import { cutPlots, Plot } from './plots';
 import { buildPlot } from './buildings';
 import { wallFeatures } from './walls';
 import { pickChurchBlock, churchFootprint } from './landmarks';
+import { distToRing, pointInRing } from '../geo/poly';
 import { unionMany } from '../geo/bool';
 import type { UrbanBuilding, PolyH } from '../types';
 import type { UrbanParcel } from '../types';
@@ -219,7 +220,8 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     streets: layerStreets,
     blocks: carved.map((b) => b.poly), parcels, buildings,
     walls: prim.walls.map((w, wi) => {
-      const wf = wallFeatures(w.ring, w.gates, rng.fork('wall:' + wi), ctx.isWater);
+      const nearW = (q: Vec2) => ctx.water.some((ph) => distToRing(ph.outer, q) < 4 || pointInRing(ph.outer, q));
+      const wf = wallFeatures(w.ring, w.gates, rng.fork('wall:' + wi), ctx.isWater, nearW);
       return { path: w.ring, closed: true, towers: wf.towers, gates: w.gates.map((g) => g.p), thickness: pop > 12000 ? 3.2 : 2.6, gateInfo: w.gates.map((g) => ({ p: g.p, dir: g.dir, width: g.width })), pieces: wf.pieces, gateTowers: wf.gateTowers };
     }),
     landmarks, squares: prim.market ? [prim.market] : [],

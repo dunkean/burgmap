@@ -3,9 +3,19 @@ import type { Vec2, Polygon, Polyline } from '../core/geom';
 import { dist } from '../core/geom';
 import type { Rng } from '../core/rng';
 
+function resampleLine(pl: Polyline, step: number): Vec2[] {
+  const out: Vec2[] = [pl[0]];
+  for (let i = 1; i < pl.length; i++) {
+    const a = pl[i - 1], b = pl[i];
+    const n = Math.max(1, Math.ceil(dist(a, b) / step));
+    for (let k = 1; k <= n; k++) out.push({ x: a.x + ((b.x - a.x) * k) / n, y: a.y + ((b.y - a.y) * k) / n });
+  }
+  return out;
+}
+
 export interface WallFeatures { towers: Vec2[]; pieces: Polyline[]; gateTowers: Vec2[] }
 
-export function wallFeatures(ring: Polygon, gates: { p: Vec2; width: number }[], rng: Rng, isWater: (p: Vec2) => boolean): WallFeatures {
+export function wallFeatures(ring: Polygon, gates: { p: Vec2; width: number }[], rng: Rng, isWater: (p: Vec2) => boolean, nearWater: (p: Vec2) => boolean = () => false): WallFeatures {
   const pts = ring.concat([ring[0]]);
   const cum = [0];
   for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + dist(pts[i - 1], pts[i]));
@@ -54,5 +64,17 @@ export function wallFeatures(ring: Polygon, gates: { p: Vec2; width: number }[],
       pieces.push([at(a), ...inner.map((o) => o.p), at(b)]);
     }
   }
-  return { towers, pieces, gateTowers };
+  // stretches along water (a river crossing the town, a harbour front) stay open: the water is the defence
+  const dry: Polyline[] = [];
+  for (const pc of pieces) {
+    const dense = resampleLine(pc, 4);
+    let cur: Vec2[] = [];
+    for (const q of dense) {
+      if (nearWater(q)) { if (cur.length >= 2) dry.push(cur); cur = []; }
+      else cur.push(q);
+    }
+    if (cur.length >= 2) dry.push(cur);
+  }
+  const keepT = (t: Vec2) => !nearWater(t);
+  return { towers: towers.filter(keepT), pieces: dry.filter((d) => d.length >= 2), gateTowers: gateTowers.filter(keepT) };
 }
