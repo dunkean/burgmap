@@ -32,6 +32,12 @@ export interface Palette {
   bridgeDeck: string; bridgeInk: string;
   farmRoof: string; farmInk: string; farmYard: string;
   marker: string;
+  /** Urban layer. */
+  urban: {
+    street: string; streetEdge: string; yard: string; garden: string; gardenInk: string;
+    mass: string; massEdge: string; plotLine: string; place: string; placeInk: string;
+    wall: string; wallFill: string; blockEdge: string;
+  };
 }
 
 export const PALETTES: Record<StyleName, Palette> = {
@@ -64,6 +70,11 @@ export const PALETTES: Record<StyleName, Palette> = {
     bridgeDeck: '#f6edd0', bridgeInk: '#3b2c1c',
     farmRoof: '#c69b70', farmInk: '#4e3b28', farmYard: '#d8c79a',
     marker: '#8b2f1f',
+    urban: {
+      street: '#f4ead0', streetEdge: '#6b5236', yard: '#e6d6a8', garden: '#d3cf98', gardenInk: '#6f7a42',
+      mass: '#4a3826', massEdge: '#f1e5c6', plotLine: '#5a4530', place: '#ece0bf', placeInk: '#8a7050',
+      wall: '#3b2c1c', wallFill: '#6b5540', blockEdge: '#5a4530',
+    },
   },
   atlas: {
     name: 'atlas',
@@ -94,6 +105,11 @@ export const PALETTES: Record<StyleName, Palette> = {
     bridgeDeck: '#fffdf4', bridgeInk: '#3b3b3b',
     farmRoof: '#d9a678', farmInk: '#5a4a3c', farmYard: '#e8dcae',
     marker: '#b3261e',
+    urban: {
+      street: '#fbf7ec', streetEdge: '#6a5a4a', yard: '#efe5c9', garden: '#d8e2ad', gardenInk: '#6f9a4f',
+      mass: '#b4604a', massEdge: '#6e3526', plotLine: '#8a6a58', place: '#f1ead6', placeInk: '#9a8a70',
+      wall: '#4a3c34', wallFill: '#8a7a6c', blockEdge: '#7a6252',
+    },
   },};
 
 export function hexToRgb(hex: string): [number, number, number] {

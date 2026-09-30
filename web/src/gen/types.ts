@@ -96,6 +96,9 @@ export interface UrbanWall {
   path: Polyline; closed: boolean; towers: Vec2[]; gates: Vec2[]; thickness: number;
   /** Gate openings: center, street direction (unit) and opening width. */
   gateInfo?: { p: Vec2; dir: Vec2; width: number }[];
+  /** Wall stretches between the gate openings, and the towers flanking each gate. */
+  pieces?: Polyline[];
+  gateTowers?: Vec2[];
 }
 export interface UrbanPhase { id: number; kind: 'core' | 'ring' | 'faubourg' | 'village'; zone: UrbanZone; region: PolyH[]; walled: boolean; fossil: boolean }
 export interface UrbanQuarter { poly: PolyH; phase: number; zone: UrbanZone; streetSpace: PolyH[] }

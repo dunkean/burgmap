@@ -36,11 +36,11 @@ export const toGeom = (m: MultiPoly | PolyH | Polygon): Geom => {
 export function fromGeom(g: Geom, minArea = 0.01): MultiPoly {
   const out: MultiPoly = [];
   for (const pg of g) {
-    const outer = cleanRing(fromRing(pg[0] as Ring), 0.02, 0.05);
+    const outer = cleanRing(fromRing(pg[0] as Ring), 0.015, 0.5, 0.002);
     if (outer.length < 3 || area(outer) < minArea) continue;
     const holes: Polygon[] = [];
     for (let i = 1; i < pg.length; i++) {
-      const h = cleanRing(fromRing(pg[i] as Ring), 0.02, 0.05);
+      const h = cleanRing(fromRing(pg[i] as Ring), 0.015, 0.5, 0.002);
       if (h.length >= 3 && area(h) >= minArea) holes.push(orientPos(h));
     }
     out.push({ outer: orientPos(outer), holes });
