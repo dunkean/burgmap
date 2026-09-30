@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Town Generator</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: system-ui, sans-serif; background: #1a1a2e; color: #eee; display: flex; height: 100vh; }
+        #controls { width: 280px; padding: 20px; background: #16213e; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
+        #controls h1 { font-size: 1.2em; color: #e94560; }
+        #controls h2 { font-size: 0.9em; color: #e94560; margin-top: 4px; border-top: 1px solid #333; padding-top: 8px; }
+        label { display: block; font-size: 0.85em; margin-bottom: 4px; color: #aaa; }
+        input[type="number"], select { width: 100%; padding: 8px; border: 1px solid #333; border-radius: 4px; background: #0f3460; color: #eee; font-size: 0.95em; }
+        button { padding: 10px; border: none; border-radius: 4px; background: #e94560; color: #fff; font-size: 1em; cursor: pointer; }
+        button:hover { background: #c73e54; }
+        button.secondary { background: #0f3460; font-size: 0.85em; padding: 6px 10px; }
+        button.secondary:hover { background: #1a4a8a; }
+        #viewer { flex: 1; display: flex; align-items: center; justify-content: center; overflow: hidden; cursor: grab; user-select: none; position: relative; }
+        #viewer.grabbing { cursor: grabbing; }
+        #svg-container { transform-origin: 0 0; }
+        .toggle-row { display: flex; gap: 8px; }
+        .toggle-row > div { flex: 1; }
+        .toggle-row select { font-size: 0.8em; padding: 5px; }
+        #status { font-size: 0.8em; color: #666; }
+        #zoom-controls { display: flex; gap: 8px; }
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <h1>Town Generator</h1>
+
+        <div>
+            <label for="seed">Seed</label>
+            <input type="number" id="seed" value="42" min="1">
+        </div>
+
+        <div>
+            <label for="size">City Size (patches)</label>
+            <input type="number" id="size" value="15" min="3" max="60">
+        </div>
+
+        <div>
+            <label for="roads">Roads</label>
+            <input type="number" id="roads" placeholder="auto" min="2" max="12">
+        </div>
+
+        <div>
+            <label for="road_style">Road Style</label>
+            <select id="road_style">
+                <option value="">Organic</option>
+                <option value="medieval">Medieval (Concentric)</option>
+            </select>
+        </div>
+
+        <div>
+            <label for="building_style">Building Style</label>
+            <select id="building_style">
+                <option value="mixed" selected>Mixed (L-shapes)</option>
+                <option value="original">Original</option>
+                <option value="composite">Composite (Overlap)</option>
+            </select>
+        </div>
+
+        <div>
+            <label for="palette">Palette</label>
+            <select id="palette">
+                <option value="default" selected>Default</option>
+                <option value="blueprint">Blueprint</option>
+                <option value="bw">Black & White</option>
+                <option value="ink">Ink</option>
+                <option value="night">Night</option>
+                <option value="ancient">Ancient</option>
+                <option value="colour">Colour</option>
+                <option value="simple">Simple</option>
+            </select>
+        </div>
+
+        <h2>City Options</h2>
+
+        <div class="toggle-row">
+            <div>
+                <label for="plaza">Plaza</label>
+                <select id="plaza"><option value="">Random</option><option value="true">Yes</option><option value="false">No</option></select>
+            </div>
+            <div>
+                <label for="citadel">Citadel</label>
+                <select id="citadel"><option value="">Random</option><option value="true">Yes</option><option value="false">No</option></select>
+            </div>
+        </div>
+
+        <div class="toggle-row">
+            <div>
+                <label for="walls">Walls</label>
+                <select id="walls"><option value="">Random</option><option value="true">Yes</option><option value="false">No</option></select>
+            </div>
+            <div>
+                <label for="temple">Temple</label>
+                <select id="temple"><option value="">Random</option><option value="true">Yes</option><option value="false">No</option></select>
+            </div>
+        </div>
+
+        <h2>Features</h2>
+
+        <div class="toggle-row">
+            <div>
+                <label for="river">River</label>
+                <select id="river"><option value="">No</option><option value="true">Yes</option></select>
+            </div>
+            <div>
+                <label for="coast">Coast</label>
+                <select id="coast"><option value="">No</option><option value="true">Yes</option></select>
+            </div>
+        </div>
+
+        <div>
+            <label for="shanty_town">Shanty Town</label>
+            <select id="shanty_town"><option value="">No</option><option value="true">Yes</option></select>
+        </div>
+
+        <h2>Generation</h2>
+
+        <div class="toggle-row">
+            <div>
+                <label for="elongation">Elongation</label>
+                <input type="number" id="elongation" placeholder="auto" min="1.0" max="3.0" step="0.1">
+            </div>
+            <div>
+                <label for="building_density">Density</label>
+                <input type="number" id="building_density" placeholder="auto" min="0" max="1" step="0.1">
+            </div>
+        </div>
+
+        <div class="toggle-row">
+            <div>
+                <label for="river_curvature">River Curve</label>
+                <input type="number" id="river_curvature" placeholder="3.0" min="0.5" max="6.0" step="0.5">
+            </div>
+            <div>
+                <label for="coast_roughness">Coast Rough</label>
+                <input type="number" id="coast_roughness" placeholder="0.5" min="0.1" max="1.5" step="0.1">
+            </div>
+        </div>
+
+        <button id="generate">Generate</button>
+        <button id="random">Random Seed</button>
+
+        <div id="zoom-controls">
+            <button class="secondary" id="reset-zoom">Reset Zoom</button>
+        </div>
+
+        <div id="status">Ready</div>
+    </div>
+
+    <div id="viewer">
+        <div id="svg-container">Click Generate to create a town</div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

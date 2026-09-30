@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gen Roofs Lab</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #1a1f2e;
+            color: #e0e0e0;
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+        .sidebar {
+            width: 340px;
+            min-width: 340px;
+            background: #232838;
+            padding: 16px;
+            overflow-y: auto;
+            border-right: 1px solid #333;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .sidebar h1 {
+            font-size: 18px;
+            color: #f0f0f0;
+            margin-bottom: 4px;
+        }
+        .sidebar h2 {
+            font-size: 13px;
+            color: #999;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-top: 8px;
+            padding-bottom: 4px;
+            border-bottom: 1px solid #333;
+        }
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .control-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .control-row label {
+            font-size: 13px;
+            min-width: 96px;
+            color: #bbb;
+        }
+        .control-row select,
+        .control-row input[type="number"],
+        .control-row input[type="range"] {
+            flex: 1;
+            background: #2a3040;
+            border: 1px solid #444;
+            color: #e0e0e0;
+            padding: 4px 6px;
+            border-radius: 4px;
+            font-size: 13px;
+        }
+        .control-row select:disabled,
+        .control-row input:disabled {
+            opacity: 0.55;
+            cursor: not-allowed;
+        }
+        .control-row input[type="range"] { padding: 0; }
+        .control-row .val {
+            font-size: 12px;
+            color: #888;
+            min-width: 34px;
+            text-align: right;
+        }
+        textarea {
+            width: 100%;
+            min-height: 98px;
+            resize: vertical;
+            background: #2a3040;
+            border: 1px solid #444;
+            color: #e0e0e0;
+            padding: 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+        }
+        button {
+            background: #4a6fa5;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.2s;
+        }
+        button:hover { background: #5a7fb5; }
+        button.secondary {
+            background: #3a4555;
+        }
+        button.secondary:hover { background: #4a5565; }
+        .btn-row {
+            display: flex;
+            gap: 8px;
+        }
+        .btn-row button { flex: 1; }
+        .main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+        .toolbar {
+            background: #232838;
+            padding: 8px 16px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            border-bottom: 1px solid #333;
+            font-size: 13px;
+        }
+        .toolbar .sep { color: #444; }
+        .canvas-wrap {
+            flex: 1;
+            position: relative;
+            overflow: hidden;
+            background: #e8dcc8;
+        }
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+        .status-bar {
+            background: #232838;
+            padding: 6px 16px;
+            font-size: 12px;
+            color: #888;
+            border-top: 1px solid #333;
+            display: flex;
+            gap: 16px;
+        }
+        .nav-links {
+            font-size: 12px;
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .nav-links a {
+            color: #6a8fc5;
+            text-decoration: none;
+        }
+        .nav-links a:hover { text-decoration: underline; }
+        .layer-toggles {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .layer-toggles label {
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            cursor: pointer;
+        }
+        .layer-toggles input[type="checkbox"] {
+            accent-color: #4a6fa5;
+        }
+        .level-list {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .level-item {
+            width: 100%;
+            text-align: left;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 8px;
+            padding: 7px 10px;
+            background: #2a3040;
+            border: 1px solid #3a4255;
+        }
+        .level-item.active {
+            background: #3c4b68;
+            border-color: #6a8fc5;
+        }
+        .mode-grid,
+        .preset-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 6px;
+        }
+        .mode-grid button,
+        .preset-grid button {
+            font-size: 11px;
+            padding: 6px 4px;
+        }
+        .mode-grid button.active {
+            background: #6a8fc5;
+        }
+        .hint {
+            font-size: 11px;
+            color: #8c92a2;
+            line-height: 1.4;
+        }
+        .mini-label {
+            font-size: 11px;
+            color: #9fa8ba;
+        }
+    </style>
+</head>
+<body>
+    <div class="sidebar">
+        <div>
+            <h1>Roofs Lab</h1>
+            <div class="nav-links">
+                <a href="/">Home</a>
+                <a href="/tools/building/">M5 Building</a>
+                <a href="/tools/roofs/">Roofs</a>
+            </div>
+        </div>
+
+        <h2>Editor</h2>
+        <div class="control-group">
+            <div class="control-row">
+                <label>Preset</label>
+                <select id="preset">
+                    <option value="irregular_stack" selected>Irregular Stack</option>
+                    <option value="single_irregular">Single Irregular</option>
+                    <option value="l_shape">L-Shape</option>
+                    <option value="t_shape">T-Shape</option>
+                    <option value="h_compound">H Compound</option>
+                    <option value="u_shape">U-Shape</option>
+                    <option value="courtyard_compound">Courtyard Compound</option>
+                    <option value="plus_compound">Cross Compound</option>
+                    <option value="tower_stack">Tower Stack</option>
+                    <option value="octagon_tower">Octagon Tower</option>
+                    <option value="mosque_complex">Mosque Complex</option>
+                    <option value="pagoda_stack">Pagoda Stack</option>
+                    <option value="cathedral_compound">Cathedral Compound</option>
+                    <option value="keep_compound">Keep Compound</option>
+                    <option value="longhouse">Longhouse</option>
+                    <option value="zigzag">Zigzag</option>
+                </select>
+            </div>
+            <div class="control-row">
+                <label>Seed</label>
+                <input type="number" id="seed" min="0" step="1" value="42">
+            </div>
+            <div class="btn-row">
+                <button class="secondary" id="randomizeBtn">Randomize</button>
+                <button class="secondary" id="fitViewBtn">Fit View</button>
+            </div>
+            <div class="mode-grid">
+                <button class="secondary" id="modeEditBtn">Edit</button>
+                <button class="secondary" id="modeDrawBtn">Draw</button>
+                <button class="secondary" id="modePanBtn">Pan</button>
+            </div>
+            <div class="hint">
+                Edit: drag vertices, double-click an edge to insert, right-click a vertex to delete.
+                Draw: click to add vertices, click the first point to close.
+                Presets rebuild immediately; changing the seed changes their proportions.
+            </div>
+        </div>
+
+        <h2>Levels</h2>
+        <div class="control-group">
+            <div class="level-list" id="levelList"></div>
+            <div class="control-row">
+                <label>Stories</label>
+                <input type="number" id="levelStories" min="1" max="20" step="1" value="1">
+            </div>
+            <div class="btn-row">
+                <button class="secondary" id="addLevelBtn">Add Level</button>
+                <button class="secondary" id="duplicateLevelBtn">Duplicate</button>
+            </div>
+            <div class="btn-row">
+                <button class="secondary" id="removeLevelBtn">Remove</button>
+                <button class="secondary" id="newPolygonBtn">New Polygon</button>
+            </div>
+        </div>
+
+        <h2>Roof</h2>
+        <div class="control-group">
+            <div class="control-row">
+                <label>Algorithm</label>
+                <select id="roofType">
+                    <option value="auto">Auto (style/building type)</option>
+                    <option value="skeleton" selected>Straight Skeleton</option>
+                    <option value="hipped">Hipped</option>
+                    <option value="gabled">Gabled</option>
+                    <option value="flat">Flat</option>
+                    <option value="domed">Domed</option>
+                    <option value="pagoda">Pagoda</option>
+                    <option value="thatched">Thatched</option>
+                    <option value="conical">Conical</option>
+                    <option value="vaulted">Vaulted</option>
+                </select>
+            </div>
+            <div class="control-row">
+                <label>Overhang</label>
+                <input type="range" id="overhang" min="-1" max="2" step="0.05" value="0.35">
+                <span class="val" id="overhangVal">0.35</span>
+            </div>
+            <div class="control-row">
+                <label>Building Type</label>
+                <select id="buildingType">
+                    <option value="house" selected>House</option>
+                    <option value="shop">Shop</option>
+                    <option value="tower">Tower</option>
+                    <option value="cathedral">Cathedral</option>
+                    <option value="keep">Keep</option>
+                    <option value="great_hall">Great Hall</option>
+                    <option value="mosque">Mosque</option>
+                    <option value="pagoda">Pagoda</option>
+                    <option value="farmhouse">Farmhouse</option>
+                    <option value="ger">Ger / Yurt</option>
+                </select>
+            </div>
+            <div class="control-row">
+                <label>Style</label>
+                <select id="style">
+                    <option value="generic" selected>Generic</option>
+                    <option value="european_medieval">European Medieval</option>
+                    <option value="arabic_islamic">Arabic / Islamic</option>
+                    <option value="east_asian">East Asian</option>
+                    <option value="roman">Roman</option>
+                    <option value="viking">Viking</option>
+                </select>
+            </div>
+        </div>
+
+        <h2>Layers</h2>
+        <div class="layer-toggles">
+            <label><input type="checkbox" id="layerFootprint" checked> Footprints / Walls</label>
+            <label><input type="checkbox" id="layerRoof" checked> Roof Faces</label>
+            <label><input type="checkbox" id="layerRidge" checked> Ridges</label>
+            <label><input type="checkbox" id="layerLevels" checked> Level Outlines</label>
+            <label><input type="checkbox" id="layerHandles" checked> Edit Handles</label>
+            <label><input type="checkbox" id="layerGrid"> Grid</label>
+            <label><input type="checkbox" id="layerLabels" checked> Labels</label>
+        </div>
+
+        <h2>Polygon JSON</h2>
+        <div class="control-group">
+            <div class="mini-label">Selected level polygon</div>
+            <textarea id="polygonJson"></textarea>
+            <div class="btn-row">
+                <button class="secondary" id="applyJsonBtn">Apply JSON</button>
+                <button class="secondary" id="copyJsonBtn">Copy JSON</button>
+            </div>
+            <div class="btn-row">
+                <button class="secondary" id="exportBtn">Export Setup</button>
+                <button class="secondary" id="importBtn">Import Setup</button>
+            </div>
+        </div>
+
+        <h2>Quick Shapes</h2>
+        <div class="preset-grid">
+            <button class="secondary" data-preset="single_irregular">Irregular</button>
+            <button class="secondary" data-preset="l_shape">L-Shape</button>
+            <button class="secondary" data-preset="t_shape">T-Shape</button>
+            <button class="secondary" data-preset="u_shape">U-Shape</button>
+            <button class="secondary" data-preset="h_compound">H Compound</button>
+            <button class="secondary" data-preset="courtyard_compound">Courtyard</button>
+            <button class="secondary" data-preset="plus_compound">Cross</button>
+            <button class="secondary" data-preset="tower_stack">Tower</button>
+            <button class="secondary" data-preset="octagon_tower">Octagon</button>
+            <button class="secondary" data-preset="mosque_complex">Mosque</button>
+            <button class="secondary" data-preset="pagoda_stack">Pagoda</button>
+            <button class="secondary" data-preset="cathedral_compound">Cathedral</button>
+            <button class="secondary" data-preset="keep_compound">Keep</button>
+            <button class="secondary" data-preset="longhouse">Longhouse</button>
+            <button class="secondary" data-preset="zigzag">Zigzag</button>
+        </div>
+    </div>
+
+    <div class="main">
+        <div class="toolbar">
+            <span>Roofs Lab</span>
+            <span class="sep">|</span>
+            <span id="infoText">Edit a polygon or load a preset, then generate</span>
+        </div>
+        <div class="canvas-wrap" id="canvasWrap">
+            <canvas id="canvas"></canvas>
+        </div>
+        <div class="status-bar">
+            <span id="statusMode">Mode: edit</span>
+            <span id="statusLevel">Level: 1 / 1</span>
+            <span id="statusRoof">Roof: auto</span>
+            <span id="statusCoords">Cursor: -</span>
+        </div>
+    </div>
+
+    <script src="/static/gen_roofs.js"></script>
+</body>
+</html>

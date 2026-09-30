@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Carte Geologique — Etape 1</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: system-ui, sans-serif; background: #1a1a2e; color: #eee; display: flex; height: 100vh; }
+        #controls {
+            width: 300px; padding: 16px; background: #16213e;
+            display: flex; flex-direction: column; gap: 8px;
+            overflow-y: auto; flex-shrink: 0;
+        }
+        #controls h1 { font-size: 1.15em; color: #e94560; }
+        #controls h2 { font-size: 0.85em; color: #e94560; margin-top: 2px; border-top: 1px solid #333; padding-top: 6px; }
+        label { display: block; font-size: 0.82em; margin-bottom: 2px; color: #aaa; }
+        input[type="number"], select {
+            width: 100%; padding: 6px; border: 1px solid #333;
+            border-radius: 4px; background: #0f3460; color: #eee; font-size: 0.9em;
+        }
+        button {
+            padding: 9px; border: none; border-radius: 4px;
+            background: #e94560; color: #fff; font-size: 0.95em; cursor: pointer; width: 100%;
+        }
+        button:hover { background: #c73e54; }
+        button.secondary { background: #0f3460; font-size: 0.82em; padding: 5px 8px; }
+        button.secondary:hover { background: #1a4a8a; }
+        .btn-row { display: flex; gap: 8px; }
+        .btn-row button { flex: 1; }
+        .param-row { display: flex; gap: 8px; }
+        .param-row > div { flex: 1; }
+        #viewer {
+            flex: 1; display: flex; align-items: center; justify-content: center;
+            overflow: hidden; cursor: grab; user-select: none; position: relative; background: #111;
+        }
+        #viewer.grabbing { cursor: grabbing; }
+        canvas { image-rendering: pixelated; }
+        .layer-toggle { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
+        .layer-toggle input[type="checkbox"] { accent-color: #e94560; width: 15px; height: 15px; }
+        .layer-toggle label { margin: 0; cursor: pointer; font-size: 0.82em; }
+        #status { font-size: 0.78em; color: #666; margin-top: auto; }
+        .view-mode { display: flex; gap: 4px; }
+        .view-mode button {
+            flex: 1; padding: 5px 4px; font-size: 0.78em; background: #0f3460;
+        }
+        .view-mode button.active { background: #e94560; }
+        .view-mode button:hover { background: #1a4a8a; }
+        .view-mode button.active:hover { background: #c73e54; }
+        .nav-link { font-size: 0.8em; color: #888; text-decoration: none; }
+        .nav-link:hover { color: #e94560; }
+        .scale-info { font-size: 0.78em; color: #888; margin-top: -2px; }
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+            <h1>Carte Geologique</h1>
+            <a href="/" class="nav-link">City Gen</a>
+        </div>
+
+        <div>
+            <label for="seed">Seed</label>
+            <input type="number" id="seed" value="42" min="1">
+        </div>
+
+        <div>
+            <label for="scale">Taille</label>
+            <select id="scale">
+                <option value="hamlet">Hameau (500m-1km)</option>
+                <option value="village">Village (1-2km)</option>
+                <option value="town" selected>Ville (2-5km)</option>
+                <option value="city">Cite (5-10km)</option>
+                <option value="agglomeration">Agglomeration (10-25km)</option>
+            </select>
+        </div>
+        <div class="scale-info" id="scale-info">Grille: 256 x 256 — cellule: 13.7m</div>
+
+        <h2>Relief</h2>
+
+        <div>
+            <label for="relief">Type de terrain</label>
+            <select id="relief">
+                <option value="mountainous">Montagneux (cretes, falaises)</option>
+                <option value="hilly">Vallonne (collines douces)</option>
+                <option value="normal" selected>Normal (plateaux, vallees)</option>
+                <option value="flat">Plat (quasi-plat)</option>
+            </select>
+        </div>
+
+        <h2>Eau</h2>
+
+        <div>
+            <label for="coast">Cote</label>
+            <select id="coast">
+                <option value="false" selected>Pas de cote</option>
+                <option value="north">Nord</option>
+                <option value="east">Est</option>
+                <option value="south">Sud</option>
+                <option value="west">Ouest</option>
+            </select>
+        </div>
+
+        <div class="param-row">
+            <div>
+                <label for="n_rivers">Rivieres</label>
+                <input type="number" id="n_rivers" value="1" min="0" max="6">
+            </div>
+            <div>
+                <label for="lakes">Lacs</label>
+                <select id="lakes">
+                    <option value="true" selected>Oui</option>
+                    <option value="false">Non</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="btn-row">
+            <button id="generate">Generer</button>
+            <button id="random" class="secondary">Aleatoire</button>
+        </div>
+
+        <h2>Vue</h2>
+
+        <div class="view-mode" id="view-mode">
+            <button class="active" data-mode="elevation">Elevation</button>
+            <button data-mode="topo">Topo</button>
+            <button data-mode="biomes">Biotopes</button>
+        </div>
+
+        <h2>Calques</h2>
+
+        <div class="layer-toggle">
+            <input type="checkbox" id="layer_contours" checked>
+            <label for="layer_contours">Courbes de niveau</label>
+        </div>
+        <div class="layer-toggle">
+            <input type="checkbox" id="layer_rivers" checked>
+            <label for="layer_rivers">Rivieres</label>
+        </div>
+        <div class="layer-toggle">
+            <input type="checkbox" id="layer_lakes" checked>
+            <label for="layer_lakes">Lacs</label>
+        </div>
+        <div class="layer-toggle">
+            <input type="checkbox" id="layer_coastline" checked>
+            <label for="layer_coastline">Trait de cote</label>
+        </div>
+        <div class="layer-toggle">
+            <input type="checkbox" id="layer_biome_borders">
+            <label for="layer_biome_borders">Frontieres biomes</label>
+        </div>
+
+        <button id="reset-zoom" class="secondary">Reset Zoom</button>
+
+        <div id="status">Pret — cliquez Generer</div>
+    </div>
+
+    <div id="viewer">
+        <canvas id="map-canvas" width="800" height="800"></canvas>
+    </div>
+
+    <script src="/static/geology.js"></script>
+</body>
+</html>

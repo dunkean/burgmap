@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Regional Layout — M2</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: system-ui, sans-serif; background: #1a1a2e; color: #eee; display: flex; height: 100vh; }
+        #controls { width: 300px; padding: 20px; background: #16213e; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; flex-shrink: 0; }
+        #controls h1 { font-size: 1.2em; color: #e94560; }
+        #controls h2 { font-size: 0.9em; color: #e94560; margin-top: 4px; border-top: 1px solid #333; padding-top: 8px; }
+        label { display: block; font-size: 0.85em; margin-bottom: 3px; color: #aaa; }
+        input[type="number"], select { width: 100%; padding: 7px; border: 1px solid #333; border-radius: 4px; background: #0f3460; color: #eee; font-size: 0.95em; }
+        input[type="range"] { width: 100%; accent-color: #e94560; }
+        button { padding: 10px; border: none; border-radius: 4px; background: #e94560; color: #fff; font-size: 1em; cursor: pointer; width: 100%; }
+        button:hover { background: #c73e54; }
+        button.secondary { background: #0f3460; font-size: 0.85em; padding: 6px 10px; }
+        button.secondary:hover { background: #1a4a8a; }
+        .btn-row { display: flex; gap: 8px; }
+        .btn-row button { flex: 1; }
+        .param-row { display: flex; gap: 8px; }
+        .param-row > div { flex: 1; }
+        #viewer { flex: 1; display: flex; align-items: center; justify-content: center; overflow: hidden; cursor: grab; user-select: none; position: relative; background: #111; }
+        #viewer.grabbing { cursor: grabbing; }
+        canvas { image-rendering: pixelated; }
+        .layer-toggle { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
+        .layer-toggle input[type="checkbox"] { accent-color: #e94560; width: 16px; height: 16px; }
+        .layer-toggle label { margin: 0; cursor: pointer; font-size: 0.85em; }
+        #status { font-size: 0.8em; color: #666; margin-top: auto; }
+        .slider-label { display: flex; justify-content: space-between; font-size: 0.85em; color: #aaa; margin-bottom: 3px; }
+        .slider-label span:last-child { color: #e94560; font-weight: bold; }
+        .nav-links { display: flex; gap: 12px; }
+        .nav-link { font-size: 0.8em; color: #888; text-decoration: none; }
+        .nav-link:hover { color: #e94560; }
+        #city-info { font-size: 0.8em; color: #ccc; background: #0f3460; border-radius: 4px; padding: 8px; display: none; }
+        #city-info .label { color: #e94560; font-weight: bold; }
+        .checkbox-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
+        .checkbox-row input[type="checkbox"] { accent-color: #e94560; width: 16px; height: 16px; }
+        .checkbox-row label { margin: 0; cursor: pointer; font-size: 0.85em; color: #aaa; }
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+            <h1>Region — M2</h1>
+            <div class="nav-links">
+                <a href="/tools/terrain/" class="nav-link">M1 Terrain</a>
+                <a href="/" class="nav-link">City Gen</a>
+            </div>
+        </div>
+
+        <h2>Terrain</h2>
+
+        <div>
+            <label for="seed">Seed</label>
+            <input type="number" id="seed" value="42" min="1">
+        </div>
+
+        <div>
+            <label for="size">Grid Size</label>
+            <select id="size">
+                <option value="64">64 x 64</option>
+                <option value="128" selected>128 x 128</option>
+                <option value="256">256 x 256</option>
+            </select>
+        </div>
+
+        <div>
+            <label for="map_extent">Map Extent</label>
+            <select id="map_extent">
+                <option value="2000" selected>2 km x 2 km</option>
+                <option value="3000">3 km x 3 km</option>
+                <option value="4000">4 km x 4 km</option>
+            </select>
+        </div>
+
+        <div id="cell-size-info" style="font-size:0.8em; color:#888; margin-top:-4px;">
+            Cell size: <span id="cell_size_display">15.6</span> m
+        </div>
+
+        <div>
+            <div class="slider-label"><span>Noise Scale</span><span id="noise_scale_val">2.0</span></div>
+            <input type="range" id="noise_scale" min="0.5" max="6.0" step="0.1" value="2.0">
+        </div>
+
+        <div class="param-row">
+            <div>
+                <label for="river_count">Rivers</label>
+                <input type="number" id="river_count" value="1" min="0" max="6">
+            </div>
+            <div>
+                <div class="slider-label"><span>River Width (m)</span><span id="river_width_val">30</span></div>
+                <input type="range" id="river_width" min="10" max="100" step="5" value="30">
+            </div>
+        </div>
+
+        <div class="param-row">
+            <div>
+                <label for="coast">Coast</label>
+                <select id="coast">
+                    <option value="false" selected>No coast</option>
+                    <option value="true">Coastal</option>
+                </select>
+            </div>
+            <div>
+                <label for="coast_direction">Coast Side</label>
+                <select id="coast_direction">
+                    <option value="0">North</option>
+                    <option value="1">East</option>
+                    <option value="2" selected>South</option>
+                    <option value="3">West</option>
+                </select>
+            </div>
+        </div>
+
+        <h2>City Placement</h2>
+
+        <div>
+            <div class="slider-label"><span>Population</span><span id="population_val">10,000</span></div>
+            <input type="range" id="population" min="2000" max="50000" step="1000" value="10000">
+        </div>
+
+        <div>
+            <div class="slider-label"><span>City Radius Override (m)</span><span id="city_radius_val">0 (auto)</span></div>
+            <input type="range" id="city_radius_m" min="0" max="800" step="10" value="0">
+        </div>
+
+        <div id="derived-info" style="font-size:0.8em; color:#888;">
+            Derived radius: <span id="derived_radius">460</span> m ≈ <span id="derived_cells">29</span> cells (<span id="derived_pct">45</span>% of map)
+        </div>
+
+        <div>
+            <label for="style">Cultural Style</label>
+            <select id="style">
+                <option value="generic" selected>Generic / Fantasy</option>
+                <option value="european_medieval">European Medieval</option>
+                <option value="arabic">Arabic / Islamic</option>
+                <option value="east_asian">East Asian</option>
+                <option value="mongol">Mongol / Steppe</option>
+                <option value="viking">Viking / Norse</option>
+                <option value="roman">Classic Antiquity</option>
+            </select>
+        </div>
+
+        <h2>Satellites</h2>
+
+        <div>
+            <label for="n_satellites">Hamlet/Village Count (0-8)</label>
+            <input type="number" id="n_satellites" value="0" min="0" max="8">
+        </div>
+
+        <div class="checkbox-row">
+            <input type="checkbox" id="build_roads" checked>
+            <label for="build_roads">Connect Roads</label>
+        </div>
+
+        <div class="btn-row">
+            <button id="generate">Generate</button>
+            <button id="random" class="secondary">Random</button>
+        </div>
+
+        <h2>Layers</h2>
+
+        <div class="layer-toggle">
+            <input type="checkbox" id="layer_elevation" checked>
+            <label for="layer_elevation">Elevation</label>
+        </div>
+        <div class="layer-toggle">
+            <input type="checkbox" id="layer_ground_cover">
+            <label for="layer_ground_cover">Ground Cover</label>
+        </div>
+        <div class="layer-toggle">
+            <input type="checkbox" id="layer_water" checked>
+            <label for="layer_water">Water</label>
+        </div>
+        <div class="layer-toggle">
+            <input type="checkbox" id="layer_heatmap">
+            <label for="layer_heatmap">Score Heatmap</label>
+        </div>
+        <div class="layer-toggle">
+            <input type="checkbox" id="layer_city" checked>
+            <label for="layer_city">City Site</label>
+        </div>
+        <div class="layer-toggle">
+            <input type="checkbox" id="layer_landmarks" checked>
+            <label for="layer_landmarks">Landmarks</label>
+        </div>
+        <div class="layer-toggle">
+            <input type="checkbox" id="layer_satellites" checked>
+            <label for="layer_satellites">Satellites</label>
+        </div>
+        <div class="layer-toggle">
+            <input type="checkbox" id="layer_roads" checked>
+            <label for="layer_roads">Roads</label>
+        </div>
+        <div class="layer-toggle">
+            <input type="checkbox" id="layer_labels" checked>
+            <label for="layer_labels">Labels</label>
+        </div>
+
+        <button id="reset-zoom" class="secondary">Reset Zoom</button>
+
+        <div id="city-info">
+            <div><span class="label">Position:</span> <span id="info-pos"></span></div>
+            <div><span class="label">Score:</span> <span id="info-score"></span></div>
+            <div><span class="label">Spec:</span> <span id="info-spec"></span></div>
+            <div><span class="label">Harbor:</span> <span id="info-harbor"></span></div>
+            <div style="margin-top:6px;"><span class="label">Landmarks:</span></div>
+            <div id="info-landmarks" style="padding-left:8px;"></div>
+        </div>
+
+        <div id="scale-bar-info" style="font-size:0.75em; color:#666; margin-top:4px;">
+            Scale: each cell = <span id="scale_cell_m">15.6</span> m
+        </div>
+
+        <div id="status">Ready — click Generate</div>
+    </div>
+
+    <div id="viewer">
+        <canvas id="region-canvas" width="800" height="800"></canvas>
+    </div>
+
+    <script src="/static/region.js"></script>
+</body>
+</html>

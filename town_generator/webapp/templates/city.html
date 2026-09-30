@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>M3 + M5 — City Roofscape Editor</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: system-ui, sans-serif; background: #1A1F2E; color: #eee; display: flex; height: 100vh; overflow: hidden; }
+
+        /* Sidebar */
+        #sidebar { width: 320px; min-width: 320px; padding: 16px; background: #141824; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; border-right: 1px solid #2a2f40; }
+        #sidebar h1 { font-size: 1.1em; color: #C53030; display: flex; align-items: center; gap: 8px; }
+        #sidebar h1 span { font-size: 0.7em; background: #C53030; color: #fff; padding: 2px 6px; border-radius: 3px; }
+        .section-header { font-size: 0.8em; color: #C53030; margin-top: 6px; border-top: 1px solid #2a2f40; padding-top: 8px; text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer; user-select: none; }
+        .section-header::before { content: '▾ '; font-size: 0.7em; }
+        .section-header.collapsed::before { content: '▸ '; }
+        .section-content { display: flex; flex-direction: column; gap: 8px; }
+        .section-content.hidden { display: none; }
+        label { display: block; font-size: 0.8em; margin-bottom: 2px; color: #8890a4; }
+        input[type="number"], select, input[type="range"] { width: 100%; padding: 7px 8px; border: 1px solid #2a2f40; border-radius: 4px; background: #1e2436; color: #eee; font-size: 0.9em; }
+        input[type="number"]:focus, select:focus { border-color: #C53030; outline: none; }
+        input[type="range"] { padding: 4px 0; background: transparent; border: none; }
+        button { padding: 9px; border: none; border-radius: 4px; background: #C53030; color: #fff; font-size: 0.9em; cursor: pointer; width: 100%; }
+        button:hover { background: #a82828; }
+        button.secondary { background: #1e2436; border: 1px solid #2a2f40; font-size: 0.8em; padding: 6px 8px; }
+        button.secondary:hover { background: #2a3050; }
+        .row { display: flex; gap: 8px; }
+        .row > div { flex: 1; }
+        .row select { font-size: 0.8em; padding: 5px; }
+        .slider-row { display: flex; align-items: center; gap: 8px; }
+        .slider-row input[type="range"] { flex: 1; }
+        .slider-row .slider-val { font-size: 0.75em; color: #8890a4; min-width: 36px; text-align: right; }
+        .hint { font-size: 0.74em; color: #727a90; line-height: 1.4; }
+
+        /* Layer toggles */
+        .layer-toggle { display: flex; align-items: center; gap: 6px; font-size: 0.8em; color: #8890a4; cursor: pointer; }
+        .layer-toggle input[type="checkbox"] { accent-color: #C53030; }
+
+        /* Status bar */
+        #status-bar { font-size: 0.75em; color: #555; margin-top: auto; padding-top: 8px; border-top: 1px solid #2a2f40; }
+
+        /* Main canvas area */
+        #canvas-area { flex: 1; position: relative; overflow: hidden; cursor: grab; user-select: none; background: linear-gradient(180deg, #f0e4cc 0%, #d8c4a5 100%); }
+        #canvas-area.grabbing { cursor: grabbing; }
+        canvas { position: absolute; top: 0; left: 0; }
+
+        /* Tooltip */
+        #tooltip { position: absolute; background: #141824ee; border: 1px solid #2a2f40; padding: 6px 10px; border-radius: 4px; font-size: 0.8em; pointer-events: none; display: none; z-index: 100; color: #ccc; }
+
+        /* Export panel */
+        #export-panel { display: none; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: #141824; border: 1px solid #2a2f40; border-radius: 8px; padding: 24px; z-index: 200; min-width: 300px; }
+        #export-panel h2 { font-size: 1em; color: #C53030; margin-bottom: 12px; }
+        #export-panel textarea { width: 100%; height: 200px; background: #1e2436; color: #aaa; border: 1px solid #2a2f40; border-radius: 4px; padding: 8px; font-family: monospace; font-size: 0.75em; resize: vertical; }
+        #export-overlay { display: none; position: absolute; inset: 0; background: #00000088; z-index: 199; }
+    </style>
+</head>
+<body>
+    <div id="sidebar">
+        <h1>City Roofscape <span>M3 + M5</span></h1>
+
+        <!-- Region import (M2 → M3 pipeline) -->
+        <div class="section-header" data-section="region">Region Import (M2)</div>
+        <div class="section-content" id="sec-region">
+            <div style="font-size:0.75em; color:#666; margin-bottom:4px;">
+                Load settlement data from M2 to inherit terrain, style, and features.
+            </div>
+            <div class="row">
+                <div>
+                    <label for="region-seed">Region Seed</label>
+                    <input type="number" id="region-seed" value="42" min="1">
+                </div>
+                <div>
+                    <label for="region-size">Map Size</label>
+                    <input type="number" id="region-size" value="128" min="32" max="256">
+                </div>
+            </div>
+            <div class="row">
+                <div>
+                    <label for="region-coast">Coast</label>
+                    <select id="region-coast"><option value="false">No</option><option value="true">Yes</option></select>
+                </div>
+                <div>
+                    <label for="region-rivers">Rivers</label>
+                    <input type="number" id="region-rivers" value="1" min="0" max="3">
+                </div>
+            </div>
+            <button class="secondary" id="load-region">Load from Region (M2)</button>
+            <div id="region-status" style="font-size:0.7em; color:#555; margin-top:2px;"></div>
+        </div>
+
+        <!-- Basic params -->
+        <div class="section-header" data-section="basic">Parameters</div>
+        <div class="section-content" id="sec-basic">
+            <div class="row">
+                <div>
+                    <label for="seed">Seed</label>
+                    <input type="number" id="seed" value="42" min="1">
+                </div>
+                <div>
+                    <label for="size">Districts</label>
+                    <input type="number" id="size" value="15" min="5" max="80">
+                </div>
+            </div>
+
+            <div>
+                <label for="style">Cultural Style</label>
+                <select id="style">
+                    <option value="generic" selected>Generic (Default)</option>
+                    <option value="european_medieval">European Medieval</option>
+                    <option value="arabic_islamic">Arabic / Islamic</option>
+                    <option value="east_asian">East Asian</option>
+                    <option value="roman">Roman</option>
+                    <option value="norse">Norse</option>
+                    <option value="mongol">Mongol</option>
+                </select>
+            </div>
+
+            <div>
+                <label for="populator">District Algorithm</label>
+                <select id="populator">
+                    <option value="auto">(auto — by district type + style)</option>
+                </select>
+            </div>
+
+            <div class="row">
+                <div>
+                    <label for="roads">Roads</label>
+                    <input type="number" id="roads" placeholder="auto" min="2" max="12">
+                </div>
+                <div>
+                    <label for="road_style">Road Style</label>
+                    <select id="road_style">
+                        <option value="">Auto (by style)</option>
+                        <option value="organic">Organic</option>
+                        <option value="medieval">Medieval</option>
+                    </select>
+                </div>
+            </div>
+
+            <div>
+                <label for="building_style">Building Style</label>
+                <select id="building_style">
+                    <option value="mixed" selected>Mixed (L-shapes)</option>
+                    <option value="original">Original</option>
+                    <option value="composite">Composite</option>
+                </select>
+            </div>
+        </div>
+
+        <!-- Landmarks -->
+        <div class="section-header" data-section="landmarks">Landmarks</div>
+        <div class="section-content" id="sec-landmarks">
+            <div class="row">
+                <div>
+                    <label for="plaza">Plaza</label>
+                    <select id="plaza"><option value="">Random</option><option value="true">Yes</option><option value="false">No</option></select>
+                </div>
+                <div>
+                    <label for="citadel">Citadel</label>
+                    <select id="citadel"><option value="">Random</option><option value="true">Yes</option><option value="false">No</option></select>
+                </div>
+            </div>
+            <div class="row">
+                <div>
+                    <label for="walls">Walls</label>
+                    <select id="walls"><option value="">Random</option><option value="true">Yes</option><option value="false">No</option></select>
+                </div>
+                <div>
+                    <label for="temple">Temple</label>
+                    <select id="temple"><option value="">Random</option><option value="true">Yes</option><option value="false">No</option></select>
+                </div>
+            </div>
+        </div>
+
+        <!-- Features -->
+        <div class="section-header" data-section="features">Features</div>
+        <div class="section-content" id="sec-features">
+            <div class="row">
+                <div>
+                    <label for="river">River</label>
+                    <select id="river"><option value="">No</option><option value="true">Yes</option></select>
+                </div>
+                <div>
+                    <label for="coast">Coast</label>
+                    <select id="coast"><option value="">No</option><option value="true">Yes</option></select>
+                </div>
+            </div>
+            <div>
+                <label for="shanty_town">Shanty Town</label>
+                <select id="shanty_town"><option value="">No</option><option value="true">Yes</option></select>
+            </div>
+        </div>
+
+        <!-- District generation -->
+        <div class="section-header" data-section="districts">District Population</div>
+        <div class="section-content" id="sec-districts">
+            <label>Min Building Area: <span id="min-area-val" class="slider-val">20</span></label>
+            <div class="slider-row">
+                <input type="range" id="min-area" min="5" max="100" step="1" value="20">
+            </div>
+
+            <label>Grid Chaos: <span id="grid-chaos-val" class="slider-val">0.40</span></label>
+            <div class="slider-row">
+                <input type="range" id="grid-chaos" min="0" max="1" step="0.05" value="0.4">
+            </div>
+
+            <label>Size Chaos: <span id="size-chaos-val" class="slider-val">0.40</span></label>
+            <div class="slider-row">
+                <input type="range" id="size-chaos" min="0" max="1" step="0.05" value="0.4">
+            </div>
+
+            <label>Density: <span id="density-val" class="slider-val">0.60</span></label>
+            <div class="slider-row">
+                <input type="range" id="density" min="0" max="1" step="0.05" value="0.6">
+            </div>
+
+            <label>Empty Lot Prob: <span id="empty-prob-val" class="slider-val">0.04</span></label>
+            <div class="slider-row">
+                <input type="range" id="empty-prob" min="0" max="0.3" step="0.01" value="0.04">
+            </div>
+
+            <label>Alley Width: <span id="alley-width-val" class="slider-val">0.80</span></label>
+            <div class="slider-row">
+                <input type="range" id="alley-width" min="0.2" max="3.0" step="0.1" value="0.8">
+            </div>
+        </div>
+
+        <div class="section-header" data-section="roof">Roof + Massing</div>
+        <div class="section-content" id="sec-roof">
+            <div class="row">
+                <div>
+                    <label for="roof-type">Roof Algorithm</label>
+                    <select id="roof-type">
+                        <option value="auto">Auto Mix</option>
+                        <option value="skeleton">Straight Skeleton</option>
+                        <option value="gabled">Gabled</option>
+                        <option value="hipped">Hipped</option>
+                        <option value="flat">Flat</option>
+                        <option value="domed">Domed</option>
+                        <option value="pagoda">Pagoda</option>
+                        <option value="thatched">Thatched</option>
+                        <option value="conical">Conical</option>
+                        <option value="vaulted">Vaulted</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="facade-density">Facade Density</label>
+                    <select id="facade-density">
+                        <option value="0">None</option>
+                        <option value="1" selected>Sparse</option>
+                        <option value="2">Rich</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="row">
+                <div>
+                    <label for="massing-mode">Massing Mode</label>
+                    <select id="massing-mode">
+                        <option value="adaptive">Adaptive</option>
+                        <option value="compound">Compound First</option>
+                        <option value="chamfered">Chamfered</option>
+                    </select>
+                </div>
+            </div>
+
+            <label>Overhang: <span id="overhang-val" class="slider-val">0.00</span></label>
+            <div class="slider-row">
+                <input type="range" id="overhang" min="0" max="2" step="0.05" value="0">
+            </div>
+
+            <label>Complexity: <span id="complexity-val" class="slider-val">0.40</span></label>
+            <div class="slider-row">
+                <input type="range" id="complexity" min="0" max="1" step="0.01" value="0.4">
+            </div>
+
+            <label>Complex Building Share: <span id="complex-ratio-val" class="slider-val">22%</span></label>
+            <div class="slider-row">
+                <input type="range" id="complex-ratio" min="0" max="1" step="0.01" value="0.22">
+            </div>
+
+            <label>Merged Building Share: <span id="join-ratio-val" class="slider-val">0%</span></label>
+            <div class="slider-row">
+                <input type="range" id="join-ratio" min="0" max="1" step="0.01" value="0">
+            </div>
+
+            <label>Setback Ratio: <span id="setback-val" class="slider-val">0.14</span></label>
+            <div class="slider-row">
+                <input type="range" id="setback" min="0.04" max="0.25" step="0.01" value="0.14">
+            </div>
+
+            <div class="hint">
+                District parcels come from the district populators, then the district roofscape pass adds complex massing, roofs, and facade detail across the whole city.
+            </div>
+        </div>
+
+        <!-- Tuning -->
+        <div class="section-header" data-section="tuning">Generation Tuning</div>
+        <div class="section-content" id="sec-tuning">
+            <div class="row">
+                <div>
+                    <label for="elongation">Elongation</label>
+                    <input type="number" id="elongation" placeholder="auto" min="1.0" max="3.0" step="0.1">
+                </div>
+                <div>
+                    <label for="building_density">Density</label>
+                    <input type="number" id="building_density" placeholder="auto" min="0" max="1" step="0.1">
+                </div>
+            </div>
+            <div class="row">
+                <div>
+                    <label for="river_curvature">River Curve</label>
+                    <input type="number" id="river_curvature" placeholder="3.0" min="0.5" max="6.0" step="0.5">
+                </div>
+                <div>
+                    <label for="coast_roughness">Coast Rough</label>
+                    <input type="number" id="coast_roughness" placeholder="0.5" min="0.1" max="1.5" step="0.1">
+                </div>
+            </div>
+        </div>
+
+        <!-- Actions -->
+        <button id="generate">Generate Roofscape</button>
+        <div class="row">
+            <div><button class="secondary" id="random">Random Seed</button></div>
+            <div><button class="secondary" id="reset-zoom">Reset Zoom</button></div>
+        </div>
+
+        <!-- Layers -->
+        <div class="section-header" data-section="layers">Layer Toggles</div>
+        <div class="section-content" id="sec-layers">
+            <label class="layer-toggle"><input type="checkbox" id="layer-districts" checked> Districts</label>
+            <label class="layer-toggle"><input type="checkbox" id="layer-lots" checked> Original lot envelopes</label>
+            <label class="layer-toggle"><input type="checkbox" id="layer-buildings" checked> Building masses</label>
+            <label class="layer-toggle"><input type="checkbox" id="layer-roofs" checked> Roof faces</label>
+            <label class="layer-toggle"><input type="checkbox" id="layer-ridges" checked> Ridges</label>
+            <label class="layer-toggle"><input type="checkbox" id="layer-alleys" checked> Alleys / courts</label>
+            <label class="layer-toggle"><input type="checkbox" id="layer-streets" checked> Streets</label>
+            <label class="layer-toggle"><input type="checkbox" id="layer-walls" checked> Walls</label>
+            <label class="layer-toggle"><input type="checkbox" id="layer-landmarks" checked> Landmarks</label>
+            <label class="layer-toggle"><input type="checkbox" id="layer-water" checked> Water</label>
+            <label class="layer-toggle"><input type="checkbox" id="layer-labels"> Labels</label>
+            <label class="layer-toggle"><input type="checkbox" id="layer-debug"> Debug (IDs)</label>
+        </div>
+
+        <!-- Export -->
+        <div class="row">
+            <div><button class="secondary" id="export-btn">Export JSON</button></div>
+            <div><button class="secondary" id="import-btn">Import JSON</button></div>
+        </div>
+
+        <div id="status-bar">Ready</div>
+    </div>
+
+    <div id="canvas-area">
+        <canvas id="canvas-main"></canvas>
+        <div id="tooltip"></div>
+    </div>
+
+    <!-- Export panel overlay -->
+    <div id="export-overlay"></div>
+    <div id="export-panel">
+        <h2>CityMap JSON</h2>
+        <textarea id="export-text" readonly></textarea>
+        <div style="margin-top: 12px; display: flex; gap: 8px;">
+            <button id="copy-json" style="flex:1">Copy to Clipboard</button>
+            <button id="close-export" class="secondary" style="flex:1">Close</button>
+        </div>
+    </div>
+
+    <input type="file" id="import-file" accept=".json" style="display:none">
+
+    <script src="/static/city.js"></script>
+</body>
+</html>

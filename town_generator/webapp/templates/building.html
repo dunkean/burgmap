@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>M5 — Building Detail &amp; Roofscape</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #1a1f2e;
+            color: #e0e0e0;
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+        .sidebar {
+            width: 320px;
+            min-width: 320px;
+            background: #232838;
+            padding: 16px;
+            overflow-y: auto;
+            border-right: 1px solid #333;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .sidebar h1 {
+            font-size: 18px;
+            color: #f0f0f0;
+            margin-bottom: 4px;
+        }
+        .sidebar h2 {
+            font-size: 13px;
+            color: #999;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-top: 8px;
+            padding-bottom: 4px;
+            border-bottom: 1px solid #333;
+        }
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .control-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .control-row label {
+            font-size: 13px;
+            min-width: 100px;
+            color: #bbb;
+        }
+        .control-row select,
+        .control-row input[type="number"],
+        .control-row input[type="range"] {
+            flex: 1;
+            background: #2a3040;
+            border: 1px solid #444;
+            color: #e0e0e0;
+            padding: 4px 6px;
+            border-radius: 4px;
+            font-size: 13px;
+        }
+        .control-row input[type="range"] {
+            padding: 0;
+        }
+        .control-row .val {
+            font-size: 12px;
+            color: #888;
+            min-width: 32px;
+            text-align: right;
+        }
+        button {
+            background: #4a6fa5;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.2s;
+        }
+        button:hover { background: #5a7fb5; }
+        button.secondary {
+            background: #3a4555;
+        }
+        button.secondary:hover { background: #4a5565; }
+        .btn-row {
+            display: flex;
+            gap: 8px;
+        }
+        .main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+        .toolbar {
+            background: #232838;
+            padding: 8px 16px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            border-bottom: 1px solid #333;
+            font-size: 13px;
+        }
+        .toolbar .sep { color: #444; }
+        .canvas-wrap {
+            flex: 1;
+            position: relative;
+            overflow: hidden;
+            background: #e8dcc8;
+        }
+        canvas {
+            position: absolute;
+            top: 0; left: 0;
+        }
+        .status-bar {
+            background: #232838;
+            padding: 6px 16px;
+            font-size: 12px;
+            color: #888;
+            border-top: 1px solid #333;
+            display: flex;
+            gap: 16px;
+        }
+        .nav-links {
+            font-size: 12px;
+            display: flex;
+            gap: 8px;
+        }
+        .nav-links a {
+            color: #6a8fc5;
+            text-decoration: none;
+        }
+        .nav-links a:hover { text-decoration: underline; }
+        .layer-toggles {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .layer-toggles label {
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            cursor: pointer;
+        }
+        .layer-toggles input[type="checkbox"] {
+            accent-color: #4a6fa5;
+        }
+        .presets-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 4px;
+        }
+        .presets-grid button {
+            font-size: 11px;
+            padding: 4px 6px;
+        }
+    </style>
+</head>
+<body>
+    <div class="sidebar">
+        <div>
+            <h1>M5 Building Detail</h1>
+            <div class="nav-links">
+                <a href="/">Home</a>
+                <a href="/tools/terrain/">M1</a>
+                <a href="/tools/region/">M2</a>
+                <a href="/tools/city/">M3</a>
+                <a href="/tools/district/">M4</a>
+                <a href="/tools/building/">M5</a>
+            </div>
+        </div>
+
+        <h2>Building Shape</h2>
+        <div class="control-group">
+            <div class="control-row">
+                <label>Mode</label>
+                <select id="shapeMode" onchange="onShapeModeChange()">
+                    <option value="simple" selected>Simple</option>
+                    <option value="compound">Compound (multi-wing)</option>
+                </select>
+            </div>
+            <div id="simpleControls">
+                <div class="control-row">
+                    <label>Preset</label>
+                    <select id="preset" onchange="generate()">
+                        <option value="house" selected>House</option>
+                        <option value="tower">Tower (octagonal)</option>
+                        <option value="cathedral">Cathedral (cruciform)</option>
+                        <option value="mosque">Mosque (square)</option>
+                        <option value="longhouse">Longhouse</option>
+                        <option value="l_shape">L-Shape</option>
+                        <option value="large">Large</option>
+                    </select>
+                </div>
+            </div>
+            <div id="compoundControls" style="display:none">
+                <div class="control-row">
+                    <label>Shape</label>
+                    <select id="compoundShape" onchange="generate()">
+                        <option value="l_shape">L-Shape</option>
+                        <option value="t_shape">T-Shape</option>
+                        <option value="h_shape">H-Shape</option>
+                        <option value="u_shape">U-Shape</option>
+                        <option value="plus">Plus / Cross</option>
+                        <option value="courtyard">Courtyard</option>
+                        <option value="cathedral">Cathedral</option>
+                        <option value="keep">Castle Keep</option>
+                    </select>
+                </div>
+            </div>
+            <div class="control-row">
+                <label>Building Type</label>
+                <select id="buildingType" onchange="generate()">
+                    <option value="house" selected>House</option>
+                    <option value="shop">Shop</option>
+                    <option value="tower">Tower</option>
+                    <option value="church">Church</option>
+                    <option value="cathedral">Cathedral</option>
+                    <option value="mosque">Mosque</option>
+                    <option value="barn">Barn</option>
+                    <option value="farmhouse">Farmhouse</option>
+                    <option value="barracks">Barracks</option>
+                    <option value="keep">Keep</option>
+                    <option value="great_hall">Great Hall</option>
+                    <option value="ger">Ger / Yurt</option>
+                    <option value="pagoda">Pagoda</option>
+                    <option value="chapel">Chapel</option>
+                </select>
+            </div>
+            <div class="control-row">
+                <label>Stories</label>
+                <input type="number" id="stories" value="1" min="1" max="5" step="1" onchange="generate()">
+            </div>
+            <div class="control-row">
+                <label>Seed</label>
+                <input type="number" id="seed" value="-1" min="-1" max="9999" step="1" onchange="generate()">
+                <button class="secondary" onclick="document.getElementById('seed').value=Math.floor(Math.random()*9999);generate()" style="padding:4px 8px;font-size:11px">Rand</button>
+            </div>
+        </div>
+
+        <h2>Roof</h2>
+        <div class="control-group">
+            <div class="control-row">
+                <label>Roof Type</label>
+                <select id="roofType" onchange="generate()">
+                    <option value="" selected>Auto (from style)</option>
+                    <option value="gabled">Gabled Pitched</option>
+                    <option value="hipped">Hipped</option>
+                    <option value="flat">Flat</option>
+                    <option value="domed">Domed</option>
+                    <option value="pagoda">Pagoda</option>
+                    <option value="thatched">Thatched</option>
+                    <option value="conical">Conical</option>
+                    <option value="vaulted">Vaulted (barrel)</option>
+                </select>
+            </div>
+            <div class="control-row">
+                <label>Overhang</label>
+                <input type="range" id="overhang" min="0" max="2" step="0.1" value="-1">
+                <span class="val" id="overhangVal">auto</span>
+            </div>
+        </div>
+
+        <h2>Facade Details</h2>
+        <div class="control-group">
+            <div class="control-row">
+                <label>Detail Density</label>
+                <select id="facadeDensity" onchange="generate()">
+                    <option value="0">None</option>
+                    <option value="1" selected>Sparse</option>
+                    <option value="2">Rich</option>
+                </select>
+            </div>
+        </div>
+
+        <h2>Style</h2>
+        <div class="control-group">
+            <div class="control-row">
+                <label>Style Preset</label>
+                <select id="style" onchange="generate()">
+                    <option value="generic" selected>Generic</option>
+                    <option value="european_medieval">European Medieval</option>
+                    <option value="arabic_islamic">Arabic / Islamic</option>
+                    <option value="east_asian">East Asian</option>
+                    <option value="roman">Roman</option>
+                    <option value="viking">Viking / Norse</option>
+                    <option value="mongol">Mongol</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="btn-row">
+            <button id="generateBtn" onclick="generate()">Generate</button>
+            <button class="secondary" onclick="resetView()">Reset View</button>
+        </div>
+
+        <h2>Layers</h2>
+        <div class="layer-toggles">
+            <label><input type="checkbox" id="layerFootprint" checked onchange="draw()"> Footprint</label>
+            <label><input type="checkbox" id="layerRoof" checked onchange="draw()"> Roof Outline</label>
+            <label><input type="checkbox" id="layerRidge" checked onchange="draw()"> Ridge / Inner</label>
+            <label><input type="checkbox" id="layerFacade" checked onchange="draw()"> Facade Details</label>
+            <label><input type="checkbox" id="layerGrid" onchange="draw()"> Grid</label>
+            <label><input type="checkbox" id="layerLabels" checked onchange="draw()"> Labels</label>
+        </div>
+
+        <h2>Quick Presets</h2>
+        <div class="presets-grid">
+            <button class="secondary" onclick="applyQuickPreset('european_house')">EU House</button>
+            <button class="secondary" onclick="applyQuickPreset('arabic_house')">Arabic</button>
+            <button class="secondary" onclick="applyQuickPreset('asian_pagoda')">Pagoda</button>
+            <button class="secondary" onclick="applyQuickPreset('viking_hall')">Viking</button>
+            <button class="secondary" onclick="applyQuickPreset('roman_insula')">Roman</button>
+            <button class="secondary" onclick="applyQuickPreset('gothic_church')">Gothic</button>
+            <button class="secondary" onclick="applyQuickPreset('tower')">Tower</button>
+            <button class="secondary" onclick="applyQuickPreset('mosque')">Mosque</button>
+            <button class="secondary" onclick="applyQuickPreset('keep_simple')">Keep</button>
+        </div>
+        <h2>Compound Presets</h2>
+        <div class="presets-grid">
+            <button class="secondary" onclick="applyQuickPreset('c_l_shape')">L-Shape</button>
+            <button class="secondary" onclick="applyQuickPreset('c_t_shape')">T-Shape</button>
+            <button class="secondary" onclick="applyQuickPreset('c_h_shape')">H-Shape</button>
+            <button class="secondary" onclick="applyQuickPreset('c_u_shape')">U-Shape</button>
+            <button class="secondary" onclick="applyQuickPreset('c_plus')">Plus</button>
+            <button class="secondary" onclick="applyQuickPreset('c_courtyard')">Courtyard</button>
+            <button class="secondary" onclick="applyQuickPreset('c_cathedral')">Cathedral</button>
+            <button class="secondary" onclick="applyQuickPreset('c_keep')">Keep</button>
+        </div>
+
+        <h2>JSON</h2>
+        <div class="btn-row">
+            <button class="secondary" onclick="exportJSON()">Export JSON</button>
+            <button class="secondary" onclick="importJSON()">Import JSON</button>
+        </div>
+    </div>
+
+    <div class="main">
+        <div class="toolbar">
+            <span>M5 — Building Detail &amp; Roofscape</span>
+            <span class="sep">|</span>
+            <span id="infoText">Click Generate to start</span>
+        </div>
+        <div class="canvas-wrap" id="canvasWrap">
+            <canvas id="canvas"></canvas>
+        </div>
+        <div class="status-bar">
+            <span id="statusRoof">Roof: —</span>
+            <span id="statusDetails">Details: —</span>
+            <span id="statusCoords">Cursor: —</span>
+        </div>
+    </div>
+
+    <script src="/static/building.js"></script>
+</body>
+</html>

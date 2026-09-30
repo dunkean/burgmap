@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>District Roofscape Lab</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: "Segoe UI", sans-serif; background: #1a1f2e; color: #eee; display: flex; height: 100vh; overflow: hidden; }
+        #sidebar { width: 340px; min-width: 340px; padding: 16px; background: #141824; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; border-right: 1px solid #2a2f40; }
+        #sidebar h1 { font-size: 1.15em; color: #d7a25a; display: flex; align-items: center; gap: 8px; }
+        #sidebar h1 span { font-size: 0.7em; background: #d7a25a; color: #1a1f2e; padding: 2px 6px; border-radius: 3px; }
+        .nav-links { display: flex; gap: 8px; flex-wrap: wrap; font-size: 0.8em; }
+        .nav-links a { color: #8fb7ff; text-decoration: none; }
+        .nav-links a:hover { text-decoration: underline; }
+        .section-header { font-size: 0.8em; color: #d7a25a; margin-top: 6px; border-top: 1px solid #2a2f40; padding-top: 8px; text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer; user-select: none; }
+        .section-header::before { content: '\25BE '; font-size: 0.7em; }
+        .section-header.collapsed::before { content: '\25B8 '; }
+        .section-content { display: flex; flex-direction: column; gap: 8px; }
+        .section-content.hidden { display: none; }
+        label { display: block; font-size: 0.8em; margin-bottom: 2px; color: #8890a4; }
+        input[type="number"], select, input[type="range"] { width: 100%; padding: 7px 8px; border: 1px solid #2a2f40; border-radius: 4px; background: #1e2436; color: #eee; font-size: 0.9em; }
+        input[type="range"] { padding: 4px 0; background: transparent; border: none; }
+        button { padding: 9px; border: none; border-radius: 4px; background: #d7a25a; color: #1a1f2e; font-size: 0.9em; cursor: pointer; width: 100%; font-weight: 600; }
+        button:hover { background: #e4b16b; }
+        button.secondary { background: #1e2436; border: 1px solid #2a2f40; color: #eee; font-size: 0.8em; padding: 6px 8px; font-weight: 400; }
+        button.secondary:hover { background: #2a3050; }
+        .row { display: flex; gap: 8px; }
+        .row > div { flex: 1; }
+        .slider-row { display: flex; align-items: center; gap: 8px; }
+        .slider-row input[type="range"] { flex: 1; }
+        .slider-row .slider-val { font-size: 0.75em; color: #8890a4; min-width: 36px; text-align: right; }
+        .hint { font-size: 0.74em; color: #727a90; line-height: 1.4; }
+        .layer-toggle { display: flex; align-items: center; gap: 6px; font-size: 0.8em; color: #8890a4; cursor: pointer; }
+        .layer-toggle input[type="checkbox"] { accent-color: #d7a25a; }
+        #status-bar { font-size: 0.75em; color: #667089; margin-top: auto; padding-top: 8px; border-top: 1px solid #2a2f40; }
+        #canvas-area { flex: 1; position: relative; overflow: hidden; cursor: grab; user-select: none; background: linear-gradient(180deg, #f0e4cc 0%, #d8c4a5 100%); }
+        #canvas-area.grabbing { cursor: grabbing; }
+        canvas { position: absolute; top: 0; left: 0; }
+        #tooltip { position: absolute; background: #141824ee; border: 1px solid #2a2f40; padding: 6px 10px; border-radius: 4px; font-size: 0.8em; pointer-events: none; display: none; z-index: 100; color: #ccc; max-width: 280px; }
+        #import-panel { display: none; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: #141824; border: 1px solid #2a2f40; border-radius: 8px; padding: 24px; z-index: 200; min-width: 420px; }
+        #import-panel h2 { font-size: 1em; color: #d7a25a; margin-bottom: 12px; }
+        #import-panel textarea { width: 100%; height: 180px; background: #1e2436; color: #d0d4df; border: 1px solid #2a2f40; border-radius: 4px; padding: 8px; font-family: ui-monospace, Consolas, monospace; font-size: 0.75em; resize: vertical; }
+        #import-overlay { display: none; position: absolute; inset: 0; background: #00000088; z-index: 199; }
+        .btn-row { display: flex; gap: 8px; margin-top: 8px; }
+        .btn-row button { flex: 1; }
+    </style>
+</head>
+<body>
+    <div id="sidebar">
+        <div>
+            <h1>District Roofscape <span>M4 + M5</span></h1>
+            <div class="nav-links">
+                <a href="/">Home</a>
+                <a href="/tools/district/">Districts</a>
+                <a href="/tools/roofs/">Roofs</a>
+            </div>
+        </div>
+
+        <div class="section-header" data-section="shape">District Shape</div>
+        <div class="section-content" id="sec-shape">
+            <div class="row">
+                <div>
+                    <label for="preset">Preset Shape</label>
+                    <select id="preset">
+                        <option value="default">Rectangle</option>
+                        <option value="hexagon">Hexagon</option>
+                        <option value="elongated">Elongated</option>
+                        <option value="irregular">Irregular</option>
+                        <option value="large">Large</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="district-type">District Type</label>
+                    <select id="district-type">
+                        <option value="craftsmen">Craftsmen</option>
+                        <option value="merchant">Merchant</option>
+                        <option value="patriciate">Patriciate</option>
+                        <option value="residential">Residential</option>
+                        <option value="slum">Slum</option>
+                        <option value="market">Market</option>
+                        <option value="cathedral">Cathedral</option>
+                        <option value="castle">Castle</option>
+                        <option value="military">Military</option>
+                        <option value="farm">Farm</option>
+                        <option value="park">Park</option>
+                    </select>
+                </div>
+            </div>
+            <div class="btn-row">
+                <button class="secondary" id="import-polygon-btn">Import Polygon</button>
+                <button class="secondary" id="import-citymap-btn">Import CityMap</button>
+            </div>
+        </div>
+
+        <div class="section-header" data-section="populator">District Generation</div>
+        <div class="section-content" id="sec-populator">
+            <label for="populator">Algorithm</label>
+            <select id="populator">
+                <option value="auto">(auto - based on type + style)</option>
+            </select>
+            <div class="row">
+                <div>
+                    <label for="style">Style</label>
+                    <select id="style">
+                        <option value="generic">Generic</option>
+                        <option value="european_medieval">European Medieval</option>
+                        <option value="arabic_islamic">Arabic / Islamic</option>
+                        <option value="east_asian">East Asian</option>
+                        <option value="roman">Roman</option>
+                        <option value="norse">Norse</option>
+                        <option value="viking">Viking</option>
+                        <option value="mongol">Mongol</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="seed">Seed</label>
+                    <input type="number" id="seed" value="42" min="1">
+                </div>
+            </div>
+            <div class="btn-row">
+                <button class="secondary" id="random">Random</button>
+                <button class="secondary" id="reset-zoom">Reset View</button>
+            </div>
+            <label>Min Building Area <span id="min-area-val" class="slider-val">20</span></label>
+            <div class="slider-row"><input type="range" id="min-area" min="5" max="100" step="1" value="20"></div>
+            <label>Grid Chaos <span id="grid-chaos-val" class="slider-val">0.40</span></label>
+            <div class="slider-row"><input type="range" id="grid-chaos" min="0" max="1" step="0.05" value="0.4"></div>
+            <label>Size Chaos <span id="size-chaos-val" class="slider-val">0.40</span></label>
+            <div class="slider-row"><input type="range" id="size-chaos" min="0" max="1" step="0.05" value="0.4"></div>
+            <label>Density <span id="density-val" class="slider-val">0.60</span></label>
+            <div class="slider-row"><input type="range" id="density" min="0" max="1" step="0.05" value="0.6"></div>
+            <label>Empty Lot Prob <span id="empty-prob-val" class="slider-val">0.04</span></label>
+            <div class="slider-row"><input type="range" id="empty-prob" min="0" max="0.3" step="0.01" value="0.04"></div>
+            <label>Alley Width <span id="alley-width-val" class="slider-val">0.80</span></label>
+            <div class="slider-row"><input type="range" id="alley-width" min="0.2" max="3.0" step="0.1" value="0.8"></div>
+        </div>
+
+        <div class="section-header" data-section="roof">Roof + Massing</div>
+        <div class="section-content" id="sec-roof">
+            <div class="row">
+                <div>
+                    <label for="roof-type">Roof Algorithm</label>
+                    <select id="roof-type">
+                        <option value="auto">Auto Mix</option>
+                        <option value="skeleton">Straight Skeleton</option>
+                        <option value="gabled">Gabled</option>
+                        <option value="hipped">Hipped</option>
+                        <option value="flat">Flat</option>
+                        <option value="domed">Domed</option>
+                        <option value="pagoda">Pagoda</option>
+                        <option value="thatched">Thatched</option>
+                        <option value="conical">Conical</option>
+                        <option value="vaulted">Vaulted</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="facade-density">Facade Density</label>
+                    <select id="facade-density">
+                        <option value="0">None</option>
+                        <option value="1" selected>Sparse</option>
+                        <option value="2">Rich</option>
+                    </select>
+                </div>
+            </div>
+            <label>Overhang <span id="overhang-val" class="slider-val">0.00</span></label>
+            <div class="slider-row"><input type="range" id="overhang" min="0" max="2" step="0.05" value="0"></div>
+            <div class="row">
+                <div>
+                    <label for="massing-mode">Massing Mode</label>
+                    <select id="massing-mode">
+                        <option value="adaptive">Adaptive</option>
+                        <option value="compound">Compound First</option>
+                        <option value="chamfered">Chamfered</option>
+                    </select>
+                </div>
+            </div>
+            <label>Complexity <span id="complexity-val" class="slider-val">0.40</span></label>
+            <div class="slider-row"><input type="range" id="complexity" min="0" max="1" step="0.01" value="0.4"></div>
+            <label>Complex Building Share <span id="complex-ratio-val" class="slider-val">22%</span></label>
+            <div class="slider-row"><input type="range" id="complex-ratio" min="0" max="1" step="0.01" value="0.22"></div>
+            <label>Merged Building Share <span id="join-ratio-val" class="slider-val">0%</span></label>
+            <div class="slider-row"><input type="range" id="join-ratio" min="0" max="1" step="0.01" value="0"></div>
+            <label>Setback Ratio <span id="setback-val" class="slider-val">0.14</span></label>
+            <div class="slider-row"><input type="range" id="setback" min="0.04" max="0.25" step="0.01" value="0.14"></div>
+            <div class="hint">
+                Roads and parcels come from the M4 populators. Auto Mix now blends roof families across the same district, and the percentage sliders target actual complex and merged building shares rather than abstract candidate counts.
+            </div>
+        </div>
+
+        <button id="generate">Generate Roofscape</button>
+
+        <div class="section-header" data-section="layers">Layers</div>
+        <div class="section-content" id="sec-layers">
+            <label class="layer-toggle"><input type="checkbox" id="layer-boundary" checked> District boundary</label>
+            <label class="layer-toggle"><input type="checkbox" id="layer-lots" checked> Original lot envelopes</label>
+            <label class="layer-toggle"><input type="checkbox" id="layer-walls" checked> Building masses</label>
+            <label class="layer-toggle"><input type="checkbox" id="layer-roofs" checked> Roof faces</label>
+            <label class="layer-toggle"><input type="checkbox" id="layer-ridges" checked> Ridges</label>
+            <label class="layer-toggle"><input type="checkbox" id="layer-alleys" checked> Alleys / courts</label>
+            <label class="layer-toggle"><input type="checkbox" id="layer-labels" checked> Labels</label>
+            <label class="layer-toggle"><input type="checkbox" id="layer-debug"> Debug</label>
+        </div>
+
+        <div class="btn-row">
+            <button class="secondary" id="export-btn">Export JSON</button>
+        </div>
+
+        <div id="status-bar">Ready - generate a district roofscape</div>
+    </div>
+
+    <div id="canvas-area">
+        <canvas id="canvas-main"></canvas>
+        <div id="tooltip"></div>
+    </div>
+
+    <div id="import-overlay"></div>
+    <div id="import-panel">
+        <h2>Import Polygon</h2>
+        <p style="font-size:0.8em; color:#7c859c; margin-bottom:8px;">
+            Paste a JSON array of <code>[x,y]</code> points, or a full CityMap JSON to pick one district.
+        </p>
+        <textarea id="import-text" placeholder='[[0,0],[50,0],[50,40],[0,40]]'></textarea>
+        <div id="citymap-district-picker" style="display:none; margin-top:8px;">
+            <label for="pick-district">Select District</label>
+            <select id="pick-district"></select>
+        </div>
+        <div class="btn-row">
+            <button id="import-apply">Apply</button>
+            <button class="secondary" id="import-cancel">Cancel</button>
+        </div>
+    </div>
+
+    <script src="/static/district_roofs.js"></script>
+</body>
+</html>

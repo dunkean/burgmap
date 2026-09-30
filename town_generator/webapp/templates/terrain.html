@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Terrain Generator — M1</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: system-ui, sans-serif; background: #1a1a2e; color: #eee; display: flex; height: 100vh; }
+        #controls { width: 300px; padding: 20px; background: #16213e; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; flex-shrink: 0; }
+        #controls h1 { font-size: 1.2em; color: #e94560; }
+        #controls h2 { font-size: 0.9em; color: #e94560; margin-top: 4px; border-top: 1px solid #333; padding-top: 8px; }
+        label { display: block; font-size: 0.85em; margin-bottom: 3px; color: #aaa; }
+        input[type="number"], select { width: 100%; padding: 7px; border: 1px solid #333; border-radius: 4px; background: #0f3460; color: #eee; font-size: 0.95em; }
+        input[type="range"] { width: 100%; accent-color: #e94560; }
+        button { padding: 10px; border: none; border-radius: 4px; background: #e94560; color: #fff; font-size: 1em; cursor: pointer; width: 100%; }
+        button:hover { background: #c73e54; }
+        button.secondary { background: #0f3460; font-size: 0.85em; padding: 6px 10px; }
+        button.secondary:hover { background: #1a4a8a; }
+        .btn-row { display: flex; gap: 8px; }
+        .btn-row button { flex: 1; }
+        .param-row { display: flex; gap: 8px; }
+        .param-row > div { flex: 1; }
+        #viewer { flex: 1; display: flex; align-items: center; justify-content: center; overflow: hidden; cursor: grab; user-select: none; position: relative; background: #111; }
+        #viewer.grabbing { cursor: grabbing; }
+        canvas { image-rendering: pixelated; }
+        .layer-toggle { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
+        .layer-toggle input[type="checkbox"] { accent-color: #e94560; width: 16px; height: 16px; }
+        .layer-toggle label { margin: 0; cursor: pointer; font-size: 0.85em; }
+        #status { font-size: 0.8em; color: #666; margin-top: auto; }
+        .slider-label { display: flex; justify-content: space-between; font-size: 0.85em; color: #aaa; margin-bottom: 3px; }
+        .slider-label span:last-child { color: #e94560; font-weight: bold; }
+        .nav-link { font-size: 0.8em; color: #888; text-decoration: none; }
+        .nav-link:hover { color: #e94560; }
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+            <h1>Terrain — M1</h1>
+            <a href="/" class="nav-link">City Gen</a>
+        </div>
+
+        <div>
+            <label for="seed">Seed</label>
+            <input type="number" id="seed" value="42" min="1">
+        </div>
+
+        <div>
+            <label for="size">Grid Size</label>
+            <select id="size">
+                <option value="64">64 x 64</option>
+                <option value="128" selected>128 x 128</option>
+                <option value="256">256 x 256</option>
+            </select>
+        </div>
+
+        <div>
+            <label for="map_extent">Map Extent</label>
+            <select id="map_extent">
+                <option value="2000" selected>2 km x 2 km</option>
+                <option value="3000">3 km x 3 km</option>
+                <option value="4000">4 km x 4 km</option>
+            </select>
+        </div>
+
+        <div id="cell-size-info" style="font-size:0.8em; color:#888; margin-top:-4px;">
+            Cell size: <span id="cell_size_display">15.6</span> m
+        </div>
+
+        <h2>Terrain</h2>
+
+        <div>
+            <div class="slider-label"><span>Noise Scale</span><span id="noise_scale_val">2.0</span></div>
+            <input type="range" id="noise_scale" min="0.5" max="6.0" step="0.1" value="2.0">
+        </div>
+
+        <div class="param-row">
+            <div>
+                <label for="octaves">Octaves</label>
+                <input type="number" id="octaves" value="4" min="2" max="8">
+            </div>
+            <div>
+                <label for="persistence">Persistence</label>
+                <input type="number" id="persistence" value="0.5" min="0.3" max="0.8" step="0.05">
+            </div>
+        </div>
+
+        <h2>Water</h2>
+
+        <div>
+            <label for="coast">Coast</label>
+            <select id="coast">
+                <option value="false" selected>No coast</option>
+                <option value="true">Coastal city</option>
+            </select>
+        </div>
+
+        <div>
+            <label for="coast_direction">Coast Side</label>
+            <select id="coast_direction">
+                <option value="0">North</option>
+                <option value="1">East</option>
+                <option value="2" selected>South</option>
+                <option value="3">West</option>
+            </select>
+        </div>
+
+        <div>
+            <div class="slider-label"><span>Sea Level</span><span id="sea_level_val">0.15</span></div>
+            <input type="range" id="sea_level" min="0.05" max="0.40" step="0.01" value="0.15">
+        </div>
+
+        <div class="param-row">
+            <div>
+                <label for="river_count">Rivers</label>
+                <input type="number" id="river_count" value="1" min="0" max="6">
+            </div>
+            <div>
+                <div class="slider-label"><span>River Width (m)</span><span id="river_width_val">30</span></div>
+                <input type="range" id="river_width" min="10" max="100" step="5" value="30">
+            </div>
+        </div>
+
+        <div class="btn-row">
+            <button id="generate">Generate</button>
+            <button id="random" class="secondary">Random</button>
+        </div>
+
+        <h2>Layers</h2>
+
+        <div class="layer-toggle">
+            <input type="checkbox" id="layer_elevation" checked>
+            <label for="layer_elevation">Elevation</label>
+        </div>
+        <div class="layer-toggle">
+            <input type="checkbox" id="layer_ground_cover">
+            <label for="layer_ground_cover">Ground Cover</label>
+        </div>
+        <div class="layer-toggle">
+            <input type="checkbox" id="layer_terrain_type">
+            <label for="layer_terrain_type">Terrain Type</label>
+        </div>
+        <div class="layer-toggle">
+            <input type="checkbox" id="layer_water" checked>
+            <label for="layer_water">Water</label>
+        </div>
+        <div class="layer-toggle">
+            <input type="checkbox" id="layer_rivers">
+            <label for="layer_rivers">River Paths</label>
+        </div>
+        <div class="layer-toggle">
+            <input type="checkbox" id="layer_coastline" checked>
+            <label for="layer_coastline">Coastline</label>
+        </div>
+
+        <button id="reset-zoom" class="secondary">Reset Zoom</button>
+
+        <div id="status">Ready — click Generate</div>
+    </div>
+
+    <div id="viewer">
+        <canvas id="terrain-canvas" width="800" height="800"></canvas>
+    </div>
+
+    <script src="/static/terrain.js"></script>
+</body>
+</html>
