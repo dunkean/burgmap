@@ -88,6 +88,16 @@ export const intersection = (a: Operand, ...rest: Operand[]): MultiPoly => run('
 export const difference = (a: Operand, ...rest: Operand[]): MultiPoly => run('difference', a, rest);
 /** Snapped booleans (1 cm grid in and out): coarse region geometry, robust against near-degeneracies. */
 export const unionS = (a: Operand, ...rest: Operand[]): MultiPoly => run('union', a, rest, true);
+
+/**
+ * Resolves a single (possibly degenerate: folded, collinear-overlapping) ring through the boolean engine, so that
+ * its area is the one every later boolean sees. Returns the cleaned pieces.
+ */
+export function resolve(p: Polygon): MultiPoly {
+  const g = toGeom(p);
+  if (!g.length) return [];
+  try { return fromGeom(polygonClipping.union(g as never) as unknown as Geom); } catch { return fromGeom(g); }
+}
 export const intersectionS = (a: Operand, ...rest: Operand[]): MultiPoly => run('intersection', a, rest, true);
 export const differenceS = (a: Operand, ...rest: Operand[]): MultiPoly => run('difference', a, rest, true);
 

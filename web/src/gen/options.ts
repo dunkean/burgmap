@@ -1,6 +1,8 @@
 import type { NameFamily } from './names/types';
 import { NAME_FAMILIES } from './names/types';
 import type { ImportedHeight } from './terrain/import';
+import { CULTURE_IDS, CULTURES as CULTURE_REGISTRY, mixToString, mixFromString, planToString, planFromString } from './urban/culture';
+import type { CultureMix, PlanOverride } from './urban/culture';
 
 export type SizeName = 'hamlet' | 'village' | 'town' | 'city' | 'capital';
 export type Relief = 'flat' | 'hills' | 'valley' | 'mountains';
@@ -27,8 +29,12 @@ export interface SitePrefs {
   /** Multiplier on the importance of flat ground (Chinese plains: > 1). */
   flatness?: number;
 }
-export type Culture = 'european-organic' | 'bastide';
-export const CULTURES: Culture[] = ['european-organic', 'bastide'];
+/** Culture preset id (URBAN_MORPHOLOGY.md §3; registry in urban/cultures.ts). */
+export type Culture = string;
+export const CULTURES: Culture[] = CULTURE_IDS;
+/** [id, label] pairs for selectors. */
+export const CULTURE_LABELS: [string, string][] = CULTURE_IDS.map((id) => [id, CULTURE_REGISTRY[id].label]);
+export type { CultureMix, PlanOverride };
 
 export interface Options {
   seed: string;
@@ -52,6 +58,10 @@ export interface Options {
   landuse: boolean;
   /** Urban morphology preset (URBAN_MORPHOLOGY.md). */
   culture: Culture;
+  /** Second culture mixed in: by growth phases, by sectors, or as a continuous blend with weight t. */
+  cultureMix?: CultureMix | null;
+  /** Explicit plan (nucleus + phases list) overriding the culture's phase recipe. */
+  plan?: PlanOverride | null;
   /** Inhabitants; 0 = automatic from the size preset. */
   population: number;
   /** Toponym language family; 'auto' (default) follows the culture. */
@@ -127,6 +137,8 @@ export function toQuery(o: Options): string {
   if (o.language && o.language !== 'auto') p.set('lang', o.language);
   if (o.labels === false) p.set('labels', '0');
   if (o.legend) p.set('legend', '1');
+  if (o.cultureMix) p.set('mix', mixToString(o.cultureMix));
+  if (o.plan) p.set('plan', planToString(o.plan));
   // the image itself is never put in the URL: only a marker plus its two scalars
   if (o.importedHeight) {
     p.set('hm', 'custom');
@@ -166,6 +178,8 @@ export function fromQuery(q: string | URLSearchParams): Options {
   o.language = lang !== null && (NAME_FAMILIES as string[]).includes(lang) ? (lang as NameFamily) : 'auto';
   o.labels = p.get('labels') !== '0' && p.get('labels') !== 'false';
   o.legend = p.get('legend') === '1' || p.get('legend') === 'true';
+  o.cultureMix = mixFromString(p.get('mix'));
+  o.plan = planFromString(p.get('plan'));
   const hs = Number(p.get('hscale')), hz = Number(p.get('hsea'));
   if (Number.isFinite(hs) && p.get('hscale') !== null) o.heightScale = Math.max(1, Math.min(9000, hs));
   if (Number.isFinite(hz) && p.get('hsea') !== null) o.importSea = Math.max(-1000, Math.min(9000, hz));
@@ -181,5 +195,7 @@ export function applyOverride(o: Options, k: string, v: string): void {
   const rec = o as unknown as Record<string, unknown>;
   if (k === 'roads' || k === 'seaLevel' || k === 'population' || k === 'heightScale' || k === 'importSea') rec[k] = Number(v);
   else if (k === 'contours' || k === 'landuse' || k === 'labels' || k === 'legend') rec[k] = v === '1' || v === 'true';
+  else if (k === 'mix' || k === 'cultureMix') o.cultureMix = mixFromString(v);
+  else if (k === 'plan') o.plan = planFromString(v) ?? (() => { try { return JSON.parse(v); } catch { return null; } })();
   else rec[k] = v;
 }

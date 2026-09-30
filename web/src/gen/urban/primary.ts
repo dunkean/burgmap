@@ -8,15 +8,22 @@ import { dist, polylineLength, chaikin, simplify, resample, polygonCentroid } fr
 import type { Rng } from '../core/rng';
 import type { UrbanCtx } from './context';
 import type { PhasePlan } from './phases';
-import type { Zone } from './morphology';
+import type { Zone, MorphologyParams } from './morphology';
 import { MultiPoly, unionS as union, intersectionS as intersection, differenceS as difference, mpArea } from '../geo/bool';
 import { area, pointInRing, distToRing, convexHull, orientPos, cleanRing, segSegT } from '../geo/poly';
 import { ribbon } from '../geo/offset';
 import { LPoly, insidePieces } from '../geo/split';
 import { GridIndex } from '../geo/spatial';
 import { Streets, LAB_OPEN, LAB_WALL, LAB_WATER, jitterWidths } from './streets';
+import { wiggle, crank, axisLines, spiralArm, outsetConvex, resampleAt } from './streetops';
+import { disk } from '../geo/offset';
+import { openHoles } from './plots';
 
-export interface Quarter { lp: LPoly; phase: number; zone: Zone; age: number; kind: 'quarter' | 'market' }
+export interface Quarter {
+  lp: LPoly; phase: number; zone: Zone; age: number; kind: 'quarter' | 'market';
+  /** Morphology of the quarter (its phase's or sector's); the culture that built it. */
+  morph?: MorphologyParams; culture?: string;
+}
 
 export interface WallLine { ring: Polygon; gates: { p: Vec2; dir: Vec2; width: number; street: number }[] }
 
@@ -176,6 +183,25 @@ export interface PrimaryInput {
   extraRadials: boolean;
   /** Zone of the faubourg ribbons (villages use 'village'). */
   faubZone?: Zone;
+  // ---- culture operators (M3b)
+  /** Nucleus shape (default: the European market hull, or a road-oriented rectangle for grids). */
+  nucleus?: { shape: 'hull' | 'rect' | 'square' | 'circle'; area: number; angle: number; ring: number };
+  /** axis: four half-axes from the nucleus to the boundary of `extent` (rank 0); roads stop at that boundary. */
+  axis?: { angle: number; extent: MultiPoly; width: number };
+  /** Region in which the roads follow the lattice (planned grid core). */
+  gridCore?: MultiPoly | null;
+  /** gateToGate: wiggle of the road spines (m). */
+  spineAmp?: number;
+  /** defensiveKinks: crank jogs per radial. */
+  kinks?: number;
+  /** spiral: arms instead of extra radials (count, turns). */
+  spiral?: { arms: number; turns: number };
+  /** rings(square): concentric streets around the nucleus every `spacing` m. */
+  nucleusRings?: { spacing: number; width: number };
+  /** switchbacks: a zig-zag ramp climbing the terraces (legs along the contour `angle`, one leg per `pitch`). */
+  switchbacks?: { angle: number; pitch: number; width: number };
+  /** Roads stop at the enclosure (gates only). */
+  gatesOnly?: boolean;
 }
 
 export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets, rng: Rng): Primary {
@@ -188,7 +214,25 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
     const pl = radialPath(rd.path, nearFoot);
     if (!pl || polylineLength(pl) < 20) continue;
     let sp = smoothStreet(pl);
-    if (P.streetOp === 'grid') sp = gridRadial(sp, inp.enclosure, ctx.center, inp.mainAngle) ?? sp;
+    if (inp.axis) {
+      // planned towns with axes: the road stops at the gate on the axis enclosure; the axes run inside
+      const hull = orientPos(convexHull(inp.axis.extent.flatMap((ph) => ph.outer)));
+      if (hull.length >= 3 && pointInRing(hull, sp[sp.length - 1])) sp = cutAtPolygon(sp, hull);
+      if (sp.length < 2 || polylineLength(sp) < 15) continue;
+    } else if (inp.gridCore ? inp.gridCore.length : P.streetOp === 'grid') sp = gridRadial(sp, inp.gridCore ?? inp.enclosure, ctx.center, inp.mainAngle) ?? sp;
+    if (inp.gatesOnly) {
+      let big = inp.enclosure[0];
+      for (const ph of inp.enclosure) if (area(ph.outer) > area(big.outer)) big = ph;
+      if (big && pointInRing(big.outer, sp[sp.length - 1])) {
+        // the road enters through the gate and stops 12 m inside (a gate forecourt)
+        const cut = cutAtPolygon(sp, big.outer);
+        const e = cut[cut.length - 1], q = cut[cut.length - 2] ?? e;
+        const l = dist(e, q) || 1;
+        sp = cut.concat([{ x: e.x + ((e.x - q.x) / l) * 12, y: e.y + ((e.y - q.y) / l) * 12 }]);
+      }
+      if (sp.length < 2 || polylineLength(sp) < 15) continue;
+    }
+    if (inp.spineAmp) sp = wiggle(sp, inp.spineAmp, rng.fork('spine:' + rawRadials.length));
     rawRadials.push({ pl: sp, major: rd.major });
   }
   // roads that join another road before the center must end exactly on it (smoothing moved both)
@@ -212,7 +256,37 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
   // ---- market at the nucleus
   let market: Polygon | null = null;
   const core = inp.phases[0].region;
-  if (inp.marketArea > 0) {
+  if (inp.nucleus && inp.nucleus.area > 0) {
+    const nu = inp.nucleus;
+    const A = nu.area;
+    const shapeAt = (c: Vec2) => nu.shape === 'circle' ? disk(c, Math.sqrt(A / Math.PI), 24)
+      : orientedRectP(c, nu.angle, Math.sqrt(A * (nu.shape === 'rect' ? 1.3 : 1)), Math.sqrt(A / (nu.shape === 'rect' ? 1.3 : 1)));
+    // planned nuclei (castle, temple, forum) are nudged — by at most half their size — onto dry, flat land
+    let nc = ctx.center;
+    if (nu.shape !== 'hull') {
+      const half = Math.sqrt(A) / 2;
+      const wet = (c: Vec2): number => {
+        let w = 0;
+        for (let i = -4; i <= 4; i++) for (let j = -4; j <= 4; j++) {
+          const q = { x: c.x + (i / 4) * half, y: c.y + (j / 4) * half };
+          if (ctx.isWater(q) || !inMP(core, q)) w++;
+        }
+        return w;
+      };
+      let bw = wet(nc) * 100;
+      for (let r = 0.1; r <= 0.5 && bw > 0; r += 0.1) for (let k = 0; k < 12; k++) {
+        const c = { x: ctx.center.x + Math.cos((k * Math.PI) / 6) * r * half * 2, y: ctx.center.y + Math.sin((k * Math.PI) / 6) * r * half * 2 };
+        const sc = wet(c) * 100 + r * 10;
+        if (sc < bw) { bw = sc; nc = c; }
+      }
+    }
+    const mk = nu.shape === 'hull' ? makeMarket(ctx.center, rawRadials.map((r) => r.pl), A, rng.fork('market'), inp.mainAngle) : shapeAt(nc);
+    const clipped = intersection(mk, core);
+    let best: Polygon | null = null;
+    for (const ph of clipped) if (!best || area(ph.outer) > area(best)) best = ph.outer;
+    if (best && area(best) > 0.4 * A) market = cleanRing(best, 0.5, 2);
+    if (market && market.length < 3) market = null;
+  } else if (inp.marketArea > 0) {
     const mk = P.streetOp === 'grid'
       ? orientedRectP(ctx.center, inp.mainAngle, Math.sqrt(inp.marketArea * 1.25), Math.sqrt(inp.marketArea / 1.25))
       : makeMarket(ctx.center, rawRadials.map((r) => r.pl), inp.marketArea, rng.fork('market'), inp.mainAngle);
@@ -230,9 +304,51 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
     let pl = r.pl;
     if (market) pl = cutAtPolygon(pl, market);
     if (pl.length < 2 || polylineLength(pl) < 15) continue;
+    // defensive kinks: cranks near the inner end and near the town entry
+    const kk = inp.kinks ?? 0;
+    const kr = rng.fork('kinks:' + radials.length);
+    for (let j = 0; j < kk; j++) {
+      const L = polylineLength(pl);
+      if (L < 160) break;
+      const sPos = j === 0 ? L - kr.range(70, 110) : kr.range(60, Math.max(61, L * 0.45));
+      pl = crank(pl, sPos, (kr.chance(0.5) ? 1 : -1) * kr.range(9, 14), kr.range(18, 28));
+    }
     const w = P.widthByRank[r.major ? 0 : 1] * P.widthScale;
     const id = streets.add(pl, jitterWidths(pl, w, P.widthJitter, () => wr.float()), r.major ? 0 : 1, 'radial', 1);
     radials.push(id); radialLines.push(pl);
+  }
+  // ---- axes (planned towns): gate to gate through the nucleus
+  const axisEnds: Vec2[] = [];
+  if (inp.axis) {
+    // the axes span the whole planned enclosure (crossing a river on bridges)
+    const hull = convexHull(inp.axis.extent.flatMap((ph) => ph.outer));
+    if (hull.length >= 3) for (const ax of axisLines(ctx.center, inp.axis.angle, orientPos(hull), market)) {
+      const id = streets.add(ax.line, inp.axis.width, 0, 'radial', 1);
+      radials.push(id); radialLines.push(ax.line);
+      axisEnds.push(ax.end);
+    }
+  }
+  // ---- spiral arms (elven): paths winding out from the grove
+  if (inp.spiral && market) {
+    const encR = Math.sqrt(mpArea(inp.enclosure) / Math.PI);
+    const r0 = Math.sqrt(area(market) / Math.PI) + 2;
+    const sr = rng.fork('spiral');
+    const a0 = sr.range(0, 2 * Math.PI);
+    for (let k = 0; k < inp.spiral.arms; k++) {
+      const arm = resampleAt(spiralArm(ctx.center, a0 + (k * 2 * Math.PI) / inp.spiral.arms, r0 - 8, encR * 1.6, inp.spiral.turns), 8);
+      // stop at the first water
+      const wi = arm.findIndex((q, i) => i > 0 && ctx.isWater(q));
+      const armD = wi > 0 ? arm.slice(0, wi) : arm;
+      const line = armD.length >= 2 ? afterExit(armD, [{ outer: market, holes: [] }]) : null;
+      if (!line) continue;
+      let piece: Polyline | null = null;
+      for (const comp of inp.enclosure) { const pcs = insidePieces(comp.outer, line); if (pcs.length && pcs[0].pts.length >= 2) { piece = pcs[0].pts; break; } }
+      if (!piece || polylineLength(piece) < 60) continue;
+      const pl = simplify(piece, 0.3);
+      const w = P.widthByRank[1] * P.widthScale;
+      const id = streets.add(pl, jitterWidths(pl, w, P.widthJitter, () => sr.float()), 1, 'radial', 1);
+      radials.push(id); radialLines.push(pl);
+    }
   }
   // ---- extra radials in wide angular gaps (large towns)
   if (inp.extraRadials) {
@@ -251,11 +367,17 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
       const er = rng.fork('extraRadials');
       for (const [a, b] of gaps) {
         const gap = b - a;
-        const k = Math.floor(gap / ((70 * Math.PI) / 180));
+        // only wide gaps get a synthetic radial, and it starts at the first old wall line (a T on the ring street),
+        // not at the market: a few true radials (the roads) reach the centre, the rest is infill
+        const k = Math.floor(gap / ((100 * Math.PI) / 180));
         for (let j = 1; j <= k; j++) {
-          const th = a + (gap * j) / (k + 1) + er.range(-0.12, 0.12);
-          const pl = traceRadial(ctx, th, market, inp.enclosure, er);
+          const th = a + (gap * j) / (k + 1) + er.range(-0.2, 0.2);
+          let pl = traceRadial(ctx, th, market, inp.enclosure, er);
           if (!pl) continue;
+          if (inp.phases.length >= 2 && inp.phases[0].fossil) {
+            pl = afterExit(pl, inp.phases[0].region);
+            if (!pl || polylineLength(pl) < 60) continue;
+          }
           const w = P.widthByRank[1] * P.widthScale * 0.9;
           const id = streets.add(pl, jitterWidths(pl, w, P.widthJitter, () => er.float()), 1, 'radial', 1);
           radials.push(id); radialLines.push(pl);
@@ -272,15 +394,80 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
     if (!ph.fossil) continue;
     for (const comp of ph.region) {
       for (const run of ringRuns(comp.outer, encInnerOK, 40)) {
-        const pl = simplify(run, 0.2);
-        const w = P.widthByRank[1] * P.widthScale * 0.95;
-        streets.add(pl, jitterWidths(pl, w, P.widthJitter, () => wr.float()), 1, 'ring', k + 1);
+        // the old wall line survives as partial arcs: stretches were built over (blocks straddle the line)
+        for (const pl0 of breakRing(simplify(run, 0.2), radialLines, P.ringGaps ?? 0, wr)) {
+          const pl = pl0;
+          const w = P.widthByRank[1] * P.widthScale * 0.95;
+          streets.add(pl, jitterWidths(pl, w, P.widthJitter, () => wr.float()), 1, 'ring', k + 1);
+        }
+      }
+    }
+  }
+  // ---- switchback ramp (dwarven): from the lowest to the highest point of the enclosure, legs along the contour
+  if (inp.switchbacks) {
+    const sw = inp.switchbacks;
+    const u = { x: Math.cos(sw.angle), y: Math.sin(sw.angle) }, v = { x: -u.y, y: u.x };
+    let big = inp.enclosure[0];
+    for (const ph of inp.enclosure) if (area(ph.outer) > area(big.outer)) big = ph;
+    if (big) {
+      let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity;
+      for (const q of big.outer) {
+        const pu = (q.x - ctx.center.x) * u.x + (q.y - ctx.center.y) * u.y, pv = (q.x - ctx.center.x) * v.x + (q.y - ctx.center.y) * v.y;
+        u0 = Math.min(u0, pu); u1 = Math.max(u1, pu); v0 = Math.min(v0, pv); v1 = Math.max(v1, pv);
+      }
+      const at = (pu: number, pv: number): Vec2 => ({ x: ctx.center.x + u.x * pu + v.x * pv, y: ctx.center.y + u.y * pu + v.y * pv });
+      const uA = u0 + (u1 - u0) * 0.22, uB = u1 - (u1 - u0) * 0.22;
+      // climb from the lower side (v sign by the terrain) toward the upper side
+      const hLow = ctx.heightAt(at(0, v0 + 20)), hHigh = ctx.heightAt(at(0, v1 - 20));
+      const dir = hLow <= hHigh ? 1 : -1;
+      const vs = dir > 0 ? v0 : v1, ve = dir > 0 ? v1 : v0;
+      const zig: Vec2[] = [];
+      // start at the lowest road end (the lower gate), if any
+      const ends = radialLines.map((pl) => pl[pl.length - 1]).sort((a2, b2) => ctx.heightAt(a2) - ctx.heightAt(b2));
+      if (ends.length) zig.push(ends[0]);
+      let side = 0;
+      for (let k = 0; ; k++) {
+        const pv = vs + dir * sw.pitch * (k + 0.5);
+        if ((ve - pv) * dir < sw.pitch * 0.3) break;
+        zig.push(at(side ? uB : uA, pv)); zig.push(at(side ? uA : uB, pv)); side = 1 - side;
+      }
+      // keep the part inside the enclosure (the first long inside piece)
+      if (zig.length >= 3) {
+        const pcs = insidePieces(big.outer, zig).filter((p2) => !p2.pts.some((q) => ctx.isWater(q)));
+        const pc = pcs.sort((a2, b2) => polylineLength(b2.pts) - polylineLength(a2.pts))[0];
+        if (pc && polylineLength(pc.pts) > 80) {
+          const id = streets.add(pc.pts, sw.width, 1, 'radial', 1);
+          radials.push(id); radialLines.push(pc.pts);
+        }
+      }
+    }
+  }
+  // ---- concentric rings around the nucleus (pradakshina streets: Madurai's Chitrai, Avani Moola, Masi streets)
+  if (inp.nucleusRings && market) {
+    const encOK = (p: Vec2) => inMP(enc, p) && enc.every((ph) => distToRing(ph.outer, p) > 6) && !nearWater(ctx, p, 5);
+    const nr = rng.fork('nrings');
+    // at least two rings between the nucleus and the edge of a small town (40 m minimum spacing)
+    const halfEnc = Math.sqrt(mpArea(enc)) / 2, halfNuc = Math.sqrt(area(market)) / 2;
+    const spacing = Math.max(40, Math.min(inp.nucleusRings.spacing, (halfEnc - halfNuc) / 2.6));
+    for (let k = 1; k < 20; k++) {
+      const ringP = outsetConvex(convexHull(market), k * spacing * nr.range(0.92, 1.08) + inp.nucleusRings.width / 2);
+      if (!ringP.some(encOK)) break;
+      // dense resample so the runs are cut close to the enclosure and the water
+      const dense: Vec2[] = [];
+      for (let i = 0; i < ringP.length; i++) {
+        const a = ringP[i], b = ringP[(i + 1) % ringP.length];
+        const m = Math.max(1, Math.ceil(dist(a, b) / 6));
+        for (let j = 0; j < m; j++) dense.push({ x: a.x + ((b.x - a.x) * j) / m, y: a.y + ((b.y - a.y) * j) / m });
+      }
+      for (const run of ringRuns(dense, encOK, 50)) {
+        const pl = simplify(run, 0.3);
+        streets.add(pl, jitterWidths(pl, inp.nucleusRings.width, P.widthJitter, () => nr.float()), 1, 'ring', 1);
       }
     }
   }
   // ---- market ring street (frontage around the square)
   let marketStreet = -1;
-  if (market) marketStreet = streets.add(market.concat([market[0]]), P.widthByRank[2] * P.widthScale, 1, 'ring', 1);
+  if (market) marketStreet = streets.add(market.concat([market[0]]), inp.nucleus?.ring ?? P.widthByRank[2] * P.widthScale, 1, 'ring', 1);
   // ---- network connectivity seed: radials, the market ring, and rings crossed by a radial
   for (const id of radials) streets.connected.add(id);
   if (marketStreet >= 0) streets.connected.add(marketStreet);
@@ -315,6 +502,11 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
             gates.push({ p, dir: { x: (b.x - a.x) / l, y: (b.y - a.y) / l }, width: st.widths[i], street: id });
           }
         }
+      }
+      // axis ends on the wall are gates (the lines end exactly on it)
+      for (const e of axisEnds) if (distToRing(ring, e) < 1 && !gates.some((g) => dist(g.p, e) < 12)) {
+        const l = dist(ctx.center, e) || 1;
+        gates.push({ p: e, dir: { x: (e.x - ctx.center.x) / l, y: (e.y - ctx.center.y) / l }, width: inp.axis!.width, street: -1 });
       }
       walls.push({ ring, gates });
     }
@@ -363,6 +555,8 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
       const rb = ribbon(line, 0.04);
       pieces = difference(pieces, rb);
     }
+    // pieces that still have holes are split through them (exact partition; the cuts are open land)
+    if (pieces.some((ph) => ph.holes.length)) pieces = pieces.flatMap((ph) => (ph.holes.length ? openHoles(ph) : [ph]));
     for (const ph of pieces) {
       const pts = ph.outer;
       if (area(pts) < 150) continue;
@@ -436,3 +630,81 @@ function traceRadial(ctx: UrbanCtx, th: number, market: Polygon | null, enc: Mul
 }
 
 export { polygonCentroid };
+
+/** Arclength slice of a polyline. */
+function slicePl(pl: Polyline, cum: number[], s0: number, s1: number): Polyline {
+  const at = (s: number): Vec2 => {
+    let i = 1;
+    while (i < pl.length - 1 && cum[i] < s) i++;
+    const t = (s - cum[i - 1]) / (cum[i] - cum[i - 1] || 1);
+    return { x: pl[i - 1].x + (pl[i].x - pl[i - 1].x) * t, y: pl[i - 1].y + (pl[i].y - pl[i - 1].y) * t };
+  };
+  const out = [at(s0)];
+  for (let i = 1; i < pl.length - 1; i++) if (cum[i] > s0 && cum[i] < s1) out.push(pl[i]);
+  out.push(at(s1));
+  return out;
+}
+
+/**
+ * Ring street broken into partial arcs: `perKm` gaps per km of ring (50–130 m each), kept away from the radial
+ * crossings so that every arc stays joined to the network.
+ */
+export function breakRing(pl: Polyline, radials: Polyline[], perKm: number, rng: Rng): Polyline[] {
+  const cum = [0];
+  for (let i = 1; i < pl.length; i++) cum.push(cum[i - 1] + dist(pl[i - 1], pl[i]));
+  const L = cum[cum.length - 1];
+  const nGaps = Math.floor((L / 1000) * perKm + rng.float());
+  if (nGaps <= 0 || L < 200) return [pl];
+  // arclength of the radial crossings
+  const cross: number[] = [];
+  for (let i = 1; i < pl.length; i++) for (const r of radials) {
+    for (let j = 1; j < r.length; j++) {
+      const x = segSegT(pl[i - 1], pl[i], r[j - 1], r[j]);
+      if (x) cross.push(cum[i - 1] + x.t * (cum[i] - cum[i - 1]));
+    }
+    // radials starting or ending on the ring (T junctions)
+    for (const e of [r[0], r[r.length - 1]]) {
+      const a = pl[i - 1], b = pl[i];
+      const dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy || 1;
+      const t = Math.max(0, Math.min(1, ((e.x - a.x) * dx + (e.y - a.y) * dy) / l2));
+      if (Math.hypot(e.x - a.x - t * dx, e.y - a.y - t * dy) < 1) cross.push(cum[i - 1] + t * Math.sqrt(l2));
+    }
+  }
+  if (!cross.length) return [pl];
+  const gaps: [number, number][] = [];
+  for (let g = 0; g < nGaps * 4 && gaps.length < nGaps; g++) {
+    const len = rng.range(50, 130);
+    const s0 = rng.range(20, L - len - 20);
+    if (s0 < 20) continue;
+    const s1 = s0 + len;
+    if (cross.some((c) => c > s0 - 35 && c < s1 + 35)) continue;
+    if (gaps.some(([a, b]) => s0 < b + 60 && s1 > a - 60)) continue;
+    gaps.push([s0, s1]);
+  }
+  if (!gaps.length) return [pl];
+  gaps.sort((a, b) => a[0] - b[0]);
+  const out: Polyline[] = [];
+  let s = 0;
+  // every arc keeps at least one radial crossing (it stays joined to the network)
+  const keep = (a: number, b: number) => b - a > 25 && cross.some((c) => c >= a - 0.5 && c <= b + 0.5);
+  for (const [a, b] of gaps) { if (keep(s, a)) out.push(slicePl(pl, cum, s, a)); s = b; }
+  if (keep(s, L)) out.push(slicePl(pl, cum, s, L));
+  return out;
+}
+
+/** The part of a polyline (starting inside `region`) after it first leaves the region, starting on its boundary. */
+function afterExit(pl: Polyline, region: MultiPoly): Polyline | null {
+  for (let i = 1; i < pl.length; i++) {
+    const a = pl[i - 1], b = pl[i];
+    let bt = Infinity;
+    for (const comp of region) for (let k = 0; k < comp.outer.length; k++) {
+      const r = segSegT(a, b, comp.outer[k], comp.outer[(k + 1) % comp.outer.length]);
+      if (r && r.t < bt) bt = r.t;
+    }
+    if (bt < Infinity) {
+      const e = { x: a.x + (b.x - a.x) * bt, y: a.y + (b.y - a.y) * bt };
+      return [e, ...pl.slice(i)];
+    }
+  }
+  return null;
+}

@@ -3,6 +3,7 @@ import { Options, SIZE_PRESETS } from './options';
 import type { World } from './types';
 import { generateTerrain } from './terrain/hydrology';
 import { chooseSite } from './site/site';
+import { getCulture } from './urban/culture';
 import { routeRoads } from './roads/regional';
 import { generateRural } from './landuse/rural';
 import { generateUrban } from './urban';
@@ -30,7 +31,9 @@ export function generate(options: Options, onStage?: (stage: string) => void): W
 
   const t1 = performance.now();
   onStage?.('site & roads');
-  world.site = chooseSite(terrain, options, mapSize, root);
+  // the culture's site preferences apply unless the options set their own
+  const cprefs = getCulture(options.culture).sitePrefs;
+  world.site = chooseSite(terrain, options.sitePrefs || !cprefs ? options : { ...options, sitePrefs: cprefs }, mapSize, root);
   const t2 = performance.now();
   stats['ms.site'] = r(t2 - t1);
   stats['site.x'] = r(world.site.center.x);

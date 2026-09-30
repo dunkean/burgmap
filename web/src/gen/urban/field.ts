@@ -11,6 +11,7 @@ import { gradientAt } from '../core/grid';
 import { smoothstep } from '../core/field';
 import type { UrbanCtx } from './context';
 import type { Streets } from './streets';
+import type { MorphologyParams } from './morphology';
 import { segSegT } from '../geo/poly';
 
 const TAU = Math.PI * 2;
@@ -21,16 +22,29 @@ export class GuidanceField {
     private ctx: UrbanCtx, private nucleus: Vec2, private streets: Streets, private gridAngle: number, rng: Rng,
   ) { this.noise = new Noise2D(rng.fork('fieldNoise')); }
 
+  /** Morphology of the quarter being split (defaults to the context's). */
+  P: MorphologyParams | null = null;
+  /** Contour direction at the site (terrain-oriented lattices: terraces). */
+  terrainAngle = 0;
+
   /** Base angle θ of the cross-field at p (the field is defined modulo 90°). */
   angle(p: Vec2): number {
-    const P = this.ctx.params;
+    const P = this.P ?? this.ctx.params;
     const nz = ((P.fieldNoise * Math.PI) / 180) * this.noise.fbm(p.x / P.fieldWavelength, p.y / P.fieldWavelength, 2);
-    if (P.streetOp === 'grid') return this.gridAngle + nz + P.gridSkew * this.noise.fbm(p.x / 600 + 9, p.y / 600 - 3, 2);
+    if (P.streetOp === 'grid') return (P.orientation === 'cardinal' ? 0 : P.orientation === 'terrain' ? this.terrainAngle : this.gridAngle) + nz + P.gridSkew * this.noise.fbm(p.x / 600 + 9, p.y / 600 - 3, 2);
     const dx = p.x - this.nucleus.x, dy = p.y - this.nucleus.y;
     const r = Math.hypot(dx, dy);
-    let th = Math.atan2(dy, dx);
-    // blend (in 4θ space) with the tangent of the nearest primary street
+    // spiral twist: both families rotate with the distance angle (log-spiral streets)
+    let th = Math.atan2(dy, dx) + (P.fieldTwist ?? 0);
     let cx = Math.cos(4 * th), cy = Math.sin(4 * th);
+    // a random low-frequency orientation field breaks the dartboard (regular concentric arcs and spokes)
+    const wr = P.fieldRandom ?? 0;
+    if (wr > 0) {
+      const psi = Math.PI * this.noise.fbm(p.x / 260 + 31.7, p.y / 260 - 12.3, 2);
+      cx = (1 - wr) * cx + wr * Math.cos(4 * psi);
+      cy = (1 - wr) * cy + wr * Math.sin(4 * psi);
+    }
+    // blend (in 4θ space) with the tangent of the nearest primary street
     const al = this.primaryAlign(p);
     if (al) {
       cx = (1 - al.w) * cx + al.w * al.c;
@@ -49,7 +63,7 @@ export class GuidanceField {
     }
     th = Math.atan2(cy, cx) / 4;
     // near the nucleus the radial field is singular: fade the noise in with distance
-    return th + nz * smoothstep(r, 20, 120);
+    return th + nz * (0.5 + 0.5 * smoothstep(r, 20, 120));
   }
 
   /**
