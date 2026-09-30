@@ -5,6 +5,7 @@ import { generateTerrain } from './terrain/hydrology';
 import { chooseSite } from './site/site';
 import { routeRoads } from './roads/regional';
 import { generateRural } from './landuse/rural';
+import { generateUrban } from './urban';
 
 export function generate(options: Options): World {
   const t0 = performance.now();
@@ -42,10 +43,17 @@ export function generate(options: Options): World {
   stats['roads'] = rr.roads.length;
   stats['bridges'] = rr.bridges.length;
 
+  const ur = generateUrban(world, root);
+  world.urban = ur.layer;
+  world.debug = { urban: ur.debug };
+  const t3b = performance.now();
+  for (const [k, v] of Object.entries(ur.stats)) stats[k.startsWith('ms.') ? k : 'urban.' + k] = v;
+  stats['ms.urbanTotal'] = r(t3b - t3);
+
   const lu = generateRural(world, root);
   world.landuse = lu.layer;
   const t4 = performance.now();
-  stats['ms.landuse'] = r(t4 - t3);
+  stats['ms.landuse'] = r(t4 - t3b);
   for (const [k, v] of Object.entries(lu.stats)) stats['landuse.' + k] = v;
 
   stats['ms.total'] = r(performance.now() - t0);

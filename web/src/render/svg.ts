@@ -7,6 +7,7 @@ import { PALETTES, Palette } from './styles';
 import { renderTerrainRaster, pngDataUrl } from './raster';
 import { f1, pathD } from './util';
 import { landuseLayer, roadsLayer, siteLayer } from './landuse';
+import { urbanLayer } from './urban';
 
 export interface RenderOptions {
   style?: StyleName; contours?: boolean; raster?: boolean; landuse?: boolean; debug?: boolean;
@@ -155,7 +156,8 @@ export function renderSvg(world: World, opts: RenderOptions = {}): string {
   parts.push(water);
 
   parts.push(roadsLayer(world, pal, u));
-  parts.push(siteLayer(world, pal, u, !!opts.debug));
+  if (world.urban) parts.push(urbanLayer(world, pal, u, !!opts.debug));
+  else parts.push(siteLayer(world, pal, u, !!opts.debug));
 
   parts.push('</g>');
   parts.push(decor(world, pal, u));

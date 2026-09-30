@@ -4,6 +4,8 @@ export type CoastOpt = 'none' | 'N' | 'E' | 'S' | 'W' | 'random';
 export type RiverOpt = 'none' | 'stream' | 'river' | 'major';
 export type StyleName = 'parchment' | 'atlas';
 export type Tri = 'auto' | 'yes' | 'no';
+export type Culture = 'european-organic' | 'bastide';
+export const CULTURES: Culture[] = ['european-organic', 'bastide'];
 
 export interface Options {
   seed: string;
@@ -22,6 +24,10 @@ export interface Options {
   contours: boolean;
   /** Show the rural land-use layer (fields, forest, ...). */
   landuse: boolean;
+  /** Urban morphology preset (URBAN_MORPHOLOGY.md). */
+  culture: Culture;
+  /** Inhabitants; 0 = automatic from the size preset. */
+  population: number;
 }
 
 export interface SizePreset { mapSize: number; grid: number; label: string }
@@ -46,6 +52,8 @@ export const DEFAULTS: Options = {
   style: 'parchment',
   contours: true,
   landuse: true,
+  culture: 'european-organic',
+  population: 0,
 };
 
 /** Number of regional road exits when the `roads` option is 0 (auto). */
@@ -66,7 +74,7 @@ export function makeOptions(partial: Partial<Options> = {}): Options {
 export function toQuery(o: Options): string {
   const p = new URLSearchParams();
   p.set('seed', o.seed);
-  const keys = ['size', 'relief', 'coast', 'river', 'walls', 'castle', 'roads', 'style'] as const;
+  const keys = ['size', 'relief', 'coast', 'river', 'walls', 'castle', 'roads', 'style', 'culture', 'population'] as const;
   for (const k of keys) if (o[k] !== DEFAULTS[k]) p.set(k, String(o[k]));
   if (o.seaLevel !== undefined) p.set('seaLevel', String(o.seaLevel));
   if (o.contours !== DEFAULTS.contours) p.set('contours', o.contours ? '1' : '0');
@@ -88,6 +96,9 @@ export function fromQuery(q: string | URLSearchParams): Options {
   o.walls = oneOf(p.get('walls'), TRIS, DEFAULTS.walls);
   o.castle = oneOf(p.get('castle'), TRIS, DEFAULTS.castle);
   o.style = oneOf(p.get('style'), STYLES, DEFAULTS.style);
+  o.culture = oneOf(p.get('culture'), CULTURES, DEFAULTS.culture);
+  const pop = Number(p.get('population'));
+  o.population = Number.isFinite(pop) && pop > 0 ? Math.min(200000, Math.round(pop)) : 0;
   const roads = Number(p.get('roads'));
   o.roads = Number.isFinite(roads) && p.get('roads') !== null ? Math.max(0, Math.min(8, Math.round(roads))) : 0;
   const sl = p.get('seaLevel');
@@ -102,7 +113,7 @@ export function fromQuery(q: string | URLSearchParams): Options {
 /** Parse "k=v" overrides (used by the preview script). */
 export function applyOverride(o: Options, k: string, v: string): void {
   const rec = o as unknown as Record<string, unknown>;
-  if (k === 'roads' || k === 'seaLevel') rec[k] = Number(v);
+  if (k === 'roads' || k === 'seaLevel' || k === 'population') rec[k] = Number(v);
   else if (k === 'contours' || k === 'landuse') rec[k] = v === '1' || v === 'true';
   else rec[k] = v;
 }

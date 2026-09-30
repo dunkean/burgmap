@@ -12,6 +12,7 @@ let out = 'out/preview.png';
 let width = 1600;
 let crop: { x: number; y: number; w: number } | undefined;
 let debug = false;
+let focus = 0;
 for (let i = 0; i < args.length; i++) {
   const a = args[i];
   const v = args[i + 1];
@@ -22,11 +23,17 @@ for (let i = 0; i < args.length; i++) {
   else if (a === '--width') { width = Number(v); i++; }
   else if (a === '--crop') { const [x, y, w] = v.split(',').map(Number); crop = { x, y, w }; i++; }
   else if (a === '--debug') { debug = true; }
+  else if (a === '--focus') { focus = Number(v); i++; }
   else if (a === '--opt') { const [k, val] = v.split('='); applyOverride(opts, k, val); i++; }
 }
 
 const t0 = performance.now();
 const world = generate(opts);
+if (focus > 0 && world.site) {
+  const c = world.site.center;
+  const w = Math.min(world.mapSize, focus);
+  crop = { x: Math.max(0, Math.min(world.mapSize - w, c.x - w / 2)), y: Math.max(0, Math.min(world.mapSize - w, c.y - w / 2)), w };
+}
 const t1 = performance.now();
 const svg = renderSvg(world, { style: opts.style, debug });
 const t2 = performance.now();

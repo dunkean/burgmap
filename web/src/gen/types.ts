@@ -65,6 +65,65 @@ export interface LandUseLayer {
   reserve: Polygon[];
 }
 
+/** Polygon with holes (all rings positively oriented). */
+export interface PolyH { outer: Polygon; holes: Polygon[] }
+
+export type UrbanZone = 'core' | 'middle' | 'edge' | 'faubourg' | 'village';
+export type StreetRole = 'radial' | 'ring' | 'street' | 'lane' | 'close' | 'quay' | 'wall-lane' | 'track' | 'boundary';
+export type Archetype = 'hamlet' | 'street-village' | 'nucleated-village' | 'town';
+
+export interface UrbanStreet {
+  path: Polyline;
+  /** Mean full width (m); per-vertex widths in `widths`. */
+  width: number;
+  widths?: number[];
+  kind: 'main' | 'street' | 'alley';
+  /** 0 arterial … 4 close (cul-de-sac). */
+  rank: number;
+  role: StreetRole;
+  phase: number;
+}
+export interface UrbanBlockInfo { quarter: number; phase: number; zone: UrbanZone; kind: 'block' | 'place' | 'market' | 'church' | 'green' }
+export type ParcelUse = 'plot' | 'garden' | 'place' | 'market' | 'church' | 'green' | 'farm';
+export interface UrbanParcel {
+  poly: Polygon; use: ParcelUse | string; block: number;
+  /** Street frontage segment (for plots). */
+  front?: [Vec2, Vec2];
+  zone?: UrbanZone;
+}
+export interface UrbanBuilding { poly: Polygon; kind: string; height?: number; parcel?: number }
+export interface UrbanWall {
+  path: Polyline; closed: boolean; towers: Vec2[]; gates: Vec2[]; thickness: number;
+  /** Gate openings: center, street direction (unit) and opening width. */
+  gateInfo?: { p: Vec2; dir: Vec2; width: number }[];
+}
+export interface UrbanPhase { id: number; kind: 'core' | 'ring' | 'faubourg' | 'village'; zone: UrbanZone; region: PolyH[]; walled: boolean; fossil: boolean }
+export interface UrbanQuarter { poly: PolyH; phase: number; zone: UrbanZone; streetSpace: PolyH[] }
+
+export interface UrbanLayer {
+  footprint: Polygon[];
+  streets: UrbanStreet[];
+  blocks: Polygon[];
+  parcels: UrbanParcel[];
+  buildings: UrbanBuilding[];
+  walls?: UrbanWall[];
+  landmarks: { kind: string; poly: Polygon; name?: string }[];
+  squares: Polygon[];
+  // ---- extensions (M3)
+  archetype: Archetype;
+  population: number;
+  morphology: string;
+  phases: UrbanPhase[];
+  quarters: UrbanQuarter[];
+  blockInfo: UrbanBlockInfo[];
+  /** Building masses unioned per block (courtyards as holes). */
+  masses: PolyH[];
+  /** Unbuilt back land (gardens, yards behind the plots). */
+  backLand: PolyH[];
+  /** Footprint with holes (exact), rural land use is excluded from it. */
+  footprintH: PolyH[];
+}
+
 export interface World {
   seed: string;
   options: Options;
@@ -74,16 +133,9 @@ export interface World {
   site?: SiteLayer;
   roads?: { path: Polyline; kind: 'major' | 'minor' | 'track'; width: number }[];
   bridges?: { a: Vec2; b: Vec2; width: number }[];
-  urban?: {
-    footprint: Polygon[];
-    streets: { path: Polyline; width: number; kind: 'main' | 'street' | 'alley' }[];
-    blocks: Polygon[];
-    parcels: { poly: Polygon; use: string }[];
-    buildings: { poly: Polygon; kind: string; height?: number }[];
-    walls?: { path: Polyline; closed: boolean; towers: Vec2[]; gates: Vec2[]; thickness: number }[];
-    landmarks: { kind: string; poly: Polygon; name?: string }[];
-    squares: Polygon[];
-  };
+  urban?: UrbanLayer;
   landuse?: LandUseLayer;
+  /** Stage-internal data for debug rendering (not part of the contract). */
+  debug?: Record<string, unknown>;
   stats: Record<string, number | string>;
 }
