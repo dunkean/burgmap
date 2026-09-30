@@ -44,7 +44,7 @@ M['medina-souk'] = morph('medina-souk', M['medina'], {
 
 M['chinese'] = morph('chinese', MORPHOLOGIES['bastide'], {
   streets: ['axis', 'grid', 'wardWalls'], closeOp: 'none', plotOp: 'siheyuan', buildingOp: 'pavilionCompound', orientation: 'cardinal',
-  gridSpacing: [240, 240], laneSpacing: [58, 0], wardArea: 26000, gridSkew: 0, fieldNoise: 0,
+  gridSpacing: [240, 240], laneSpacing: [58, 125], wardArea: 26000, gridSkew: 0, fieldNoise: 0,
   blockSize: { core: [9000, 16000], middle: [9000, 16000], edge: [9000, 16000], faubourg: [4500, 14000] },
   minBlock: 1500, minWidth: 22, widthByRank: [14, 10, 7, 4.5, 3],
   frontage: { core: [14, 22], middle: [14, 22], edge: [15, 24] }, plotDepth: { core: [22, 34], middle: [22, 34], edge: [24, 36] }, plotTilt: 0,
