@@ -9,6 +9,7 @@ import type { TerrainLayer, River } from '../types';
 import { generateHeightfield, HeightPlan, OPPOSITE, SIDE_VEC, Side } from './heightfield';
 import { marchingSquares } from './contour';
 import { resolveDepressions } from './erosion';
+import { scaleFor, areaOfWidth, assembleChannels, assignHydraulics, RawChan } from './rivernet';
 
 const EPS = 0.002;
 const clamp = (v: number, a: number, b: number): number => (v < a ? a : v > b ? b : v);
@@ -547,6 +548,18 @@ export function terrainForExtent(opts: Options, mapSize: number, root?: Rng): { 
       const hasSea = plan.seaSide !== null;
       const approxW = (cls.wSrc + cls.wMouth) / 2;
       const poly = smoothAndMeander(route.poly, Math.max(cell * 0.9, 3), approxW, slopeAt, rrng.fork('meander'), true, hasSea, 90 * Math.min(ek, 6), 16 * Math.min(ek, 6));
+      if (poly.length > 1) {
+        // the head always sits exactly on the map edge (and so does the tail when the river leaves the map)
+        const mapS = n * cell;
+        const snap = (q: Vec2): void => {
+          const ds = [q.x, q.y, mapS - q.x, mapS - q.y];
+          let kk = 0; for (let i = 1; i < 4; i++) if (ds[i] < ds[kk]) kk = i;
+          if (ds[kk] > 6 * cell) return;
+          if (kk === 0) q.x = 0; else if (kk === 1) q.y = 0; else if (kk === 2) q.x = mapS; else q.y = mapS;
+        };
+        snap(poly[0]);
+        if (!hasSea) snap(poly[poly.length - 1]);
+      }
       if (hasSea && poly.length > 3) {
         const a = poly[poly.length - 4], b = poly[poly.length - 1];
         const l = dist(a, b) || 1;
@@ -588,34 +601,11 @@ export function terrainForExtent(opts: Options, mapSize: number, root?: Rng): { 
   const acc = accumulate(flood.receiver, flood.order, inject);
   const t2 = performance.now();
 
-  // main river widths from accumulation along the polyline
+  // main river: final widths/areas come from the hydraulics pass below; mark its cells for the tributary tracing
   const idxAt = (q: Vec2) => Math.min(n - 1, Math.max(0, Math.floor(q.y / cell))) * n + Math.min(n - 1, Math.max(0, Math.floor(q.x / cell)));
   const mainMask = new Uint8Array(N);
-  let accMouth = 1;
+  const injectAmt = inject.length ? inject[0].amount : 0;
   if (mainPoly && cls) {
-    const raw = mainPoly.map((q) => {
-      // look at the neighbourhood: trench cells hold the largest accumulation
-      let m = 0;
-      const cx = Math.floor(q.x / cell), cy = Math.floor(q.y / cell);
-      for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
-        const x = cx + dx, y = cy + dy;
-        if (x >= 0 && y >= 0 && x < n && y < n) m = Math.max(m, acc[y * n + x]);
-      }
-      return m;
-    });
-    for (let i = 1; i < raw.length; i++) raw[i] = Math.max(raw[i], raw[i - 1]);
-    const sm = movingAvg(raw, 10);
-    accMouth = Math.max(...sm);
-    const L = mainPoly.length;
-    mainWidths = sm.map((a, i) => {
-      let wd = cls.wMouth * Math.pow(a / accMouth, 0.5);
-      wd = Math.max(cls.wSrc, Math.min(cls.wMouth * 1.05, wd));
-      if (plan.seaSide) wd *= 1 + 0.55 * smooth((i / (L - 1) - 0.88) / 0.12);
-      return wd;
-    });
-    mainWidths = movingAvg(mainWidths, 4);
-    rivers.push({ path: mainPoly, width: mainWidths, main: true });
-    // mark cells around main path
     for (const q of mainPoly) {
       const cx = Math.floor(q.x / cell), cy = Math.floor(q.y / cell);
       for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
@@ -661,8 +651,9 @@ export function terrainForExtent(opts: Options, mapSize: number, root?: Rng): { 
   const sources: number[] = [];
   for (let i = 0; i < N; i++) if (isStream[i] && !hasUp[i] && !mainMask[i]) sources.push(i);
   const visited = new Uint8Array(N);
-  const naturalRaw: { cells: number[]; endsAt: number; forced?: boolean }[] = [];
-  // lake outlets first: every lake drains through a real river
+  interface NatRaw { cells: number[]; endsAt: number; forced?: boolean; lakeSrc: number }
+  const naturalRaw: NatRaw[] = [];
+  // lake outlets first: every lake drains through exactly one river
   for (const id of keep) {
     let bestC = -1, bestA = -1;
     for (let i = 0; i < N; i++) {
@@ -678,17 +669,17 @@ export function terrainForExtent(opts: Options, mapSize: number, root?: Rng): { 
       if (c < 0) break;
       if (sea2[c] || lakeField[c] > 0 || mainMask[c] || visited[c]) { endsAt = c; break; }
       cells.push(c); visited[c] = 1;
-      if (steps > 30 && isStream[c]) { c = recv[c]; if (c >= 0) endsAt = c; break; }
       c = recv[c];
     }
     visited[bestC] = 1;
-    if (cells.length >= 2) naturalRaw.push({ cells, endsAt, forced: true });
+    naturalRaw.push({ cells, endsAt, forced: true, lakeSrc: id });
   }
-  const natural: { cells: number[]; endsAt: number; forced?: boolean }[] = [];
-  for (const s of sources) {
-    if (visited[s]) continue;
+  const natural: NatRaw[] = [];
+  const minRawLen = 100 * Math.min(ek, 3);
+  for (const s0 of sources) {
+    if (visited[s0]) continue;
     const cells: number[] = [];
-    let c = s;
+    let c = s0;
     let endsAt = -1;
     for (;;) {
       if (mainMask[c] || (visited[c] && cells.length > 0)) { endsAt = c; break; }
@@ -698,7 +689,7 @@ export function terrainForExtent(opts: Options, mapSize: number, root?: Rng): { 
       if (sea2[r] || lakeField[r] > 0) { endsAt = r; break; }
       c = r;
     }
-    if (cells.length >= 4) natural.push({ cells, endsAt });
+    if (cells.length >= 4 && cells.length * cell * 1.1 >= minRawLen) natural.push({ cells, endsAt, lakeSrc: -1 });
   }
   // cap the number of tributaries by upstream area
   const maxTrib = (mapSize < 2000 ? 2 : mapSize < 3000 ? 3 : mapSize < 4200 ? 4 : mapSize < 7000 ? 5 : mapSize < 15000 ? 7 : 9) + (cls ? 0 : 1);
@@ -710,40 +701,44 @@ export function terrainForExtent(opts: Options, mapSize: number, root?: Rng): { 
     natural.length = 0; natural.push(...kept);
   }
   naturalRaw.push(...natural);
-  const refMouth = cls ? accMouth : Math.max(thr * 2, ...naturalRaw.map((r) => acc[r.cells[r.cells.length - 1]]));
-  const wRefMouth = cls ? cls.wMouth : 4.6 * widthK;
-  const wMinNat = (cls ? 1.8 : 1.6) * Math.min(widthK, 2);
-  for (const r of naturalRaw) {
+
+  // channel geometry + hydraulics (rivernet.ts): hosts, confluence angles, edge-fed tributaries
+  const scale = scaleFor(widthK);
+  const ownerCell = new Int32Array(N).fill(-1);
+  naturalRaw.forEach((r, k) => { for (const c of r.cells) ownerCell[c] = k; });
+  const rawChans: RawChan[] = naturalRaw.map((r, k) => {
     const pts: Vec2[] = r.cells.map((i) => ({ x: ((i % n) + 0.5) * cell, y: (((i / n) | 0) + 0.5) * cell }));
     if (r.endsAt >= 0) pts.push({ x: ((r.endsAt % n) + 0.5) * cell, y: (((r.endsAt / n) | 0) + 0.5) * cell });
-    if (!r.forced && polylineLength(pts) < 120 * Math.min(ek, 3)) continue;
     const simp = simplify(pts, cell * 1.4);
-    const sm = smoothAndMeander(simp, Math.max(cell * 0.9, 3), 4, slopeAt, rng.fork('nm:' + r.cells[0]), true, false, 200 * Math.min(ek, 4), 7 * Math.min(ek, 3));
-    // widths: sample accumulation from nearest cell
-    let wv = sm.map((q) => {
-      let m = 0;
-      const cx = Math.floor(q.x / cell), cy = Math.floor(q.y / cell);
-      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-        const x = cx + dx, y = cy + dy;
-        if (x >= 0 && y >= 0 && x < n && y < n && (isStream[y * n + x] || r.forced)) m = Math.max(m, acc[y * n + x]);
-      }
-      return Math.max(m, thr);
-    });
-    for (let i = 1; i < wv.length; i++) wv[i] = Math.max(wv[i], wv[i - 1]);
-    wv = movingAvg(wv, 8);
-    const widths = wv.map((a) => Math.max(wMinNat, Math.min(wRefMouth * 0.8, wRefMouth * Math.pow(a / refMouth, 0.5))));
-    if (r.forced && r.endsAt >= 0 && !sea2[r.endsAt] && lakeField[r.endsAt] <= 0) {
-      // join the stream/river it runs into: meandering smoothing leaves a small gap otherwise
-      const e = sm[sm.length - 1];
-      let bd = 90 * Math.min(ek, 3) + 4 * cell, bp: Vec2 | null = null;
-      for (const rv of rivers) {
-        const { pt, d } = nearestOnPath(rv.path, e);
-        if (d < bd) { bd = d; bp = pt; }
-      }
-      if (bp && bd > 1) { sm.push(bp); widths.push(widths[widths.length - 1]); }
-    }
-    rivers.push({ path: sm, width: widths });
+    const path = smoothAndMeander(simp, Math.max(cell * 0.9, 3), 4, slopeAt, rng.fork('nm:' + r.cells[0]), true, false, 200 * Math.min(ek, 4), 7 * Math.min(ek, 3));
+    const e = r.endsAt;
+    let end: RawChan['end'] = 'none', hostRaw = -2, endLake = -1;
+    if (e < 0) end = 'none';
+    else if (sea2[e]) end = 'sea';
+    else if (lakeField[e] > 0) { end = 'lake'; endLake = comp[e]; }
+    else if (mainMask[e]) { end = 'host'; hostRaw = -1; }
+    else if (ownerCell[e] >= 0 && ownerCell[e] !== k) { end = 'host'; hostRaw = ownerCell[e]; }
+    return { path, forced: !!r.forced, end, hostRaw, lakeSrc: r.lakeSrc, endLake, endAcc: acc[r.cells[r.cells.length - 1]] };
+  });
+  const nEdge = !cls || cls.wMouth < 8 * widthK ? 0 : mapSize < 1400 ? (rng.fork('nedge').chance(0.5) ? 1 : 0) : mapSize < 2000 ? 1 : mapSize < 3000 ? 1 + (rng.fork('nedge').chance(0.5) ? 1 : 0) : mapSize < 4200 ? 2 : 2 + (rng.fork('nedge').chance(0.5) ? 1 : 0);
+  const mainMaxW = cls ? cls.wMouth * 1.2 : 0;
+  const geo = assembleChannels({
+    chans: rawChans, main: mainPoly, mapSize, cell, scale, rng: rng.fork('net'), nEdge,
+    edgeW: [scale.brook * 1.3, scale.brook * 2.0], mainMaxW, minLen: 90,
+    isWet: (q) => { const i = idxAt(q); return sea2[i] !== 0 || lakeField[i] > 0; },
+  });
+  const natRivers: River[] = geo.map((g) => ({
+    path: g.path, width: g.path.map(() => 1), id: g.id, host: g.host >= 0 ? g.host : undefined, edgeFed: g.edgeFed, w0: g.w0,
+    source: g.edgeFed ? 'edge' : g.lakeSrc >= 0 ? 'lake' : 'spring',
+    mouth: g.end === 'host' ? 'river' : g.end === 'sea' ? 'sea' : g.end === 'lake' ? 'lake' : 'edge',
+    lakeId: g.lakeSrc >= 0 ? g.lakeSrc : undefined, endLake: g.endLake >= 0 ? g.endLake : undefined,
+  }));
+  const ownerId = new Int32Array(N).fill(-1);
+  for (const g of geo) for (const c of naturalRaw[g.raw].cells) ownerId[c] = g.id;
+  if (mainPoly) {
+    rivers.push({ path: mainPoly, width: mainPoly.map(() => 1), main: true, id: 0, edgeFed: true, source: 'edge', mouth: plan.seaSide ? 'sea' : 'edge' });
   }
+  rivers.push(...natRivers);
 
   // ---- polygons (sea and lakes): needed before the water mask so river ribbons can be clipped at the shore
   const seaField = new Float32Array(N);
@@ -767,6 +762,49 @@ export function terrainForExtent(opts: Options, mapSize: number, root?: Rng): { 
   for (let k = rivers.length - 1; k >= 0; k--) {
     const clipped = clipRiverAtWater(rivers[k], waterPolys);
     if (!clipped) rivers.splice(k, 1); else rivers[k] = clipped;
+  }
+
+  // a mouth that stops a few metres short of the shore is carried to it
+  for (const rv of rivers) {
+    if (rv.mouth !== 'sea' && rv.mouth !== 'lake') continue;
+    const polys = rv.mouth === 'sea' ? coastline : lakes;
+    const last = rv.path[rv.path.length - 1];
+    if (polys.some((pg) => polygonContains(pg, last))) continue;
+    let bd = 45, bp: Vec2 | null = null;
+    for (const pg of polys) for (let i = 0; i < pg.length; i++) {
+      const nn = nearestOnPath([pg[i], pg[(i + 1) % pg.length]], last);
+      if (nn.d < bd) { bd = nn.d; bp = nn.pt; }
+    }
+    if (bp && bd > 0.5) rv.path.push(bp), rv.width.push(rv.width[rv.width.length - 1]);
+  }
+
+  // ---- hydraulics: contributing areas, widths and classes
+  {
+    const at = (q: Vec2, rad: number, pick: (i: number) => boolean): number => {
+      let m = 0;
+      const cx = Math.floor(q.x / cell), cy = Math.floor(q.y / cell);
+      for (let dy = -rad; dy <= rad; dy++) for (let dx = -rad; dx <= rad; dx++) {
+        const x = cx + dx, y = cy + dy;
+        if (x >= 0 && y >= 0 && x < n && y < n && pick(y * n + x)) m = Math.max(m, acc[y * n + x]);
+      }
+      return m;
+    };
+    const mainHead = mainPoly ? Math.max(0, at(mainPoly[Math.min(3, mainPoly.length - 1)], 2, () => true) - injectAmt) : 0;
+    const aint = (q: Vec2, r: River): number => r.main
+      ? Math.max(0, at(q, 2, () => true) - injectAmt - mainHead) * cell * cell
+      : at(q, 1, (i) => ownerId[i] === r.id) * cell * cell;
+    let mainAext = 0, lam = 0;
+    const main0 = rivers.find((r) => r.main);
+    if (main0 && cls) {
+      mainAext = areaOfWidth(cls.wSrc);
+      let aMax = 0;
+      for (const q of main0.path) aMax = Math.max(aMax, aint(q, main0));
+      lam = Math.max(0.5, Math.min(120, (areaOfWidth(cls.wMouth) - mainAext) / Math.max(aMax, 0.05 * N * cell * cell)));
+    }
+    assignHydraulics({
+      rivers, scale, aint, mainAext, lam, lamBrook: 4, lamEdge: 10, mainMouthW: cls ? cls.wMouth : 0, mainHeadW: cls ? cls.wSrc : 0,
+      estuary: plan.seaSide ? 1.55 : 1, minBrookW: 1.4 * Math.min(widthK, 2),
+    });
   }
 
   // ---- water mask

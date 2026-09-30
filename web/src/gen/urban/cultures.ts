@@ -175,6 +175,7 @@ export const CULTURE_LIST: Culture[] = [
     },
     hamlet: { form: 'auto', morphology: 'chinese-suburb' },
     render: { towerShape: 'square', wardWalls: true, moat: true, compoundWalls: true },
+    sitePrefs: { flatness: 2, waterSide: 'S', hillSide: 'N', weights: { hilltop: 0, plain: 2 } },
   },
   {
     id: 'japanese-jokamachi', label: 'Japanese castle town (jōkamachi)',
@@ -190,6 +191,7 @@ export const CULTURE_LIST: Culture[] = [
     village: { form: 'auto', morphology: 'jp-merchant' },
     hamlet: { form: 'auto', morphology: 'jp-merchant' },
     render: { towerShape: 'square', compoundWalls: true },
+    sitePrefs: { weights: { hilltop: 2, plain: 1.5 } },
   },
   {
     id: 'indian-temple', label: 'Indian temple town',
@@ -208,6 +210,7 @@ export const CULTURE_LIST: Culture[] = [
     },
     hamlet: { form: 'auto', morphology: 'indian-temple' },
     render: { towerShape: 'square' },
+    sitePrefs: { flatness: 1.6, weights: { hilltop: 0, plain: 2, bridge: 1.5 } },
   },
   {
     id: 'roman-core', label: 'Roman castrum core',
@@ -244,6 +247,7 @@ export const CULTURE_LIST: Culture[] = [
       nucleus: { kind: 'grove', shape: 'circle', area: [1200, 2500], compound: true, ring: 2.6 },
     },
     render: { towerShape: 'round', canopy: true },
+    sitePrefs: { woodland: 1 },
   },
   {
     id: 'dwarven', label: 'Dwarven hold', fantasy: true,
@@ -263,5 +267,6 @@ export const CULTURE_LIST: Culture[] = [
     },
     hamlet: { form: 'walled', morphology: 'dwarven', enclosure: { shape: 'rect', wall: 'none', fossil: 'none', orientation: 'terrain' } },
     render: { towerShape: 'square', terraces: true },
+    sitePrefs: { mountainFace: 1, weights: { valley: 2, hilltop: 1.5, plain: 0.3 } },
   },
 ];

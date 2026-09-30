@@ -2,7 +2,8 @@ import type { Rng } from '../core/rng';
 import { MinHeap } from '../core/pq';
 import { D8, D8_DIST, blurGrid } from '../core/grid';
 import { Vec2, Polyline, chaikin, simplify, polylineLength, dist, resample } from '../core/geom';
-import { smoothstep } from '../core/field';
+import { smoothstep, forCellsNearPolyline } from '../core/field';
+import { bridgeRoad, attachEnd } from './junctions';
 import { roadCount, Options, SizeName } from '../options';
 import { passability } from '../site/site';
 import type { TerrainLayer, SiteLayer, World } from '../types';
@@ -198,10 +199,28 @@ export function routeRoads(
     else if (pass[i] === 1) {
       let m = 1;
       if (f.dWater[i] < 60 && f.hab[i] < 2) m += 0.7 * (1 - smoothstep(f.hab[i], 0.3, 2));
-      if (f.dWater[i] < 4 * cell) m += 0.5 * (1 - f.dWater[i] / (4 * cell)); // keep a margin from banks and shores
+      if (f.dWater[i] < 6 * cell) m += 1.0 * (1 - f.dWater[i] / (6 * cell)); // keep a margin from banks and shores
       else if (f.hab[i] >= 2 && f.hab[i] < 12 && f.dMain[i] < 400) m *= 0.92; // terrace above the floodplain
       cm[i] = m;
     }
+  }
+
+  // distance from each cell centre to the nearest river ribbon edge: banks are kept clear of the road
+  const ribDist = new Float32Array(N).fill(1e9);
+  for (const rv of terrain.rivers) {
+    for (let i = 1; i < rv.path.length; i++) {
+      const hw = Math.max(rv.width[i - 1], rv.width[i]) / 2;
+      forCellsNearPolyline([rv.path[i - 1], rv.path[i]], n, n, cell, hw + 1.3 * cell, (idx, d) => { if (d - hw < ribDist[idx]) ribDist[idx] = d - hw; });
+    }
+  }
+  for (let i = 0; i < N; i++) if (pass[i] === 1 && ribDist[i] < 0.75 * cell) cm[i] *= 3;
+
+  // crossings are cheaper where the water is a single narrow channel (not at confluences, bends and shores)
+  {
+    const wetF = new Float32Array(N);
+    for (let i = 0; i < N; i++) wetF[i] = water[i] ? 1 : 0;
+    const wd = blurGrid({ w: n, h: n, cell, data: wetF }, 3, 1).data;
+    for (let i = 0; i < N; i++) if (pass[i] >= 2) cm[i] *= 1 + 5 * Math.max(0, wd[i] - 0.25);
   }
 
   // ---- exits on the border
@@ -209,7 +228,7 @@ export function routeRoads(
   const step = Math.max(2, Math.round(30 / cell));
   const push = (x: number, y: number) => {
     const idx = y * n + x;
-    if (pass[idx] !== 1 || !isFinite(costC[idx])) return;
+    if (pass[idx] !== 1 || !isFinite(costC[idx]) || f.dWater[idx] < 25) return;
     const p = { x: (x + 0.5) * cell, y: (y + 0.5) * cell };
     const eff = dist(p, site.center) / Math.max(1, costC[idx]);
     cands.push({ idx, p, ang: Math.atan2(p.y - site.center.y, p.x - site.center.x), q: eff });
@@ -287,15 +306,19 @@ export function routeRoads(
     return bad;
   };
   const isWaterPt = (p: Vec2): boolean => water[Math.min(n - 1, Math.max(0, Math.floor(p.y / cell))) * n + Math.min(n - 1, Math.max(0, Math.floor(p.x / cell)))] !== 0;
+  const isBankPt = (p: Vec2): boolean => {
+    const i = Math.min(n - 1, Math.max(0, Math.floor(p.y / cell))) * n + Math.min(n - 1, Math.max(0, Math.floor(p.x / cell)));
+    return water[i] !== 0 || ribDist[i] < 0.6 * cell;
+  };
   const smoothPath = (cells: number[], startPt: Vec2 | null, endPt: Vec2 | null): Polyline => {
     const raw: Vec2[] = cells.map((i) => ({ x: ((i % n) + 0.5) * cell, y: (((i / n) | 0) + 0.5) * cell }));
     if (startPt) raw[0] = startPt;
     if (endPt) raw[raw.length - 1] = endPt;
     const pw = plannedWater(cells);
     // land-preserving smoothing: relax the resampled path, never pulling a point into water
-    const tries: [number, number][] = [[36, 3.4], [16, 1.8], [6, 1]];
+    const tries: [number, number][] = [[70, 6], [36, 3.4], [16, 1.8], [6, 1]];
     for (const [iters, disp] of tries) {
-      let p = relax(raw, iters, disp * cell, isWaterPt);
+      let p = relax(raw, iters, disp * cell, isBankPt);
       p = simplify(p, 0.35);
       if (unplanned(p, pw) === 0) return p;
     }
@@ -309,7 +332,7 @@ export function routeRoads(
       return false;
     };
     for (const [iters, disp] of [[36, 3.4], [16, 1.8]] as [number, number][]) {
-      const p = simplify(relax(raw, iters, disp * cell, isWaterPt, nearWater), 0.35);
+      const p = simplify(relax(raw, iters, disp * cell, isBankPt, nearWater), 0.35);
       if (unplanned(p, pw) === 0) return p;
     }
     // last resort: round the corners of the cell path
@@ -317,37 +340,45 @@ export function routeRoads(
       const p = resample(chaikin(raw, it), 4);
       if (unplanned(p, pw) === 0) return p;
     }
-    return raw;
+    return resample(chaikin(raw, 2), 4);
   };
 
   const baseCfg = { w: n, h: n, cell, H, pass, cm, discount: 0.45 };
-  chosen.forEach((ex, k) => {
+  const usedNear = new Uint8Array(N);
+  const hostOf: number[] = [];
+  const nearestRoad = (p: Vec2): { idx: number; pt: Vec2; d: number } => {
+    let best = { idx: -1, pt: p, d: Infinity };
+    smoothed.forEach((pl, i) => { const nn = nearestOnPolyline(pl, p); if (nn.d < best.d) best = { idx: i, pt: nn.pt, d: nn.d }; });
+    return best;
+  };
+  const markRoad = (pl: Polyline): void => { forCellsNearPolyline(pl, n, n, cell, 2 * cell, (idx) => { usedNear[idx] = 1; }); };
+  chosen.forEach((ex) => {
     const path = astarFewCrossings({ ...baseCfg, used, hf: hCenter, allowBridge: true }, ex.idx, (i) => i === centerIdx, sIds, mainIds);
     if (!path) return;
-    // truncate where the road first touches the existing network
+    // truncate where the road first comes within ~10 m of the existing network
     let cut = path.length;
     let junction = -1;
-    for (let i = 1; i < path.length; i++) if (used[path[i]]) { cut = i + 1; junction = path[i]; break; }
+    for (let i = 3; i < path.length; i++) if (usedNear[path[i]] && pass[path[i]] === 1) { cut = i + 1; junction = path[i]; break; }
     let cells = path.slice(0, cut);
-    const ownerRoad = junction >= 0 ? owner[junction] : -1;
-    const idxRoad = roads.length;
-    for (const c of cells) if (!used[c]) { used[c] = 1; owner[c] = idxRoad; }
-    let startPt = { ...ex.p };
+    for (const c of cells) used[c] = 1;
+    const startPt = { ...ex.p };
     if (ex.idx % n === 0) startPt.x = 0; else if (ex.idx % n === n - 1) startPt.x = mapSize;
     else if (ex.idx < n) startPt.y = 0; else startPt.y = mapSize;
     let endPt: Vec2 | null = null;
-    if (junction >= 0 && ownerRoad >= 0 && smoothed[ownerRoad]) {
+    let host = -1;
+    if (junction >= 0 && smoothed.length) {
       const jp = { x: ((junction % n) + 0.5) * cell, y: (((junction / n) | 0) + 0.5) * cell };
-      endPt = nearestOnPolyline(smoothed[ownerRoad], jp).pt;
-      if (cells.length > 6) cells = cells.slice(0, cells.length - 2); // approach the junction without a kink
-    } else if (junction < 0) endPt = { ...site.center };
+      const nr = nearestRoad(jp);
+      if (nr.idx >= 0 && nr.d < 6 * cell) { host = nr.idx; endPt = nr.pt; if (cells.length > 6) cells = cells.slice(0, cells.length - 2); }
+    }
+    if (host < 0) endPt = { ...site.center };
+    if (cells.length < 2) return;
     const pl = smoothPath(cells, startPt, endPt);
     smoothed.push(pl);
-    rawCells.push(cells);
-    const toCenter = junction < 0;
-    reached.push(toCenter);
+    hostOf.push(host);
+    reached.push(host < 0);
+    markRoad(pl);
     roads.push({ path: pl, kind: 'major', width: ROAD_WIDTH.major });
-    void k;
   });
   // roads that merge into another before the center are secondary, unless they are long
   for (let i = 0; i < roads.length; i++) {
@@ -363,14 +394,16 @@ export function routeRoads(
       .slice(0, Math.ceil(roads.length / 2) - majors).forEach((rd) => { rd.kind = 'major'; rd.width = ROAD_WIDTH.major; });
   }
 
-  // ---- tracks linking neighbouring roads
+  // ---- tracks linking neighbouring roads (kept clear of every other road except at their two ends)
+  const trackHosts: Record<number, [number, number]> = {};
   const order = roads.map((rd, i) => ({ i, a: Math.atan2(rd.path[0].y - site.center.y, rd.path[0].x - site.center.x) })).sort((a, b) => a.a - b.a);
   const nTracks = roads.length >= 2 ? Math.min(TRACKS[opts.size] + (r.chance(0.35) ? 1 : 0), roads.length) : 0;
   const trackRng = r.fork('tracks');
   let made = 0;
-  for (let attempt = 0; attempt < nTracks * 4 && made < nTracks; attempt++) {
+  for (let attempt = 0; attempt < nTracks * 6 && made < nTracks; attempt++) {
     const oi = trackRng.int(0, order.length - 1);
-    const A = roads[order[oi].i], B = roads[order[(oi + 1) % order.length].i];
+    const ai = order[oi].i, bi = order[(oi + 1) % order.length].i;
+    const A = roads[ai], B = roads[bi];
     if (A === B) continue;
     const LA = polylineLength(A.path), LB = polylineLength(B.path);
     const sA = LA * trackRng.range(0.35, 0.8), sB = LB * trackRng.range(0.35, 0.8);
@@ -385,41 +418,74 @@ export function routeRoads(
       const dx = Math.abs((idx % n) - bx), dy = Math.abs(((idx / n) | 0) - by);
       return 0.95 * cell * (Math.max(dx, dy) + (Math.SQRT2 - 1) * Math.min(dx, dy));
     };
-    const cells = astarFewCrossings({ ...baseCfg, hf: octile, allowBridge: false, discount: 1 }, ia, (i) => i === ib, sIds, mainIds);
+    // other roads are obstacles for the track except near its two ends
+    const cmT = Float32Array.from(cm);
+    for (let i = 0; i < N; i++) {
+      if (!usedNear[i]) continue;
+      const cx = ((i % n) + 0.5) * cell, cy = (((i / n) | 0) + 0.5) * cell;
+      if (Math.hypot(cx - pa.x, cy - pa.y) > 50 && Math.hypot(cx - pb.x, cy - pb.y) > 50) cmT[i] *= 25;
+    }
+    const cells = astarFewCrossings({ ...baseCfg, cm: cmT, hf: octile, allowBridge: false, discount: 1 }, ia, (i) => i === ib, sIds, mainIds);
     if (!cells) continue;
     const pl = smoothPath(cells, pa, pb);
     if (polylineLength(pl) > 1.4 * dd) continue;
+    // reject tracks that hug another road
+    let hug = false;
+    const Lt = polylineLength(pl);
+    for (let q = 45; q < Lt - 45 && !hug; q += 6) {
+      const p = pointAtLength(pl, q);
+      for (let k = 0; k < roads.length; k++) if (nearestOnPolyline(roads[k].path, p).d < 16) { hug = true; break; }
+    }
+    if (hug) continue;
+    trackHosts[roads.length] = [ai, bi];
     roads.push({ path: pl, kind: 'track', width: ROAD_WIDTH.track });
+    smoothed.push(pl);
+    hostOf.push(-1);
     made++;
   }
 
-  // ---- bridges: where a road runs over river water
-  const bridges: Bridge[] = [];
+  // ---- drop stubs (short roads nobody joins)
+  const isHost = new Set<number>();
+  hostOf.forEach((h) => { if (h >= 0) isHost.add(h); });
+  Object.values(trackHosts).forEach(([a, b]) => { isHost.add(a); isHost.add(b); });
+  const alive = roads.map((rd, i) => isHost.has(i) || polylineLength(rd.path) >= 55);
+  const remap = new Map<number, number>();
+  alive.forEach((ok, i) => { if (ok) remap.set(i, remap.size); });
+  const keptRoads = roads.filter((_, i) => alive[i]);
+  const keptHost = hostOf.map((h, i) => (alive[i] ? (h >= 0 ? remap.get(h) ?? -1 : -1) : null)).filter((h): h is number => h !== null);
+  const keptTrack: Record<number, [number, number]> = {};
+  Object.entries(trackHosts).forEach(([i, [a, b]]) => { if (alive[+i]) keptTrack[remap.get(+i)!] = [remap.get(a)!, remap.get(b)!]; });
+  roads.length = 0; roads.push(...keptRoads);
+
+  // ---- bridges: perpendicular crossings on dry approaches
+  const roadBridges: { a: Vec2; b: Vec2; width: number }[][] = [];
   for (const rd of roads) {
-    const pl = rd.path;
-    const samples: { p: Vec2; wet: boolean }[] = [];
-    for (let i = 1; i < pl.length; i++) {
-      const a = pl[i - 1], b = pl[i];
-      const L = dist(a, b), m = Math.max(1, Math.ceil(L / 1.5));
-      for (let k = i === 1 ? 0 : 1; k <= m; k++) {
-        const t = k / m;
-        const p = { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
-        const x = Math.min(n - 1, Math.max(0, Math.floor(p.x / cell))), y = Math.min(n - 1, Math.max(0, Math.floor(p.y / cell)));
-        samples.push({ p, wet: water[y * n + x] !== 0 });
-      }
-    }
-    const runs: [number, number][] = [];
-    for (let i = 0; i < samples.length; i++) {
-      if (!samples[i].wet) continue;
-      let j = i;
-      while (j + 1 < samples.length && samples[j + 1].wet) j++;
-      if (runs.length && i - runs[runs.length - 1][1] < 7) runs[runs.length - 1][1] = j; else runs.push([i, j]);
-      i = j;
-    }
-    for (const [i0, j0] of runs) {
-      const ia = Math.max(0, i0 - 2), ib = Math.min(samples.length - 1, j0 + 2);
-      bridges.push({ a: samples[ia].p, b: samples[ib].p, width: rd.width + 1 });
-    }
+    const res = bridgeRoad(rd.path, { rivers: terrain.rivers, wet: isWaterPt, roadWidth: rd.width }, 3.0);
+    rd.path = res.path;
+    roadBridges.push(res.bridges);
   }
+
+  // ---- junctions: proper Y/T joins at a shared vertex
+  const jrng = r.fork('junctions');
+  const dropped = new Set<number>();
+  roads.forEach((rd, i) => {
+    const th = keptTrack[i];
+    const mk = (hostIdx: number) => ({ wet: isWaterPt, hostBridges: roadBridges[hostIdx], ownBridges: roadBridges[i], rng: jrng, strict: !!th });
+    if (keptHost[i] >= 0) { const p = attachEnd(rd.path, false, roads[keptHost[i]].path, mk(keptHost[i])); if (p) rd.path = p; }
+    if (th) {
+      const p1 = attachEnd(rd.path, true, roads[th[0]].path, mk(th[0]));
+      if (!p1) { dropped.add(i); return; }
+      const p2 = attachEnd(p1, false, roads[th[1]].path, mk(th[1]));
+      if (!p2) { dropped.add(i); return; }
+      rd.path = p2;
+    }
+  });
+  if (dropped.size) {
+    const keepRoads = roads.filter((_, i) => !dropped.has(i));
+    const keepBr = roadBridges.filter((_, i) => !dropped.has(i));
+    roads.length = 0; roads.push(...keepRoads);
+    roadBridges.length = 0; roadBridges.push(...keepBr);
+  }
+  const bridges: Bridge[] = roadBridges.flat();
   return { roads, bridges, stats: { roads: roads.length, bridges: bridges.length } };
 }

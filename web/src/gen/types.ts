@@ -5,7 +5,23 @@ import type { NamesLayer } from './names/types';
 
 export type { Vec2, Polygon, Polyline, Grid, Options, NamesLayer };
 
-export interface River { path: Polyline; width: number[]; name?: string; main?: boolean }
+export type RiverClass = 'brook' | 'stream' | 'river' | 'major';
+export interface River {
+  path: Polyline; width: number[]; name?: string; main?: boolean;
+  /** Stable id (main = 0); `host` = id of the river this one flows into (mouth 'river'). */
+  id?: number; host?: number;
+  /** Class from the widest point. Only brooks may have a source inside the map. */
+  cls?: RiverClass;
+  /** Contributing area per vertex (virtual m2, incl. the catchment outside the map) and its external part. */
+  area?: number[]; ext?: number[];
+  /** Fed from a map edge with an external catchment (or through a lake / tributary that is). */
+  edgeFed?: boolean;
+  w0?: number;
+  source?: 'edge' | 'spring' | 'lake';
+  mouth?: 'river' | 'sea' | 'lake' | 'edge';
+  /** Lake component ids (internal): outlet source lake / lake the river ends in. */
+  lakeId?: number; endLake?: number;
+}
 
 export interface TerrainLayer {
   height: Grid;
@@ -43,10 +59,20 @@ export interface SiteFields {
   riverMask: Uint8Array;
   /** 1 on cells where the main river may be bridged (near the crossing). */
   bridgeZone: Uint8Array;
+  /** 1 on river cells wider than a brook (need a bridge; brooks may be forded). */
+  wide?: Uint8Array;
 }
+
+import type { SiteArchetype } from './options';
+export type { SiteArchetype };
 
 export interface SiteLayer {
   center: Vec2; crossing?: Vec2; harbor?: Vec2; citadelSpot?: Vec2;
+  /** Historical site type the core was placed in, and the feature point that justifies it (bridge point, harbor, confluence...). */
+  archetype: SiteArchetype;
+  feature?: Vec2;
+  /** Quality (0..1) of the best site of each archetype the terrain offers (absent = not available). */
+  offers: Partial<Record<SiteArchetype, number>>;
   /** Travel cost (m-equivalents) from the center; Infinity where unreachable. */
   cost: Grid;
   /** Approximate radius (m) of the urban footprint reserved for the town (M3). */

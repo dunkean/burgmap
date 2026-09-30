@@ -8,6 +8,7 @@
 import type { MorphologyParams, MorphRef, Range, Zone } from './morphology';
 import { resolveMorph, blendParams } from './morphology';
 import { CULTURE_LIST } from './cultures';
+import type { SitePrefs } from '../options';
 
 export type EnclosureShape = 'organic' | 'rect' | 'rounded-rect' | 'square' | 'oval' | 'circle' | 'terraces';
 export interface EnclosureSpec {
@@ -86,6 +87,8 @@ export interface Culture {
   village: SettlementForm;
   hamlet: SettlementForm;
   render: RenderHints;
+  /** Site preferences (site/site.ts), used when the `sitePrefs` option is not set. */
+  sitePrefs?: SitePrefs;
 }
 export interface CultureMix { id: string; t: number; mode: 'phases' | 'sectors' | 'blend' }
 export interface PlanOverride {

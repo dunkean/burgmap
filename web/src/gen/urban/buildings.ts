@@ -244,7 +244,12 @@ export interface CourtHint { court: boolean; f: number }
 
 /** Buildings of a plot plus its unbuilt garden (kind 'garden', not a building). */
 export function buildPlot(pl: Plot, cov: number, P: MorphologyParams, rng: Rng, hint?: CourtHint): Bldg[] {
-  const raw = buildPlotRaw(pl, cov, P, rng, hint);
+  let raw = buildPlotRaw(pl, cov, P, rng, hint);
+  // dense zones: an irregular plot whose layout falls far short of the target is built over its whole depth
+  if (cov >= 0.66 && pl.zone !== 'village') {
+    const built = raw.filter((b) => b.kind !== 'garden').reduce((s, b) => s + area(b.poly), 0);
+    if (built < (cov - 0.2) * area(pl.poly)) raw = buildPlotRaw(pl, 0.9, P, rng, { court: false, f: 0.5 });
+  }
   const gardens = raw.filter((b) => b.kind === 'garden');
   return dropOverlaps(normalizeFootprints(raw.filter((b) => b.kind !== 'garden'))).concat(gardens);
 }

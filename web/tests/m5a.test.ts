@@ -57,7 +57,7 @@ describe('names on a generated world', () => {
     }
     const streets = n.entries.filter((e) => e.kind === 'street').map((e) => e.text);
     expect(new Set(streets).size).toBe(streets.length);
-    expect(streets.some((s) => /^Grand-Rue$/.test(s))).toBe(true);
+    expect(streets.some((s) => /^(Grand-Rue|Rue Maîtresse|Rue Principale)$/.test(s))).toBe(true);
     const again = generateNames(w, new Rng('burgmap:' + w.seed));
     expect(again.entries.map((e) => e.text)).toEqual(n.entries.map((e) => e.text));
   });

@@ -5,7 +5,7 @@ import { generate } from '../src/gen/pipeline';
 import { makeOptions, SizeName } from '../src/gen/options';
 
 const [culture, seed, size, focusS] = process.argv.slice(2);
-const w = generate(makeOptions({ seed, size: size as SizeName, culture }));
+const w = generate(makeOptions({ seed, size: size as SizeName, culture, relief: (process.argv[6] ?? 'hills') as never }));
 const u = w.urban!;
 const c = w.site!.center, F = Number(focusS ?? 900);
 const col: Record<string, string> = { radial: '#d00', ring: '#00c', street: '#080', lane: '#999', close: '#f80' };

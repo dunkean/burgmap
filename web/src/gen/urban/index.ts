@@ -386,6 +386,9 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     for (const p of r.plots) { plots.push(p); plotMorph.push(P); parcels.push({ poly: p.poly, use: 'plot', block: bi, front: p.front, zone: b.zone }); }
     for (const g of r.back) parcels.push({ poly: g, use: 'garden', block: bi, zone: b.zone });
   });
+  // blocks that received no plot (no street frontage: along water, behind a wall) stay kitchen gardens / orchards
+  const plotted = new Set(parcels.filter((p) => p.use === 'plot').map((p) => p.block));
+  carved.forEach((b, bi) => { if (b.kind === 'block' && !compoundOf[bi] && !plotted.has(bi)) b.kind = 'green'; });
   const t5 = performance.now();
   stats['ms.plots'] = Math.round(t5 - t4);
   stats['plots'] = plots.length;

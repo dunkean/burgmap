@@ -10,6 +10,25 @@ export type CoastOpt = 'none' | 'N' | 'E' | 'S' | 'W' | 'random';
 export type RiverOpt = 'none' | 'stream' | 'river' | 'major';
 export type StyleName = 'parchment' | 'atlas';
 export type Tri = 'auto' | 'yes' | 'no';
+/** Historical site archetypes the settlement core can be placed in (site/site.ts). */
+export type SiteArchetype = 'bridge' | 'confluence' | 'meander' | 'harbor' | 'estuary' | 'valley' | 'hilltop' | 'plain';
+export const SITE_ARCHETYPES: SiteArchetype[] = ['bridge', 'confluence', 'meander', 'harbor', 'estuary', 'valley', 'hilltop', 'plain'];
+export type SiteType = 'auto' | SiteArchetype;
+/** Cultural / scenario hooks for site selection (filled by the culture layer). All fields optional. */
+export interface SitePrefs {
+  /** Multipliers on the archetype probabilities, e.g. { hilltop: 0, harbor: 3 }. */
+  weights?: Partial<Record<SiteArchetype, number>>;
+  /** Side of the town where open water should lie (screen directions, y down): 'S' = water to the south. */
+  waterSide?: 'N' | 'E' | 'S' | 'W';
+  /** Side of the town where the high ground should lie: 'N' = hills to the north. */
+  hillSide?: 'N' | 'E' | 'S' | 'W';
+  /** 0..1: prefer the foot of a mountain face (dwarven). */
+  mountainFace?: number;
+  /** 0..1: prefer woodland edges (elven). Reserved: land use is generated after the site, so it has no effect yet. */
+  woodland?: number;
+  /** Multiplier on the importance of flat ground (Chinese plains: > 1). */
+  flatness?: number;
+}
 /** Culture preset id (URBAN_MORPHOLOGY.md §3; registry in urban/cultures.ts). */
 export type Culture = string;
 export const CULTURES: Culture[] = CULTURE_IDS;
@@ -23,6 +42,9 @@ export interface Options {
   relief: Relief;
   coast: CoastOpt;
   river: RiverOpt;
+  /** Site archetype: 'auto' picks one from what the terrain offers. */
+  siteType?: SiteType;
+  sitePrefs?: SitePrefs;
   /** Shifts the sea inland (+) or seaward (-), range about [-1, 1]. Only used when a coast exists. */
   seaLevel?: number;
   // Placeholders for later stages
@@ -71,6 +93,7 @@ export const DEFAULTS: Options = {
   relief: 'hills',
   coast: 'none',
   river: 'river',
+  siteType: 'auto',
   walls: 'auto',
   castle: 'auto',
   roads: 0,
@@ -95,6 +118,7 @@ const COASTS: CoastOpt[] = ['none', 'N', 'E', 'S', 'W', 'random'];
 const RIVERS: RiverOpt[] = ['none', 'stream', 'river', 'major'];
 const STYLES: StyleName[] = ['parchment', 'atlas'];
 const TRIS: Tri[] = ['auto', 'yes', 'no'];
+const SITE_TYPES: SiteType[] = ['auto', ...SITE_ARCHETYPES];
 const SIZES = Object.keys(SIZE_PRESETS) as SizeName[];
 
 export function makeOptions(partial: Partial<Options> = {}): Options {
@@ -106,6 +130,7 @@ export function toQuery(o: Options): string {
   p.set('seed', o.seed);
   const keys = ['size', 'relief', 'coast', 'river', 'walls', 'castle', 'roads', 'style', 'culture', 'population'] as const;
   for (const k of keys) if (o[k] !== DEFAULTS[k]) p.set(k, String(o[k]));
+  if (o.siteType && o.siteType !== 'auto') p.set('site', o.siteType);
   if (o.seaLevel !== undefined) p.set('seaLevel', String(o.seaLevel));
   if (o.contours !== DEFAULTS.contours) p.set('contours', o.contours ? '1' : '0');
   if (o.landuse !== DEFAULTS.landuse) p.set('landuse', o.landuse ? '1' : '0');
@@ -134,6 +159,7 @@ export function fromQuery(q: string | URLSearchParams): Options {
   o.relief = oneOf(p.get('relief'), RELIEFS, DEFAULTS.relief);
   o.coast = oneOf(p.get('coast'), COASTS, DEFAULTS.coast);
   o.river = oneOf(p.get('river'), RIVERS, DEFAULTS.river);
+  o.siteType = oneOf(p.get('site'), SITE_TYPES, 'auto');
   o.walls = oneOf(p.get('walls'), TRIS, DEFAULTS.walls);
   o.castle = oneOf(p.get('castle'), TRIS, DEFAULTS.castle);
   o.style = oneOf(p.get('style'), STYLES, DEFAULTS.style);

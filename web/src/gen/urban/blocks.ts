@@ -19,7 +19,7 @@ import { MultiPoly, union, difference, differenceS, intersectionS, mpArea } from
 import { ribbon, disk } from '../geo/offset';
 
 export const SPLIT_DBG: { on: boolean; why: Record<string, number> } = { on: false, why: {} };
-export type PieceKind = 'block' | 'place' | 'market' | 'church' | 'compound';
+export type PieceKind = 'block' | 'place' | 'market' | 'church' | 'compound' | 'green';
 export interface Piece { lp: LPoly; phase: number; zone: Zone; age: number; quarter: number; kind: PieceKind; level: number; morph?: MorphologyParams; compound?: string }
 
 const TMP_LABEL = -100;
