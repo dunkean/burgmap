@@ -72,12 +72,12 @@ function endAngles(X: LPoly, a: Vec2, b: Vec2): number[] {
   return out;
 }
 
-export interface SplitOpts { nucleus: Vec2; gridAngle: number }
+export interface SplitOpts { nucleus: Vec2; gridAngle: number; terrainAngle?: number }
 
 export function splitQuarter(ctx: UrbanCtx, q: Quarter, qi: number, streets: Streets, field: GuidanceField, o: SplitOpts, rng: Rng): Piece[] {
   const P = q.morph ?? ctx.params;
   field.P = P;
-  const gridAngle = P.orientation === 'cardinal' ? 0 : o.gridAngle;
+  const gridAngle = P.orientation === 'cardinal' ? 0 : P.orientation === 'terrain' ? (o.terrainAngle ?? o.gridAngle) : o.gridAngle;
   const lanes = P.laneSpacing[0] > 0 || P.laneSpacing[1] > 0;
   const out: Piece[] = [];
   const root: Piece = { lp: q.lp, phase: q.phase, zone: q.zone, age: q.age, quarter: qi, kind: q.kind === 'market' ? 'market' : 'block', level: 1, morph: P };

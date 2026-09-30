@@ -173,6 +173,25 @@ export function nearestLabel(lp: LPoly, p: Vec2): { d: number; label: number; ed
   return best;
 }
 
+/** True when polygon Q lies inside polygon P: every vertex inside or on it (1 cm), no edge properly crossing it. */
+export function polyInside(P: Vec2[], Q: Vec2[]): boolean {
+  for (const q of Q) if (!pointInRing(P, q) && distToSeg(q, P[0], P[0]) >= 0 && !onRing(P, q, 0.01)) return false;
+  for (let i = 0; i < Q.length; i++) {
+    const a = Q[i], b = Q[(i + 1) % Q.length];
+    if (segCrossesRing(P, a, b, 1e-4)) {
+      const m = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      if (!pointInRing(P, m) && !onRing(P, m, 0.01)) return false;
+      // a crossing with both halves inside can only touch; test quarter points too
+      for (const t of [0.25, 0.75]) { const q = { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }; if (!pointInRing(P, q) && !onRing(P, q, 0.01)) return false; }
+    }
+  }
+  return true;
+}
+function onRing(P: Vec2[], q: Vec2, tol: number): boolean {
+  for (let i = 0; i < P.length; i++) if (distToSeg(q, P[i], P[(i + 1) % P.length]) < tol) return true;
+  return false;
+}
+
 /** Sutherland–Hodgman clip of a CONVEX polygon by the half-plane n·(x − p) ≥ 0. */
 export function clipHalfPlaneConvex(poly: Polygon, p: Vec2, n: Vec2): Polygon {
   const out: Vec2[] = [];

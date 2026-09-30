@@ -16,6 +16,7 @@ import { disk } from '../geo/offset';
 import { churchFootprint } from './landmarks';
 import type { ArchBldg } from './bops';
 import { dropOverlaps } from './buildings';
+import { polyInside } from '../geo/split';
 import type { UrbanLine } from '../types';
 
 export interface CompoundOut {
@@ -469,11 +470,29 @@ function palace(lot: Polygon, cx: CompoundCtx): CompoundOut {
   return out;
 }
 
+/** Mine mouth: an adit (half disk) cut into the rock with a spoil heap and a headframe shed. */
+function mine(lot: Polygon, cx: CompoundCtx): CompoundOut {
+  const out = emptyOut(lot, 'compound:mine');
+  const f = lotFrame(lot, cx.angle);
+  const s = Math.min(9, f.hu - 1.5, f.hv - 1.5);
+  if (s < 4) return out;
+  const n = 10;
+  const adit = orientPos([...Array.from({ length: n + 1 }, (_, k) => {
+    const a = (k / n) * Math.PI;
+    return { x: f.c.x + Math.cos(cx.angle + a) * s * 0.6, y: f.c.y + Math.sin(cx.angle + a) * s * 0.6 };
+  })]);
+  out.buildings.push({ poly: adit, kind: 'landmark', parcel: 0, arch: 'mine-mouth', roof: 'none', material: 'rock', storeys: 1 });
+  const sh = rectAt(f.c, cx.angle, -s, -s * 0.3, -s * 0.9, -s * 0.2);
+  out.buildings.push({ poly: sh, kind: 'landmark', parcel: 0, arch: 'headframe-shed', roof: 'gable', material: 'timber', storeys: 1 });
+  out.landmarks.push({ kind: 'spoil-heap', poly: rectAt(f.c, cx.angle, s * 0.2, s, -s * 0.95, -s * 0.25) });
+  return out;
+}
+
 export const COMPOUND_BUILDERS: Record<string, (lot: Polygon, cx: CompoundCtx) => CompoundOut> = {
   church, 'great-mosque': greatMosque, kasbah, hammam, 'drum-tower': drumTower,
   yamen: (l, c) => axialCompound(l, c, 'yamen'), 'chinese-temple': (l, c) => axialCompound(l, c, 'chinese-temple'),
   'walled-market': walledMarket, castle: jpCastle, 'jp-temple': jpTemple, 'hindu-temple': hinduTemple, tank,
-  basilica, 'roman-temple': romanTemple, grove, 'dwarf-gate': dwarfGate, forge, palace,
+  basilica, 'roman-temple': romanTemple, grove, 'dwarf-gate': dwarfGate, forge, palace, mine,
 };
 
 /** Builds a compound; unknown kinds leave the lot as one parcel of that use. */
@@ -484,7 +503,7 @@ export function buildCompound(kind: string, lot: Polygon, cx: CompoundCtx): Comp
   // safety: keep only footprints inside their parcel
   out.buildings = out.buildings.filter((bd) => {
     const par = out.parcels[bd.parcel]?.poly;
-    return par && bd.poly.every((p) => pointInRing(par, p) || distToRing(par, p) < 0.01) && area(bd.poly) > 2;
+    return par && polyInside(par, bd.poly) && area(bd.poly) > 2;
   });
   // no overlapping footprints (small lots squeeze nested layouts)
   out.buildings = dropOverlaps(out.buildings) as typeof out.buildings;
@@ -492,7 +511,7 @@ export function buildCompound(kind: string, lot: Polygon, cx: CompoundCtx): Comp
 }
 
 // ---------------------------------------------------------------- claiming
-export interface ClaimBlock { poly: Polygon; kind: string; phase: number; zone: string; quarter: number }
+export interface ClaimBlock { poly: Polygon; kind: string; phase: number; zone: string; quarter: number; height?: number }
 
 /**
  * Picks a block for a landmark: area within range (scored by fit), then by the placement rule (next to the
@@ -520,6 +539,7 @@ export function pickBlock(
       case 'edge': { const e = ctx.edgeDist(c); if (e > Math.max(90, R * 0.25)) return; s += 1.5 - e / 60 + 0.4 * b.phase; break; }
       case 'axis-north': { if (c.y > nucleus.y - 20) return; s += 2 - Math.abs(c.x - nucleus.x) / 40 - d / Math.max(150, R * 0.5); break; }
       case 'east': case 'west': { const sg = place === 'east' ? 1 : -1; if ((c.x - nucleus.x) * sg < R * 0.15) return; s += 1.5 - Math.abs(c.y - nucleus.y) / 80 - Math.abs(d - R * 0.45) / 150; break; }
+      case 'high': { s += (b.height ?? 0) / 4; break; }
       case 'gate': { const g = Math.min(...ctx.gates.map((q) => dist(q, c)), 1e9); if (g > 200) return; s += 1.5 - g / 80; break; }
       default: break;
     }

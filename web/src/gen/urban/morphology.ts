@@ -32,7 +32,7 @@ export interface MorphologyParams {
   plotOp: PlotOpId;
   buildingOp: BuildingOpId;
   /** Lattice orientation: along the main road, or true north. */
-  orientation: 'road' | 'cardinal';
+  orientation: 'road' | 'cardinal' | 'terrain';
   /** Second lattice (lanes inside wards, e.g. hutongs) spacing per family (0 = none) … */
   laneSpacing: [number, number];
   /** … used below this piece area (m²); larger pieces use the coarse lattice (ward streets). */
@@ -52,6 +52,8 @@ export interface MorphologyParams {
   extraRadials: boolean;
   /** rings(square): concentric streets offset from the nucleus every `ringSpacing` m (0 = none). */
   ringSpacing: number;
+  /** Regional roads stop at the gates (the interior is served by the town's own streets). */
+  gatesOnly?: boolean;
   /** Architecture of the ordinary buildings. */
   arch: ArchSpec;
   /**

@@ -24,12 +24,14 @@ export class GuidanceField {
 
   /** Morphology of the quarter being split (defaults to the context's). */
   P: MorphologyParams | null = null;
+  /** Contour direction at the site (terrain-oriented lattices: terraces). */
+  terrainAngle = 0;
 
   /** Base angle θ of the cross-field at p (the field is defined modulo 90°). */
   angle(p: Vec2): number {
     const P = this.P ?? this.ctx.params;
     const nz = ((P.fieldNoise * Math.PI) / 180) * this.noise.fbm(p.x / P.fieldWavelength, p.y / P.fieldWavelength, 2);
-    if (P.streetOp === 'grid') return (P.orientation === 'cardinal' ? 0 : this.gridAngle) + nz + P.gridSkew * this.noise.fbm(p.x / 600 + 9, p.y / 600 - 3, 2);
+    if (P.streetOp === 'grid') return (P.orientation === 'cardinal' ? 0 : P.orientation === 'terrain' ? this.terrainAngle : this.gridAngle) + nz + P.gridSkew * this.noise.fbm(p.x / 600 + 9, p.y / 600 - 3, 2);
     const dx = p.x - this.nucleus.x, dy = p.y - this.nucleus.y;
     const r = Math.hypot(dx, dy);
     // spiral twist: both families rotate with the distance angle (log-spiral streets)

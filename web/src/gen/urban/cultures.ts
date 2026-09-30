@@ -94,8 +94,8 @@ M['elven'] = morph('elven', EO, {
 });
 
 M['dwarven'] = morph('dwarven', MORPHOLOGIES['bastide'], {
-  streets: ['switchbacks', 'grid'], closeOp: 'none', plotOp: 'burgage', buildingOp: 'hall', orientation: 'road',
-  gridSpacing: [64, 1000], gridSkew: 0, blockSize: { core: [1200, 3500], middle: [1200, 3500], edge: [1200, 3500], faubourg: [3000, 9000] },
+  streets: ['switchbacks', 'grid'], closeOp: 'none', plotOp: 'burgage', buildingOp: 'hall', orientation: 'terrain', gatesOnly: true,
+  gridSpacing: [46, 150], gridSkew: 0, fieldNoise: 0, blockSize: { core: [1200, 3500], middle: [1200, 3500], edge: [1200, 3500], faubourg: [3000, 9000] },
   minBlock: 400, minWidth: 14, widthByRank: [9, 7, 4, 3, 2.5],
   frontage: { core: [14, 24], middle: [14, 24], edge: [14, 24] }, plotDepth: { core: [16, 30], middle: [16, 30], edge: [16, 30] },
   coverage: { core: [0.78, 0.88], middle: [0.75, 0.85], edge: [0.7, 0.8] }, footprintConformity: { core: 0, middle: 0, edge: 0 }, cornerFill: { core: 0, middle: 0, edge: 0 },
@@ -244,5 +244,24 @@ export const CULTURE_LIST: Culture[] = [
       nucleus: { kind: 'grove', shape: 'circle', area: [1200, 2500], compound: true, ring: 2.6 },
     },
     render: { towerShape: 'round', canopy: true },
+  },
+  {
+    id: 'dwarven', label: 'Dwarven hold', fantasy: true,
+    nucleus: { kind: 'none', shape: 'rect', area: [0, 0], compound: false, ring: 8, orientation: 'terrain' },
+    core: { morphology: 'dwarven', enclosure: { shape: 'rect', wall: 'wall', fossil: 'none', towers: 'square', orientation: 'terrain', aspect: [1.6, 2.2] } },
+    ring: null,
+    phaseCount: [[0, 1]],
+    faubourg: 'dwarven', faubShare: [0.05, 0.05],
+    landmarks: [
+      { role: 'power', kind: 'dwarf-gate', place: 'high', area: [900, 6000], minPop: 300 },
+      { role: 'extra', kind: 'mine', place: 'high', area: [300, 3000], minPop: 300, count: 2 },
+      { role: 'civic', kind: 'forge', place: 'any', area: [400, 3000], minPop: 300, count: 3 },
+    ],
+    village: {
+      form: 'walled', morphology: 'dwarven', enclosure: { shape: 'rect', wall: 'wall', fossil: 'none', towers: 'square', orientation: 'terrain' },
+      nucleus: { kind: 'none', shape: 'rect', area: [0, 0], compound: false, ring: 6 },
+    },
+    hamlet: { form: 'walled', morphology: 'dwarven', enclosure: { shape: 'rect', wall: 'none', fossil: 'none', orientation: 'terrain' } },
+    render: { towerShape: 'square', terraces: true },
   },
 ];

@@ -197,6 +197,10 @@ export interface PrimaryInput {
   spiral?: { arms: number; turns: number };
   /** rings(square): concentric streets around the nucleus every `spacing` m. */
   nucleusRings?: { spacing: number; width: number };
+  /** switchbacks: a zig-zag ramp climbing the terraces (legs along the contour `angle`, one leg per `pitch`). */
+  switchbacks?: { angle: number; pitch: number; width: number };
+  /** Roads stop at the enclosure (gates only). */
+  gatesOnly?: boolean;
 }
 
 export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets, rng: Rng): Primary {
@@ -215,6 +219,18 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
       if (hull.length >= 3 && pointInRing(hull, sp[sp.length - 1])) sp = cutAtPolygon(sp, hull);
       if (sp.length < 2 || polylineLength(sp) < 15) continue;
     } else if (inp.gridCore ? inp.gridCore.length : P.streetOp === 'grid') sp = gridRadial(sp, inp.gridCore ?? inp.enclosure, ctx.center, inp.mainAngle) ?? sp;
+    if (inp.gatesOnly) {
+      let big = inp.enclosure[0];
+      for (const ph of inp.enclosure) if (area(ph.outer) > area(big.outer)) big = ph;
+      if (big && pointInRing(big.outer, sp[sp.length - 1])) {
+        // the road enters through the gate and stops 12 m inside (a gate forecourt)
+        const cut = cutAtPolygon(sp, big.outer);
+        const e = cut[cut.length - 1], q = cut[cut.length - 2] ?? e;
+        const l = dist(e, q) || 1;
+        sp = cut.concat([{ x: e.x + ((e.x - q.x) / l) * 12, y: e.y + ((e.y - q.y) / l) * 12 }]);
+      }
+      if (sp.length < 2 || polylineLength(sp) < 15) continue;
+    }
     if (inp.spineAmp) sp = wiggle(sp, inp.spineAmp, rng.fork('spine:' + rawRadials.length));
     rawRadials.push({ pl: sp, major: rd.major });
   }
@@ -382,6 +398,45 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
           const pl = pl0;
           const w = P.widthByRank[1] * P.widthScale * 0.95;
           streets.add(pl, jitterWidths(pl, w, P.widthJitter, () => wr.float()), 1, 'ring', k + 1);
+        }
+      }
+    }
+  }
+  // ---- switchback ramp (dwarven): from the lowest to the highest point of the enclosure, legs along the contour
+  if (inp.switchbacks) {
+    const sw = inp.switchbacks;
+    const u = { x: Math.cos(sw.angle), y: Math.sin(sw.angle) }, v = { x: -u.y, y: u.x };
+    let big = inp.enclosure[0];
+    for (const ph of inp.enclosure) if (area(ph.outer) > area(big.outer)) big = ph;
+    if (big) {
+      let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity;
+      for (const q of big.outer) {
+        const pu = (q.x - ctx.center.x) * u.x + (q.y - ctx.center.y) * u.y, pv = (q.x - ctx.center.x) * v.x + (q.y - ctx.center.y) * v.y;
+        u0 = Math.min(u0, pu); u1 = Math.max(u1, pu); v0 = Math.min(v0, pv); v1 = Math.max(v1, pv);
+      }
+      const at = (pu: number, pv: number): Vec2 => ({ x: ctx.center.x + u.x * pu + v.x * pv, y: ctx.center.y + u.y * pu + v.y * pv });
+      const uA = u0 + (u1 - u0) * 0.22, uB = u1 - (u1 - u0) * 0.22;
+      // climb from the lower side (v sign by the terrain) toward the upper side
+      const hLow = ctx.heightAt(at(0, v0 + 20)), hHigh = ctx.heightAt(at(0, v1 - 20));
+      const dir = hLow <= hHigh ? 1 : -1;
+      const vs = dir > 0 ? v0 : v1, ve = dir > 0 ? v1 : v0;
+      const zig: Vec2[] = [];
+      // start at the lowest road end (the lower gate), if any
+      const ends = radialLines.map((pl) => pl[pl.length - 1]).sort((a2, b2) => ctx.heightAt(a2) - ctx.heightAt(b2));
+      if (ends.length) zig.push(ends[0]);
+      let side = 0;
+      for (let k = 0; ; k++) {
+        const pv = vs + dir * sw.pitch * (k + 0.5);
+        if ((ve - pv) * dir < sw.pitch * 0.3) break;
+        zig.push(at(side ? uB : uA, pv)); zig.push(at(side ? uA : uB, pv)); side = 1 - side;
+      }
+      // keep the part inside the enclosure (the first long inside piece)
+      if (zig.length >= 3) {
+        const pcs = insidePieces(big.outer, zig).filter((p2) => !p2.pts.some((q) => ctx.isWater(q)));
+        const pc = pcs.sort((a2, b2) => polylineLength(b2.pts) - polylineLength(a2.pts))[0];
+        if (pc && polylineLength(pc.pts) > 80) {
+          const id = streets.add(pc.pts, sw.width, 1, 'radial', 1);
+          radials.push(id); radialLines.push(pc.pts);
         }
       }
     }

@@ -60,7 +60,24 @@ export function mainRoadAngle(world: World): number {
   return best;
 }
 
-const orientAngle = (o: EnclosureSpec['orientation'] | NucleusSpec['orientation'], main: number) => (o === 'cardinal' ? 0 : o === 'qibla' ? QIBLA : main);
+let TERRAIN_ANGLE = 0;
+const orientAngle = (o: EnclosureSpec['orientation'] | NucleusSpec['orientation'], main: number) => (o === 'cardinal' ? 0 : o === 'qibla' ? QIBLA : o === 'terrain' ? TERRAIN_ANGLE : main);
+
+/** Contour direction (radians) at p: perpendicular to the gradient of the height field smoothed over ~120 m. */
+export function contourAngle(world: World, p: Vec2): number {
+  const g = world.terrain.height;
+  let gx = 0, gy = 0;
+  const R = 120;
+  for (let k = 0; k < 12; k++) {
+    const a = (k / 12) * 2 * Math.PI, dx = Math.cos(a), dy = Math.sin(a);
+    const q = { x: p.x + dx * R, y: p.y + dy * R };
+    const ix = Math.min(g.w - 1, Math.max(0, Math.floor(q.x / g.cell))), iy = Math.min(g.h - 1, Math.max(0, Math.floor(q.y / g.cell)));
+    const h = g.data[iy * g.w + ix];
+    gx += dx * h; gy += dy * h;
+  }
+  if (Math.hypot(gx, gy) < 1e-6) return 0;
+  return Math.atan2(gy, gx) + Math.PI / 2;
+}
 
 export function generateUrban(world: World, root: Rng): UrbanResult {
   const t0 = performance.now();
@@ -90,6 +107,8 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   const estArea = (pop / params.density.middle) * 1e4;
   const ctx = makeCtx(world, params, 2.6 * Math.sqrt(estArea / Math.PI) + 450);
   const mainAngle = mainRoadAngle(world);
+  TERRAIN_ANGLE = contourAngle(world, world.site!.center);
+  const terrainAngle = TERRAIN_ANGLE;
   const streets = new Streets();
 
   let eplan: EnclosurePlan | null = null;
@@ -186,6 +205,8 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     kinks: allStreetOps.has('defensiveKinks') ? Math.max(...phaseMorphs.map((m) => m.kinks)) : 0,
     spiral: allStreetOps.has('spiral') ? { arms: pop > 6000 ? 5 : 4, turns: 0.32 } : undefined,
     nucleusRings: coreM.ringSpacing > 0 ? { spacing: coreM.ringSpacing, width: coreM.widthByRank[1] * coreM.widthScale } : undefined,
+    switchbacks: allStreetOps.has('switchbacks') ? { angle: terrainAngle, pitch: coreM.gridSpacing[0] * 2, width: coreM.widthByRank[0] * coreM.widthScale } : undefined,
+    gatesOnly: !!coreM.gatesOnly,
   }, streets, rng.fork('primary'));
   const t2 = performance.now();
   stats['ms.phases'] = Math.round(t1 - t0);
@@ -216,6 +237,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   // ---- level 2: blocks
   const nucleus = prim.market ? polygonCentroid(prim.market) : ctx.center;
   const field = new GuidanceField(ctx, nucleus, streets, mainAngle, rng.fork('field'));
+  field.terrainAngle = terrainAngle;
   const pieces: Piece[][] = prim.quarters.map(() => []);
   const done = prim.quarters.map(() => false);
   for (let round = 0; round < 6; round++) {
@@ -223,7 +245,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     prim.quarters.forEach((q, qi) => {
       if (done[qi]) return;
       if (q.kind !== 'market' && !q.lp.lab.some((l) => l >= 0 && streets.connected.has(l))) return;
-      pieces[qi] = splitQuarter(ctx, q, qi, streets, field, { nucleus, gridAngle: mainAngle }, rng.fork('q:' + qi));
+      pieces[qi] = splitQuarter(ctx, q, qi, streets, field, { nucleus, gridAngle: mainAngle, terrainAngle }, rng.fork('q:' + qi));
       done[qi] = true;
       progress = true;
     });
@@ -259,7 +281,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
       for (let k = 0; k < lp.pts.length; k++) if (lp.lab[k] === prim.marketStreet && prim.marketStreet >= 0) front += dist(lp.pts[k], lp.pts[(k + 1) % lp.pts.length]);
       return front;
     };
-    const cb: ClaimBlock[] = allPieces.map((pc) => ({ poly: pc.lp.pts, kind: pc.kind, phase: pc.phase, zone: pc.zone, quarter: pc.quarter }));
+    const cb: ClaimBlock[] = allPieces.map((pc) => ({ poly: pc.lp.pts, kind: pc.kind, phase: pc.phase, zone: pc.zone, quarter: pc.quarter, height: ctx.heightAt(interiorPoint(pc.lp.pts)) }));
     for (const lm of plan.landmarks) {
       if (pop < lm.minPop) continue;
       const count = lm.count ?? 1;
@@ -335,7 +357,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     else landmarks.push({ kind: nucleusKind === 'forum' ? 'forum' : archetype === 'town' ? 'market' : 'green', poly: prim.market });
   }
   // landmark lots claimed at level 2 (see above) are filled here
-  carved.forEach((b, bi) => { if (b.compound && !compoundOf[bi]) claim(bi, b.compound, b.compound === 'great-mosque' ? QIBLA : blockMorph[bi].orientation === 'cardinal' ? 0 : mainAngle); });
+  carved.forEach((b, bi) => { if (b.compound && !compoundOf[bi]) claim(bi, b.compound, b.compound === 'great-mosque' ? QIBLA : blockMorph[bi].orientation === 'cardinal' ? 0 : blockMorph[bi].orientation === 'terrain' ? terrainAngle : mainAngle); });
 
   // ---- level 3: plots (by the block's plot operator)
   const plots: Plot[] = [];
@@ -413,6 +435,35 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     // one moat around the whole (planned, convex) enclosure
     const off = outsetConvex(convexHull(prim.walls.flatMap((w) => w.ring)), 12);
     if (off.length >= 3) lines.push({ kind: 'moat', path: off, closed: true, width: 9 });
+  }
+  // ---- terraces (dwarven): retaining walls along the contour-parallel streets, hachured on the downhill side
+  if (hints.terraces) {
+    const ca = Math.cos(terrainAngle), sa = Math.sin(terrainAngle);
+    // downhill normal: the side where the height decreases
+    const probe = (p: Vec2, s2: number) => ctx.heightAt({ x: p.x - sa * s2, y: p.y + ca * s2 });
+    for (const st of streets.list) {
+      if (!st.ribbon || st.rank > 3 || st.role === 'close' || st.path.length < 2) continue;
+      const a = st.path[0], b = st.path[st.path.length - 1];
+      const L = dist(a, b);
+      if (L < 20 || Math.abs(((b.x - a.x) * ca + (b.y - a.y) * sa) / L) < 0.94) continue;
+      const m = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      const down = probe(m, 8) < probe(m, -8) ? 1 : -1;
+      const nx = -sa * down, ny = ca * down;
+      const hw = st.widths[0] / 2;
+      // the retaining wall on the downhill edge of the street, with hachures down the face
+      const edge = st.path.map((q) => ({ x: q.x + nx * (hw - 0.4), y: q.y + ny * (hw - 0.4) }));
+      lines.push({ kind: 'terrace', path: edge, width: 1.6 });
+      const cum = [0];
+      for (let i = 1; i < edge.length; i++) cum.push(cum[i - 1] + dist(edge[i - 1], edge[i]));
+      for (let sPos = 1.5; sPos < cum[cum.length - 1]; sPos += 2.6) {
+        let i = 1;
+        while (i < edge.length - 1 && cum[i] < sPos) i++;
+        const t = (sPos - cum[i - 1]) / (cum[i] - cum[i - 1] || 1);
+        const q = { x: edge[i - 1].x + (edge[i].x - edge[i - 1].x) * t, y: edge[i - 1].y + (edge[i].y - edge[i - 1].y) * t };
+        const len = sPos % 4.4 < 2.2 ? 3.2 : 1.8;
+        lines.push({ kind: 'hachure', path: [q, { x: q.x - nx * len, y: q.y - ny * len }], width: 0.3 });
+      }
+    }
   }
   // ---- elven canopy: trees over the town, clear of the houses
   const trees: UrbanTree[] = [];

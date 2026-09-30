@@ -175,7 +175,8 @@ function cultureOverlay(ub: NonNullable<World['urban']>, pal: Palette, lw: (m: n
     const d = ds.join('');
     if (k === 'hedge') s += `<path d="${d}" fill="none" stroke="${pal.treeInk ?? '#4a6a3a'}" stroke-width="${lw(2.6, 0.8)}" stroke-opacity="0.8" stroke-dasharray="3 1.5"/>`;
     else if (k === 'ghat-steps') s += `<path d="${d}" fill="none" stroke="${U.plotLine}" stroke-width="${lw(0.3, 0.12)}"/>`;
-    else if (k === 'terrace') s += `<path d="${d}" fill="none" stroke="${U.wall}" stroke-width="${lw(1.2, 0.5)}"/>`;
+    else if (k === 'terrace') s += `<path d="${d}" fill="none" stroke="${U.wall}" stroke-width="${lw(1.6, 0.8)}"/>`;
+    else if (k === 'hachure') s += `<path d="${d}" fill="none" stroke="${U.wall}" stroke-width="${lw(0.55, 0.3)}" stroke-opacity="0.85"/>`;
     else s += `<path class="u-line-${k}" d="${d}" fill="none" stroke="${U.wall}" stroke-width="${lw(WALL_LINES[k] ?? 1, 0.4)}" stroke-linejoin="miter" stroke-linecap="square"/>`;
   }
   const trees = ub.trees ?? [];

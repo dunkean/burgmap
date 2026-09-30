@@ -20,7 +20,7 @@ import type { MorphologyParams, ArchSpec } from './morphology';
 import type { Plot } from './plots';
 import { buildPlot, clipPlot, courtyardRing, rectify, shapeOf, dropOverlaps, MIN_BW, type Bldg, type HalfPlane, type CourtHint } from './buildings';
 import { area, inscribed, distToRing, orientPos, cleanRing, pointInRing } from '../geo/poly';
-import { isConvex } from '../geo/split';
+import { isConvex, polyInside } from '../geo/split';
 import { disk } from '../geo/offset';
 
 export interface ArchBldg extends Bldg {
@@ -245,7 +245,7 @@ function hall(pl: Plot, P: MorphologyParams, rng: Rng): ArchBldg[] {
     const c = Math.min(u1 - u0, d1 - d0) * 0.22;
     const at = (u: number, d: number): Vec2 => ({ x: f.fa.x + f.t.x * u + f.n.x * d, y: f.fa.y + f.t.y * u + f.n.y * d });
     const oct = orientPos([at(u0 + c, d0), at(u1 - c, d0), at(u1, d0 + c), at(u1, d1 - c), at(u1 - c, d1), at(u0 + c, d1), at(u0, d1 - c), at(u0, d0 + c)]);
-    if (oct.every((q) => pointInRing(pl.poly, q) || distToRing(pl.poly, q) < 0.01)) poly = oct;
+    if (polyInside(pl.poly, oct)) poly = oct;
   }
   return [{ poly, kind: 'house', arch: poly.length === 8 ? 'octagonal-hall' : P.arch.typology, roof: P.arch.roof, material: P.arch.material, storeys: rng.int(1, 2), orientation: Math.atan2(f.n.y, f.n.x) }];
 }

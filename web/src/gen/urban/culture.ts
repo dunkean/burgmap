@@ -20,7 +20,7 @@ export interface EnclosureSpec {
   moat?: boolean;
   /** Gates where the roads cross the line, or centred on the four sides (roads are led to them). */
   gates?: 'roads' | 'cardinal';
-  orientation?: 'road' | 'cardinal';
+  orientation?: 'road' | 'cardinal' | 'terrain';
   aspect?: Range;
 }
 export interface SectorSpec { morphology: MorphRef; share: number; culture?: string }
@@ -35,7 +35,7 @@ export interface NucleusSpec {
   compound: boolean;
   /** Width of the street around it (m). */
   ring: number;
-  orientation?: 'road' | 'cardinal' | 'qibla';
+  orientation?: 'road' | 'cardinal' | 'qibla' | 'terrain';
 }
 export type LandmarkPlace = 'adjacent-nucleus' | 'near-nucleus' | 'edge' | 'axis-north' | 'east' | 'west' | 'any' | 'gate' | 'high';
 export interface LandmarkSpec {
