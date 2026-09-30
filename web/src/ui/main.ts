@@ -12,11 +12,24 @@ import { ControlRegistry, fillSelect, selectControl, checkControl, numberControl
 import { readHeightmap } from './heightmap';
 import { NAME_FAMILIES } from '../gen/names/types';
 import { FONT_STACKS, fontString } from '../render/labelStyles';
+import { STYLE_LIST, isMapStyle, MapStyle } from '../render/styles';
+import type { Scene } from '../render/scene';
+import { buildScene } from '../render/scene';
+import { saveFile } from './download';
+import { worldToJson } from './exportWorld';
 import type { ImportedHeight } from '../gen/terrain/import';
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 
-let opts: Options = fromQuery(location.search);
+/** The URL style can be any MapStyle; gen/options.ts only whitelists the first two, so read it here. */
+function parseOptions(q: string): Options {
+  const o = fromQuery(q);
+  const v = new URLSearchParams(q.startsWith('?') ? q.slice(1) : q).get('style');
+  return isMapStyle(v) ? { ...o, style: v as Options['style'] } : o;
+}
+const mapStyle = (): MapStyle => opts.style as MapStyle;
+
+let opts: Options = parseOptions(location.search);
 /** The imported image of this session (kept out of the URL; the link only carries a `hm=custom` marker). */
 let importedMem: ImportedHeight | null = null;
 /** Set when the page was opened from a link that used a custom heightmap we do not have. */
@@ -45,7 +58,7 @@ fillSelect(reliefEl, [['flat', 'Flat'], ['hills', 'Rolling hills'], ['valley', '
 fillSelect(coastEl, [['none', 'None'], ['random', 'Random side'], ['N', 'North'], ['E', 'East'], ['S', 'South'], ['W', 'West']], opts.coast);
 fillSelect(riverEl, [['none', 'None'], ['stream', 'Stream'], ['river', 'River'], ['major', 'Major river']], opts.river);
 fillSelect(roadsEl, [['0', `Auto (${DEFAULT_ROADS[opts.size]})`], ...[1, 2, 3, 4, 5, 6, 7, 8].map((k) => [String(k), String(k)] as [string, string])], String(opts.roads));
-fillSelect(styleEl, [['parchment', 'Parchment'], ['atlas', 'Atlas']], opts.style);
+fillSelect(styleEl, STYLE_LIST.map((s) => [s.id, s.label] as [string, string]), opts.style);
 fillSelect(cultureEl, [['european-organic', 'Medieval organic'], ['bastide', 'Bastide (planned grid)']], opts.culture);
 fillSelect(languageEl, [['auto', 'Automatic (from the plan)'], ...NAME_FAMILIES.map((f) => [f, f[0].toUpperCase() + f.slice(1)] as [string, string])], opts.language ?? 'auto');
 
@@ -120,6 +133,7 @@ let lastGenKey = '';
 // CANVAS-VIEWER (begin show)
 let currentWorld: World | null = null;
 let currentRenderer: CanvasRenderer | null = null;
+let sceneCache: { world: World; contours: boolean; scene: Scene } | null = null;
 
 const measureCtx = document.createElement('canvas').getContext('2d');
 const svgMeasure = (t: string, s: number, st: Parameters<typeof fontString>[0]): number => {
@@ -128,14 +142,18 @@ const svgMeasure = (t: string, s: number, st: Parameters<typeof fontString>[0]):
   return measureCtx.measureText(t).width;
 };
 const currentSvg = (): string => (currentWorld
-  ? renderSvg(currentWorld, { style: opts.style, contours: opts.contours, landuse: opts.landuse, labels: opts.labels !== false, legend: !!opts.legend, measure: svgMeasure })
+  ? renderSvg(currentWorld, { style: mapStyle(), contours: opts.contours, landuse: opts.landuse, labels: opts.labels !== false, legend: !!opts.legend, measure: svgMeasure })
   : '');
 
 /** (Re)build the canvas renderer from the current world and the display options. */
 function rerender(keepView = true): void {
   if (!currentWorld) return;
   const w: World = { ...currentWorld, options: { ...currentWorld.options, style: opts.style, contours: opts.contours, landuse: opts.landuse, labels: opts.labels, legend: opts.legend } };
-  currentRenderer = createCanvasRenderer(canvasEl, w, opts.style);
+  // a style switch only re-renders: the scene (flattened world) is reused unless the contour layer changes
+  if (!sceneCache || sceneCache.world !== currentWorld || sceneCache.contours !== !!opts.contours) {
+    sceneCache = { world: currentWorld, contours: !!opts.contours, scene: buildScene(w) };
+  }
+  currentRenderer = createCanvasRenderer(canvasEl, w, mapStyle(), { scene: sceneCache.scene });
   viewer.setRenderer(currentRenderer, w.mapSize, keepView);
 }
 
@@ -231,7 +249,7 @@ registry.onChange((c, kind) => {
 });
 
 window.addEventListener('popstate', () => {
-  const parsed = fromQuery(location.search);
+  const parsed = parseOptions(location.search);
   missingCustom = wantsCustomHeight(location.search) && !importedMem;
   opts = { ...parsed, importedHeight: wantsCustomHeight(location.search) ? importedMem ?? undefined : undefined };
   registry.writeAll(opts);
@@ -296,31 +314,45 @@ map.addEventListener('pointerdown', () => $('app').classList.remove('open'));
 // CANVAS-VIEWER (end viewer)
 
 // ---------- export ----------
-function download(blob: Blob, name: string): void {
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = name;
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
-}
 const fname = () => `burgmap-${opts.seed}-${opts.size}`;
+/** Save through the Artifact viewer's downloads capability when present, else a plain download. */
+async function exportFile(name: string, data: Blob | string, mime: string): Promise<void> {
+  try {
+    const r = await saveFile(name, data, mime);
+    if (r === 'saved' || r === 'fallback') statusEl.textContent = `Exported ${name}`;
+  } catch (e) {
+    statusEl.textContent = 'Export failed: ' + (e as Error).message;
+  }
+}
 $('exportSvg').addEventListener('click', () => {
-  if (currentWorld) download(new Blob([currentSvg()], { type: 'image/svg+xml' }), fname() + '.svg');
+  if (currentWorld) void exportFile(fname() + '.svg', new Blob([currentSvg()], { type: 'image/svg+xml' }), 'image/svg+xml');
+});
+$('exportJson').addEventListener('click', () => {
+  if (currentWorld) void exportFile(fname() + '.json', new Blob([worldToJson(currentWorld)], { type: 'application/json' }), 'application/json');
 });
 $('exportPng').addEventListener('click', () => {
   if (!currentWorld) return;
-  const img = new Image();
-  const url = URL.createObjectURL(new Blob([currentSvg()], { type: 'image/svg+xml' }));
-  img.onload = () => {
-    const S = 3000;
-    const c = document.createElement('canvas');
-    c.width = S; c.height = S;
-    c.getContext('2d')!.drawImage(img, 0, 0, S, S);
-    URL.revokeObjectURL(url);
-    c.toBlob((b) => { if (b) download(b, fname() + '.png'); }, 'image/png');
+  const svg = currentSvg();
+  const load = (src: string, revoke?: () => void): void => {
+    const img = new Image();
+    img.onload = () => {
+      const S = 3000;
+      const c = document.createElement('canvas');
+      c.width = S; c.height = S;
+      c.getContext('2d')!.drawImage(img, 0, 0, S, S);
+      revoke?.();
+      c.toBlob((b) => { if (b) void exportFile(fname() + '.png', b, 'image/png'); else statusEl.textContent = 'PNG export failed'; }, 'image/png');
+    };
+    img.onerror = () => {
+      revoke?.();
+      // some hosts refuse blob: images: retry once with a data: URL
+      if (src.startsWith('blob:')) load('data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg));
+      else statusEl.textContent = 'PNG export failed';
+    };
+    img.src = src;
   };
-  img.onerror = () => { statusEl.textContent = 'PNG export failed'; URL.revokeObjectURL(url); };
-  img.src = url;
+  const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
+  load(url, () => URL.revokeObjectURL(url));
 });
 
 history.replaceState(null, '', '?' + toQuery(opts));

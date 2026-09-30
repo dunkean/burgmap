@@ -1,20 +1,21 @@
 import type { World } from '../gen/types';
-import type { StyleName } from '../gen/options';
 import { Vec2, chaikin, simplify, offsetRibbon } from '../gen/core/geom';
 import { marchingSquares } from '../gen/terrain/contour';
 import { contourSet, ContourSet } from './contours';
-import { PALETTES, Palette } from './styles';
+import { PALETTES, Palette, MapStyle } from './styles';
 import { renderTerrainRaster, pngDataUrl } from './raster';
 import { f1, pathD, seaWithIslands } from './util';
 import { landuseLayer, roadsLayer, siteLayer } from './landuse';
 import { urbanLayer } from './urban';
 import { labelsSvg } from './svgLabels';
 import { cartoucheModel, legendModel, panelSvg } from './legend';
+import { frameModel, panelMargin } from './frame';
+import { litSvg, shadowSvg, gridSvg, waterLinesSvg } from './extras';
 import { FONT_STACKS } from './labelStyles';
 import type { Measure } from './mapLabels';
 
 export interface RenderOptions {
-  style?: StyleName; contours?: boolean; raster?: boolean; landuse?: boolean; debug?: boolean;
+  style?: MapStyle; contours?: boolean; raster?: boolean; landuse?: boolean; debug?: boolean;
   /** Name labels (default: world.options.labels !== false), legend (default: world.options.legend) and cartouche (default on). */
   labels?: boolean; legend?: boolean; cartouche?: boolean;
   /** Text width measurer for label placement (browser: canvas based; default: estimate). */
@@ -28,7 +29,7 @@ function contourLayer(world: World, pal: Palette, u: number): string {
   const sw = 0.55 * u;
   return `<g class="layer-contours" fill="none" stroke="${pal.contour}" stroke-linejoin="round" stroke-linecap="round">` +
     (thin ? `<path d="${thin}" stroke-width="${f1(sw)}" opacity="${pal.contourOpacity * 0.7}"/>` : '') +
-    (index ? `<path d="${index}" stroke-width="${f1(sw * 1.9)}" opacity="${pal.contourOpacity}"/>` : '') +
+    (index ? `<path d="${index}" stroke-width="${f1(sw * pal.contourIndexW)}" opacity="${pal.contourOpacity}"/>` : '') +
     '</g>';
 }
 
@@ -57,21 +58,8 @@ function rippleLayer(world: World, pal: Palette, u: number): string {
 }
 
 function decor(world: World, pal: Palette, u: number): string {
-  const S = world.mapSize;
-  const m = 22 * u;
-  const fs = 11 * u;
-  let s = `<g class="layer-decor" font-family="${pal.fontFamily}" fill="${pal.ink}">`;
-  // frame
-  s += `<rect x="${f1(5 * u)}" y="${f1(5 * u)}" width="${f1(S - 10 * u)}" height="${f1(S - 10 * u)}" fill="none" stroke="${pal.frame}" stroke-width="${f1(2 * u)}"/>`;
-  s += `<rect x="${f1(9 * u)}" y="${f1(9 * u)}" width="${f1(S - 18 * u)}" height="${f1(S - 18 * u)}" fill="none" stroke="${pal.frame}" stroke-width="${f1(0.7 * u)}"/>`;
-  // north arrow
-  const cx = S - m - 22 * u, cy = m + 34 * u, r = 26 * u;
-  s += `<circle cx="${f1(cx)}" cy="${f1(cy)}" r="${f1(r * 1.15)}" fill="${pal.paper}" opacity="0.72"/>`;
-  s += `<path d="M${f1(cx)} ${f1(cy - r)}L${f1(cx + r * 0.32)} ${f1(cy + r * 0.55)}L${f1(cx)} ${f1(cy + r * 0.25)}Z" fill="${pal.ink}"/>`;
-  s += `<path d="M${f1(cx)} ${f1(cy - r)}L${f1(cx - r * 0.32)} ${f1(cy + r * 0.55)}L${f1(cx)} ${f1(cy + r * 0.25)}Z" fill="none" stroke="${pal.ink}" stroke-width="${f1(0.9 * u)}"/>`;
-  s += `<text x="${f1(cx)}" y="${f1(cy - r - 4 * u)}" font-size="${f1(fs * 1.1)}" text-anchor="middle" font-weight="bold">N</text>`;
-  s += '</g>';
-  return s;
+  const W = world.mapSize / u;
+  return panelSvg({ w: W, h: W, prims: frameModel(W, W, pal, true) }, 0, 0, u, FONT_STACKS[pal.name] ?? pal.fontFamily, 'layer-decor');
 }
 
 export function renderSvg(world: World, opts: RenderOptions = {}): string {
@@ -90,6 +78,7 @@ export function renderSvg(world: World, opts: RenderOptions = {}): string {
     const r = renderTerrainRaster(world, pal);
     parts.push(`<g class="layer-terrain"><image x="0" y="0" width="${S}" height="${S}" preserveAspectRatio="none" xlink:href="${pngDataUrl(r.png)}"/></g>`);
   }
+  if (pal.grid) parts.push(gridSvg(world, pal, u));
   if (opts.contours ?? world.options.contours) parts.push(contourLayer(world, pal, u));
 
   if (opts.landuse ?? world.options.landuse) parts.push(landuseLayer(world, pal, u));
@@ -122,21 +111,25 @@ export function renderSvg(world: World, opts: RenderOptions = {}): string {
   for (const poly of t.lakes) {
     water += `<path d="${pathD(poly, true)}" fill="${pal.lakeFill}" stroke="${pal.waterEdge}" stroke-width="${f1(1.3 * u)}" stroke-linejoin="round"/>`;
   }
+  water += waterLinesSvg(world, pal);
   water += '</g>';
   parts.push(water);
 
   parts.push(roadsLayer(world, pal, u));
-  if (world.urban) parts.push(urbanLayer(world, pal, u, !!opts.debug));
-  else parts.push(siteLayer(world, pal, u, !!opts.debug));
+  if (world.urban) {
+    parts.push(urbanLayer(world, pal, u, !!opts.debug));
+    if (!opts.debug) { parts.push(shadowSvg(world, pal, u)); parts.push(litSvg(world, pal, u)); }
+  } else parts.push(siteLayer(world, pal, u, !!opts.debug));
 
   parts.push('</g>');
   if (opts.labels ?? world.options.labels !== false) parts.push(labelsSvg(world, pal, opts.measure, !!(opts.legend ?? world.options.legend)));
   parts.push(decor(world, pal, u));
   const fam = FONT_STACKS[style] ?? pal.fontFamily;
-  if (opts.cartouche !== false) parts.push(panelSvg(cartoucheModel(world, pal, 1 / u), 22 * u, 22 * u, u, fam, 'cartouche'));
+  const pm = panelMargin(pal) * u;
+  if (opts.cartouche !== false) parts.push(panelSvg(cartoucheModel(world, pal, 1 / u), pm, pm, u, fam, 'cartouche'));
   if (opts.legend ?? !!world.options.legend) {
     const lg = legendModel(world, pal);
-    parts.push(panelSvg(lg, 22 * u, S - 22 * u - lg.h * u, u, fam, 'legend'));
+    parts.push(panelSvg(lg, pm, S - pm - lg.h * u, u, fam, 'legend'));
   }
   parts.push('</svg>');
   return parts.join('\n');

@@ -105,3 +105,13 @@ interface World {
 - Land use coherent (no fields on cliffs, meadows by rivers, forest on steep/remote land).
 - Generation time: town < 1.5 s, capital < 6 s in Node.
 - Deterministic.
+
+## Map styles (M5b)
+
+`src/render/styles.ts` is the single style system: a `Palette` of tokens for every layer (paper, ink, hillshade strength and hatching, water incl. engraved water lines, land-use fills/textures/tree shape, roads, street space, building roof / outline / cast shadow / lit windows, landmarks, walls, labels and fonts, contour colour, drawing grid, frame kind, cartouche). Styles: `parchment`, `atlas`, `watabou` (plain classic), `engraving`, `cadastre`, `blueprint`, `illuminated`, `topographic`, `night`. `MapStyle` is the full union; `StyleName` in `gen/options.ts` still lists only the first two (gen is off limits to render work), so the UI reads/writes `style=` itself (`parseOptions` in `ui/main.ts`).
+
+- SVG (`svg.ts`, `urban.ts`, `landuse.ts`, `extras.ts`, `frame.ts`) and Canvas (`canvas.ts`) read only the palette. `extras.ts` holds what is layered over the shared urban drawing (hatched shadows via mask, lit windows, water lines, grid); `frame.ts` describes frame + north arrow once as panel primitives (SVG scales them by u, canvas paints them around the map rectangle).
+- A style switch only re-renders: `ui/main.ts` keeps the `Scene` per world and rebuilds just the renderer.
+- Adding a style = one `derive(...)` call in `styles.ts`; `tests/m5b.test.ts` checks that every token is defined and that all styles render through both renderers.
+- Exports go through `ui/download.ts`: the claude.ai Artifact `window.claude.use('downloads')` capability when present (`declined` = do nothing, `unavailable`/`not_granted` = fall back), else `<a download>` (works from `file://`). `ui/exportWorld.ts` writes the JSON export (options + vector layers, no rasters).
+- Scripts: `scripts/m5b_shots.mjs` (all styles x cases x zooms through the UI select), `scripts/m5b_contact.mjs` (3x3 contact sheet), `scripts/export_check.mjs` (export paths incl. a mocked Artifact host).

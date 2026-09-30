@@ -4,7 +4,7 @@
  * them on the interactive canvas, `panelSvg` emits the same thing for the SVG export.
  */
 import type { World } from '../gen/types';
-import type { Palette } from './styles';
+import type { Palette, MapStyle } from './styles';
 import { FONT_STACKS } from './labelStyles';
 import { SETTLEMENT_CLASS } from '../gen/names';
 import { NameFamily } from '../gen/names/types';
@@ -41,6 +41,23 @@ export function townTitle(world: World): { title: string; sub: string } {
   return { title, sub };
 }
 
+/** Panel background and border (double rule; gold corner studs on ornate styles). */
+function panelFrame(pal: Palette, W: number, H: number): Prim[] {
+  const c = pal.cart;
+  const out: Prim[] = [
+    { t: 'rect', x: 0, y: 0, w: W, h: H, fill: c.fill, stroke: c.stroke, sw: 1.4, op: c.op },
+    { t: 'rect', x: 3.5, y: 3.5, w: W - 7, h: H - 7, stroke: c.ornate ? c.accent : c.stroke, sw: c.ornate ? 1 : 0.6 },
+  ];
+  if (c.ornate) {
+    for (const [cx, cy] of [[0, 0], [W, 0], [0, H], [W, H]]) {
+      out.push({ t: 'poly', pts: [[cx, cy - 7], [cx + 7, cy], [cx, cy + 7], [cx - 7, cy]], fill: pal.accent, stroke: pal.frame, sw: 0.8 });
+    }
+    out.push({ t: 'poly', pts: [[W / 2, -5], [W / 2 + 5, 0], [W / 2, 5], [W / 2 - 5, 0]], fill: pal.accent, stroke: pal.frame, sw: 0.7 });
+    out.push({ t: 'poly', pts: [[W / 2, H - 5], [W / 2 + 5, H], [W / 2, H + 5], [W / 2 - 5, H]], fill: pal.accent, stroke: pal.frame, sw: 0.7 });
+  }
+  return out;
+}
+
 export function cartoucheModel(world: World, pal: Palette, pxPerM: number): Panel {
   const { title, sub } = townTitle(world);
   const W = 244;
@@ -48,9 +65,8 @@ export function cartoucheModel(world: World, pal: Palette, pxPerM: number): Pane
   const barW = Math.max(24, L * pxPerM);
   const prims: Prim[] = [];
   const H = 104;
-  prims.push({ t: 'rect', x: 0, y: 0, w: W, h: H, fill: pal.paper, stroke: pal.ink, sw: 1.4, op: 0.9 });
-  prims.push({ t: 'rect', x: 3.5, y: 3.5, w: W - 7, h: H - 7, stroke: pal.ink, sw: 0.6 });
-  prims.push({ t: 'text', x: W / 2, y: 33, s: title, size: title.length > 16 ? 19 : 24, anchor: 'middle', fill: pal.ink, bold: true, caps: true, spacing: 1.2 });
+  prims.push(...panelFrame(pal, W, H));
+  prims.push({ t: 'text', x: W / 2, y: 33, s: title, size: title.length > 16 ? 19 : 24, anchor: 'middle', fill: pal.lab.town, bold: true, caps: true, spacing: 1.2 });
   prims.push({ t: 'text', x: W / 2, y: 50, s: sub, size: 11.5, anchor: 'middle', fill: pal.inkSoft, italic: true });
   // scale bar
   const x0 = (W - barW) / 2, y0 = 76, bh = 5;
@@ -67,8 +83,20 @@ interface Item { label: string; draw: (x: number, y: number) => Prim[] }
 
 const SW = 24, SH = 12;
 
-function fillSwatch(fill: string, stroke?: string, op = 1): (x: number, y: number) => Prim[] {
-  return (x, y) => [{ t: 'rect', x, y, w: SW, h: SH, fill, stroke, sw: 0.7, op }];
+function fillSwatch(fill: string, stroke?: string, op = 1, lines?: string): (x: number, y: number) => Prim[] {
+  return (x, y) => [{ t: 'rect', x, y, w: SW, h: SH, fill, stroke, sw: 0.7, op }, ...(lines ? [3, 6, 9].map((d): Prim => ({ t: 'line', pts: [[x + 1, y + d], [x + SW - 1, y + d]], stroke: lines, sw: 0.5, op: 0.7 })) : [])];
+}
+/** Tree symbol per style: blob, drawn crown (circle + shadow arc + trunk) or a small dot. */
+function treeSymbol(pal: Palette, x: number, y: number, r: number): Prim[] {
+  if (pal.treeShape === 'crown') {
+    return [
+      { t: 'circle', x, y, r, fill: pal.treeFill, stroke: pal.treeInk, sw: 0.6 },
+      { t: 'line', pts: [[x + r * 0.5, y - r * 0.5], [x + r * 0.75, y], [x + r * 0.5, y + r * 0.5], [x, y + r * 0.75], [x - r * 0.5, y + r * 0.5]], stroke: pal.treeInk, sw: 0.5 },
+      { t: 'line', pts: [[x, y + r], [x, y + r * 1.5]], stroke: pal.treeInk, sw: 0.6 },
+    ];
+  }
+  const rr = pal.treeShape === 'dot' ? r * 0.55 : r;
+  return [{ t: 'circle', x, y, r: rr, fill: pal.treeFill, stroke: pal.treeInk, sw: 0.6 }];
 }
 function lineSwatch(edge: string, fill: string | null, w: number, dash?: number[]): (x: number, y: number) => Prim[] {
   return (x, y) => {
@@ -86,16 +114,16 @@ export function legendModel(world: World, pal: Palette): Panel {
   const kinds = new Set(world.landuse?.areas.map((a) => a.kind) ?? []);
   const lu = world.options.landuse;
   const t = world.terrain;
-  if (t.coastline.length) add('Sea', fillSwatch(pal.seaFill, pal.waterEdge));
-  if (t.lakes.length) add('Lake', fillSwatch(pal.lakeFill, pal.waterEdge));
+  if (t.coastline.length) add('Sea', fillSwatch(pal.seaFill, pal.waterEdge, 1, pal.waterLines?.color));
+  if (t.lakes.length) add('Lake', fillSwatch(pal.lakeFill, pal.waterEdge, 1, pal.waterLines?.color));
   if (t.rivers.length) add('River', (x, y) => [{ t: 'line', pts: [[x, y + 9], [x + 8, y + 3], [x + 16, y + 9], [x + SW, y + 3]], stroke: pal.riverEdge, sw: 4.6 }, { t: 'line', pts: [[x, y + 9], [x + 8, y + 3], [x + 16, y + 9], [x + SW, y + 3]], stroke: pal.riverFill, sw: 3 }]);
   if (lu) {
     if (kinds.has('field')) add('Fields (strips)', (x, y) => [{ t: 'rect', x, y, w: SW, h: SH, fill: pal.land.field, stroke: pal.hedge, sw: 0.7 }, ...[3, 6, 9].map((d): Prim => ({ t: 'line', pts: [[x + 1, y + d], [x + SW - 1, y + d]], stroke: pal.furrow, sw: 0.6, op: 0.7 }))]);
     if (kinds.has('meadow')) add('Meadow', fillSwatch(pal.land.meadow, undefined, 0.9));
     if (kinds.has('pasture')) add('Pasture', fillSwatch(pal.land.pasture, undefined, 0.9));
     if (kinds.has('commons')) add('Commons', fillSwatch(pal.land.commons, undefined, 0.9));
-    if (kinds.has('forest')) add('Woodland', (x, y) => [{ t: 'rect', x, y, w: SW, h: SH, fill: pal.land.forest }, ...[[6, 4], [13, 8], [19, 4], [9, 9]].map(([dx, dy]): Prim => ({ t: 'circle', x: x + dx, y: y + dy, r: 2.6, fill: pal.treeFill, stroke: pal.treeInk, sw: 0.6 }))]);
-    if (kinds.has('orchard')) add('Orchard', (x, y) => [{ t: 'rect', x, y, w: SW, h: SH, fill: pal.land.orchard }, ...[[6, 4], [12, 4], [18, 4], [6, 9], [12, 9], [18, 9]].map(([dx, dy]): Prim => ({ t: 'circle', x: x + dx, y: y + dy, r: 1.7, fill: pal.treeFill, stroke: pal.orchardDot, sw: 0.6 }))]);
+    if (kinds.has('forest')) add('Woodland', (x, y) => [{ t: 'rect', x, y, w: SW, h: SH, fill: pal.land.forest }, ...[[6, 4], [13, 8], [19, 4], [9, 8]].flatMap(([dx, dy]) => treeSymbol(pal, x + dx, y + dy, 2.4))]);
+    if (kinds.has('orchard')) add('Orchard', (x, y) => [{ t: 'rect', x, y, w: SW, h: SH, fill: pal.land.orchard }, ...[[6, 4], [12, 4], [18, 4], [6, 9], [12, 9], [18, 9]].flatMap(([dx, dy]) => treeSymbol(pal, x + dx, y + dy, 1.7))]);
     if (kinds.has('marsh')) add('Marsh', (x, y) => [{ t: 'rect', x, y, w: SW, h: SH, fill: pal.land.marsh }, ...[5, 12, 19].map((dx): Prim => ({ t: 'line', pts: [[x + dx - 2, y + 8], [x + dx + 2, y + 8]], stroke: pal.reed, sw: 0.9 }))]);
     if (kinds.has('garden')) add('Gardens', fillSwatch(pal.land.garden, undefined, 0.9));
   }
@@ -104,13 +132,21 @@ export function legendModel(world: World, pal: Palette): Panel {
   if (world.bridges?.length) add('Bridge', (x, y) => [{ t: 'rect', x: x + 6, y: y + 1, w: 12, h: SH - 2, fill: pal.bridgeDeck, stroke: pal.bridgeInk, sw: 0.8 }]);
   if (world.urban) {
     add('Streets', lineSwatch(U.streetEdge, U.street, 3.4));
-    add('Houses', (x, y) => [{ t: 'rect', x, y, w: SW, h: SH, fill: U.yard }, { t: 'rect', x: x + 2, y: y + 2, w: 9, h: 8, fill: U.mass, stroke: U.massEdge, sw: 0.5 }, { t: 'rect', x: x + 13, y: y + 3, w: 8, h: 7, fill: U.mass, stroke: U.massEdge, sw: 0.5 }]);
+    add('Houses', (x, y) => {
+      const sw = Math.max(0.5, U.massEdgeW * 1.7);
+      const out: Prim[] = [{ t: 'rect', x, y, w: SW, h: SH, fill: U.yard }];
+      if (U.shadow) out.push({ t: 'rect', x: x + 3.6, y: y + 3.8, w: 9, h: 8, fill: U.shadow.color, op: 0.7 }, { t: 'rect', x: x + 14.6, y: y + 4.8, w: 8, h: 7, fill: U.shadow.color, op: 0.7 });
+      out.push({ t: 'rect', x: x + 2, y: y + 2, w: 9, h: 8, fill: U.mass, stroke: U.massEdge, sw }, { t: 'rect', x: x + 13, y: y + 3, w: 8, h: 7, fill: U.mass, stroke: U.massEdge, sw });
+      if (U.lit) out.push({ t: 'circle', x: x + 5, y: y + 5.5, r: 1, fill: U.lit.color }, { t: 'circle', x: x + 17, y: y + 6, r: 1, fill: U.lit.color });
+      return out;
+    });
+    if (U.plotAlpha >= 0.6) add('Plot boundaries', (x, y) => [{ t: 'rect', x, y, w: SW, h: SH, fill: U.yard }, { t: 'line', pts: [[x, y + 4], [x + SW, y + 4]], stroke: U.plotLine, sw: 0.6 }, { t: 'line', pts: [[x + 8, y], [x + 8, y + SH]], stroke: U.plotLine, sw: 0.6 }, { t: 'line', pts: [[x + 16, y + 4], [x + 16, y + SH]], stroke: U.plotLine, sw: 0.6 }]);
     if (world.urban.buildings.some((b) => b.kind === 'church') || world.urban.landmarks.some((l) => /church|cathedral/.test(l.kind))) {
-      add('Church', (x, y) => [{ t: 'rect', x: x + 4, y: y + 1, w: 16, h: SH - 2, fill: U.landmark, stroke: U.mass, sw: 0.9 }, { t: 'line', pts: [[x + 12, y + 3], [x + 12, y + 9]], stroke: U.mass, sw: 0.9 }, { t: 'line', pts: [[x + 9.5, y + 5.2], [x + 14.5, y + 5.2]], stroke: U.mass, sw: 0.9 }]);
+      add('Church', (x, y) => [{ t: 'rect', x: x + 4, y: y + 1, w: 16, h: SH - 2, fill: U.landmark, stroke: U.landmarkEdge, sw: 0.9 }, { t: 'line', pts: [[x + 12, y + 3], [x + 12, y + 9]], stroke: U.landmarkEdge, sw: 0.9 }, { t: 'line', pts: [[x + 9.5, y + 5.2], [x + 14.5, y + 5.2]], stroke: U.landmarkEdge, sw: 0.9 }]);
     }
     if (world.urban.squares.length || world.urban.landmarks.some((l) => l.kind === 'market' || l.kind === 'green')) add('Market place, green', fillSwatch(U.place, U.placeInk, 1));
     add('Gardens, yards', (x, y) => [{ t: 'rect', x, y, w: SW, h: SH, fill: U.garden }, { t: 'line', pts: [[x + 3, y + 4], [x + 11, y + 4]], stroke: U.gardenInk, sw: 0.8 }, { t: 'line', pts: [[x + 11, y + 8], [x + 19, y + 8]], stroke: U.gardenInk, sw: 0.8 }]);
-    if (world.urban.walls?.length) add('Town wall, gate', (x, y) => [{ t: 'line', pts: [[x, y + SH / 2], [x + 9, y + SH / 2]], stroke: U.wall, sw: 5 }, { t: 'line', pts: [[x, y + SH / 2], [x + 9, y + SH / 2]], stroke: U.wallFill, sw: 3.2 }, { t: 'line', pts: [[x + 15, y + SH / 2], [x + SW, y + SH / 2]], stroke: U.wall, sw: 5 }, { t: 'line', pts: [[x + 15, y + SH / 2], [x + SW, y + SH / 2]], stroke: U.wallFill, sw: 3.2 }, { t: 'circle', x: x + 9, y: y + SH / 2, r: 2.4, fill: U.wallFill, stroke: U.wall, sw: 0.8 }, { t: 'circle', x: x + 15, y: y + SH / 2, r: 2.4, fill: U.wallFill, stroke: U.wall, sw: 0.8 }]);
+    if (world.urban.walls?.length) add('Town wall, gate', (x, y) => [{ t: 'line', pts: [[x, y + SH / 2], [x + 9, y + SH / 2]], stroke: U.wall, sw: 3.4 * U.wallScale + 1.6 }, { t: 'line', pts: [[x, y + SH / 2], [x + 9, y + SH / 2]], stroke: U.wallFill, sw: 3.4 * U.wallScale }, { t: 'line', pts: [[x + 15, y + SH / 2], [x + SW, y + SH / 2]], stroke: U.wall, sw: 3.4 * U.wallScale + 1.6 }, { t: 'line', pts: [[x + 15, y + SH / 2], [x + SW, y + SH / 2]], stroke: U.wallFill, sw: 3.4 * U.wallScale }, { t: 'circle', x: x + 9, y: y + SH / 2, r: 2.4, fill: U.wallFill, stroke: U.wall, sw: 0.8 }, { t: 'circle', x: x + 15, y: y + SH / 2, r: 2.4, fill: U.wallFill, stroke: U.wall, sw: 0.8 }]);
   }
   if (world.options.contours) add('Contour (index heavier)', (x, y) => [{ t: 'line', pts: [[x, y + 9], [x + 10, y + 3], [x + SW, y + 7]], stroke: pal.contour, sw: 0.9, op: pal.contourOpacity + 0.2 }]);
   if (world.landuse?.farmsteads.length) add('Farmstead', (x, y) => [{ t: 'rect', x: x + 4, y: y + 2, w: 7, h: 6, fill: pal.farmRoof, stroke: pal.farmInk, sw: 0.7 }, { t: 'rect', x: x + 13, y: y + 4, w: 6, h: 5, fill: pal.farmRoof, stroke: pal.farmInk, sw: 0.7 }]);
@@ -119,14 +155,14 @@ export function legendModel(world: World, pal: Palette): Panel {
   const rows = Math.ceil(items.length / cols);
   const colW = 158, rowH = 17, pad = 10, head = 22;
   const W = pad * 2 + colW * cols - (cols > 1 ? 6 : 0) + (cols === 1 ? -20 : 0);
-  const H = head + rows * rowH + pad;
+  const H = head + rows * rowH + pad + 4;
   const prims: Prim[] = [
-    { t: 'rect', x: 0, y: 0, w: W, h: H, fill: pal.paper, stroke: pal.ink, sw: 1.2, op: 0.92 },
-    { t: 'text', x: pad, y: 16, s: 'Legend', size: 12, anchor: 'start', fill: pal.ink, bold: true, caps: true, spacing: 1.1 },
+    ...panelFrame(pal, W, H),
+    { t: 'text', x: pad + 3, y: 17, s: 'Legend', size: 12, anchor: 'start', fill: pal.lab.town, bold: true, caps: true, spacing: 1.1 },
   ];
   items.forEach((it, i) => {
     const c = Math.floor(i / rows), r = i % rows;
-    const x = pad + c * colW, y = head + r * rowH;
+    const x = pad + 3 + c * colW, y = head + 2 + r * rowH;
     prims.push(...it.draw(x, y));
     prims.push({ t: 'text', x: x + SW + 7, y: y + 10, s: it.label, size: 11, anchor: 'start', fill: pal.ink });
   });
@@ -195,4 +231,4 @@ export function panelSvg(panel: Panel, ox: number, oy: number, k: number, family
   return s + '</g>';
 }
 
-export const panelFont = (style: 'parchment' | 'atlas'): string => FONT_STACKS[style];
+export const panelFont = (style: MapStyle): string => FONT_STACKS[style];

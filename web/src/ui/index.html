@@ -17,7 +17,8 @@
   select:disabled, input:disabled { opacity:.5; }
   .row { display:flex; gap:6px; align-items:stretch; }
   .row > * { min-width:0; }
-  .row > input { flex:1; width:auto; }
+  .row > input { flex:1 1 auto; width:auto; min-width:70px; }
+  .row > button { flex:none; min-width:max-content; }
   button { padding:6px 10px; border:1px solid var(--accent); border-radius:4px; background:var(--accent); color:#fff8ea; font:inherit; cursor:pointer; white-space:nowrap; }
   button.secondary { background:transparent; color:var(--accent); }
   button.small { padding:3px 8px; font-size:12px; }
@@ -25,7 +26,8 @@
   button:disabled { opacity:.5; cursor:default; }
   .check { display:flex; align-items:center; gap:8px; margin-top:9px; font-size:13px; }
   .btns { display:flex; gap:6px; margin-top:4px; }
-  .btns button { flex:1; }
+  .btns { flex-wrap:wrap; }
+  .btns button { flex:1 1 auto; padding-left:6px; padding-right:6px; font-size:13px; }
   /* collapsible sections (native <details>) */
   details.sec { border:1px solid var(--line); border-radius:6px; background:rgba(255,250,240,.45); }
   details.sec > summary { cursor:pointer; padding:7px 10px; font-size:12px; letter-spacing:.1em; text-transform:uppercase; color:var(--accent); font-weight:bold; list-style:none; user-select:none; }
@@ -113,7 +115,7 @@
       <div class="check"><input id="legend" type="checkbox"><span>Legend</span></div>
     </div></details>
 
-    <div class="btns"><button id="exportSvg">Export SVG</button><button id="exportPng">Export PNG</button></div>
+    <div class="btns"><button id="exportSvg">Export SVG</button><button id="exportPng">Export PNG</button><button id="exportJson" class="secondary" title="World data (options + vector layers, no rasters) for other tools">Export JSON</button></div>
     <div id="progress"><i></i></div>
     <div id="gentime"></div>
     <div id="status"></div>

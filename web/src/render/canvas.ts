@@ -10,8 +10,7 @@
  * Everything DOM-ish is injectable (`CanvasRendererDeps`) so a mock 2D context can drive it in Node.
  */
 import type { World, LandKind, Vec2 } from '../gen/types';
-import type { StyleName } from '../gen/options';
-import { PALETTES, Palette } from './styles';
+import { PALETTES, Palette, MapStyle } from './styles';
 import { renderTerrainRaster } from './raster';
 import { buildScene, Scene, PolyLayer, LineLayer, TextureLayer, textureMarks, LAND_ORDER } from './scene';
 import { selectLod, lineWidth, Lod, BAND_MIN_EDGE } from './lod';
@@ -20,6 +19,8 @@ import { Label, placeLabels } from './labels';
 import { buildMapLabels, placeMapLabels, MapLabel, PlacedMapLabel, estimateWidth } from './mapLabels';
 import { fontString, FONT_STACKS, KindStyle } from './labelStyles';
 import { cartoucheModel, legendModel, drawPanelCanvas, Panel } from './legend';
+import { frameModel, panelMargin } from './frame';
+import { litDots } from './extras';
 
 export interface CanvasLike { width: number; height: number; getContext(id: '2d'): CanvasRenderingContext2D | null }
 
@@ -129,7 +130,7 @@ function defaultCreateCanvas(w: number, h: number): CanvasLike | null {
   return null;
 }
 
-export function createCanvasRenderer(canvas: CanvasLike, world: World, style: StyleName | Palette, deps: CanvasRendererDeps = {}): CanvasRenderer {
+export function createCanvasRenderer(canvas: CanvasLike, world: World, style: MapStyle | Palette, deps: CanvasRendererDeps = {}): CanvasRenderer {
   const pal: Palette = typeof style === 'string' ? PALETTES[style] : style;
   const scene = deps.scene ?? buildScene(world, deps.tileSize);
   const S = world.mapSize;
@@ -150,6 +151,7 @@ export function createCanvasRenderer(canvas: CanvasLike, world: World, style: St
   let terrainImg: CanvasImageSource | null | undefined;
   let densityImg: CanvasImageSource | null | undefined;
   const patterns = new Map<string, CanvasPattern | null>();
+  let litCache: Float32Array | undefined;
   let stats: FrameStats = { band: 0, scale: 0, ms: 0, tilesDrawn: 0, bigDrawn: 0, pathsBuilt: 0, pathCache: 0, buildingsCandidate: 0, buildingsDrawn: false, textureTiles: 0 };
 
   const polyL = (n: string): PolyLayer | undefined => scene.poly.get(n);
@@ -251,6 +253,9 @@ export function createCanvasRenderer(canvas: CanvasLike, world: World, style: St
     ctx.setTransform(dpr * sc, 0, 0, dpr * sc, dpr * (cssW / 2 - view.cx * sc), dpr * (cssH / 2 - view.cy * sc));
     ctx.lineJoin = 'round'; ctx.lineCap = 'round';
     ctx.setLineDash([]);
+    // everything below is clipped to the map rectangle (sea polygons etc. run past it)
+    ctx.save();
+    ctx.beginPath(); ctx.rect(0, 0, S, S); ctx.clip();
 
     const px = (n: number): number => n / sc;
     const lw = (w: number, minPx: number): number => lineWidth(w, minPx, sc);
@@ -322,11 +327,19 @@ export function createCanvasRenderer(canvas: CanvasLike, world: World, style: St
     // 2. land use (tints multiply over the hillshade so relief reads through them); contours under it
     const luOn = world.options.landuse;
     const luAlpha = pal.landOpacity;
-    const multiply = (on: boolean): void => { ctx.globalCompositeOperation = on ? 'multiply' : 'source-over'; };
+    const multiply = (on: boolean): void => { ctx.globalCompositeOperation = on && pal.landBlend === 'multiply' ? 'multiply' : 'source-over'; };
+    if (pal.grid && sc * pal.grid.step > 7) {
+      const g = pal.grid;
+      ctx.strokeStyle = g.color; ctx.globalAlpha = g.opacity; ctx.lineWidth = Math.max(0.6 * u, 0.8 / sc);
+      ctx.beginPath();
+      for (let v = Math.max(g.step, Math.ceil(rect.minX / g.step) * g.step); v < Math.min(S, rect.maxX); v += g.step) { ctx.moveTo(v, Math.max(0, rect.minY)); ctx.lineTo(v, Math.min(S, rect.maxY)); }
+      for (let v = Math.max(g.step, Math.ceil(rect.minY / g.step) * g.step); v < Math.min(S, rect.maxY); v += g.step) { ctx.moveTo(Math.max(0, rect.minX), v); ctx.lineTo(Math.min(S, rect.maxX), v); }
+      ctx.stroke(); ctx.globalAlpha = 1;
+    }
     if (world.options.contours) {
       for (const l of linesOf((x) => x.role === 'contour')) {
         const idx = l.kind === 'index';
-        strokeLines([l], pal.contour, () => (idx ? 1.2 : 0.7) / sc, idx ? pal.contourOpacity : pal.contourOpacity * 0.7);
+        strokeLines([l], pal.contour, () => (idx ? 0.7 * pal.contourIndexW * 0.9 : 0.7) / sc, idx ? pal.contourOpacity : pal.contourOpacity * 0.7);
       }
     }
     for (const kind of LAND_ORDER) {
@@ -336,21 +349,21 @@ export function createCanvasRenderer(canvas: CanvasLike, world: World, style: St
       multiply(true);
       fillPolys(name, pal.land[kind], kind === 'forest' ? 0.7 : luAlpha);
       if (kind === 'field' && lod.strips) {
-        fillPolys('stripA', pal.stripA, 0.55);
-        fillPolys('stripB', pal.stripB, 0.5);
+        if (pal.stripAlpha[0] > 0) fillPolys('stripA', pal.stripA, pal.stripAlpha[0]);
+        if (pal.stripAlpha[1] > 0) fillPolys('stripB', pal.stripB, pal.stripAlpha[1]);
       }
       multiply(false);
       if (kind === 'field' && lod.strips && lod.band >= 2) {
-        strokePolys('stripA', pal.furrow, lw(0.28, 0.5), 0.5);
-        strokePolys('stripB', pal.furrow, lw(0.28, 0.5), 0.5);
+        strokePolys('stripA', pal.furrow, lw(0.28, 0.5), pal.furrowAlpha * 0.85);
+        strokePolys('stripB', pal.furrow, lw(0.28, 0.5), pal.furrowAlpha * 0.85);
       }
-      if (kind === 'forest' && lod.strips) strokePolys(name, pal.treeInk, lw(0.7, 0.8), 0.5);
+      if (kind === 'forest' && lod.strips) strokePolys(name, pal.treeInk, lw(0.7, 0.8), pal.tex.forest ? 0.5 : 0.35);
       if ((kind === 'orchard' || kind === 'garden') && lod.strips) strokePolys(name, pal.hedge, lw(0.8, 0.8), 0.7);
-      if (kind === 'field' && lod.band >= 2) strokePolys(name, pal.hedge, lw(0.9, 0.9), 0.75, [px(4 * 1.3), px(1.6)]);
+      if (kind === 'field' && lod.band >= 2 && pal.hedgeOn) strokePolys(name, pal.hedge, lw(0.9, 0.9), 0.75, [px(4 * 1.3), px(1.6)]);
     }
     // textures (procedural marks, visible tiles only, cached per tile)
     if (lod.textures && luOn) {
-      for (const tl of scene.textures) fs.textureTiles += drawTexture(ctx, tl, rect, band, lw);
+      for (const tl of scene.textures) if (pal.tex[tl.kind]) fs.textureTiles += drawTexture(ctx, tl, rect, band, lw);
     }
 
     // 3. rivers + water
@@ -364,8 +377,20 @@ export function createCanvasRenderer(canvas: CanvasLike, world: World, style: St
       if (sc < 0.08) strokeLines(linesOf((l) => l.name === 'river-centre'), pal.riverEdge, () => px(1.3));
     }
     fillPolys('sea', pal.seaFill, 1, 'evenodd');
-    strokePolys('sea', pal.waterEdge, lw(1.5 * u, 1.2));
     fillPolys('lakes', pal.lakeFill, 1, 'nonzero');
+    const wl = pal.waterLines;
+    if (wl && sc >= 0.11) {
+      const gap = wl.gap;
+      const wpat = getPattern(ctx, 'waterlines', gap, gap, 0, (c, k) => {
+        c.globalAlpha = wl.opacity; c.strokeStyle = wl.color; c.lineWidth = Math.max(0.9, wl.width * k * 0.7);
+        c.beginPath(); c.moveTo(0, gap * k / 2); c.lineTo(gap * k, gap * k / 2); c.stroke();
+      });
+      if (wpat) {
+        ctx.fillStyle = wpat;
+        for (const name of ['sea', 'lakes'] as const) { const l = polyL(name); if (l) for (const p of polyPaths(l)) ctx.fill(p, name === 'sea' ? 'evenodd' : 'nonzero'); }
+      }
+    }
+    strokePolys('sea', pal.waterEdge, lw(1.5 * u, 1.2));
     strokePolys('lakes', pal.waterEdge, lw(1.3 * u, 1.1));
 
     // 4. regional roads + farmsteads
@@ -438,7 +463,18 @@ export function createCanvasRenderer(canvas: CanvasLike, world: World, style: St
         if (cand <= BUILDING_BUDGET_MAX) {
           fs.buildingsDrawn = true;
           const paths = polyPaths(masses);
-          if (lod.shadows && cand <= BUILDING_BUDGET_FULL) {
+          const sh = U.shadow;
+          if (sh && lod.band >= 2 && cand <= BUILDING_BUDGET_FULL) {
+            // styled cast shadow: solid sepia fringe, hatched once the fringe is wide enough on screen
+            ctx.save(); ctx.translate(sh.dx, sh.dy);
+            ctx.fillStyle = sh.color; ctx.globalAlpha = sh.hatch && sc >= 1.1 ? sh.alpha * 0.4 : sh.alpha;
+            for (const p of paths) ctx.fill(p, 'evenodd');
+            if (sh.hatch && sc >= 1.1) {
+              const hp = getPattern(ctx, 'shadowhatch', 2.6, 2.6, 45, (c, k) => { c.strokeStyle = sh.color; c.globalAlpha = sh.alpha; c.lineWidth = 0.9 * k; c.beginPath(); c.moveTo(0, 1.3 * k); c.lineTo(2.6 * k, 1.3 * k); c.stroke(); });
+              if (hp) { ctx.fillStyle = hp; ctx.globalAlpha = 1; for (const p of paths) ctx.fill(p, 'evenodd'); }
+            }
+            ctx.restore(); ctx.globalAlpha = 1;
+          } else if (lod.shadows && cand <= BUILDING_BUDGET_FULL) {
             ctx.save(); ctx.translate(1.4, 1.7);
             ctx.fillStyle = 'rgba(0,0,0,0.2)';
             for (const p of paths) ctx.fill(p, 'evenodd');
@@ -447,33 +483,35 @@ export function createCanvasRenderer(canvas: CanvasLike, world: World, style: St
           ctx.fillStyle = U.mass;
           for (const p of paths) ctx.fill(p, 'evenodd');
           if (cand <= BUILDING_BUDGET_FULL) {
-            ctx.strokeStyle = U.massEdge; ctx.lineWidth = lw(0.3, 0.3);
+            ctx.strokeStyle = U.massEdge; ctx.lineWidth = lw(U.massEdgeW, 0.3);
             for (const p of paths) ctx.stroke(p);
           }
+          if (U.lit && lod.band >= 2) drawLit(ctx, rect, sc, U.lit.color, U.lit.density);
         }
       }
       // churches: distinct outlined mass with a cross
       if (polyL('u-church')) {
         fillPolys('u-church', U.landmark);
-        strokePolys('u-church', U.mass, lw(0.8, 0.6));
-        if (lod.band >= 2) strokeLines(linesOf((l) => l.role === 'cross'), U.mass, (l) => lw(l.width, 0.6));
+        strokePolys('u-church', U.landmarkEdge, lw(0.8, 0.6));
+        if (lod.band >= 2) strokeLines(linesOf((l) => l.role === 'cross'), U.landmarkEdge, (l) => lw(l.width, 0.6));
       }
       // plot hairlines: a dark pass (reads on yards) and a light pass (reads on roofs)
       if (lod.parcels) {
-        strokePolys('u-plots', U.plotLine, lw(0.14, 0.4), 0.45);
-        strokePolys('u-plots', U.massEdge, lw(0.14, 0.4), 0.28);
+        strokePolys('u-plots', U.plotLine, lw(U.plotW, 0.4), U.plotAlpha);
+        if (U.plotLightAlpha > 0) strokePolys('u-plots', U.massEdge, lw(U.plotW, 0.4), U.plotLightAlpha);
       }
       // hierarchy: arterial / primary streets keep a legible minimum width in street colour
       const minPx = (l: LineLayer): number => (l.kind.startsWith('r0') ? 2.6 : l.kind.startsWith('r1') ? 1.8 : 1.0);
       const thin = mainsOf(lod.band === 1 ? 2 : 1).filter((l) => l.width * sc < minPx(l));
       strokeLines(thin, U.street, (l) => minPx(l) / sc);
-      strokePolys('block-edges', U.blockEdge, lw(0.4, 0.3));
+      strokePolys('block-edges', U.blockEdge, lw(U.blockEdgeW, 0.3));
       if (polyL('landmarks') && near) strokePolys('landmarks', U.landmark, lw(0.6, 0.6), 0.5, [px(5), px(3)]);
     }
     // walls: casing + fill (stretches between gate openings), towers and gate towers
     const walls = linesOf((l) => l.role === 'wall');
-    for (const l of walls) strokeLines([l], U.wall, () => Math.max(l.width + 1.4, 3 / sc), 1, [], 'butt');
-    for (const l of walls) strokeLines([l], U.wallFill, () => Math.max(0.6, l.width - 1, 1.5 / sc), 1, [], 'butt');
+    const ws = U.wallScale;
+    for (const l of walls) strokeLines([l], U.wall, () => Math.max(l.width * ws + 1.4, 3 / sc), 1, [], 'butt');
+    for (const l of walls) strokeLines([l], U.wallFill, () => Math.max(0.6, l.width * ws - 1, 1.5 / sc), 1, [], 'butt');
     if (walls.length && lod.towers) {
       for (const name of ['towers', 'gate-towers']) {
         fillPolys(name, U.wallFill);
@@ -486,12 +524,19 @@ export function createCanvasRenderer(canvas: CanvasLike, world: World, style: St
     // site marker (placeholder until an urban layer exists)
     if (!world.urban && world.site) drawSiteMarker(ctx, world, pal, u, sc);
 
-    // 7. map frame
-    ctx.strokeStyle = pal.frame; ctx.lineWidth = lw(2 * u, 1.5); ctx.setLineDash([]);
-    ctx.strokeRect(0, 0, S, S);
+    ctx.restore();
+    ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+    // 7. map frame (screen space, around the map rectangle)
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.setLineDash([]);
+    {
+      const side = S * sc, fx = cssW / 2 - view.cx * sc, fy = cssH / 2 - view.cy * sc;
+      if (pal.frameKind !== 'none' && fx < cssW && fy < cssH && fx + side > 0 && fy + side > 0) {
+        drawPanelCanvas(ctx, { w: side, h: side, prims: frameModel(side, side, pal, false) }, fx, fy, family);
+      }
+    }
 
     // 8. labels, cartouche, legend (screen space)
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     if (labels.length) {
       const measure = (text: string, size: number): number => {
         ctx.font = `${size}px ${pal.fontFamily}`;
@@ -502,7 +547,7 @@ export function createCanvasRenderer(canvas: CanvasLike, world: World, style: St
       for (const pl of placed) {
         const size = pl.label.size ?? 12;
         ctx.font = `${size}px ${pal.fontFamily}`;
-        ctx.lineWidth = 3; ctx.strokeStyle = pal.paper; ctx.globalAlpha = 0.85;
+        ctx.lineWidth = 3; ctx.strokeStyle = pal.lab.halo; ctx.globalAlpha = 0.85;
         ctx.strokeText(pl.label.text, pl.x, pl.y);
         ctx.globalAlpha = 1; ctx.fillStyle = pl.label.color ?? pal.ink;
         ctx.fillText(pl.label.text, pl.x, pl.y);
@@ -524,10 +569,19 @@ export function createCanvasRenderer(canvas: CanvasLike, world: World, style: St
       placedLast = placeMapLabels(mapLabels, view, cssW, cssH, measure);
       drawMapLabels(ctx, placedLast, pal, family);
     }
-    if (overlays.cartouche) drawPanelCanvas(ctx, cartoucheModel(world, pal, sc), 12, 12, family);
+    // panels sit inside the map frame when the map corner is under them, else at the viewport corner
+    const pm = panelMargin(pal) * 0.75;
+    const mx0 = cssW / 2 - view.cx * sc, my0 = cssH / 2 - view.cy * sc, mapBottom = my0 + S * sc;
+    const cart = overlays.cartouche ? cartoucheModel(world, pal, sc) : null;
+    if (cart) {
+      const inside = mx0 < 12 + cart.w && my0 < 12 + cart.h;
+      drawPanelCanvas(ctx, cart, inside ? Math.max(12, mx0 + pm) : 12, inside ? Math.max(12, my0 + pm) : 12, family);
+    }
     if (overlays.legend) {
       legendPanel ??= legendModel(world, pal);
-      drawPanelCanvas(ctx, legendPanel, 12, Math.max(12, cssH - legendPanel.h - 34), family);
+      const home = Math.max(12, cssH - legendPanel.h - 34);
+      const inside = mx0 < 12 + legendPanel.w && mapBottom > home && mapBottom < cssH + legendPanel.h + 60;
+      drawPanelCanvas(ctx, legendPanel, inside ? Math.max(12, mx0 + pm) : 12, inside ? Math.max(12, Math.min(home, mapBottom - pm - legendPanel.h)) : home, family);
     }
     ctx.setTransform(1, 0, 0, 1, 0, 0);
 
@@ -538,9 +592,30 @@ export function createCanvasRenderer(canvas: CanvasLike, world: World, style: St
     return fs;
   }
 
+  /** Deterministic lit windows of the visible buildings (night style). */
+  function drawLit(ctx: CanvasRenderingContext2D, rect: Rect4, sc: number, color: string, density: number): void {
+    litCache ??= litDots(world, density);
+    const d = litCache;
+    const path = new P();
+    let n = 0;
+    for (let i = 0; i < d.length; i += 2) {
+      const x = d[i], y = d[i + 1];
+      if (x < rect.minX || x > rect.maxX || y < rect.minY || y > rect.maxY) continue;
+      path.moveTo(x, y); path.lineTo(x, y); n++;
+      if (n > 60000) break;
+    }
+    if (!n) return;
+    ctx.lineCap = 'round'; ctx.strokeStyle = color;
+    const w = Math.max(1.3, 2 / sc);
+    ctx.globalAlpha = 0.16; ctx.lineWidth = w * 3.2; ctx.stroke(path);
+    ctx.globalAlpha = 1; ctx.lineWidth = w; ctx.stroke(path);
+  }
+
   function drawTexture(ctx: CanvasRenderingContext2D, tl: TextureLayer, rect: Rect4, band: number, lw: (w: number, m: number) => number): number {
-    const spec = TEX[tl.kind];
-    if (!spec) return 0;
+    const base = TEX[tl.kind];
+    if (!base) return 0;
+    const crown = pal.treeShape === 'crown' && (tl.kind === 'forest' || tl.kind === 'orchard');
+    const spec: TexSpec = pal.treeShape === 'dot' && (tl.kind === 'forest' || tl.kind === 'orchard') ? { ...base, r: base.r * 0.5 } : base;
     const tiles = tl.index.tilesInRect(rect);
     if (tiles.length > 500) return 0;
     const fillP: Path2D[] = [], strokeP: Path2D[] = [];
@@ -552,7 +627,14 @@ export function createCanvasRenderer(canvas: CanvasLike, world: World, style: St
         const path = new P();
         for (const m of marks) {
           const r = spec.r * m.r;
-          if (spec.shape === 'circle') { path.moveTo(m.x + r, m.y); path.arc(m.x, m.y, r, 0, TAU); }
+          if (spec.shape === 'circle') {
+            path.moveTo(m.x + r, m.y); path.arc(m.x, m.y, r, 0, TAU);
+            if (crown) {
+              // drawn crown: shadow arc on the lower right and a short trunk
+              path.moveTo(m.x + r * 0.55, m.y - r * 0.5); path.arc(m.x, m.y, r * 0.78, -0.75, 2.2);
+              path.moveTo(m.x, m.y + r); path.lineTo(m.x, m.y + r * 1.5);
+            }
+          }
           else if (spec.shape === 'dot') { path.moveTo(m.x + r, m.y); path.arc(m.x, m.y, r, 0, TAU); }
           else if (spec.shape === 'tuft') {
             path.moveTo(m.x, m.y); path.lineTo(m.x - r * 0.45, m.y - r);
@@ -631,8 +713,8 @@ function drawMapLabels(ctx: CanvasRenderingContext2D, placed: PlacedMapLabel[], 
     const halo = Math.max(2.4, pl.size * 0.26);
     const curved = pl.glyphs.some((g) => g.a !== 0);
     for (const pass of [0, 1] as const) {
-      ctx.globalAlpha = pass === 0 ? 0.8 : 1;
-      ctx.strokeStyle = pal.paper; ctx.fillStyle = st.color; ctx.lineWidth = halo;
+      ctx.globalAlpha = pass === 0 ? pal.lab.haloOp : 1;
+      ctx.strokeStyle = pal.lab.halo; ctx.fillStyle = st.color; ctx.lineWidth = halo;
       let lastSize = -1;
       for (const g of pl.glyphs) {
         if (g.ch === ' ') continue;
@@ -653,8 +735,8 @@ function drawMapLabels(ctx: CanvasRenderingContext2D, placed: PlacedMapLabel[], 
         case 'cross': ctx.moveTo(x, y - r * 1.25); ctx.lineTo(x, y + r * 1.25); ctx.moveTo(x - r * 0.85, y - r * 0.3); ctx.lineTo(x + r * 0.85, y - r * 0.3); ctx.lineWidth = 1.6; ctx.stroke(); break;
         case 'tri': ctx.moveTo(x, y - r * 1.1); ctx.lineTo(x + r * 1.1, y + r * 0.8); ctx.lineTo(x - r * 1.1, y + r * 0.8); ctx.closePath(); ctx.fill(); break;
         case 'square': ctx.rect(x - r * 0.9, y - r * 0.9, r * 1.8, r * 1.8); ctx.fill(); break;
-        case 'ring': ctx.arc(x, y, r * 0.85, 0, TAU); ctx.fillStyle = pal.paper; ctx.fill(); ctx.stroke(); break;
-        default: ctx.arc(x, y, r, 0, TAU); ctx.fill(); ctx.strokeStyle = pal.paper; ctx.lineWidth = 1; ctx.stroke();
+        case 'ring': ctx.arc(x, y, r * 0.85, 0, TAU); ctx.fillStyle = pal.lab.halo; ctx.fill(); ctx.stroke(); break;
+        default: ctx.arc(x, y, r, 0, TAU); ctx.fill(); ctx.strokeStyle = pal.lab.halo; ctx.lineWidth = 1; ctx.stroke();
       }
     }
   }

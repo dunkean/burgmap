@@ -4,8 +4,7 @@
  * an injected `measure`, so it runs in Node (SVG export) and in the browser (canvas).
  */
 import type { World, Vec2 } from '../gen/types';
-import type { StyleName } from '../gen/options';
-import type { Palette } from './styles';
+import type { MapStyle, Palette } from './styles';
 import { KindStyle, kindStyles, streetRankStyle } from './labelStyles';
 import { View, worldToScreen } from './view';
 
@@ -18,7 +17,7 @@ export interface MapLabel {
 /** Text width in px of `text` at `size` px for the given style (italic/bold matter). */
 export type Measure = (text: string, size: number, st: KindStyle) => number;
 
-export function buildMapLabels(world: World, style: StyleName, pal: Palette): MapLabel[] {
+export function buildMapLabels(world: World, style: MapStyle, pal: Palette): MapLabel[] {
   const names = world.names;
   if (!names) return [];
   const styles = kindStyles(style, pal);
@@ -46,7 +45,7 @@ export interface PlacedMapLabel {
 interface Box { x0: number; y0: number; x1: number; y1: number }
 interface LGlyph { ch: string; size: number; w: number }
 
-const SMALL_CAP = 0.78;
+const SMALL_CAP = 0.82;
 
 /** Split text into glyphs (case rules applied) with their advance widths (letter spacing included). */
 export function layoutGlyphs(text: string, st: KindStyle, size: number, spacingPx: number, measure: Measure): { glyphs: LGlyph[]; total: number } {
