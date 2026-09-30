@@ -134,6 +134,7 @@ export function createCanvasRenderer(canvas: CanvasLike, world: World, style: St
   let labels: Label[] = [];
   let terrainImg: CanvasImageSource | null | undefined;
   let densityImg: CanvasImageSource | null | undefined;
+  const patterns = new Map<string, CanvasPattern | null>();
   let stats: FrameStats = { band: 0, scale: 0, ms: 0, tilesDrawn: 0, bigDrawn: 0, pathsBuilt: 0, pathCache: 0, buildingsCandidate: 0, buildingsDrawn: false, textureTiles: 0 };
 
   const polyL = (n: string): PolyLayer | undefined => scene.poly.get(n);
@@ -174,6 +175,25 @@ export function createCanvasRenderer(canvas: CanvasLike, world: World, style: St
       }
     } catch { terrainImg = null; }
     return terrainImg;
+  }
+  /** Tiling pattern (tile of `tw` x `th` meters drawn at 14 px/m, rotated `rot` degrees); null where canvases/DOMMatrix are unavailable (Node). */
+  function getPattern(ctx: CanvasRenderingContext2D, key: string, tw: number, th: number, rot: number, draw: (c: CanvasRenderingContext2D, k: number) => void): CanvasPattern | null {
+    let p = patterns.get(key);
+    if (p !== undefined) return p;
+    p = null;
+    try {
+      const k = 14;
+      const c = makeCanvas(Math.ceil(tw * k), Math.ceil(th * k));
+      const cx = c?.getContext('2d');
+      if (c && cx && typeof DOMMatrix !== 'undefined') {
+        cx.lineCap = 'round';
+        draw(cx, k);
+        p = ctx.createPattern(c as unknown as CanvasImageSource, 'repeat');
+        p?.setTransform(new DOMMatrix().rotate(rot).scale(1 / k));
+      }
+    } catch { p = null; }
+    patterns.set(key, p ?? null);
+    return p ?? null;
   }
   function getDensity(): CanvasImageSource | null {
     if (densityImg !== undefined) return densityImg;
@@ -284,26 +304,37 @@ export function createCanvasRenderer(canvas: CanvasLike, world: World, style: St
       ctx.drawImage(tex, 0, 0, S, S);
     }
 
-    // 2. land use
+    // 2. land use (tints multiply over the hillshade so relief reads through them); contours under it
+    const luOn = world.options.landuse;
     const luAlpha = pal.landOpacity;
+    const multiply = (on: boolean): void => { ctx.globalCompositeOperation = on ? 'multiply' : 'source-over'; };
+    if (world.options.contours) {
+      for (const l of linesOf((x) => x.role === 'contour')) {
+        const idx = l.kind === 'index';
+        strokeLines([l], pal.contour, () => (idx ? 1.2 : 0.7) / sc, idx ? pal.contourOpacity : pal.contourOpacity * 0.7);
+      }
+    }
     for (const kind of LAND_ORDER) {
+      if (!luOn) break;
       const name = 'lu-' + kind;
       if (!polyL(name)) continue;
-      fillPolys(name, pal.land[kind], kind === 'forest' ? 0.7 : kind === 'field' ? luAlpha : luAlpha);
+      multiply(true);
+      fillPolys(name, pal.land[kind], kind === 'forest' ? 0.7 : luAlpha);
       if (kind === 'field' && lod.strips) {
         fillPolys('stripA', pal.stripA, 0.55);
         fillPolys('stripB', pal.stripB, 0.5);
-        if (lod.band >= 2) {
-          strokePolys('stripA', pal.furrow, lw(0.28, 0.5), 0.5);
-          strokePolys('stripB', pal.furrow, lw(0.28, 0.5), 0.5);
-        }
+      }
+      multiply(false);
+      if (kind === 'field' && lod.strips && lod.band >= 2) {
+        strokePolys('stripA', pal.furrow, lw(0.28, 0.5), 0.5);
+        strokePolys('stripB', pal.furrow, lw(0.28, 0.5), 0.5);
       }
       if (kind === 'forest' && lod.strips) strokePolys(name, pal.treeInk, lw(0.7, 0.8), 0.5);
       if ((kind === 'orchard' || kind === 'garden') && lod.strips) strokePolys(name, pal.hedge, lw(0.8, 0.8), 0.7);
       if (kind === 'field' && lod.band >= 2) strokePolys(name, pal.hedge, lw(0.9, 0.9), 0.75, [px(4 * 1.3), px(1.6)]);
     }
     // textures (procedural marks, visible tiles only, cached per tile)
-    if (lod.textures) {
+    if (lod.textures && luOn) {
       for (const tl of scene.textures) fs.textureTiles += drawTexture(ctx, tl, rect, band, lw);
     }
 
@@ -317,7 +348,7 @@ export function createCanvasRenderer(canvas: CanvasLike, world: World, style: St
       for (const p of paths) ctx.fill(p, 'nonzero');
       if (sc < 0.08) strokeLines(linesOf((l) => l.name === 'river-centre'), pal.riverEdge, () => px(1.3));
     }
-    fillPolys('sea', pal.seaFill, 1, 'nonzero');
+    fillPolys('sea', pal.seaFill, 1, 'evenodd');
     strokePolys('sea', pal.waterEdge, lw(1.5 * u, 1.2));
     fillPolys('lakes', pal.lakeFill, 1, 'nonzero');
     strokePolys('lakes', pal.waterEdge, lw(1.3 * u, 1.1));
@@ -336,6 +367,9 @@ export function createCanvasRenderer(canvas: CanvasLike, world: World, style: St
     strokeLines(tracks, pal.roadEdge, (l) => lw(l.width * 0.5, 1), 0.85, [px(lod.band ? 7 : 5), px(lod.band ? 4 : 3)], 'butt');
 
     // 5. urban
+    const U = pal.urban;
+    const uStreets = linesOf((l) => l.role === 'street');
+    const mainsOf = (maxRank: number): LineLayer[] => uStreets.filter((l) => Number(l.kind.slice(1, 2)) <= maxRank && !l.kind.endsWith('c'));
     if (lod.densityAlpha > 0) {
       const dimg = getDensity();
       if (dimg) {
@@ -349,61 +383,86 @@ export function createCanvasRenderer(canvas: CanvasLike, world: World, style: St
         strokePolys('footprint', pal.inkSoft, lw(1, 1), 0.55 * lod.densityAlpha, [px(7), px(5)]);
       }
     }
-    if (lod.blocks) {
-      fillPolys('blocks', pal.ink, 0.12);
-      strokePolys('blocks', pal.ink, lw(0.5, 0.5), 0.4);
-    }
-    if (lod.parcels) strokePolys('parcels', pal.inkSoft, lw(0.25, 0.5), 0.55);
-    fillPolys('squares', pal.roadFill, 0.9);
-    strokePolys('squares', pal.roadEdge, lw(0.6, 0.6), 0.7);
-    if (lod.streets) {
-      const st = linesOf((l) => (l.role === 'street' || (lod.alleys && l.role === 'alley')));
-      roadGroup(st, (l) => (l.kind === 'main' ? 1.6 : l.kind === 'alley' ? 0.6 : 1.1));
+    if (!lod.blocks) {
+      // far: arterial and primary streets only, as thin cased lines
+      roadGroup(mainsOf(1), (l) => (l.kind.startsWith('r0') ? 1.8 : 1.2));
     } else {
-      // far: only main streets, as thin ink lines
-      const main = linesOf((l) => l.role === 'street' && l.kind === 'main');
-      strokeLines(main, pal.roadEdge, () => px(1.3), 0.9);
-    }
-    // buildings
-    const houses = polyL('houses'), special = polyL('special');
-    if (lod.buildings && (houses || special)) {
-      let cand = 0;
-      for (const l of [houses, special]) if (l) for (const t of l.index.tilesInRect(rect)) cand += l.index.tileStart[t + 1] - l.index.tileStart[t];
-      fs.buildingsCandidate = cand;
-      if (cand <= BUILDING_BUDGET_MAX) {
-        fs.buildingsDrawn = true;
-        const full = cand <= BUILDING_BUDGET_FULL;
-        const groups: [PolyLayer | undefined, string][] = [[houses, pal.farmRoof], [special, pal.inkSoft]];
-        for (const [l, col] of groups) {
-          if (!l) continue;
-          const paths = polyPaths(l);
-          if (lod.shadows && full) {
-            ctx.save(); ctx.translate(1.6, 1.9);
-            ctx.fillStyle = 'rgba(0,0,0,0.22)';
-            for (const p of paths) ctx.fill(p, 'nonzero');
+      // street space = the quarters; blocks, places and masses are laid on top
+      fillPolys('u-streets', U.street, 1, 'nonzero');
+      strokePolys('u-streets', U.street, 0.4);
+      const near = lod.band >= 2;
+      const paved = (name: string, base: string, pat: CanvasPattern | null, patAlpha = 1): void => {
+        fillPolys(name, base);
+        if (near && pat) {
+          const l = polyL(name);
+          if (l) { ctx.fillStyle = pat; ctx.globalAlpha = patAlpha; for (const p of polyPaths(l)) ctx.fill(p, 'evenodd'); ctx.globalAlpha = 1; }
+        }
+      };
+      const pave = near ? getPattern(ctx, 'pave', 3, 3, 0, (c, k) => { c.globalAlpha = 0.55; c.fillStyle = U.placeInk; c.beginPath(); c.arc(1.5 * k, 1.5 * k, 0.28 * k, 0, TAU); c.fill(); }) : null;
+      const gardenPat = near ? getPattern(ctx, 'garden', 6, 6, 28, (c, k) => {
+        c.globalAlpha = 0.7; c.strokeStyle = U.gardenInk; c.lineWidth = 0.35 * k;
+        c.beginPath(); c.moveTo(0.6 * k, 1.5 * k); c.lineTo(3.4 * k, 1.5 * k); c.moveTo(3.2 * k, 4.5 * k); c.lineTo(5.6 * k, 4.5 * k); c.stroke();
+      }) : null;
+      const gravePat = near ? getPattern(ctx, 'grave', 5, 4, 0, (c, k) => {
+        c.globalAlpha = 0.8; c.strokeStyle = U.gardenInk; c.lineWidth = 0.25 * k;
+        c.beginPath(); c.moveTo(1.2 * k, 1.2 * k); c.lineTo(1.2 * k, 2.8 * k); c.moveTo(0.6 * k, 1.8 * k); c.lineTo(1.8 * k, 1.8 * k);
+        c.moveTo(3.7 * k, 3.1 * k); c.lineTo(3.7 * k, 3.9 * k); c.moveTo(3.3 * k, 3.4 * k); c.lineTo(4.1 * k, 3.4 * k); c.stroke();
+      }) : null;
+      paved('u-places', U.place, pave);
+      paved('u-greens', U.garden, gardenPat, 0.6);
+      paved('u-yards', U.garden, gravePat);
+      fillPolys('u-blocks', U.yard);
+      paved('u-backland', U.garden, gardenPat);
+      // building masses (courtyards are holes -> evenodd), with a soft drop shadow when zoomed in
+      const masses = polyL('u-masses');
+      if (lod.buildings && masses) {
+        let cand = 0;
+        for (const t of masses.index.tilesInRect(rect)) cand += masses.index.tileStart[t + 1] - masses.index.tileStart[t];
+        cand += masses.index.bigInRect(rect).length;
+        fs.buildingsCandidate = cand;
+        if (cand <= BUILDING_BUDGET_MAX) {
+          fs.buildingsDrawn = true;
+          const paths = polyPaths(masses);
+          if (lod.shadows && cand <= BUILDING_BUDGET_FULL) {
+            ctx.save(); ctx.translate(1.4, 1.7);
+            ctx.fillStyle = 'rgba(0,0,0,0.2)';
+            for (const p of paths) ctx.fill(p, 'evenodd');
             ctx.restore();
           }
-          ctx.fillStyle = col;
-          for (const p of paths) ctx.fill(p, 'nonzero');
-          if (full) {
-            ctx.strokeStyle = pal.ink; ctx.lineWidth = lw(0.35, 0.6);
+          ctx.fillStyle = U.mass;
+          for (const p of paths) ctx.fill(p, 'evenodd');
+          if (cand <= BUILDING_BUDGET_FULL) {
+            ctx.strokeStyle = U.massEdge; ctx.lineWidth = lw(0.3, 0.3);
             for (const p of paths) ctx.stroke(p);
           }
         }
       }
+      // churches: distinct outlined mass with a cross
+      if (polyL('u-church')) {
+        fillPolys('u-church', U.landmark);
+        strokePolys('u-church', U.mass, lw(0.8, 0.6));
+        if (lod.band >= 2) strokeLines(linesOf((l) => l.role === 'cross'), U.mass, (l) => lw(l.width, 0.6));
+      }
+      // plot hairlines: a dark pass (reads on yards) and a light pass (reads on roofs)
+      if (lod.parcels) {
+        strokePolys('u-plots', U.plotLine, lw(0.14, 0.4), 0.45);
+        strokePolys('u-plots', U.massEdge, lw(0.14, 0.4), 0.28);
+      }
+      // hierarchy: arterial / primary streets keep a legible minimum width in street colour
+      const minPx = (l: LineLayer): number => (l.kind.startsWith('r0') ? 2.6 : l.kind.startsWith('r1') ? 1.8 : 1.0);
+      const thin = mainsOf(lod.band === 1 ? 2 : 1).filter((l) => l.width * sc < minPx(l));
+      strokeLines(thin, U.street, (l) => minPx(l) / sc);
+      strokePolys('block-edges', U.blockEdge, lw(0.4, 0.3));
+      if (polyL('landmarks') && near) strokePolys('landmarks', U.landmark, lw(0.6, 0.6), 0.5, [px(5), px(3)]);
     }
-    if (lod.landmarks) {
-      fillPolys('landmarks', pal.marker, 0.45);
-      strokePolys('landmarks', pal.ink, lw(0.8, 0.8));
-    }
-    // walls
+    // walls: casing + fill (stretches between gate openings), towers and gate towers
     const walls = linesOf((l) => l.role === 'wall');
-    if (walls.length) {
-      strokeLines(walls, pal.ink, (l) => lw(l.width, 2), 1, [], 'butt');
-      if (lod.towers) {
-        fillPolys('towers', pal.ink);
-        fillPolys('gates', pal.roadFill);
-        strokePolys('gates', pal.ink, lw(0.8, 0.8));
+    for (const l of walls) strokeLines([l], U.wall, () => Math.max(l.width + 1.4, 3 / sc), 1, [], 'butt');
+    for (const l of walls) strokeLines([l], U.wallFill, () => Math.max(0.6, l.width - 1, 1.5 / sc), 1, [], 'butt');
+    if (walls.length && lod.towers) {
+      for (const name of ['towers', 'gate-towers']) {
+        fillPolys(name, U.wallFill);
+        strokePolys(name, U.wall, lw(0.9, 0.8));
       }
     }
 
@@ -494,20 +553,20 @@ export function createCanvasRenderer(canvas: CanvasLike, world: World, style: St
     const tex = getTerrain();
     if (tex) ctx.drawImage(tex, 0, 0, target.width, target.width);
     ctx.setTransform(k, 0, 0, k, 0, 0);
-    const water = (name: string, fill: string): void => {
+    const water = (name: string, fill: string, rule: CanvasFillRule = 'nonzero'): void => {
       const l = polyL(name);
       if (!l) return;
       ctx.fillStyle = fill;
       for (const t of l.index.tilesInRect({ minX: 0, minY: 0, maxX: S, maxY: S })) {
         const p = cached(`${l.name}|0|t${t}`, () => polyPath(P, l, l.index.itemsOf(t), BAND_MIN_EDGE[0]));
-        if (p) ctx.fill(p, 'nonzero');
+        if (p) ctx.fill(p, rule);
       }
       for (const i of l.index.big) {
         const p = cached(`${l.name}|0|b${i}`, () => polyPath(P, l, [i], BAND_MIN_EDGE[0]));
-        if (p) ctx.fill(p, 'nonzero');
+        if (p) ctx.fill(p, rule);
       }
     };
-    water('sea', pal.seaFill); water('lakes', pal.lakeFill); water('rivers', pal.riverFill);
+    water('sea', pal.seaFill, 'evenodd'); water('lakes', pal.lakeFill); water('rivers', pal.riverFill);
     const d = getDensity();
     if (d) ctx.drawImage(d, 0, 0, S, S);
     const r = viewRect(view, viewW, viewH, 0);

@@ -3,6 +3,9 @@ import type { Vec2 } from '../gen/core/geom';
 import type { Palette } from './styles';
 import { f1, pathD } from './util';
 
+/** Land-use tints multiply over the hillshaded terrain so relief stays readable under them (browsers; resvg falls back to plain alpha). */
+const MUL = ' style="mix-blend-mode:multiply"';
+
 const ringsD = (a: LandArea): string => {
   let d = pathD(a.poly, true);
   if (a.holes) for (const h of a.holes) d += pathD(h, true);
@@ -81,14 +84,14 @@ export function landuseLayer(world: World, pal: Palette, u: number): string {
     if (!list.length) continue;
     out += `<g class="lu-${kind}">`;
     if (kind === 'field') {
-      out += `<g fill="${pal.land.field}" fill-opacity="${pal.landOpacity}" fill-rule="evenodd">${list.map((a) => `<path d="${ringsD(a)}"/>`).join('')}</g>`;
+      out += `<g fill="${pal.land.field}" fill-opacity="${pal.landOpacity}" fill-rule="evenodd"${MUL}>${list.map((a) => `<path d="${ringsD(a)}"/>`).join('')}</g>`;
       // strips: alternate tints, thin dividing lines and furrow texture
       for (const a of list) {
         if (!a.strips || a.stripAngle === undefined) continue;
         const deg = Math.round((a.stripAngle * 180) / Math.PI) % 180;
         let dA = '', dB = '', all = '';
         a.strips.forEach((st, i) => { const d = pathD(st, true); all += d; if (i & 1) dB += d; else dA += d; });
-        out += `<path d="${dA}" fill="${pal.stripA}" fill-opacity="0.55"/><path d="${dB}" fill="${pal.stripB}" fill-opacity="0.5"/>` +
+        out += `<path d="${dA}" fill="${pal.stripA}" fill-opacity="0.55"${MUL}/><path d="${dB}" fill="${pal.stripB}" fill-opacity="0.5"${MUL}/>` +
           `<path d="${all}" fill="url(#p-fur-${deg})" stroke="${pal.furrow}" stroke-width="${f1(0.28 * s)}" stroke-opacity="0.55"/>`;
       }
       // hedges along furlong edges
@@ -96,7 +99,7 @@ export function landuseLayer(world: World, pal: Palette, u: number): string {
     } else {
       const d = list.map(ringsD).join('');
       const alpha = kind === 'forest' ? 0.7 : pal.landOpacity;
-      out += `<path d="${d}" fill="${pal.land[kind]}" fill-opacity="${alpha}" fill-rule="evenodd" stroke="${pal.land[kind]}" stroke-width="${f1(0.6 * s)}"/>`;
+      out += `<path d="${d}" fill="${pal.land[kind]}" fill-opacity="${alpha}" fill-rule="evenodd" stroke="${pal.land[kind]}" stroke-width="${f1(0.6 * s)}"${MUL}/>`;
       out += `<path d="${d}" fill="url(#p-${kind})" fill-rule="evenodd"/>`;
       if (kind === 'forest') out += `<path d="${d}" fill="none" stroke="${pal.treeInk}" stroke-width="${f1(0.7 * s)}" stroke-opacity="0.55" stroke-linejoin="round"/>`;
       else if (kind === 'orchard' || kind === 'garden') out += `<path d="${d}" fill="none" stroke="${pal.hedge}" stroke-width="${f1(0.8 * s)}" stroke-opacity="0.7"/>`;

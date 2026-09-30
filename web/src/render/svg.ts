@@ -1,11 +1,11 @@
 import type { World } from '../gen/types';
-import type { StyleName, Relief } from '../gen/options';
-import { Vec2, chaikin, simplify, offsetRibbon, polylineLength } from '../gen/core/geom';
-import { sampleGrid } from '../gen/core/grid';
+import type { StyleName } from '../gen/options';
+import { Vec2, chaikin, simplify, offsetRibbon } from '../gen/core/geom';
 import { marchingSquares } from '../gen/terrain/contour';
+import { contourSet, ContourSet } from './contours';
 import { PALETTES, Palette } from './styles';
 import { renderTerrainRaster, pngDataUrl } from './raster';
-import { f1, pathD } from './util';
+import { f1, pathD, seaWithIslands } from './util';
 import { landuseLayer, roadsLayer, siteLayer } from './landuse';
 import { urbanLayer } from './urban';
 
@@ -13,36 +13,14 @@ export interface RenderOptions {
   style?: StyleName; contours?: boolean; raster?: boolean; landuse?: boolean; debug?: boolean;
 }
 
-const CONTOUR_INTERVAL: Record<Relief, number> = { flat: 2, hills: 5, valley: 5, mountains: 20 };
-
 function contourLayer(world: World, pal: Palette, u: number): string {
-  const t = world.terrain;
-  const hg = t.height;
-  const interval = CONTOUR_INTERVAL[world.options.relief];
-  let maxH = 0;
-  for (let i = 0; i < hg.data.length; i++) if (hg.data[i] > maxH) maxH = hg.data[i];
-  const thin: string[] = [], index: string[] = [];
-  for (let lv = interval, k = 1; lv < maxH; lv += interval, k++) {
-    const isIndex = k % 5 === 0;
-    const paths = marchingSquares(hg.data, hg.w, hg.h, lv, hg.cell, hg.cell / 2, hg.cell / 2);
-    let d = '';
-    for (const p of paths) {
-      if (p.pts.length < 4) continue;
-      let pts = p.pts;
-      if (polylineLength(pts) < 35 * u) continue;
-      let sl = 0;
-      for (const q of pts) sl += sampleGrid(t.slope, q.x, q.y);
-      if (sl / pts.length < (world.options.relief === 'flat' ? 0.004 : 0.012)) continue;
-      pts = chaikin(pts, 2, p.closed);
-      pts = simplify(pts, 0.35 * u);
-      d += pathD(pts, p.closed);
-    }
-    if (d) (isIndex ? index : thin).push(d);
-  }
+  const cs = contourSet(world, u);
+  const dOf = (l: ContourSet['thin']): string => l.map((c) => pathD(c.pts, c.closed)).join('');
+  const thin = dOf(cs.thin), index = dOf(cs.index);
   const sw = 0.55 * u;
   return `<g class="layer-contours" fill="none" stroke="${pal.contour}" stroke-linejoin="round" stroke-linecap="round">` +
-    (thin.length ? `<path d="${thin.join('')}" stroke-width="${f1(sw)}" opacity="${pal.contourOpacity * 0.7}"/>` : '') +
-    (index.length ? `<path d="${index.join('')}" stroke-width="${f1(sw * 1.9)}" opacity="${pal.contourOpacity}"/>` : '') +
+    (thin ? `<path d="${thin}" stroke-width="${f1(sw)}" opacity="${pal.contourOpacity * 0.7}"/>` : '') +
+    (index ? `<path d="${index}" stroke-width="${f1(sw * 1.9)}" opacity="${pal.contourOpacity}"/>` : '') +
     '</g>';
 }
 
@@ -146,9 +124,12 @@ export function renderSvg(world: World, opts: RenderOptions = {}): string {
 
   // water
   let water = '<g class="layer-water">';
-  for (const poly of t.coastline) water += `<path d="${pathD(poly, true)}" fill="${pal.seaFill}"/>`;
+  // islands are holes of the sea polygon they lie in (evenodd), so the land shows through
+  const swi = seaWithIslands(t.coastline, t.islands);
+  const seaD = swi.sea.map((poly, i) => pathD(poly, true) + swi.holes[i].map((h) => pathD(h, true)).join(''));
+  for (const d of seaD) water += `<path d="${d}" fill="${pal.seaFill}" fill-rule="evenodd"/>`;
   water += rippleLayer(world, pal, u);
-  for (const poly of t.coastline) water += `<path d="${pathD(poly, true)}" fill="none" stroke="${pal.waterEdge}" stroke-width="${f1(1.5 * u)}" stroke-linejoin="round"/>`;
+  for (const d of seaD) water += `<path d="${d}" fill="none" stroke="${pal.waterEdge}" stroke-width="${f1(1.5 * u)}" stroke-linejoin="round"/>`;
   for (const poly of t.lakes) {
     water += `<path d="${pathD(poly, true)}" fill="${pal.lakeFill}" stroke="${pal.waterEdge}" stroke-width="${f1(1.3 * u)}" stroke-linejoin="round"/>`;
   }

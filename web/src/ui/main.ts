@@ -99,7 +99,8 @@ if (worker) {
     if (r.error) { busyEl.classList.remove('on'); statusEl.textContent = 'Error: ' + r.error.split('\n')[0]; console.error(r.error); return; }
     show(r.world!, r.stats!, r.ms!);
   };
-  worker.onerror = (e) => { console.error(e); worker = null; run(); };
+  // e.g. blob workers are refused on file:// - fall back to generating on the main thread
+  worker.onerror = () => { console.info('Generation worker unavailable (file:// ?), generating on the main thread'); worker = null; run(); };
 }
 
 function run(): void {
@@ -131,6 +132,15 @@ const viewer = createViewer({
   onFrame: (ms, band, scale) => { hudEl.textContent = `${['far', 'mid', 'near'][band]} - ${scale.toFixed(3)} px/m - ${ms.toFixed(1)} ms`; },
 });
 $('fit').addEventListener('click', () => viewer.fit());
+// debug hook for scripted screenshots (scripts/ui_check.mjs)
+(window as unknown as Record<string, unknown>).__burgmap = {
+  setView: (v: { cx: number; cy: number; scale: number }) => viewer.setView(v),
+  getView: () => viewer.getView(),
+  fit: () => viewer.fit(),
+  world: () => currentWorld,
+  /** Center of the settlement (site center / urban footprint centroid). */
+  center: () => currentWorld?.site?.center ?? { x: (currentWorld?.mapSize ?? 0) / 2, y: (currentWorld?.mapSize ?? 0) / 2 },
+};
 // CANVAS-VIEWER (end viewer)
 
 // ---------- export ----------

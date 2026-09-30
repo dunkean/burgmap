@@ -17,6 +17,8 @@ export interface ViewerOptions {
 export interface Viewer {
   setRenderer(r: CanvasRenderer, mapSize: number, keepView?: boolean): void;
   fit(): void;
+  /** Set the view directly (clamped). Debug / scripted screenshots. */
+  setView(v: View): void;
   zoomBy(factor: number): void;
   invalidate(): void;
   getView(): View;
@@ -152,7 +154,7 @@ export function createViewer(o: ViewerOptions): Viewer {
       if (!keepView || sizeChanged) view = fitView(mapSize, w, h);
       invalidate();
     },
-    fit, zoomBy: (f) => zoomBy(f), invalidate,
+    fit, setView: set, zoomBy: (f) => zoomBy(f), invalidate,
     getView: () => view,
     destroy() {
       destroyed = true; ro.disconnect(); window.removeEventListener('keydown', key);

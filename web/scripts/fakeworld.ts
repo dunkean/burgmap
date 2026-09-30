@@ -1,5 +1,5 @@
 /** Synthetic World generator and mock Canvas 2D context for stress/smoke tests (Node only). */
-import type { World, Polygon, Polyline } from '../src/gen/types';
+import type { World, Polygon, Polyline, UrbanStreet, UrbanParcel, UrbanBlockInfo } from '../src/gen/types';
 import { makeOptions } from '../src/gen/options';
 import { createGrid } from '../src/gen/core/grid';
 
@@ -27,7 +27,7 @@ export function fakeWorld(o: FakeOpts = {}): World {
     const P = (dx: number, dy: number) => ({ x: c.x + dx * ca - dy * sa, y: c.y + dx * sa + dy * ca });
     buildings.push({ poly: [P(-w / 2, -h / 2), P(w / 2, -h / 2), P(w / 2, h / 2), P(-w / 2, h / 2)], kind: rnd() < 0.97 ? 'house' : 'church' });
   }
-  const streets: { path: Polyline; width: number; kind: 'main' | 'street' | 'alley' }[] = [];
+  const streets: UrbanStreet[] = [];
   for (let i = 0; i < ns; i++) {
     const c = near();
     let a = rnd() * Math.PI * 2;
@@ -40,14 +40,15 @@ export function fakeWorld(o: FakeOpts = {}): World {
       path.push({ x: p.x + Math.cos(a) * l, y: p.y + Math.sin(a) * l });
     }
     const r = rnd();
-    streets.push({ path, width: r < 0.05 ? 8 : r < 0.5 ? 5 : 2.5, kind: r < 0.05 ? 'main' : r < 0.5 ? 'street' : 'alley' });
+    streets.push({ path, width: r < 0.05 ? 8 : r < 0.5 ? 5 : 2.5, kind: r < 0.05 ? 'main' : r < 0.5 ? 'street' : 'alley', rank: r < 0.05 ? 0 : r < 0.5 ? 2 : 3, role: r < 0.05 ? 'radial' : r < 0.5 ? 'street' : 'lane', phase: 1 });
   }
-  const blocks: Polygon[] = [], parcels: { poly: Polygon; use: string }[] = [];
+  const blocks: Polygon[] = [], parcels: UrbanParcel[] = [], blockInfo: UrbanBlockInfo[] = [];
   for (let i = 0; i < Math.floor(nb / 12); i++) {
     const c = near(), w = 30 + rnd() * 40, h = 30 + rnd() * 40;
     const poly = [{ x: c.x - w / 2, y: c.y - h / 2 }, { x: c.x + w / 2, y: c.y - h / 2 }, { x: c.x + w / 2, y: c.y + h / 2 }, { x: c.x - w / 2, y: c.y + h / 2 }];
     blocks.push(poly);
-    if (i % 3 === 0) parcels.push({ poly, use: 'house' });
+    blockInfo.push({ quarter: 0, phase: 1, zone: 'core', kind: 'block' });
+    if (i % 3 === 0) parcels.push({ poly, use: 'plot', block: i });
   }
   const ring = (c: { x: number; y: number }, r: number, n: number): Polygon => Array.from({ length: n }, (_, i) => ({ x: c.x + Math.cos((i / n) * 6.283) * r, y: c.y + Math.sin((i / n) * 6.283) * r }));
   const footprint: Polygon[] = centers.map((c) => ring(c, c.r * 1.8, 24));
@@ -67,6 +68,10 @@ export function fakeWorld(o: FakeOpts = {}): World {
     roads: Array.from({ length: 300 }, () => ({ path: [near(), near(), near()], kind: 'minor' as const, width: 5 })),
     urban: {
       footprint, streets, blocks, parcels, buildings, landmarks: [], squares: [],
+      archetype: 'town', population: 1000, morphology: 'fake', phases: [], blockInfo, backLand: [],
+      quarters: blocks.slice(0, Math.floor(blocks.length / 4)).map((poly) => ({ poly: { outer: poly, holes: [] }, phase: 1, zone: 'core' as const, streetSpace: [] })),
+      masses: buildings.map((b) => ({ outer: b.poly, holes: [] })),
+      footprintH: footprint.map((outer) => ({ outer, holes: [] })),
       walls: centers.slice(0, 5).map((c) => ({ path: ring(c, c.r * 0.6, 40), closed: true, towers: [], gates: [], thickness: 3 })),
     },
     landuse: { areas, farmsteads: [], reserve: [] },
