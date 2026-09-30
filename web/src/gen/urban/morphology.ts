@@ -49,6 +49,17 @@ export interface MorphologyParams {
   sideGap: Record<Zone, Range>;
   /** Burgage-cycle infill base per zone (0 = house + garden … 1 = fully built). */
   infill: Record<Zone, number>;
+  /** Built share of the block per zone (burgage cycle): oldest phase ≈ 0.9, faubourgs ≈ 0.45. */
+  coverage: Record<Zone, Range>;
+  /** Chance that a wide plot of a dense zone holds a large courtyard building (inn, hall, hôtel). */
+  bigCourtChance: number;
+  /**
+   * Footprint conformity per zone: 1 = footprints take the plot's shape within their depth band (trapezoids where
+   * plots fan, skewed quads, polygonal corners); 0 = orthogonal rectangles inside the plot.
+   */
+  footprintConformity: Record<Zone, number>;
+  /** Probability that the irregular corner left beside an orthogonal footprint is built too. */
+  cornerFill: Record<Zone, number>;
   courtyardMin: number;
   /** Gross densities (inhabitants per ha) per zone, used to size phase regions. */
   density: Record<Zone, number>;
@@ -75,7 +86,7 @@ const EO: MorphologyParams = {
   placeThreshold: 900,
   deadEndRatio: 0.35,
   slitDepth: 0.55,
-  frontage: { core: [4.5, 7.5], middle: [6, 10], edge: [8, 14], faubourg: [7, 13], village: [18, 40] },
+  frontage: { core: [5, 8], middle: [6, 10], edge: [8, 14], faubourg: [7, 13], village: [18, 40] },
   plotDepth: { core: [24, 42], middle: [30, 50], edge: [35, 65], faubourg: [30, 60], village: [40, 80] },
   plotTilt: 6,
   wideLotChance: 0.08,
@@ -83,6 +94,10 @@ const EO: MorphologyParams = {
   setback: { core: [0, 0.3], middle: [0, 0.8], edge: [0.5, 3], faubourg: [0.5, 3], village: [3, 10] },
   sideGap: { core: [0, 0], middle: [0, 1.2], edge: [0.5, 2.5], faubourg: [0.8, 3], village: [3, 8] },
   infill: { core: 0.92, middle: 0.62, edge: 0.38, faubourg: 0.3, village: 0.12 },
+  coverage: { core: [0.86, 0.94], middle: [0.75, 0.85], edge: [0.53, 0.67], faubourg: [0.38, 0.52], village: [0.12, 0.3] },
+  bigCourtChance: 0.3,
+  footprintConformity: { core: 0.92, middle: 0.75, edge: 0.6, faubourg: 0.4, village: 0.3 },
+  cornerFill: { core: 0.6, middle: 0.35, edge: 0.2, faubourg: 0.1, village: 0 },
   courtyardMin: 9,
   density: { core: 185, middle: 120, edge: 85, faubourg: 55, village: 35 },
 };
@@ -106,6 +121,9 @@ const BASTIDE: MorphologyParams = {
   plotDepth: { core: [20, 30], middle: [20, 32], edge: [22, 36], faubourg: [30, 60], village: [40, 80] },
   plotTilt: 1.5,
   infill: { core: 0.72, middle: 0.6, edge: 0.45, faubourg: 0.3, village: 0.12 },
+  coverage: { core: [0.85, 0.92], middle: [0.72, 0.83], edge: [0.55, 0.68], faubourg: [0.38, 0.52], village: [0.12, 0.3] },
+  footprintConformity: { core: 0.3, middle: 0.3, edge: 0.3, faubourg: 0.3, village: 0.2 },
+  cornerFill: { core: 0.5, middle: 0.3, edge: 0.2, faubourg: 0.1, village: 0 },
   density: { core: 150, middle: 130, edge: 110, faubourg: 55, village: 35 },
 };
 

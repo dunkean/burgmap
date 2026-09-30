@@ -186,7 +186,8 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   const slowest = { ms: 0, bi: -1, n: 0 };
   carved.forEach((b, bi) => {
     const br = rng.fork('blk:' + bi);
-    const infill = Math.max(0, Math.min(1, params.infill[b.zone] + br.range(-0.08, 0.08)));
+    const [c0, c1] = params.coverage[b.zone];
+    const infill = c0 + (c1 - c0) * br.float();
     blockInfill.push(infill);
     if (b.kind !== 'block') {
       const use = b.kind === 'market' ? (archetype === 'town' ? 'market' : 'green') : b.kind === 'church' ? 'church' : 'place';
@@ -213,8 +214,16 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   let pi = 0;
   const parcelIndexOfPlot: number[] = [];
   parcels.forEach((pc, i) => { if (pc.use === 'plot') parcelIndexOfPlot.push(i); });
+  // courts come in neighbouring pairs, about 2 plots in 9 along a frontage run, at a depth shared by the run
+  const courtHint = (pl: Plot) => {
+    const cr = rng.fork('court:' + pl.block + ':' + pl.run);
+    const phase = cr.int(0, 8), f = cr.range(0.35, 0.65);
+    return { court: (pl.order + phase) % 9 < 2, f };
+  };
   for (const pl of plots) {
-    const bl = buildPlot(pl, blockInfill[pl.block], params, rng.fork('pl:' + pi));
+    const pr = rng.fork('pl:' + pi);
+    const cov = Math.max(0, Math.min(1, blockInfill[pl.block] + pr.range(-0.03, 0.03)));
+    const bl = buildPlot(pl, cov, params, pr, courtHint(pl));
     for (const b of bl) {
       if (b.kind === 'garden') { plotGardens.push(b.poly); continue; }
       buildings.push({ poly: b.poly, kind: b.kind, parcel: parcelIndexOfPlot[pi] }); perBlock[pl.block].push(b.poly);

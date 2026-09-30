@@ -89,6 +89,50 @@ export function wallSvg(w: UrbanWall, ink: string, fill: string, wallScale = 1, 
   return s;
 }
 
+const hex2 = (h: string): [number, number, number] => { const v = parseInt(h.slice(1, 7), 16); return [(v >> 16) & 255, (v >> 8) & 255, v & 255]; };
+const rgb2 = (c: number[]): string => '#' + c.map((x) => Math.max(0, Math.min(255, Math.round(x))).toString(16).padStart(2, '0')).join('');
+const mixHex = (a: string, b: string, t: number): string => { const A = hex2(a), B = hex2(b); return rgb2(A.map((x, i) => x + (B[i] - x) * t)); };
+const lumHex = (h: string): number => { const [r, g, b] = hex2(h); return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255; };
+
+/** Landmark building kinds (drawn distinctly, not as ordinary roofs). */
+export const LANDMARK_KINDS = new Set(['church', 'cathedral']);
+
+/**
+ * Buildings drawn one by one: a roof tone varied slightly per building and a crisp dark outline, so shared party
+ * walls show and the fabric reads cellular (cadastre / watabou) instead of one dark blob. Colours come from the
+ * style tokens: a light `mass` is the roof itself (outlined with the darker of `massEdge` or a shade of it); an ink
+ * `mass` (parchment) is lifted toward the yard colour into a warm roof tone and outlined with the ink.
+ */
+function buildingsSvg(ub: NonNullable<World['urban']>, U: Palette['urban'], lw: (m: number, px: number) => string): string {
+  const lm = lumHex(U.mass);
+  const base = lm < 0.3 ? mixHex(U.mass, U.yard, 0.42) : U.mass;
+  const edge = lm < 0.3 ? mixHex(U.mass, '#000000', 0.25) : lumHex(U.massEdge) < lm ? U.massEdge : mixHex(U.mass, '#000000', 0.6);
+  const tones = [-0.09, -0.045, 0, 0.045, 0.09].map((k) => (k < 0 ? mixHex(base, '#000000', -k) : mixHex(base, '#ffffff', k)));
+  const buckets: string[][] = tones.map(() => []);
+  ub.buildings.forEach((b, i) => {
+    if (LANDMARK_KINDS.has(b.kind)) return;
+    const h = (Math.imul(i + 1, 2654435761) >>> 0) % tones.length;
+    buckets[h].push(pathD(b.poly, true));
+  });
+  const ew = lw(Math.max(0.28, U.massEdgeW * 0.9), 0.22);
+  let s = `<g class="u-buildings" stroke="${edge}" stroke-width="${ew}" stroke-linejoin="miter">`;
+  buckets.forEach((list, k) => { if (list.length) s += `<path d="${list.join('')}" fill="${tones[k]}"/>`; });
+  s += '</g>';
+  // landmarks: church / cathedral as a darker, hatched mass with a cross
+  const ch = ub.buildings.filter((b) => LANDMARK_KINDS.has(b.kind));
+  if (ch.length) {
+    const d = ch.map((b) => pathD(b.poly, true)).join('');
+    s += `<defs><pattern id="p-lmhatch" patternUnits="userSpaceOnUse" width="1.6" height="1.6" patternTransform="rotate(45)"><path d="M0 0.8H1.6" stroke="${U.landmarkEdge}" stroke-width="0.35" stroke-opacity="0.55"/></pattern></defs>`;
+    s += `<g class="u-landmarks"><path d="${d}" fill="${U.landmark}" stroke="${U.landmarkEdge}" stroke-width="${lw(0.8, 0.4)}"/><path d="${d}" fill="url(#p-lmhatch)"/>`;
+    let cx = 0, cy = 0, n = 0, x0 = Infinity, x1 = -Infinity;
+    for (const b of ch) for (const q of b.poly) { cx += q.x; cy += q.y; n++; x0 = Math.min(x0, q.x); x1 = Math.max(x1, q.x); }
+    cx /= n; cy /= n;
+    const r = Math.max(2.5, (x1 - x0) * 0.08);
+    s += `<path d="M${f1(cx - r)} ${f1(cy)}H${f1(cx + r)}M${f1(cx)} ${f1(cy - r * 1.4)}V${f1(cy + r)}" stroke="${U.landmarkEdge}" stroke-width="${lw(0.9, 0.5)}"/></g>`;
+  }
+  return s;
+}
+
 export function urbanLayer(world: World, pal: Palette, u: number, debug: boolean): string {
   if (debug) return urbanDebugLayer(world, u);
   const ub = world.urban;
@@ -119,25 +163,10 @@ export function urbanLayer(world: World, pal: Palette, u: number, debug: boolean
     const d = ub.backLand.map(phD).join('');
     s += `<g class="u-gardens"><path d="${d}" fill="${U.garden}"/><path d="${d}" fill="url(#p-ugarden)"/></g>`;
   }
-  if (ub.masses.length) {
-    s += `<path class="u-masses" d="${ub.masses.map(phD).join('')}" fill="${U.mass}" fill-rule="evenodd" stroke="${U.massEdge}" stroke-width="${lw(U.massEdgeW, U.massEdgeW * 0.5)}"/>`;
-  }
-  // landmarks: church / cathedral drawn as a distinct, outlined mass with a cross
-  const ch = ub.buildings.filter((b) => b.kind === 'church');
-  if (ch.length) {
-    const d = ch.map((b) => pathD(b.poly, true)).join('');
-    s += `<g class="u-landmarks"><path d="${d}" fill="${U.landmark}" stroke="${U.landmarkEdge}" stroke-width="${lw(0.8, 0.4)}"/>`;
-    // cross on the nave
-    let cx = 0, cy = 0, n = 0, x0 = Infinity, x1 = -Infinity;
-    for (const b of ch) for (const q of b.poly) { cx += q.x; cy += q.y; n++; x0 = Math.min(x0, q.x); x1 = Math.max(x1, q.x); }
-    cx /= n; cy /= n;
-    const r = Math.max(2.5, (x1 - x0) * 0.08);
-    s += `<path d="M${f1(cx - r)} ${f1(cy)}H${f1(cx + r)}M${f1(cx)} ${f1(cy - r * 1.4)}V${f1(cy + r)}" stroke="${U.landmarkEdge}" stroke-width="${lw(0.9, 0.5)}"/></g>`;
-  }
-  // plot hairlines: a dark pass (reads on yards) and a light pass (reads on roofs), so each house is legible
+  // plot hairlines first: the buildings cover them, so they read on yards and gardens only (cadastre style)
   const plotD = ub.parcels.filter((p) => p.use === 'plot').map((p) => pathD(p.poly, true)).join('');
-  s += `<g class="u-plots" fill="none" stroke-width="${lw(U.plotW, 0.05)}"><path d="${plotD}" stroke="${U.plotLine}" stroke-opacity="${U.plotAlpha}"/>` +
-    `<path d="${plotD}" stroke="${U.massEdge}" stroke-opacity="${U.plotLightAlpha}"/></g>`;
+  s += `<path class="u-plots" d="${plotD}" fill="none" stroke="${U.plotLine}" stroke-opacity="${f1(U.plotAlpha * 0.75)}" stroke-width="${lw(U.plotW, 0.05)}"/>`;
+  s += buildingsSvg(ub, U, lw);
   // main streets keep a legible minimum width at small scales (drawn over the street space only where wider)
   const mains = ub.streets.filter((st) => st.rank <= 1 && st.role !== 'close');
   const minW = 2.4 * u;
