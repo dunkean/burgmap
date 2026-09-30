@@ -1,8 +1,8 @@
 /** Invariant checks of URBAN_GEOMETRY.md §6 on a generated world (shared by the urban tests). */
 import type { World, UrbanStreet } from '../src/gen/types';
 import type { Vec2, Polygon } from '../src/gen/core/geom';
-import { area, interiorAngle, inscribed, bboxOf, distToSeg, pointInRing } from '../src/gen/geo/poly';
-import { intersection, difference, mpArea } from '../src/gen/geo/bool';
+import { area, interiorAngle, inscribed, bboxOf, distToSeg, pointInRing, distToRing, segSegT } from '../src/gen/geo/poly';
+import { intersection, difference, differenceS, mpArea } from '../src/gen/geo/bool';
 import { GridIndex } from '../src/gen/geo/spatial';
 import { StreetGraph } from '../src/gen/geo/graph';
 
@@ -77,21 +77,50 @@ export function checkWorld(w: World): Report {
       const hw = ((s.widths?.[i - 1] ?? s.width) + (s.widths?.[i] ?? s.width)) / 4;
       const d = distToSeg(p, s.path[i - 1], s.path[i]);
       if (Math.abs(d - hw) < Math.max(0.6, 0.3 * hw) || d < hw) return true;
+      // widened junction disks at street ends
+      const e0 = s.path[0], e1 = s.path[s.path.length - 1];
+      const hwe = (s.widths?.[0] ?? s.width) / 2;
+      if (Math.abs(Math.hypot(p.x - e0.x, p.y - e0.y) - 1.15 * hwe) < 0.4 || Math.abs(Math.hypot(p.x - e1.x, p.y - e1.y) - 1.15 * hwe) < 0.4) return true;
     }
-    // disks at street ends (junction widening)
     return false;
   };
   for (const p of ub.parcels) {
     if (p.use !== 'plot') continue;
-    const f = p.front!;
-    const L = Math.hypot(f[1].x - f[0].x, f[1].y - f[0].y);
-    const m = { x: (f[0].x + f[1].x) / 2, y: (f[0].y + f[1].y) / 2 };
-    if (L < 3 || !onRibbon(m)) { r.noFrontage++; if (r.noFrontage < 6) det.push(`plot without frontage (L=${L.toFixed(1)})`); }
+    // length of the plot boundary lying on a street ribbon edge (sampled every 0.5 m)
+    let len = 0;
+    const P = p.poly;
+    for (let k = 0; k < P.length && len < 3; k++) {
+      const a = P[k], b = P[(k + 1) % P.length];
+      const L = Math.hypot(b.x - a.x, b.y - a.y);
+      const n = Math.max(1, Math.ceil(L / 0.5));
+      for (let j = 0; j < n; j++) {
+        const t = (j + 0.5) / n;
+        if (onRibbon({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t })) len += L / n;
+      }
+    }
+    if (len < 3) { r.noFrontage++; if (r.noFrontage < 6) det.push(`plot without frontage (${len.toFixed(1)} m on streets, area ${area(P).toFixed(0)})`); }
   }
   // 4. buildings inside their plot
+  // geometric test (booleans are unreliable when vertices lie exactly on the other polygon's edges):
+  // every vertex inside or within 1 cm of the plot, no proper edge crossing; else measure with a snapped boolean
   for (const b of ub.buildings) {
     if (b.parcel === undefined) continue;
-    const out = mpArea(difference(b.poly, ub.parcels[b.parcel].poly));
+    const P = ub.parcels[b.parcel].poly;
+    let ok = b.poly.every((q) => pointInRing(P, q) || distToRing(P, q) < 0.01);
+    if (ok) {
+      outer: for (let i = 0; i < b.poly.length; i++) {
+        const a = b.poly[i], c = b.poly[(i + 1) % b.poly.length];
+        for (let j = 0; j < P.length; j++) {
+          const r2 = segSegT(a, c, P[j], P[(j + 1) % P.length]);
+          if (r2 && r2.t > 1e-4 && r2.t < 1 - 1e-4 && r2.u > 1e-4 && r2.u < 1 - 1e-4) {
+            const m = { x: (a.x + c.x) / 2, y: (a.y + c.y) / 2 };
+            if (!pointInRing(P, m) && distToRing(P, m) > 0.01) { ok = false; break outer; }
+          }
+        }
+      }
+    }
+    if (ok) continue;
+    const out = mpArea(differenceS(b.poly, P));
     if (out > 0.05) { r.bldgOutside++; if (r.bldgOutside < 6) det.push(`building outside plot by ${out.toFixed(3)} m²`); }
   }
   // 5. angles and widths

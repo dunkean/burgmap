@@ -17,7 +17,7 @@ import { GridIndex } from '../geo/spatial';
 import { MultiPoly, union, difference, differenceS, mpArea } from '../geo/bool';
 import { ribbon, disk } from '../geo/offset';
 
-export type PieceKind = 'block' | 'place' | 'market';
+export type PieceKind = 'block' | 'place' | 'market' | 'church';
 export interface Piece { lp: LPoly; phase: number; zone: Zone; age: number; quarter: number; kind: PieceKind; level: number }
 
 const TMP_LABEL = -100;

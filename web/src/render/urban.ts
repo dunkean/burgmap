@@ -53,6 +53,7 @@ function patterns(pal: Palette): string {
   const W = 6;
   return `<defs><pattern id="p-ugarden" patternUnits="userSpaceOnUse" width="${W}" height="${W}" patternTransform="rotate(28)">` +
     `<path d="M0.6 1.5H3.4M3.2 4.5H5.6" stroke="${U.gardenInk}" stroke-width="0.35" stroke-linecap="round" opacity="0.7"/></pattern>` +
+    `<pattern id="p-ugrave" patternUnits="userSpaceOnUse" width="5" height="4"><path d="M1.2 1.2V2.8M0.6 1.8H1.8M3.7 3.1V3.9M3.3 3.4H4.1" stroke="${U.gardenInk}" stroke-width="0.25" opacity="0.8"/></pattern>` +
     `<pattern id="p-upave" patternUnits="userSpaceOnUse" width="3" height="3"><circle cx="1.5" cy="1.5" r="0.28" fill="${U.placeInk}" opacity="0.55"/></pattern></defs>`;
 }
 
@@ -75,6 +76,11 @@ export function urbanLayer(world: World, pal: Palette, u: number, debug: boolean
     const d = greens.map((p) => pathD(p.poly, true)).join('');
     s += `<g class="u-greens"><path d="${d}" fill="${U.garden}"/><path d="${d}" fill="url(#p-ugarden)" opacity="0.6"/></g>`;
   }
+  const yards = ub.parcels.filter((p) => p.use === 'church');
+  if (yards.length) {
+    const d = yards.map((p) => pathD(p.poly, true)).join('');
+    s += `<g class="u-churchyard"><path d="${d}" fill="${U.garden}"/><path d="${d}" fill="url(#p-ugrave)"/></g>`;
+  }
   const blockD = ub.blocks.filter((_, i) => ub.blockInfo[i]?.kind === 'block').map((b) => pathD(b, true)).join('');
   s += `<path class="u-blocks" d="${blockD}" fill="${U.yard}"/>`;
   if (ub.backLand.length) {
@@ -83,6 +89,18 @@ export function urbanLayer(world: World, pal: Palette, u: number, debug: boolean
   }
   if (ub.masses.length) {
     s += `<path class="u-masses" d="${ub.masses.map(phD).join('')}" fill="${U.mass}" fill-rule="evenodd" stroke="${U.massEdge}" stroke-width="${lw(0.3, 0.15)}"/>`;
+  }
+  // landmarks: church / cathedral drawn as a distinct, outlined mass with a cross
+  const ch = ub.buildings.filter((b) => b.kind === 'church');
+  if (ch.length) {
+    const d = ch.map((b) => pathD(b.poly, true)).join('');
+    s += `<g class="u-landmarks"><path d="${d}" fill="${U.landmark}" stroke="${U.mass}" stroke-width="${lw(0.8, 0.4)}"/>`;
+    // cross on the nave
+    let cx = 0, cy = 0, n = 0, x0 = Infinity, x1 = -Infinity;
+    for (const b of ch) for (const q of b.poly) { cx += q.x; cy += q.y; n++; x0 = Math.min(x0, q.x); x1 = Math.max(x1, q.x); }
+    cx /= n; cy /= n;
+    const r = Math.max(2.5, (x1 - x0) * 0.08);
+    s += `<path d="M${f1(cx - r)} ${f1(cy)}H${f1(cx + r)}M${f1(cx)} ${f1(cy - r * 1.4)}V${f1(cy + r)}" stroke="${U.mass}" stroke-width="${lw(0.9, 0.5)}"/></g>`;
   }
   const plotD = ub.parcels.filter((p) => p.use === 'plot').map((p) => pathD(p.poly, true)).join('');
   s += `<path class="u-plots" d="${plotD}" fill="none" stroke="${U.plotLine}" stroke-width="${lw(0.12, 0.05)}" stroke-opacity="0.5"/>`;

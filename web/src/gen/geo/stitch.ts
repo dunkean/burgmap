@@ -63,6 +63,9 @@ export function stitchUnion(A0: Polygon, B0: Polygon): Polygon | null {
   const js = mi[s], je = mi[e];
   for (let k = (js + 1) % m; k !== je; k = (k + 1) % m) ring.push(B[k]);
   if (ring.length < 3) return null;
+  // no repeated vertices (a ring touching itself would double count area)
+  const seen = new Set<string>();
+  for (const q of ring) { const k = Math.round(q.x / TOL) + ',' + Math.round(q.y / TOL); if (seen.has(k)) return null; seen.add(k); }
   const aU = polygonArea(ring), aA = polygonArea(A0), aB = polygonArea(B0);
   if (Math.abs(aU - (aA + aB)) > 0.02 + 1e-6 * (aA + aB) || !isSimple(ring)) return null;
   return ring;

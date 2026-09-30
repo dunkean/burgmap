@@ -20,6 +20,7 @@ import { polygonCentroid } from '../core/geom';
 import { cutPlots, Plot } from './plots';
 import { buildPlot } from './buildings';
 import { wallFeatures } from './walls';
+import { pickChurchBlock, churchFootprint } from './landmarks';
 import { unionMany } from '../geo/bool';
 import type { UrbanBuilding, PolyH } from '../types';
 import type { UrbanParcel } from '../types';
@@ -117,6 +118,22 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   stats['ms.carve'] = Math.round(t4 - t3);
   stats['blocks'] = carved.length;
 
+  // ---- landmarks claimed before plots: the parish church (cathedral in cities) next to the market
+  const landmarks: UrbanLayer['landmarks'] = [];
+  const churchBuildings: Polygon[] = [];
+  if (prim.market) landmarks.push({ kind: archetype === 'town' ? 'market' : 'green', poly: prim.market });
+  if (archetype !== 'hamlet') {
+    const cb = pickChurchBlock(carved, prim.marketStreet, streets, nucleus, pop);
+    if (cb >= 0) {
+      const fp = churchFootprint(carved[cb].poly, pop, rng.fork('church'));
+      if (fp) {
+        carved[cb].kind = 'church';
+        landmarks.push({ kind: fp.kind + '-yard', poly: carved[cb].poly });
+        for (const part of fp.parts) { landmarks.push({ kind: fp.kind, poly: part }); churchBuildings.push(part); }
+      }
+    }
+  }
+
   // ---- level 3: plots
   const plots: Plot[] = [];
   const parcels: UrbanParcel[] = [];
@@ -126,7 +143,11 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     const br = rng.fork('blk:' + bi);
     const infill = Math.max(0, Math.min(1, params.infill[b.zone] + br.range(-0.08, 0.08)));
     blockInfill.push(infill);
-    if (b.kind !== 'block') { parcels.push({ poly: b.poly, use: b.kind === 'market' ? (archetype === 'town' ? 'market' : 'green') : 'place', block: bi, zone: b.zone }); return; }
+    if (b.kind !== 'block') {
+      const use = b.kind === 'market' ? (archetype === 'town' ? 'market' : 'green') : b.kind === 'church' ? 'church' : 'place';
+      parcels.push({ poly: b.poly, use, block: bi, zone: b.zone });
+      return;
+    }
     const tb0 = performance.now();
     const r = cutPlots(b.poly, bi, b.zone, infill, params, streets, br);
     const tb1 = performance.now() - tb0;
@@ -155,6 +176,9 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     }
     pi++;
   }
+  // the church stands on its lot (the churchyard parcel)
+  const churchParcel = parcels.findIndex((p) => p.use === 'church');
+  for (const cbp of churchBuildings) buildings.push({ poly: cbp, kind: 'church', parcel: churchParcel >= 0 ? churchParcel : undefined });
   const t6 = performance.now();
   const masses: PolyH[] = [];
   perBlock.forEach((list) => { if (list.length) for (const ph of unionMany(list, 24, true)) masses.push({ outer: ph.outer, holes: ph.holes }); });
@@ -178,7 +202,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
       const wf = wallFeatures(w.ring, w.gates, rng.fork('wall:' + wi), ctx.isWater);
       return { path: w.ring, closed: true, towers: wf.towers, gates: w.gates.map((g) => g.p), thickness: pop > 12000 ? 3.2 : 2.6, gateInfo: w.gates.map((g) => ({ p: g.p, dir: g.dir, width: g.width })), pieces: wf.pieces, gateTowers: wf.gateTowers };
     }),
-    landmarks: [], squares: prim.market ? [prim.market] : [],
+    landmarks, squares: prim.market ? [prim.market] : [],
     archetype, population: pop, morphology: params.id,
     phases: plan.phases.map((p) => ({ id: p.id, kind: p.kind, zone: p.zone, region: toPH(p.region), walled: p.walled, fossil: p.fossil })),
     quarters: prim.quarters.map((q, qi) => ({ poly: { outer: q.lp.pts, holes: [] }, phase: q.phase, zone: q.zone, streetSpace: toPH(streetSpace[qi]) })),

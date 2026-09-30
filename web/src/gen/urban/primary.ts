@@ -26,6 +26,8 @@ export interface Primary {
   radials: number[];
   walls: WallLine[];
   footprint: MultiPoly;
+  /** Street id of the ring around the market (-1 if none). */
+  marketStreet: number;
 }
 
 const inMP = (m: MultiPoly, p: Vec2) => m.some((ph) => pointInRing(ph.outer, p) && !ph.holes.some((h) => pointInRing(h, p)));
@@ -355,7 +357,7 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
     }
   }
   if (market) quarters.push({ lp: { pts: market, lab: market.map(() => marketStreet) }, phase: 1, zone: 'core', age: 1, kind: 'market' });
-  return { quarters, market, radials, walls, footprint };
+  return { quarters, market, radials, walls, footprint, marketStreet };
 }
 
 const mid = (a: Vec2, b: Vec2): Vec2 => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });

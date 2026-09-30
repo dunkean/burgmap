@@ -16,8 +16,8 @@ import { dist, polygonArea } from '../core/geom';
 import type { Rng } from '../core/rng';
 import type { MorphologyParams, Zone } from './morphology';
 import type { Streets } from './streets';
-import { MultiPoly, PolyH, intersectionS, differenceS, unionS, mpArea } from '../geo/bool';
-import { area, interiorAngle, pointInRing, distToSeg, inscribed, cleanRing, orientPos, bboxOf, snapPt } from '../geo/poly';
+import { MultiPoly, PolyH, intersectionS, differenceS, difference, unionS, mpArea } from '../geo/bool';
+import { area, interiorAngle, pointInRing, distToSeg, inscribed, cleanRing, orientPos, bboxOf, snapPt, isSimple } from '../geo/poly';
 import { sweepLeft } from '../geo/offset';
 import { stitchUnion } from '../geo/stitch';
 import { rayHit, splitByChord, lpoly } from '../geo/split';
@@ -66,6 +66,25 @@ function normalAt(pl: Vec2[], cum: number[], s: number, win: number): Vec2 {
 }
 
 export interface PlotResult { plots: Plot[]; back: Polygon[] }
+
+function polyCenter(p: Polygon): Vec2 {
+  // a point strictly inside (inscribed-circle center), robust for concave rings
+  return inscribed(p, [], 0.2).c;
+}
+
+/** Splits a polygon with holes by lines through its holes until every piece is hole-free. */
+export function openHoles(ph: PolyH, depth = 0): MultiPoly {
+  if (!ph.holes.length || depth > 4) return [{ outer: ph.outer, holes: [] }];
+  const h = ph.holes[0];
+  const c = polyCenter(h);
+  const bb = bboxOf(ph.outer);
+  const W = Math.max(bb.x1 - bb.x0, bb.y1 - bb.y0) + 10;
+  const left = [{ x: c.x - W, y: bb.y0 - W }, { x: c.x, y: bb.y0 - W }, { x: c.x, y: bb.y1 + W }, { x: c.x - W, y: bb.y1 + W }];
+  const right = [{ x: c.x, y: bb.y0 - W }, { x: c.x + W, y: bb.y0 - W }, { x: c.x + W, y: bb.y1 + W }, { x: c.x, y: bb.y1 + W }];
+  const out: MultiPoly = [];
+  for (const half of [left, right]) for (const q of intersectionS([ph], half)) out.push(...openHoles(q, depth + 1));
+  return out;
+}
 
 export function cutPlots(
   block: Polygon, bi: number, zone: Zone, infill: number, P: MorphologyParams, streets: Streets, rng: Rng,
@@ -200,8 +219,18 @@ export function cutPlots(
       return false;
     });
     if (!T.length) continue;
-    // back land fully enclosed by a territory belongs to it (plots never have holes)
-    T = T.map((ph) => ({ outer: ph.outer, holes: [] }));
+    // plots never have holes: back land fully enclosed by a territory joins it; a hole holding an earlier
+    // territory is opened by splitting the piece through it
+    const T2: MultiPoly = [];
+    for (const ph of T) {
+      const keep = ph.holes.filter((h) => {
+        const c = polyCenter(h);
+        return taken.some((t) => pointInRing(t.outer, c));
+      });
+      if (!keep.length) { T2.push({ outer: ph.outer, holes: [] }); continue; }
+      for (const piece of openHoles({ outer: ph.outer, holes: keep })) T2.push(piece);
+    }
+    T = T2;
     taken = taken.concat(T);
     territories.push({ run, poly: T, depth: dz });
   }
@@ -282,7 +311,10 @@ export function cutPlots(
     }
   }
   // ---- 5. back land = block − territories
-  const backMP: MultiPoly = taken.length ? differenceS(B, ...taken.map((ph) => [ph] as MultiPoly)) : [{ outer: B, holes: [] }];
+  let backMP: MultiPoly = taken.length ? differenceS(B, ...taken.map((ph) => [ph] as MultiPoly)) : [{ outer: B, holes: [] }];
+  // area accounting: the snapped boolean occasionally drops a real sliver; redo it exactly if so
+  const covered = taken.reduce((a, ph) => a + area(ph.outer), 0) + mpArea(backMP);
+  if (taken.length && area(B) - covered > Math.max(0.3, 0.001 * area(B))) backMP = difference(B, ...taken.map((ph) => [ph] as MultiPoly));
   const gardens: Polygon[] = [...leftovers];
   for (const ph of backMP) {
     if (!ph.holes.length) { gardens.push(ph.outer); continue; }
@@ -356,7 +388,7 @@ export function cutPlots(
   for (const c of cells) {
     if (!c) continue;
     const poly = cleanRing(c.poly, 0.005, 0.5, 0.002, false);
-    const pp = poly.length >= 3 ? poly : c.poly;
+    const pp = poly.length >= 3 && isSimple(poly) ? poly : c.poly;
     if (c.plot) { c.plot.poly = pp; merged.push(c.plot); } else keepBack.push(pp);
   }
   // side fronts: plot edges lying on a frontage edge of the block, not parallel to the main frontage

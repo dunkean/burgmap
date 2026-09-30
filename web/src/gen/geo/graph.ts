@@ -173,6 +173,21 @@ export class StreetGraph {
         hits.push({ s, t: h.t, p: this.nodes[node].p, node });
       }
     }
+    // existing nodes lying within snapR of a new segment (T-junctions of earlier streets onto this one)
+    for (let s = 1; s < P.length; s++) {
+      const a = P[s - 1], b = P[s];
+      const dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy;
+      if (l2 < 1e-12) continue;
+      for (const id of this.nodeIdx.query(Math.min(a.x, b.x) - snapR, Math.min(a.y, b.y) - snapR, Math.max(a.x, b.x) + snapR, Math.max(a.y, b.y) + snapR)) {
+        const nd = this.nodes[id];
+        if (!nd.edges.length || id === startNode || id === endNode0) continue;
+        const t = ((nd.p.x - a.x) * dx + (nd.p.y - a.y) * dy) / l2;
+        if (t <= 1e-6 || t >= 1 - 1e-6) continue;
+        const d = Math.hypot(nd.p.x - a.x - t * dx, nd.p.y - a.y - t * dy);
+        if (d > snapR || hits.some((h) => h.node === id)) continue;
+        hits.push({ s, t, p: nd.p, node: id });
+      }
+    }
     hits.sort((x, y) => x.s - y.s || x.t - y.t);
     // cut points along P: start node, crossings, end node; one edge between consecutive cut points
     const cuts: { s: number; t: number; node: number }[] = [{ s: 1, t: 0, node: startNode }];

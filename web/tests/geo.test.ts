@@ -91,6 +91,13 @@ describe('graph', () => {
     for (const x of f) expect(x.area).toBeCloseTo(100, 6);
     expect(g.components().count).toBe(1);
   });
+  it('connects an earlier street ending (within snapR) on a later closed ring', () => {
+    const g = new StreetGraph();
+    const at = (k: number) => ({ width: 1, rank: 1, phase: 1, kind: 'street' as const, street: k });
+    g.insertPolyline([{ x: 1458.34, y: 1319.57 }, { x: 1483.49, y: 1282.49 }], at(0), { snapR: 0.3, mergeDist: 0 });
+    g.insertPolyline([{ x: 1397.54, y: 1378.45 }, { x: 1418.95, y: 1341.89 }, { x: 1437.96, y: 1325.16 }, { x: 1481.9, y: 1313.11 }, { x: 1457.02, y: 1354.36 }, { x: 1436.07, y: 1368.59 }, { x: 1397.54, y: 1378.45 }], at(1), { snapR: 0.3, mergeDist: 0 });
+    expect(g.components().count).toBe(1);
+  });
   it('snaps endpoints and merges near-parallel duplicates', () => {
     const g = new StreetGraph();
     const at = { width: 5, rank: 1, phase: 0, kind: 'street' as const, street: 0 };
