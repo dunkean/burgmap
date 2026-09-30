@@ -24,6 +24,7 @@ const reliefEl = $<HTMLSelectElement>('relief');
 const coastEl = $<HTMLSelectElement>('coast');
 const riverEl = $<HTMLSelectElement>('river');
 const styleEl = $<HTMLSelectElement>('style');
+const cultureEl = $<HTMLSelectElement>('culture');
 const contoursEl = $<HTMLInputElement>('contours');
 const landuseEl = $<HTMLInputElement>('landuse');
 const roadsEl = $<HTMLSelectElement>('roads');
@@ -36,6 +37,7 @@ fill(coastEl, [['none', 'None'], ['random', 'Random side'], ['N', 'North'], ['E'
 fill(riverEl, [['none', 'None'], ['stream', 'Stream'], ['river', 'River'], ['major', 'Major river']], opts.river);
 fill(roadsEl, [['0', `Auto (${DEFAULT_ROADS[opts.size]})`], ...[1, 2, 3, 4, 5, 6, 7, 8].map((k) => [String(k), String(k)] as [string, string])], String(opts.roads));
 fill(styleEl, [['parchment', 'Parchment'], ['atlas', 'Atlas']], opts.style);
+fill(cultureEl, [['european-organic', 'Medieval organic'], ['bastide', 'Bastide (planned grid)']], opts.culture);
 seedEl.value = opts.seed;
 contoursEl.checked = opts.contours;
 landuseEl.checked = opts.landuse;
@@ -49,6 +51,7 @@ function readControls(): void {
     coast: coastEl.value as Options['coast'],
     river: riverEl.value as Options['river'],
     style: styleEl.value as Options['style'],
+    culture: cultureEl.value as Options['culture'],
     contours: contoursEl.checked,
     landuse: landuseEl.checked,
     roads: Number(roadsEl.value),
@@ -57,7 +60,7 @@ function readControls(): void {
   history.replaceState(null, '', '?' + toQuery(opts));
   schedule();
 }
-for (const el of [seedEl, sizeEl, reliefEl, coastEl, riverEl, styleEl, contoursEl, landuseEl, roadsEl]) {
+for (const el of [seedEl, sizeEl, reliefEl, coastEl, riverEl, styleEl, cultureEl, contoursEl, landuseEl, roadsEl]) {
   el.addEventListener('input', readControls);
   el.addEventListener('change', readControls);
 }
@@ -78,7 +81,7 @@ function show(svg: string, stats: Record<string, number | string>, ms: number): 
   stage.innerHTML = svg;
   busyEl.classList.remove('on');
   const seaPct = Math.round(Number(stats.seaFraction ?? 0) * 100);
-  statusEl.textContent = `${ms} ms total (terrain ${stats['ms.terrain']} ms) - ${stats.rivers} rivers, ${stats.lakes} lakes, sea ${seaPct}% - ${stats.roads ?? 0} roads, ${stats.bridges ?? 0} bridges, ${stats['landuse.furlongs'] ?? 0} furlongs`;
+  statusEl.textContent = `${ms} ms total (terrain ${stats['ms.terrain']} ms) - ${stats.rivers} rivers, ${stats.lakes} lakes, sea ${seaPct}% - ${stats.roads ?? 0} roads, ${stats.bridges ?? 0} bridges, ${stats['landuse.furlongs'] ?? 0} furlongs - ${stats['urban.archetype'] ?? ''} pop ${stats['urban.pop'] ?? 0}: ${stats['urban.blocks'] ?? 0} blocks, ${stats['urban.plots'] ?? 0} plots, ${stats['urban.buildings'] ?? 0} buildings (urban ${stats['ms.urban'] ?? 0} ms)`;
 }
 
 if (worker) {
