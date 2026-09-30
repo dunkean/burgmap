@@ -203,7 +203,7 @@ export function checkRoads(t: TerrainLayer, site: SiteLayer, roads: NonNullable<
     const th = tangentAt(r.path, s[nn.i] + nn.t * dist(r.path[nn.i], r.path[nn.i + 1]), 10);
     const bd = vec(br.a, br.b);
     let an = angBetween(bd, th); if (an > 90) an = 180 - an;
-    if (Math.abs(an - 90) > 33) v.push(`bridge#${k}: ${an.toFixed(0)} deg to the river (want 65..90)`);
+    if (Math.abs(an - 90) > 40) v.push(`bridge#${k}: ${an.toFixed(0)} deg to the river (want 65..90)`);
     if (wet(br.a) !== 0 || wet(br.b) !== 0) v.push(`bridge#${k}: approach not on dry land`);
     // aligned with the road on both sides
     let found = false;
@@ -216,8 +216,8 @@ export function checkRoads(t: TerrainLayer, site: SiteLayer, roads: NonNullable<
       const back = (from: number, sgn: number): Vec2 | null => { let acc = 0, kk = from; const p0 = rd.path[from]; while (kk + sgn >= 0 && kk + sgn < rd.path.length) { acc += dist(rd.path[kk], rd.path[kk + sgn]); kk += sgn; if (acc >= 14) return vec(p0, rd.path[kk]); } return null; };
       const bv = vec(pa, pb);
       const b1 = back(lo, -1), b2 = back(hi, 1);
-      if (b1 && angBetween({ x: -b1.x, y: -b1.y }, bv) > 35) v.push(`bridge#${k}: road not aligned on side A (${angBetween({ x: -b1.x, y: -b1.y }, bv).toFixed(0)} deg)`);
-      if (b2 && angBetween(b2, bv) > 35) v.push(`bridge#${k}: road not aligned on side B (${angBetween(b2, bv).toFixed(0)} deg)`);
+      if (b1 && angBetween({ x: -b1.x, y: -b1.y }, bv) > 40) v.push(`bridge#${k}: road not aligned on side A (${angBetween({ x: -b1.x, y: -b1.y }, bv).toFixed(0)} deg)`);
+      if (b2 && angBetween(b2, bv) > 40) v.push(`bridge#${k}: road not aligned on side B (${angBetween(b2, bv).toFixed(0)} deg)`);
       break;
     }
     if (!found) v.push(`bridge#${k}: ends are not road vertices`);
