@@ -15,7 +15,7 @@ import { ribbon } from '../geo/offset';
 import { LPoly, insidePieces } from '../geo/split';
 import { GridIndex } from '../geo/spatial';
 import { Streets, LAB_OPEN, LAB_WALL, LAB_WATER, jitterWidths } from './streets';
-import { wiggle, crank, axisLines, spiralArm, outsetConvex } from './streetops';
+import { wiggle, crank, axisLines, spiralArm, outsetConvex, resampleAt } from './streetops';
 import { disk } from '../geo/offset';
 
 export interface Quarter {
@@ -318,8 +318,11 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
     const sr = rng.fork('spiral');
     const a0 = sr.range(0, 2 * Math.PI);
     for (let k = 0; k < inp.spiral.arms; k++) {
-      const arm = spiralArm(ctx.center, a0 + (k * 2 * Math.PI) / inp.spiral.arms, r0 - 3, encR * 1.6, inp.spiral.turns);
-      const line = afterExit(arm, [{ outer: market, holes: [] }]);
+      const arm = resampleAt(spiralArm(ctx.center, a0 + (k * 2 * Math.PI) / inp.spiral.arms, r0 - 8, encR * 1.6, inp.spiral.turns), 8);
+      // stop at the first water
+      const wi = arm.findIndex((q, i) => i > 0 && ctx.isWater(q));
+      const armD = wi > 0 ? arm.slice(0, wi) : arm;
+      const line = armD.length >= 2 ? afterExit(armD, [{ outer: market, holes: [] }]) : null;
       if (!line) continue;
       let piece: Polyline | null = null;
       for (const comp of inp.enclosure) { const pcs = insidePieces(comp.outer, line); if (pcs.length && pcs[0].pts.length >= 2) { piece = pcs[0].pts; break; } }

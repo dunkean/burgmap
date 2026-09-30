@@ -87,9 +87,9 @@ M['elven'] = morph('elven', EO, {
   curvature: 1.2, fieldNoise: 25, fieldWavelength: 120, fieldRandom: 0.25, fieldTwist: 0.6, ringGaps: 1.2,
   blockSize: { core: [9000, 22000], middle: [12000, 30000], edge: [15000, 35000], faubourg: [12000, 30000], village: [15000, 40000] },
   minWidth: 34, widthByRank: [4, 3.4, 2.8, 2.2, 2], widthJitter: 0.25, placeThreshold: 1500,
-  houseArea: { core: [500, 1400], middle: [700, 1800], edge: [900, 2400], faubourg: [900, 2400], village: [1000, 2800] },
+  houseArea: { core: [320, 800], middle: [400, 1000], edge: [500, 1300], faubourg: [500, 1300], village: [600, 1600] },
   coverage: { core: [0.1, 0.18], middle: [0.08, 0.15], edge: [0.06, 0.12], faubourg: [0.06, 0.12], village: [0.05, 0.1] },
-  density: { core: 45, middle: 35, edge: 28, faubourg: 25, village: 20 },
+  density: { core: 90, middle: 75, edge: 60, faubourg: 40, village: 35 },
   arch: { typology: 'tree-house', roof: 'dome', storeys: [1, 3], material: 'living-wood' },
 });
 
@@ -208,5 +208,41 @@ export const CULTURE_LIST: Culture[] = [
     },
     hamlet: { form: 'auto', morphology: 'indian-temple' },
     render: { towerShape: 'square' },
+  },
+  {
+    id: 'roman-core', label: 'Roman castrum core',
+    nucleus: { kind: 'forum', shape: 'rect', area: [3500, 9000], compound: false, ring: 6, orientation: 'road' },
+    core: { morphology: 'roman-castrum', share: 0.3, enclosure: { shape: 'rounded-rect', wall: 'wall', fossil: 'street', towers: 'round', orientation: 'road', aspect: [1.25, 1.5] } },
+    ring: { morphology: 'european-organic', culture: 'european-organic', enclosure: { shape: 'organic', wall: 'auto', fossil: 'street', towers: 'round' } },
+    phaseCount: [[0, 1], [3000, 2], [12000, 3]],
+    faubourg: 'european-organic', faubShare: [0.12, 0.1],
+    landmarks: [
+      { role: 'civic', kind: 'basilica', place: 'adjacent-nucleus', area: [1200, 6000], minPop: 800 },
+      { role: 'worship', kind: 'roman-temple', place: 'adjacent-nucleus', area: [600, 4000], minPop: 1500 },
+    ],
+    village: {
+      form: 'walled', morphology: 'roman-castrum', enclosure: { shape: 'rounded-rect', wall: 'wall', fossil: 'none', towers: 'round', orientation: 'road' },
+      nucleus: { kind: 'forum', shape: 'rect', area: [900, 1600], compound: false, ring: 5, orientation: 'road' },
+    },
+    hamlet: { form: 'auto' },
+    render: { towerShape: 'round' },
+  },
+  {
+    id: 'elven', label: 'Elven forest town', fantasy: true,
+    nucleus: { kind: 'grove', shape: 'circle', area: [5000, 14000], compound: true, ring: 3.4 },
+    core: { morphology: 'elven', enclosure: { shape: 'organic', wall: 'hedge', fossil: 'street' } },
+    ring: { morphology: 'elven', enclosure: { shape: 'organic', wall: 'hedge', fossil: 'street' } },
+    phaseCount: [[0, 1], [2500, 2]],
+    faubourg: null, faubShare: [0.02, 0.02],
+    landmarks: [],
+    village: {
+      form: 'walled', morphology: 'elven', enclosure: { shape: 'circle', wall: 'hedge', fossil: 'none' },
+      nucleus: { kind: 'grove', shape: 'circle', area: [2500, 5000], compound: true, ring: 3 },
+    },
+    hamlet: {
+      form: 'walled', morphology: 'elven', enclosure: { shape: 'circle', wall: 'none', fossil: 'none' },
+      nucleus: { kind: 'grove', shape: 'circle', area: [1200, 2500], compound: true, ring: 2.6 },
+    },
+    render: { towerShape: 'round', canopy: true },
   },
 ];

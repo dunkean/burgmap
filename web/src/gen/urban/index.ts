@@ -29,6 +29,7 @@ import { buildCompound, pickBlock, ClaimBlock } from './compounds';
 import { approachGates, axisLines, outsetConvex } from './streetops';
 import { distToRing, pointInRing, area as areaOf, inscribed, convexHull } from '../geo/poly';
 import { unionMany } from '../geo/bool';
+import { StreetGraph } from '../geo/graph';
 import type { UrbanBuilding, PolyH, UrbanParcel } from '../types';
 
 export interface UrbanResult { layer: UrbanLayer; stats: Record<string, number | string>; debug: UrbanDebug }
@@ -117,7 +118,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
       zone: 'village', share: 1, density: params.density.village, shape: enc.shape === 'terraces' ? 'rect' : enc.shape,
       angle: orientAngle(enc.orientation, mainAngle), aspect: 1.2, closing: params.streetOp === 'organic', fossil: false,
     };
-    eplan = planServedPhases(ctx, pop, walled, mainAngle, rng.fork('phases'), roads, { nPh: 1, zones: ['village'], faubShare: 0.3, specs: settlement && settlement.form !== 'auto' ? [spec] : undefined });
+    eplan = planServedPhases(ctx, pop, walled, mainAngle, rng.fork('phases'), roads, { nPh: 1, zones: ['village'], faubShare: 0.3, specs: settlement && settlement.form !== 'auto' ? [spec] : undefined, organicOutline: enc.wall === 'hedge' || enc.wall === 'none' });
     faub = planFaubourgs(ctx, eplan.enclosure, roads, ((pop * 0.3) / params.density.village) * 1e4, 0, rng.fork('faubourg'));
     const nu = { ...plan.nucleus, ...(settlement?.nucleus ?? {}) };
     marketArea = nu.kind === 'market' ? 500 + pop * 0.8 : 0;
@@ -129,7 +130,9 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     const n = plan.phases.length;
     const zones = zonesFor(n);
     const faubShare = plan.faubShare[walled ? 0 : 1];
-    eplan = planServedPhases(ctx, pop, walled, mainAngle, rng.fork('phases'), roads, { specs: phaseInputs(n, zones), faubShare });
+    // lines that never were walls (hedges, unwalled cultures) stay curved; wall lines become straight curtains
+    const organicOutline = plan.phases.every((p) => p.enc.wall === 'hedge' || p.enc.wall === 'none');
+    eplan = planServedPhases(ctx, pop, walled, mainAngle, rng.fork('phases'), roads, { specs: phaseInputs(n, zones), faubShare, organicOutline });
     const faubPop = pop * faubShare;
     // scarce land: what the enclosure could not hold grows along the roads instead
     const encTarget = eplan.phases.reduce((s2, ph, k) => s2 + (ph.pop / (plan.phases[k].morph.density[ph.zone] * (eplan!.densityScale ?? 1))) * 1e4, 0);
@@ -230,6 +233,17 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   const t3 = performance.now();
   let demoted = 0;
   for (const st of streets.list) if (!streets.connected.has(st.id) && st.ribbon) { streets.demote(st.id); demoted++; }
+  // geometric connectivity (as the checker sees it): street components that do not reach a radial are demoted
+  {
+    const g = new StreetGraph();
+    for (const st of streets.list) if (st.ribbon) g.insertPolyline(st.path, { width: st.widths[0], rank: st.rank, phase: st.phase, kind: 'street', street: st.id }, { snapR: 0.3, mergeDist: 0 });
+    const { comp } = g.components();
+    const good = new Set<number>();
+    for (const e of g.aliveEdges()) if (streets.list[e.street].role === 'radial') good.add(comp[e.a]);
+    const bad = new Set<number>();
+    for (const e of g.aliveEdges()) if (!good.has(comp[e.a])) bad.add(e.street);
+    for (const id of bad) if (streets.list[id].ribbon && streets.list[id].role !== 'radial') { streets.demote(id); streets.connected.delete(id); demoted++; }
+  }
   if (demoted) for (const list of pieces) for (const pc of list) pc.lp.lab = pc.lp.lab.map((l) => (l >= 0 && !streets.list[l].ribbon ? LAB_OPEN : l));
   stats['demotedStreets'] = demoted;
   // ---- landmark lots, claimed as whole pieces before dead ends and plots (URBAN_GEOMETRY §3.4)
@@ -408,11 +422,14 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     for (const fp of prim.footprint) {
       let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
       for (const q of fp.outer) { x0 = Math.min(x0, q.x); y0 = Math.min(y0, q.y); x1 = Math.max(x1, q.x); y1 = Math.max(y1, q.y); }
-      for (let y = y0; y < y1; y += 11) for (let x = x0; x < x1; x += 11) {
-        const p = { x: x + tr.range(-4, 4), y: y + tr.range(-4, 4) };
+      for (let y = y0; y < y1; y += 14) for (let x = x0; x < x1; x += 14) {
+        const p = { x: x + tr.range(-5, 5), y: y + tr.range(-5, 5) };
         if (!pointInRing(fp.outer, p) || ctx.isWater(p)) continue;
         const r = tr.range(4, 7.5);
         if (houses.some((h) => dist(h.c, p) < h.r + r * 0.45)) continue;
+        // the main paths stay open to the sky; lanes run under the canopy
+        const ns = streets.nearest(p, r + 4, (st) => st.rank <= 1 && st.ribbon);
+        if (ns && ns.d < ns.hw + r * 0.6) continue;
         trees.push({ x: p.x, y: p.y, r });
       }
     }
@@ -435,8 +452,13 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     walls: prim.walls.map((w, wi) => {
       const nearW = (q: Vec2) => ctx.water.some((ph) => distToRing(ph.outer, q) < 4 || pointInRing(ph.outer, q));
       const wf = wallFeatures(w.ring, w.gates, rng.fork('wall:' + wi), ctx.isWater, nearW);
-      return { path: w.ring, closed: true, towers: wf.towers, gates: w.gates.map((g) => g.p), thickness: wallKind === 'hedge' || wallKind === 'palisade' ? 1.6 : pop > 12000 ? 3.2 : 2.6, gateInfo: w.gates.map((g) => ({ p: g.p, dir: g.dir, width: g.width })), pieces: wf.pieces, gateTowers: wf.gateTowers, towerScale: wf.towerScale, curtains: wf.curtains, towerShape };
-    }),
+      if (wallKind === 'hedge') {
+        // a living hedge: a plan line, no masonry
+        lines.push({ kind: 'hedge', path: w.ring, closed: true, width: 2.6 });
+        return null;
+      }
+      return { path: w.ring, closed: true, towers: wf.towers, gates: w.gates.map((g) => g.p), thickness: wallKind === 'palisade' ? 1.6 : pop > 12000 ? 3.2 : 2.6, gateInfo: w.gates.map((g) => ({ p: g.p, dir: g.dir, width: g.width })), pieces: wf.pieces, gateTowers: wf.gateTowers, towerScale: wf.towerScale, curtains: wf.curtains, towerShape };
+    }).filter((w): w is NonNullable<typeof w> => !!w),
     landmarks, squares: prim.market && !compoundOf[carved.findIndex((b) => b.kind === 'market')] ? [prim.market] : [],
     archetype, population: pop, morphology: params.id,
     phases: eplan.phases.map((p) => ({ id: p.id, kind: p.kind, zone: p.zone, region: toPH(p.region), walled: p.walled, fossil: p.fossil })),

@@ -12,7 +12,8 @@ import type { Rng } from '../core/rng';
 import type { MorphologyParams, Zone } from './morphology';
 import type { Streets } from './streets';
 import type { Plot, PlotResult } from './plots';
-import { area, obb, orientPos, distToSeg, interiorAngle, segSegT, pointInRing } from '../geo/poly';
+import { area, obb, orientPos, distToSeg, interiorAngle, segSegT, pointInRing, isSimple } from '../geo/poly';
+import { stitchUnion } from '../geo/stitch';
 import { splitByChord, lpoly } from '../geo/split';
 import { shapeOf } from './buildings';
 
@@ -140,5 +141,43 @@ export function cutCourtyards(block: Polygon, bi: number, zone: Zone, P: Morphol
       rank: fl.rank, depth: D, wide: false, sideFronts: [], run: 0, order: order++,
     });
   }
-  return { plots, back };
+  // final guarantee (URBAN_GEOMETRY §6.3), as the checker measures it: ≥ 3 m of boundary on a street ribbon edge;
+  // other lots join the neighbouring lot sharing the longest edge, or become back land
+  const onStreet = (q: Vec2): boolean => {
+    const ns = streets.nearest(q, 12);
+    return !!ns && (Math.abs(ns.d - ns.hw) < Math.max(0.5, 0.25 * ns.hw) || ns.d < ns.hw);
+  };
+  const ribbonLen = (X: Polygon): number => {
+    let L = 0;
+    for (let k = 0; k < X.length && L < 3.3; k++) {
+      const a = X[k], b = X[(k + 1) % X.length];
+      const le = dist(a, b), m = Math.max(1, Math.ceil(le / 0.5));
+      for (let j = 0; j < m; j++) { const t = (j + 0.5) / m; if (onStreet({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t })) L += le / m; }
+    }
+    return L;
+  };
+  const sharedLen = (X: Polygon, Y: Polygon): number => {
+    let s2 = 0;
+    for (let k = 0; k < X.length; k++) {
+      const a = X[k], b = X[(k + 1) % X.length];
+      const m = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      for (let j = 0; j < Y.length; j++) if (distToSeg(m, Y[j], Y[(j + 1) % Y.length]) < 0.05) { s2 += dist(a, b); break; }
+    }
+    return s2;
+  };
+  const okF = plots.map((p) => ribbonLen(p.poly) >= 3.3);
+  for (let i = 0; i < plots.length; i++) {
+    if (okF[i] || !plots[i]) continue;
+    let best = -1, bl = 0;
+    for (let j = 0; j < plots.length; j++) {
+      if (j === i || !plots[j] || !okF[j]) continue;
+      const sh = sharedLen(plots[i].poly, plots[j].poly);
+      if (sh > bl) { bl = sh; best = j; }
+    }
+    const merged = best >= 0 ? stitchUnion(plots[best].poly, plots[i].poly) : null;
+    if (merged && isSimple(merged)) plots[best].poly = merged;
+    else back.push(plots[i].poly);
+    (plots as (Plot | null)[])[i] = null;
+  }
+  return { plots: plots.filter((p): p is Plot => !!p), back };
 }
