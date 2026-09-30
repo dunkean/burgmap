@@ -7,6 +7,7 @@ import { chaikin, simplify, dist, polylineLength } from '../core/geom';
 import type { Rng } from '../core/rng';
 import { Noise2D } from '../core/noise';
 import { marchingSquares } from '../terrain/contour';
+import { distanceField } from '../core/field';
 import { blurGrid } from '../core/grid';
 import type { SizeName } from '../options';
 import type { Archetype, UrbanZone } from '../types';
@@ -125,7 +126,7 @@ function thresholdFor(sorted: Float32Array, cell: number, targetArea: number): n
   return sorted[k];
 }
 
-export function regionForArea(ctx: UrbanCtx, f: Float32Array, sorted: Float32Array, targetArea: number): MultiPoly {
+export function regionForArea(ctx: UrbanCtx, f: Float32Array, sorted: Float32Array, targetArea: number, closing = 0): MultiPoly {
   const thr = thresholdFor(sorted, ctx.cell, targetArea);
   const N = f.length;
   const v = new Float32Array(N);
@@ -135,7 +136,20 @@ export function regionForArea(ctx: UrbanCtx, f: Float32Array, sorted: Float32Arr
   const rad = Math.max(1, Math.round(22 / ctx.cell));
   const b = blurGrid({ w: ctx.n, h: ctx.n, cell: ctx.cell, data: v }, rad, 2).data;
   for (let i = 0; i < N; i++) v[i] = isFinite(f[i]) ? b[i] : Math.min(b[i], -cap);
-  const regs = isoRegions(v, ctx.n, ctx.cell, -thr, Math.min(2500, targetArea * 0.05));
+  let regs: PolyH[];
+  if (closing > 0) {
+    // morphological closing (dilate, then erode by `closing` m): enclosures are compact, not lobed
+    const inside = new Uint8Array(N);
+    for (let i = 0; i < N; i++) if (v[i] > -thr) inside[i] = 1;
+    const d1 = distanceField(inside, ctx.n, ctx.n, ctx.cell).dist;
+    const outside = new Uint8Array(N);
+    for (let i = 0; i < N; i++) if (d1[i] > closing) outside[i] = 1;
+    const d2 = distanceField(outside, ctx.n, ctx.n, ctx.cell).dist;
+    const ind = new Float32Array(N);
+    for (let i = 0; i < N; i++) ind[i] = (inside[i] || d2[i] > closing) && !ctx.terrain.water[i] ? 1 : 0;
+    const sm = blurGrid({ w: ctx.n, h: ctx.n, cell: ctx.cell, data: ind }, Math.max(1, Math.round(12 / ctx.cell)), 2).data;
+    regs = isoRegions(sm, ctx.n, ctx.cell, 0.5, Math.min(2500, targetArea * 0.05));
+  } else regs = isoRegions(v, ctx.n, ctx.cell, -thr, Math.min(2500, targetArea * 0.05));
   let m: MultiPoly = regs;
   if (ctx.water.length) m = difference(m, ctx.water);
   return keepMain(m, ctx.center, 0.1);
@@ -186,7 +200,7 @@ export function planTownPhases(ctx: UrbanCtx, pop: number, walled: boolean, main
       const land = regionForArea(ctx, f, sorted, cum * 3.2);
       R = intersection(rect, land);
       R = keepMain(R, ctx.center, 0.15);
-    } else R = regionForArea(ctx, f, sorted, cum);
+    } else R = regionForArea(ctx, f, sorted, cum, P.streetOp === 'organic' ? (k === nPh - 1 ? 55 : 35) : 0);
     if (prev.length) {
       R = union(R, prev);
       // keep R_{k-1} strictly nested

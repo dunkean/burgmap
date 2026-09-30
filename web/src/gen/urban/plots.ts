@@ -329,7 +329,7 @@ export function cutPlots(
   const isBad = (c: Cell): boolean => {
     const a = area(c.poly);
     if (a < (c.plot ? 35 : 25)) return true;
-    if (c.plot && dist(c.plot.front[0], c.plot.front[1]) < 3) return true;
+    if (c.plot && dist(c.plot.front[0], c.plot.front[1]) < 3.5) return true;
     if (minAng(c.poly) < (15 * Math.PI) / 180) return true;
     if (a >= 600) return false;
     return (isConvex(c.poly, 1e-3) ? convexWidth(c.poly) / 2 : inscribed(c.poly, [], 0.2).r) < 1.25;
@@ -373,7 +373,7 @@ export function cutPlots(
       if (!merged1) continue;
       const tgt = cells[best];
       // a plot swallowed by a garden keeps its frontage: the merged cell becomes the plot
-      if (c.plot && !tgt.plot) tgt.plot = c.plot;
+      if (c.plot && !tgt.plot) { if (dist(c.plot.front[0], c.plot.front[1]) >= 3.5) tgt.plot = c.plot; }
       else if (c.plot && tgt.plot && dist(tgt.plot.front[1], c.plot.front[0]) < 0.05) { tgt.plot.front = [tgt.plot.front[0], c.plot.front[1]]; tgt.plot.sideB = c.plot.sideB; }
       else if (c.plot && tgt.plot && dist(c.plot.front[1], tgt.plot.front[0]) < 0.05) { tgt.plot.front = [c.plot.front[0], tgt.plot.front[1]]; tgt.plot.sideA = c.plot.sideA; }
       tgt.poly = merged1;
@@ -395,6 +395,43 @@ export function cutPlots(
   // side fronts: plot edges lying on a frontage edge of the block, not parallel to the main frontage
   const frontEdges: [Vec2, Vec2][] = [];
   for (let i = 0; i < n; i++) if (isF(i)) frontEdges.push([B[i], B[(i + 1) % n]]);
+  // final guarantee (§6.3): every plot has ≥ 3 m of boundary on a street frontage; others merge into the
+  // neighbouring plot sharing the longest edge, or become back land
+  const onStreet = (q: Vec2): boolean => {
+    const ns = streets.nearest(q, 12);
+    return !!ns && (Math.abs(ns.d - ns.hw) < Math.max(0.5, 0.25 * ns.hw) || ns.d < ns.hw);
+  };
+  const frontLen = (P: Polygon): number => {
+    let L = 0;
+    for (let k = 0; k < P.length && L < 3.2; k++) {
+      const a = P[k], b = P[(k + 1) % P.length];
+      const le = dist(a, b), m = Math.max(1, Math.ceil(le / 0.5));
+      for (let j = 0; j < m; j++) {
+        const t = (j + 0.5) / m;
+        if (onStreet({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t })) L += le / m;
+      }
+    }
+    return L;
+  };
+  for (let i = 0; i < merged.length; i++) {
+    const p = merged[i];
+    if (!p || frontLen(p.poly) >= 3.2) continue;
+    let best = -1, bl = 0;
+    for (let j = 0; j < merged.length; j++) {
+      if (j === i || !merged[j] || frontLen(merged[j].poly) < 3.2) continue;
+      const sh = shared(p.poly, merged[j].poly);
+      if (sh > bl) { bl = sh; best = j; }
+    }
+    let joined: Polygon | null = null;
+    if (best >= 0) {
+      joined = stitchUnion(merged[best].poly, p.poly);
+      if (!joined) { const u = unionS(merged[best].poly, p.poly); if (u.length === 1 && !u[0].holes.length) joined = u[0].outer; }
+    }
+    if (joined) merged[best].poly = joined;
+    else keepBack.push(p.poly);
+    (merged as (Plot | null)[])[i] = null;
+  }
+  for (let i = merged.length - 1; i >= 0; i--) if (!merged[i]) merged.splice(i, 1);
   for (const p of merged) {
     const t = unit(p.front[0], p.front[1]);
     const segs: [Vec2, Vec2][] = [];

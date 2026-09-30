@@ -102,8 +102,15 @@ export function urbanLayer(world: World, pal: Palette, u: number, debug: boolean
     const r = Math.max(2.5, (x1 - x0) * 0.08);
     s += `<path d="M${f1(cx - r)} ${f1(cy)}H${f1(cx + r)}M${f1(cx)} ${f1(cy - r * 1.4)}V${f1(cy + r)}" stroke="${U.mass}" stroke-width="${lw(0.9, 0.5)}"/></g>`;
   }
+  // plot hairlines: a dark pass (reads on yards) and a light pass (reads on roofs), so each house is legible
   const plotD = ub.parcels.filter((p) => p.use === 'plot').map((p) => pathD(p.poly, true)).join('');
-  s += `<path class="u-plots" d="${plotD}" fill="none" stroke="${U.plotLine}" stroke-width="${lw(0.12, 0.05)}" stroke-opacity="0.5"/>`;
+  s += `<g class="u-plots" fill="none" stroke-width="${lw(0.14, 0.05)}"><path d="${plotD}" stroke="${U.plotLine}" stroke-opacity="0.45"/>` +
+    `<path d="${plotD}" stroke="${U.massEdge}" stroke-opacity="0.28"/></g>`;
+  // main streets keep a legible minimum width at small scales (drawn over the street space only where wider)
+  const mains = ub.streets.filter((st) => st.rank <= 1 && st.role !== 'close');
+  const minW = 2.4 * u;
+  const wide = mains.filter((st) => st.width < minW);
+  if (wide.length) s += `<path class="u-main-streets" d="${wide.map((st) => pathD(st.path, false)).join('')}" fill="none" stroke="${U.street}" stroke-width="${f1(minW)}" stroke-linecap="round" stroke-linejoin="round"/>`;
   s += `<path class="u-block-edges" d="${ub.blocks.map((b) => pathD(b, true)).join('')}" fill="none" stroke="${U.blockEdge}" stroke-width="${lw(0.4, 0.3)}"/>`;
   for (const w of ub.walls ?? []) {
     const th = w.thickness;

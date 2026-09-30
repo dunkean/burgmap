@@ -121,22 +121,32 @@ function buildPlotRaw(pl: Plot, infill: number, P: MorphologyParams, rng: Rng): 
   const [gp0, gp1] = P.sideGap[zone];
   const [bd0, bd1] = P.buildDepth[zone];
   if (zone === 'village') {
-    // farmstead: house along the street, barn at the side/rear around a yard
-    const sb = rng.range(sb0, sb1);
-    const hd = rng.range(7, 10), hw = Math.min(W - 2, rng.range(12, 18));
-    const left = rng.chance(0.5);
-    const x0 = left ? rng.range(1, 3) : W - hw - rng.range(1, 3);
+    // farmstead around a yard (Hakenhof / Dreiseithof): house along the street, barn along one side from the
+    // street backwards (an L), and on larger farms a shed closing the back of the yard (a U)
+    const sb = rng.range(1, 4);
     const lat = (u0: number, u1: number): HalfPlane[] => [
       { p: { x: fa.x + t.x * u0, y: fa.y + t.y * u0 }, n: t },
       { p: { x: fa.x + t.x * u1, y: fa.y + t.y * u1 }, n: { x: -t.x, y: -t.y } },
     ];
-    add([...band(sb, sb + hd), ...lat(x0, x0 + hw)], 'house');
-    const bdp = rng.range(8, 12), bl = Math.min(D - sb - hd - 6, rng.range(14, 24));
-    if (bl > 6) {
-      const bx0 = left ? W - bdp - rng.range(1, 3) : rng.range(1, 3);
-      add([...band(sb + hd + 5, sb + hd + 5 + bl), ...lat(bx0, bx0 + bdp)], 'barn');
+    const g = rng.range(1, 2.5);
+    const bw = Math.min(rng.range(8, 11), W * 0.35);
+    const hd = rng.range(7.5, 10);
+    const barnLeft = rng.chance(0.5);
+    const houseW = Math.min(rng.range(12, 17), W - bw - 2 * g - 3);
+    const yardD = Math.min(D - sb - 6, rng.range(18, 28));
+    if (houseW < 6 || yardD < 10) {
+      add([...band(sb, sb + hd), ...lat(g, Math.min(W - g, g + rng.range(9, 14)))], 'house');
+      addGarden();
+      return out;
     }
-    if (rng.chance(0.5) && D > sb + 30) add([...band(sb + hd + 2, sb + hd + 8), ...lat(W / 2 - 3, W / 2 + 4)], 'shed');
+    const bx0 = barnLeft ? g : W - g - bw;
+    const hx0 = barnLeft ? g + bw + 1.5 : W - g - bw - 1.5 - houseW;
+    add([...band(sb, sb + hd), ...lat(hx0, hx0 + houseW)], 'house');
+    add([...band(sb, sb + yardD), ...lat(bx0, bx0 + bw)], 'barn');
+    if (W > 24 && rng.chance(0.55)) {
+      const s0 = sb + yardD - rng.range(6, 8);
+      add([...band(s0, sb + yardD), ...lat(barnLeft ? bx0 + bw + 1 : hx0, barnLeft ? hx0 + houseW : bx0 - 1)], 'shed');
+    }
     addGarden();
     return out;
   }
