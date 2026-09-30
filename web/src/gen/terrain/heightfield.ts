@@ -3,6 +3,7 @@ import { Noise2D } from '../core/noise';
 import { Grid, createGrid } from '../core/grid';
 import { mountainRelief } from './erosion';
 import type { Options, Relief } from '../options';
+import { importedHeightfield } from './import';
 
 export type Side = 'N' | 'E' | 'S' | 'W';
 export const SIDES: Side[] = ['N', 'E', 'S', 'W'];
@@ -104,6 +105,8 @@ function removeThinLand(H: Float32Array, n: number, rho: number): void {
 export function generateHeightfield(
   opts: Options, mapSize: number, n: number, rng: Rng,
 ): { height: Grid; plan: HeightPlan } {
+  // imported heightmap replaces the procedural relief (hook, see terrain/import.ts)
+  if (opts.importedHeight) return importedHeightfield(opts.importedHeight, mapSize, n, opts.heightScale ?? 120, opts.importSea ?? 0);
   const noise = new Noise2D(rng.fork('noise'));
   const noise2 = new Noise2D(rng.fork('noise2'));
   const prng = rng.fork('params');

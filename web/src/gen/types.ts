@@ -1,8 +1,9 @@
 import type { Vec2, Polygon, Polyline } from './core/geom';
 import type { Grid } from './core/grid';
 import type { Options } from './options';
+import type { NamesLayer } from './names/types';
 
-export type { Vec2, Polygon, Polyline, Grid, Options };
+export type { Vec2, Polygon, Polyline, Grid, Options, NamesLayer };
 
 export interface River { path: Polyline; width: number[]; name?: string; main?: boolean }
 
@@ -18,6 +19,8 @@ export interface TerrainLayer {
   seaFraction: number;
   /** Closed sea polygons (may extend a couple of cells beyond the map border; clip when rendering). */
   coastline: Polygon[];
+  /** Islands (land inside the sea): loops of orientation opposite to the main coastline loop. Absent when none. */
+  islands?: Polygon[];
   lakes: Polygon[];
   rivers: River[];
   /** D8 receiver index per cell after depression filling (-1 = outlet). */
@@ -144,6 +147,8 @@ export interface World {
   bridges?: { a: Vec2; b: Vec2; width: number }[];
   urban?: UrbanLayer;
   landuse?: LandUseLayer;
+  /** Toponyms with anchor geometry (M5a). */
+  names?: NamesLayer;
   /** Stage-internal data for debug rendering (not part of the contract). */
   debug?: Record<string, unknown>;
   stats: Record<string, number | string>;

@@ -3,7 +3,9 @@
  * Pure (no DOM, no Path2D) so it can be built and tested in Node.
  * Read-only w.r.t. the World; tolerant of missing optional layers.
  */
-import type { World, LandKind, Polygon, Polyline, Vec2 } from '../gen/types';
+import type { World, LandKind, Polygon, Polyline, Vec2, PolyH } from '../gen/types';
+import { contourSet } from './contours';
+import { seaWithIslands } from './util';
 import { offsetRibbon } from '../gen/core/geom';
 import { TileIndex, boxesOf, chunkPolyline } from './tileindex';
 
@@ -109,7 +111,8 @@ export function buildScene(world: World, tileSize = TILE_SIZE): Scene {
   };
 
   const t = world.terrain;
-  addPoly('sea', t.coastline);
+  const swi = seaWithIslands(t.coastline, t.islands);
+  addPoly('sea', swi.sea, swi.holes.map((h) => (h.length ? h : undefined)));
   addPoly('lakes', t.lakes);
   // river ribbons (same taper rule as svg.ts)
   const u16 = S / 1600;
@@ -124,6 +127,14 @@ export function buildScene(world: World, tileSize = TILE_SIZE): Scene {
   }
   addPoly('rivers', ribbons);
   addLines('river-centre', 'river', 'centre', 0, centre);
+
+  // contours (closed loops get their first point repeated: the canvas draws them as plain polylines)
+  if (world.options.contours) {
+    const cs = contourSet(world, u16);
+    const lp = (l: { pts: Polyline; closed: boolean }[]): Polyline[] => l.map((c) => (c.closed ? [...c.pts, c.pts[0]] : c.pts));
+    addLines('contour-thin', 'contour', 'thin', 0, lp(cs.thin));
+    addLines('contour-index', 'contour', 'index', 0, lp(cs.index));
+  }
 
   // land use
   const textures: TextureLayer[] = [];
@@ -159,43 +170,60 @@ export function buildScene(world: World, tileSize = TILE_SIZE): Scene {
     addLines('road-' + kind, 'road', kind, roadW[kind], (world.roads ?? []).filter((r) => r.kind === kind).map((r) => r.path));
   }
 
-  // urban
+  // urban (same layering as render/urban.ts)
   const ur = world.urban;
   if (ur) {
+    const addH = (name: string, l: PolyH[]): void => addPoly(name, l.map((p) => p.outer), l.map((p) => (p.holes.length ? p.holes : undefined)));
     addPoly('footprint', ur.footprint);
-    addPoly('blocks', ur.blocks);
-    addPoly('parcels', ur.parcels.map((p) => p.poly));
-    addPoly('squares', ur.squares);
+    addPoly('u-streets', ur.quarters.map((q) => q.poly.outer));
+    const parcelsOf = (use: string[]): Polygon[] => ur.parcels.filter((p) => use.includes(p.use)).map((p) => p.poly);
+    addPoly('u-places', parcelsOf(['place', 'market']));
+    addPoly('u-greens', parcelsOf(['green']));
+    addPoly('u-yards', parcelsOf(['church']));
+    addPoly('u-blocks', ur.blocks.filter((_, i) => ur.blockInfo[i]?.kind === 'block'));
+    addPoly('block-edges', ur.blocks);
+    addH('u-backland', ur.backLand);
+    addH('u-masses', ur.masses);
+    addPoly('u-plots', parcelsOf(['plot']));
+    addPoly('u-church', ur.buildings.filter((b) => b.kind === 'church').map((b) => b.poly));
+    const crosses: Polyline[] = [];
+    for (const b of ur.buildings) {
+      if (b.kind !== 'church' || b.poly.length < 3) continue;
+      let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+      for (const q of b.poly) { x0 = Math.min(x0, q.x); x1 = Math.max(x1, q.x); y0 = Math.min(y0, q.y); y1 = Math.max(y1, q.y); }
+      const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, r = Math.max(2.5, (x1 - x0) * 0.08);
+      crosses.push([{ x: cx - r, y: cy }, { x: cx + r, y: cy }], [{ x: cx, y: cy - r * 1.4 }, { x: cx, y: cy + r }]);
+    }
+    addLines('church-cross', 'cross', 'cross', 0.9, crosses);
     addPoly('landmarks', ur.landmarks.map((l) => l.poly));
-    const houses: Polygon[] = [], special: Polygon[] = [];
-    for (const b of ur.buildings) (b.kind === 'house' || b.kind === 'home' || b.kind === 'residential' || b.kind === 'dwelling' ? houses : special).push(b.poly);
-    addPoly('houses', houses);
-    addPoly('special', special);
+    // streets by rank and (rounded) width so each layer shares one stroke width
     const byW = new Map<string, Polyline[]>();
-    for (const s of ur.streets) {
-      const k = `${s.kind}|${Math.round(s.width * 2) / 2}`;
+    for (const st of ur.streets) {
+      const k = `${st.rank}|${st.role === 'close' ? 'c' : ''}|${Math.round(st.width * 2) / 2}`;
       let l = byW.get(k);
       if (!l) byW.set(k, (l = []));
-      l.push(s.path);
+      l.push(st.path);
     }
-    const sorted = [...byW.entries()].sort((a, b) => Number(a[0].split('|')[1]) - Number(b[0].split('|')[1]));
+    const sorted = [...byW.entries()].sort((a, b) => Number(b[0].split('|')[0]) - Number(a[0].split('|')[0]));
     for (const [k, src] of sorted) {
-      const [kind, w] = k.split('|');
-      addLines('street-' + k, kind === 'alley' ? 'alley' : 'street', kind, Number(w), src);
+      const [rank, close, w] = k.split('|');
+      addLines('street-' + k, 'street', `r${rank}${close}`, Number(w), src);
     }
     if (ur.walls) {
-      const wallLines: Polyline[] = [];
-      const towers: Polygon[] = [], gates: Polygon[] = [];
-      let thick = 0, n = 0;
+      const towers: Polygon[] = [], gateTowers: Polygon[] = [];
+      const byTh = new Map<number, Polyline[]>();
       for (const w of ur.walls) {
-        wallLines.push(w.closed && w.path.length > 2 ? [...w.path, w.path[0]] : w.path);
-        thick += w.thickness; n++;
-        for (const p of w.towers) towers.push(ngon(p, Math.max(3, w.thickness * 1.7)));
-        for (const p of w.gates) gates.push(ngon(p, Math.max(3.5, w.thickness * 1.5)));
+        const th = Math.round(w.thickness * 2) / 2;
+        let l = byTh.get(th);
+        if (!l) byTh.set(th, (l = []));
+        if (w.pieces?.length) for (const pc of w.pieces) l.push(pc);
+        else l.push(w.closed && w.path.length > 2 ? [...w.path, w.path[0]] : w.path);
+        for (const p of w.towers) towers.push(ngon(p, w.thickness * 1.6, 12));
+        for (const p of w.gateTowers ?? []) gateTowers.push(ngon(p, w.thickness * 1.45, 12));
       }
-      addLines('walls', 'wall', 'wall', n ? thick / n : 2.5, wallLines);
+      for (const [th, src] of byTh) addLines('wall-' + th, 'wall', 'wall', th, src);
       addPoly('towers', towers);
-      addPoly('gates', gates);
+      addPoly('gate-towers', gateTowers);
     }
   }
 

@@ -71,8 +71,8 @@ function edgeDir(ring: Polygon, p: { x: number; y: number }): number {
 }
 
 /** Straight curtain bands with mitred joins, towers at the vertices (round or square), flanking gate towers. */
-export function wallSvg(w: UrbanWall, ink: string, fill: string): string {
-  const th = w.thickness;
+export function wallSvg(w: UrbanWall, ink: string, fill: string, wallScale = 1, towerScale = 1): string {
+  const th = w.thickness * wallScale;
   const d = (w.pieces ?? [w.path]).map((p) => pathD(p, false)).join('');
   let s = `<g class="u-walls"><path d="${d}" fill="none" stroke="${ink}" stroke-width="${f1(th + 1.4)}" stroke-linecap="butt" stroke-linejoin="miter" stroke-miterlimit="6"/>` +
     `<path d="${d}" fill="none" stroke="${fill}" stroke-width="${f1(Math.max(0.6, th - 1))}" stroke-linecap="butt" stroke-linejoin="miter" stroke-miterlimit="6"/>`;
@@ -82,8 +82,9 @@ export function wallSvg(w: UrbanWall, ink: string, fill: string): string {
     const pts = [[-h, -h], [h, -h], [h, h], [-h, h]].map(([x, y]) => `${f1(t.x + x * c - y * sn)} ${f1(t.y + x * sn + y * c)}`);
     return `<path d="M${pts.join('L')}Z"/>`;
   };
-  const tw = w.towers.map((t, i) => tower(t, th * 1.6 * (w.towerScale?.[i] ?? 1))).join('');
-  const gt = (w.gateTowers ?? []).map((t) => tower(t, th * 1.5)).join('');
+  const tr = w.thickness * 1.6 * towerScale;
+  const tw = w.towers.map((t, i) => tower(t, tr * (w.towerScale?.[i] ?? 1))).join('');
+  const gt = (w.gateTowers ?? []).map((t) => tower(t, tr * 0.93)).join('');
   s += `<g fill="${fill}" stroke="${ink}" stroke-width="0.9">${tw}${gt}</g></g>`;
   return s;
 }
@@ -119,31 +120,31 @@ export function urbanLayer(world: World, pal: Palette, u: number, debug: boolean
     s += `<g class="u-gardens"><path d="${d}" fill="${U.garden}"/><path d="${d}" fill="url(#p-ugarden)"/></g>`;
   }
   if (ub.masses.length) {
-    s += `<path class="u-masses" d="${ub.masses.map(phD).join('')}" fill="${U.mass}" fill-rule="evenodd" stroke="${U.massEdge}" stroke-width="${lw(0.3, 0.15)}"/>`;
+    s += `<path class="u-masses" d="${ub.masses.map(phD).join('')}" fill="${U.mass}" fill-rule="evenodd" stroke="${U.massEdge}" stroke-width="${lw(U.massEdgeW, U.massEdgeW * 0.5)}"/>`;
   }
   // landmarks: church / cathedral drawn as a distinct, outlined mass with a cross
   const ch = ub.buildings.filter((b) => b.kind === 'church');
   if (ch.length) {
     const d = ch.map((b) => pathD(b.poly, true)).join('');
-    s += `<g class="u-landmarks"><path d="${d}" fill="${U.landmark}" stroke="${U.mass}" stroke-width="${lw(0.8, 0.4)}"/>`;
+    s += `<g class="u-landmarks"><path d="${d}" fill="${U.landmark}" stroke="${U.landmarkEdge}" stroke-width="${lw(0.8, 0.4)}"/>`;
     // cross on the nave
     let cx = 0, cy = 0, n = 0, x0 = Infinity, x1 = -Infinity;
     for (const b of ch) for (const q of b.poly) { cx += q.x; cy += q.y; n++; x0 = Math.min(x0, q.x); x1 = Math.max(x1, q.x); }
     cx /= n; cy /= n;
     const r = Math.max(2.5, (x1 - x0) * 0.08);
-    s += `<path d="M${f1(cx - r)} ${f1(cy)}H${f1(cx + r)}M${f1(cx)} ${f1(cy - r * 1.4)}V${f1(cy + r)}" stroke="${U.mass}" stroke-width="${lw(0.9, 0.5)}"/></g>`;
+    s += `<path d="M${f1(cx - r)} ${f1(cy)}H${f1(cx + r)}M${f1(cx)} ${f1(cy - r * 1.4)}V${f1(cy + r)}" stroke="${U.landmarkEdge}" stroke-width="${lw(0.9, 0.5)}"/></g>`;
   }
   // plot hairlines: a dark pass (reads on yards) and a light pass (reads on roofs), so each house is legible
   const plotD = ub.parcels.filter((p) => p.use === 'plot').map((p) => pathD(p.poly, true)).join('');
-  s += `<g class="u-plots" fill="none" stroke-width="${lw(0.14, 0.05)}"><path d="${plotD}" stroke="${U.plotLine}" stroke-opacity="0.45"/>` +
-    `<path d="${plotD}" stroke="${U.massEdge}" stroke-opacity="0.28"/></g>`;
+  s += `<g class="u-plots" fill="none" stroke-width="${lw(U.plotW, 0.05)}"><path d="${plotD}" stroke="${U.plotLine}" stroke-opacity="${U.plotAlpha}"/>` +
+    `<path d="${plotD}" stroke="${U.massEdge}" stroke-opacity="${U.plotLightAlpha}"/></g>`;
   // main streets keep a legible minimum width at small scales (drawn over the street space only where wider)
   const mains = ub.streets.filter((st) => st.rank <= 1 && st.role !== 'close');
   const minW = 2.4 * u;
   const wide = mains.filter((st) => st.width < minW);
   if (wide.length) s += `<path class="u-main-streets" d="${wide.map((st) => pathD(st.path, false)).join('')}" fill="none" stroke="${U.street}" stroke-width="${f1(minW)}" stroke-linecap="round" stroke-linejoin="round"/>`;
-  s += `<path class="u-block-edges" d="${ub.blocks.map((b) => pathD(b, true)).join('')}" fill="none" stroke="${U.blockEdge}" stroke-width="${lw(0.4, 0.3)}"/>`;
-  for (const w of ub.walls ?? []) s += wallSvg(w, U.wall, U.wallFill);
+  s += `<path class="u-block-edges" d="${ub.blocks.map((b) => pathD(b, true)).join('')}" fill="none" stroke="${U.blockEdge}" stroke-width="${lw(U.blockEdgeW, 0.3)}"/>`;
+  for (const w of ub.walls ?? []) s += wallSvg(w, U.wall, U.wallFill, U.wallScale, U.towerScale);
   s += '</g>';
   return s;
 }

@@ -5,23 +5,46 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Burgmap</title>
 <style>
-  :root { --bg:#2b2620; --panel:#f3ead2; --ink:#3d2f20; --ink2:#7a6247; --accent:#8a5a2b; --line:#d6c7a1; }
+  :root { --bg:#2b2620; --panel:#f3ead2; --ink:#3d2f20; --ink2:#7a6247; --accent:#8a5a2b; --line:#d6c7a1; --field:#fffaf0; }
   * { box-sizing: border-box; }
   html, body { margin:0; height:100%; background:var(--bg); color:var(--ink); font:14px/1.4 Georgia, 'Times New Roman', serif; overflow:hidden; }
-  #app { display:flex; height:100%; }
-  #panel { width:280px; flex:none; background:var(--panel); border-right:1px solid var(--line); padding:16px; overflow:auto; box-shadow:2px 0 12px rgba(0,0,0,.35); z-index:2; }
-  #panel h1 { margin:0 0 2px; font-size:24px; letter-spacing:.04em; }
-  #panel .sub { color:var(--ink2); font-size:12px; margin-bottom:16px; }
-  label { display:block; font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:var(--ink2); margin:12px 0 4px; }
-  select, input[type=text] { width:100%; padding:7px 8px; border:1px solid var(--line); border-radius:4px; background:#fffaf0; color:var(--ink); font:inherit; }
-  .row { display:flex; gap:6px; }
-  button { padding:7px 10px; border:1px solid var(--accent); border-radius:4px; background:var(--accent); color:#fff8ea; font:inherit; cursor:pointer; }
+  #app { display:flex; height:100%; position:relative; }
+  #panel { width:300px; flex:none; background:var(--panel); border-right:1px solid var(--line); padding:14px 14px 10px; overflow:auto; box-shadow:2px 0 12px rgba(0,0,0,.35); z-index:5; display:flex; flex-direction:column; gap:8px; }
+  #panel h1 { margin:0; font-size:24px; letter-spacing:.04em; }
+  #panel .sub { color:var(--ink2); font-size:12px; margin:0 0 4px; }
+  label { display:block; font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:var(--ink2); margin:10px 0 3px; }
+  select, input[type=text], input[type=number] { width:100%; padding:6px 8px; border:1px solid var(--line); border-radius:4px; background:var(--field); color:var(--ink); font:inherit; }
+  select:disabled, input:disabled { opacity:.5; }
+  .row { display:flex; gap:6px; align-items:stretch; }
+  .row > * { min-width:0; }
+  .row > input { flex:1 1 auto; width:auto; min-width:70px; }
+  .row > button { flex:none; min-width:max-content; }
+  button { padding:6px 10px; border:1px solid var(--accent); border-radius:4px; background:var(--accent); color:#fff8ea; font:inherit; cursor:pointer; white-space:nowrap; }
   button.secondary { background:transparent; color:var(--accent); }
+  button.small { padding:3px 8px; font-size:12px; }
   button:hover { filter:brightness(1.08); }
-  .check { display:flex; align-items:center; gap:8px; margin-top:12px; font-size:13px; }
-  .btns { display:flex; gap:6px; margin-top:20px; }
-  .btns button { flex:1; }
-  #status { margin-top:16px; font-size:12px; color:var(--ink2); min-height:2.6em; }
+  button:disabled { opacity:.5; cursor:default; }
+  .check { display:flex; align-items:center; gap:8px; margin-top:9px; font-size:13px; }
+  .btns { display:flex; gap:6px; margin-top:4px; }
+  .btns { flex-wrap:wrap; }
+  .btns button { flex:1 1 auto; padding-left:6px; padding-right:6px; font-size:13px; }
+  /* collapsible sections (native <details>) */
+  details.sec { border:1px solid var(--line); border-radius:6px; background:rgba(255,250,240,.45); }
+  details.sec > summary { cursor:pointer; padding:7px 10px; font-size:12px; letter-spacing:.1em; text-transform:uppercase; color:var(--accent); font-weight:bold; list-style:none; user-select:none; }
+  details.sec > summary::-webkit-details-marker { display:none; }
+  details.sec > summary::before { content:'\25B8'; display:inline-block; width:1.1em; transition:transform .15s; }
+  details.sec[open] > summary::before { transform:rotate(90deg); }
+  details.sec > .body { padding:0 10px 10px; }
+  .hint { font-size:12px; color:var(--ink2); margin:6px 0 0; }
+  .slot { margin-top:8px; padding:8px; border:1px dashed var(--line); border-radius:4px; font-size:12px; color:var(--ink2); }
+  .chip { display:inline-block; margin-top:6px; padding:2px 8px; border-radius:10px; background:#e6d6a8; color:var(--ink); font-size:12px; }
+  .chip.warn { background:#e9c7b6; }
+  #status { font-size:12px; color:var(--ink2); min-height:2.6em; }
+  #progress { height:4px; border-radius:2px; background:var(--line); overflow:hidden; opacity:0; transition:opacity .2s; }
+  #progress.on { opacity:1; }
+  #progress > i { display:block; height:100%; width:38%; background:var(--accent); animation:slide 1s infinite ease-in-out; }
+  @keyframes slide { 0% { transform:translateX(-110%); } 100% { transform:translateX(290%); } }
+  #gentime { font-size:12px; color:var(--ink); }
   #map { position:relative; flex:1; overflow:hidden; cursor:grab; touch-action:none; }
   #map.drag { cursor:grabbing; }
   /* CANVAS-VIEWER styles */
@@ -31,33 +54,70 @@
   #fit { position:absolute; right:12px; top:36px; padding:4px 8px; font-size:12px; }
   #busy { position:absolute; right:14px; top:12px; color:#f3ead2; font-size:12px; opacity:0; transition:opacity .2s; pointer-events:none; }
   #busy.on { opacity:1; }
-  @media (max-width: 700px) { #panel { width:220px; padding:10px; } }
+  #menuBtn { display:none; position:absolute; left:10px; top:10px; z-index:6; padding:5px 10px; font-size:18px; line-height:1; }
+  @media (max-width: 800px) {
+    #panel { position:absolute; left:0; top:0; bottom:0; width:min(86vw, 330px); transform:translateX(-102%); transition:transform .2s; }
+    #app.open #panel { transform:none; }
+    #menuBtn { display:block; }
+    #panel { padding-top:52px; }
+    #minimap { width:96px; height:96px; }
+    #fit { top:12px; right:12px; }
+    #busy { top:48px; }
+  }
 </style>
 </head>
 <body>
 <div id="app">
+  <button id="menuBtn" class="secondary" title="Options" aria-label="Options">&#9776;</button>
   <aside id="panel">
-    <h1>Burgmap</h1>
-    <div class="sub">Medieval settlement in its landscape</div>
-    <label for="seed">Seed</label>
-    <div class="row"><input id="seed" type="text" spellcheck="false"><button id="dice" class="secondary" title="Random seed">&#127922;</button></div>
-    <label for="size">Size</label>
-    <select id="size"></select>
-    <label for="relief">Relief</label>
-    <select id="relief"></select>
-    <label for="coast">Coast</label>
-    <select id="coast"></select>
-    <label for="river">River</label>
-    <select id="river"></select>
-    <label for="roads">Regional roads</label>
-    <select id="roads"></select>
-    <label for="culture">Town plan</label>
-    <select id="culture"></select>
-    <label for="style">Style</label>
-    <select id="style"></select>
-    <div class="check"><input id="contours" type="checkbox"><span>Contour lines</span></div>
-    <div class="check"><input id="landuse" type="checkbox"><span>Land use (fields, woods...)</span></div>
-    <div class="btns"><button id="exportSvg">Export SVG</button><button id="exportPng">Export PNG</button></div>
+    <div>
+      <h1>Burgmap</h1>
+      <div class="sub">Medieval settlement in its landscape</div>
+    </div>
+    <div>
+      <label for="seed" style="margin-top:0">Seed</label>
+      <div class="row"><input id="seed" type="text" spellcheck="false"><button id="dice" class="secondary" title="Random seed (R)">&#127922; Random</button></div>
+      <div class="btns"><button id="copyLink" class="secondary" title="Copy a link to this exact map">Copy link</button></div>
+      <div id="shareState" class="hint"></div>
+    </div>
+
+    <details class="sec" open id="sec-terrain"><summary>Terrain</summary><div class="body">
+      <label for="relief">Relief</label><select id="relief"></select>
+      <label for="coast">Coast</label><select id="coast"></select>
+      <label for="river">River</label><select id="river"></select>
+      <label>Heightmap</label>
+      <button id="hmImport" class="secondary" style="width:100%">Import heightmap (PNG/JPG)</button>
+      <input id="hmFile" type="file" accept="image/png,image/jpeg,image/*" hidden>
+      <div class="row" style="align-items:center;justify-content:space-between;margin-top:6px"><span id="hmInfo" class="hint" style="margin:0"></span><button id="hmClear" class="secondary small" title="Back to generated terrain" hidden>Remove</button></div>
+      <div id="hmParams" hidden>
+        <label for="hmScale">Vertical scale (m, white pixel)</label><input id="hmScale" type="number" min="1" max="9000" step="10">
+        <label for="hmSea">Sea level (m)</label><input id="hmSea" type="number" min="-1000" max="9000" step="5">
+      </div>
+    </div></details>
+
+    <details class="sec" open id="sec-settlement"><summary>Settlement</summary><div class="body">
+      <label for="size">Size</label><select id="size"></select>
+      <label for="population">Population (0 = automatic)</label><input id="population" type="number" min="0" max="200000" step="50">
+      <label for="roads">Regional roads</label><select id="roads"></select>
+    </div></details>
+
+    <details class="sec" id="sec-plan"><summary>Plan</summary><div class="body">
+      <label for="culture">Town plan</label><select id="culture"></select>
+      <label for="language">Place-name language</label><select id="language"></select>
+      <div id="planExtra" class="slot" data-slot="plan-extra">Phases, cultural blend and plan parameters will appear here.</div>
+    </div></details>
+
+    <details class="sec" open id="sec-map"><summary>Map</summary><div class="body">
+      <label for="style">Style</label><select id="style"></select>
+      <div class="check"><input id="contours" type="checkbox"><span>Contour lines</span></div>
+      <div class="check"><input id="landuse" type="checkbox"><span>Land use (fields, woods...)</span></div>
+      <div class="check"><input id="labels" type="checkbox"><span>Names (labels)</span></div>
+      <div class="check"><input id="legend" type="checkbox"><span>Legend</span></div>
+    </div></details>
+
+    <div class="btns"><button id="exportSvg">Export SVG</button><button id="exportPng">Export PNG</button><button id="exportJson" class="secondary" title="World data (options + vector layers, no rasters) for other tools">Export JSON</button></div>
+    <div id="progress"><i></i></div>
+    <div id="gentime"></div>
     <div id="status"></div>
   </aside>
   <main id="map"><canvas id="view"></canvas><canvas id="minimap"></canvas><div id="hud"></div><button id="fit" class="secondary" title="Fit map (0)">Fit</button><div id="busy">generating...</div></main>

@@ -138,6 +138,24 @@ Every footprint is computed as **plot ∩ (a region defined relative to the plot
 - **Detached** (suburbs and villages): a rectangle of 6–10 × 8–14 m aligned with the frontage and intersected with the plot. Barn and outbuildings are placed along the rear or side edges, again intersected with the plot.
 - **Render**: union the buildings per block into masses, keeping the holes (courtyards). Outline the masses. Draw the individual plot lines as a faint hairline over the roofs, so the fabric reads like Nolli or Merian, not like isolated boxes.
 
+### 3.9 Fortifications (user requirement)
+
+Walls are **polygonal**: straight curtains of 25–80 m between towers.
+- **Wall line:** fit the enclosure isoline with a max-deviation polygon, then snap its vertices to local high points and terrain breaks.
+- **Towers:** one at every vertex, extra towers so spacing is ≤ 40–60 m, and paired towers at the gates.
+- **Castles, citadels and kasbahs:** 4–8 sided, near-convex, on the highest ground. Chinese, Roman and kasbah walls are rectangular.
+- **Exact partition:** the phase region, the fossilized ring street and the intramural lane follow the polygonal wall line exactly.
+
+### 4.1 Density targets (user requirement)
+
+The built share of each block is the built area divided by the block area:
+- oldest phase: 85–95 %;
+- second phase: 70–85 %;
+- younger phases: 50–70 %;
+- faubourgs: 35–55 %.
+
+In the core, buildings touch, and gardens and inner courtyards are rare (about one small court per 4–6 plots, often shared). No "matchstick" footprints: minimum width 4.5 m, aspect ratio ≤ 4. Plots narrower than about 4.5 m are merged. In the core, the block interior is divided among the plots rather than left as back land.
+
 ## 5. Villages and hamlets (same kernel, different top level)
 
 - **Hamlet**: no street network. There are 3–15 farmsteads, and each farmstead is a plot. Plots are cut from the land along tracks: a strip along the track, cut into wide farm plots of 25–60 m. The front range becomes house and barn around a yard (a U or L built along the plot edges). The rest of the plot is garden or orchard.

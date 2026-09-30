@@ -85,7 +85,7 @@ export interface RasterResult { png: Uint8Array; w: number; h: number; /** Raw 8
 export function renderTerrainRaster(world: World, pal: Palette): RasterResult {
   const hg = world.terrain.height;
   const n = hg.w;
-  const up = n >= 400 ? 1.5 : 2;
+  const up = pal.hatch > 0 ? Math.min(4, 1700 / n) : n >= 400 ? 1.5 : 2;
   const W = Math.round(n * up);
   const H = W;
   const hs = new Float32Array(W * H);
@@ -131,6 +131,8 @@ export function renderTerrainRaster(world: World, pal: Palette): RasterResult {
     return stops[stops.length - 1].c;
   };
   const paper = hexToRgb(pal.paper);
+  const inkRgb = hexToRgb(pal.ink);
+  const HP = 6; // hatch period in raster px
   const out = new Uint8Array(W * H * 3);
   const L = { x: -0.5, y: -0.5, z: 0.7071 };
   const L2 = { x: 0.2, y: -0.75, z: 0.63 };
@@ -155,10 +157,23 @@ export function renderTerrainRaster(world: World, pal: Palette): RasterResult {
       const t = Math.min(1, hv / landMax);
       const c = colorAt(Math.pow(t, 0.85));
       const g = pal.grain ? 1 + (hash2(x, y) - 0.5) * 2 * pal.grain : 1;
-      const k = f * g;
-      out[o] = Math.max(0, Math.min(255, c[0] * k));
-      out[o + 1] = Math.max(0, Math.min(255, c[1] * k));
-      out[o + 2] = Math.max(0, Math.min(255, c[2] * k));
+      let k = f * g;
+      let a = 0;
+      if (pal.hatch > 0) {
+        // engraved look: the flat tone barely follows the light, the shadow side is hatched (cross-hatched when deep)
+        k = 1 + (f - 1) * 0.3;
+        const dn = Math.max(0, 1 - f) / 0.2;
+        if (dn > 0.22) {
+          const th = 0.8 + Math.min(1, dn) * 1.9;
+          if (((x + y) % HP) < th) a = Math.min(1, (dn - 0.22) * 2.2);
+          if (dn > 0.8 && ((((x - y) % HP) + HP) % HP) < th * 0.8) a = Math.max(a, Math.min(1, (dn - 0.8) * 3));
+        }
+        a *= pal.hatch * 0.85;
+        k *= g;
+      }
+      out[o] = Math.max(0, Math.min(255, (c[0] * k) * (1 - a) + inkRgb[0] * a));
+      out[o + 1] = Math.max(0, Math.min(255, (c[1] * k) * (1 - a) + inkRgb[1] * a));
+      out[o + 2] = Math.max(0, Math.min(255, (c[2] * k) * (1 - a) + inkRgb[2] * a));
     }
   }
   return { png: encodePng(out, W, H, 3), w: W, h: H, rgb: out };

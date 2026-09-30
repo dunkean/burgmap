@@ -3,6 +3,9 @@ import type { Vec2 } from '../gen/core/geom';
 import type { Palette } from './styles';
 import { f1, pathD } from './util';
 
+/** Land-use tints multiply over the hillshaded terrain so relief stays readable under them (browsers; resvg falls back to plain alpha). Dark styles blend normally. */
+const mul = (pal: Palette): string => (pal.landBlend === 'multiply' ? ' style="mix-blend-mode:multiply"' : '');
+
 const ringsD = (a: LandArea): string => {
   let d = pathD(a.poly, true);
   if (a.holes) for (const h of a.holes) d += pathD(h, true);
@@ -15,18 +18,29 @@ function patterns(world: World, pal: Palette, s: number): string {
   const pat = (id: string, w: number, h: number, body: string, extra = '') =>
     out.push(`<pattern id="${id}" patternUnits="userSpaceOnUse" width="${f1(w)}" height="${f1(h)}"${extra}>${body}</pattern>`);
 
-  // forest: dense canopy circles (irregular)
+  // forest: canopy (blobs), drawn crowns with trunk and shadow arc, or sparse tiny trees
   {
     const W = 30 * s;
     const pts: [number, number, number][] = [[4, 5, 3.1], [13, 3, 2.7], [22, 6, 3.2], [8, 13, 3.3], [18, 14, 3], [27, 15, 2.6], [3, 22, 2.8], [12, 24, 3.2], [22, 23, 3.1], [29, 27, 2.5], [16, 29, 2.4]];
     let b = '';
-    for (const [x, y, r] of pts) b += `<circle cx="${f1(x * s)}" cy="${f1(y * s)}" r="${f1(r * s)}"/>`;
-    pat('p-forest', W, W, `<g fill="${pal.treeFill}" stroke="${pal.treeInk}" stroke-width="${f1(0.55 * s)}">${b}</g>`);
+    if (pal.treeShape === 'crown') {
+      for (const [x, y, r] of pts) {
+        const X = x * s, Y = y * s, R = r * s * 0.95;
+        b += `<circle cx="${f1(X)}" cy="${f1(Y)}" r="${f1(R)}"/>` +
+          `<path d="M${f1(X + R * 0.55)} ${f1(Y - R * 0.55)}A${f1(R * 0.78)} ${f1(R * 0.78)} 0 0 1 ${f1(X - R * 0.55)} ${f1(Y + R * 0.55)}" fill="none"/>` +
+          `<path d="M${f1(X)} ${f1(Y + R)}V${f1(Y + R * 1.5)}" fill="none"/>`;
+      }
+    } else if (pal.treeShape === 'dot') {
+      for (const [x, y, r] of pts) b += `<circle cx="${f1(x * s)}" cy="${f1(y * s)}" r="${f1(r * s * 0.5)}"/>`;
+    } else for (const [x, y, r] of pts) b += `<circle cx="${f1(x * s)}" cy="${f1(y * s)}" r="${f1(r * s)}"/>`;
+    pat('p-forest', W, W, `<g fill="${pal.treeFill}" stroke="${pal.treeInk}" stroke-width="${f1(0.55 * s)}" stroke-linecap="round">${b}</g>`);
   }
   // orchard: regular dot grid with a small stem mark
   {
     const W = 11 * s;
-    pat('p-orchard', W, W, `<circle cx="${f1(W / 2)}" cy="${f1(W / 2)}" r="${f1(2.3 * s)}" fill="${pal.treeFill}" stroke="${pal.orchardDot}" stroke-width="${f1(0.5 * s)}"/><circle cx="${f1(W / 2)}" cy="${f1(W / 2)}" r="${f1(0.45 * s)}" fill="${pal.orchardDot}"/>`);
+    const R = (pal.treeShape === 'dot' ? 1.5 : 2.3) * s;
+    pat('p-orchard', W, W, `<circle cx="${f1(W / 2)}" cy="${f1(W / 2)}" r="${f1(R)}" fill="${pal.treeFill}" stroke="${pal.orchardDot}" stroke-width="${f1(0.5 * s)}"/><circle cx="${f1(W / 2)}" cy="${f1(W / 2)}" r="${f1(0.45 * s)}" fill="${pal.orchardDot}"/>` +
+      (pal.treeShape === 'crown' ? `<path d="M${f1(W / 2 + R * 0.5)} ${f1(W / 2 - R * 0.5)}A${f1(R * 0.75)} ${f1(R * 0.75)} 0 0 1 ${f1(W / 2 - R * 0.5)} ${f1(W / 2 + R * 0.5)}" fill="none" stroke="${pal.orchardDot}" stroke-width="${f1(0.4 * s)}"/>` : ''));
   }
   // garden: tiny beds
   {
@@ -64,7 +78,7 @@ function patterns(world: World, pal: Palette, s: number): string {
   }
   const sp = Math.max(2.4, 1.5 * s);
   for (const deg of seen) {
-    pat(`p-fur-${deg}`, 40, sp, `<path d="M0 ${f1(sp / 2)}H40" stroke="${pal.furrow}" stroke-width="${f1(Math.max(0.35, 0.3 * s))}" opacity="0.6"/>`, ` patternTransform="rotate(${deg})"`);
+    pat(`p-fur-${deg}`, 40, sp, `<path d="M0 ${f1(sp / 2)}H40" stroke="${pal.furrow}" stroke-width="${f1(Math.max(0.35, 0.3 * s))}" opacity="${pal.furrowAlpha}"/>`, ` patternTransform="rotate(${deg})"`);
   }
   return `<defs>${out.join('')}</defs>`;
 }
@@ -81,23 +95,23 @@ export function landuseLayer(world: World, pal: Palette, u: number): string {
     if (!list.length) continue;
     out += `<g class="lu-${kind}">`;
     if (kind === 'field') {
-      out += `<g fill="${pal.land.field}" fill-opacity="${pal.landOpacity}" fill-rule="evenodd">${list.map((a) => `<path d="${ringsD(a)}"/>`).join('')}</g>`;
+      out += `<g fill="${pal.land.field}" fill-opacity="${pal.landOpacity}" fill-rule="evenodd"${mul(pal)}>${list.map((a) => `<path d="${ringsD(a)}"/>`).join('')}</g>`;
       // strips: alternate tints, thin dividing lines and furrow texture
       for (const a of list) {
         if (!a.strips || a.stripAngle === undefined) continue;
         const deg = Math.round((a.stripAngle * 180) / Math.PI) % 180;
         let dA = '', dB = '', all = '';
         a.strips.forEach((st, i) => { const d = pathD(st, true); all += d; if (i & 1) dB += d; else dA += d; });
-        out += `<path d="${dA}" fill="${pal.stripA}" fill-opacity="0.55"/><path d="${dB}" fill="${pal.stripB}" fill-opacity="0.5"/>` +
-          `<path d="${all}" fill="url(#p-fur-${deg})" stroke="${pal.furrow}" stroke-width="${f1(0.28 * s)}" stroke-opacity="0.55"/>`;
+        out += `<path d="${dA}" fill="${pal.stripA}" fill-opacity="${pal.stripAlpha[0]}"${mul(pal)}/><path d="${dB}" fill="${pal.stripB}" fill-opacity="${pal.stripAlpha[1]}"${mul(pal)}/>` +
+          `<path d="${all}" fill="url(#p-fur-${deg})" stroke="${pal.furrow}" stroke-width="${f1(0.28 * s)}" stroke-opacity="${Math.min(1, pal.furrowAlpha * 0.9)}"/>`;
       }
       // hedges along furlong edges
-      out += `<g fill="none" stroke="${pal.hedge}" stroke-width="${f1(0.9 * s)}" stroke-opacity="0.75" stroke-dasharray="${f1(4 * s)} ${f1(1.2 * s)}" stroke-linecap="round">${list.map((a) => `<path d="${ringsD(a)}"/>`).join('')}</g>`;
+      if (pal.hedgeOn) out += `<g fill="none" stroke="${pal.hedge}" stroke-width="${f1(0.9 * s)}" stroke-opacity="0.75" stroke-dasharray="${f1(4 * s)} ${f1(1.2 * s)}" stroke-linecap="round">${list.map((a) => `<path d="${ringsD(a)}"/>`).join('')}</g>`;
     } else {
       const d = list.map(ringsD).join('');
       const alpha = kind === 'forest' ? 0.7 : pal.landOpacity;
-      out += `<path d="${d}" fill="${pal.land[kind]}" fill-opacity="${alpha}" fill-rule="evenodd" stroke="${pal.land[kind]}" stroke-width="${f1(0.6 * s)}"/>`;
-      out += `<path d="${d}" fill="url(#p-${kind})" fill-rule="evenodd"/>`;
+      out += `<path d="${d}" fill="${pal.land[kind]}" fill-opacity="${alpha}" fill-rule="evenodd" stroke="${pal.land[kind]}" stroke-width="${f1(0.6 * s)}"${mul(pal)}/>`;
+      if (pal.tex[kind]) out += `<path d="${d}" fill="url(#p-${kind})" fill-rule="evenodd"/>`;
       if (kind === 'forest') out += `<path d="${d}" fill="none" stroke="${pal.treeInk}" stroke-width="${f1(0.7 * s)}" stroke-opacity="0.55" stroke-linejoin="round"/>`;
       else if (kind === 'orchard' || kind === 'garden') out += `<path d="${d}" fill="none" stroke="${pal.hedge}" stroke-width="${f1(0.8 * s)}" stroke-opacity="0.7"/>`;
     }

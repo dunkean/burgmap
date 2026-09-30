@@ -6,6 +6,7 @@ import { placeLabels } from '../src/render/labels';
 import { buildScene, textureMarks, hash3 } from '../src/render/scene';
 import { createCanvasRenderer } from '../src/render/canvas';
 import type { CanvasLike } from '../src/render/canvas';
+import { seaWithIslands } from '../src/render/util';
 import { fakeWorld, mockCanvas, MockPath2D } from '../scripts/fakeworld';
 
 function rndBoxes(n: number, S: number, maxDim: number, seed = 5): Float32Array {
@@ -86,7 +87,8 @@ describe('LOD + view', () => {
     const far = selectLod(0.03), mid = selectLod(0.1), near = selectLod(1);
     expect(far.buildings || far.blocks || far.streets).toBe(false);
     expect(mid.blocks && mid.streets && mid.landmarks).toBe(true);
-    expect(mid.buildings || mid.parcels).toBe(false);
+    expect(mid.buildings).toBe(true); // masses from the mid band on
+    expect(mid.parcels).toBe(false); // plot hairlines only when near
     expect(near.buildings && near.parcels && near.textures && near.shadows && near.alleys).toBe(true);
     expect(far.densityAlpha).toBe(1);
     expect(near.densityAlpha).toBeLessThan(1);
@@ -128,8 +130,8 @@ describe('scene + textures', () => {
   const world = fakeWorld({ mapSize: 4000, buildings: 3000, streets: 500, clusters: 3, landAreas: 60, seed: 3 });
   const scene = buildScene(world);
   it('indexes layers', () => {
-    expect(scene.counts.houses).toBeGreaterThan(2000);
-    expect(scene.poly.get('houses')!.index.count).toBe(scene.counts.houses);
+    expect(scene.counts['u-masses']).toBeGreaterThan(2000);
+    expect(scene.poly.get('u-masses')!.index.count).toBe(scene.counts['u-masses']);
     expect(scene.density!.max).toBeGreaterThan(0);
   });
   it('texture marks are deterministic and each lies inside an area', () => {
@@ -161,7 +163,7 @@ describe('canvas renderer smoke (mock 2D context)', () => {
   const fp = world.urban!.footprint[0];
   const cx = fp.reduce((s, p) => s + p.x, 0) / fp.length, cy = fp.reduce((s, p) => s + p.y, 0) / fp.length;
 
-  it('far zoom skips buildings, blocks and alleys', () => {
+  it('far zoom skips masses, blocks and alleys', () => {
     const { r, log } = mk();
     const st = r.draw({ cx: 4000, cy: 4000, scale: 0.1 * 0.2 });
     expect(st.band).toBe(0);
@@ -177,12 +179,12 @@ describe('canvas renderer smoke (mock 2D context)', () => {
     const st = r.draw(view);
     expect(st.band).toBe(2);
     expect(st.buildingsDrawn).toBe(true);
-    const total = scene.counts.houses + (scene.counts.special ?? 0);
+    const total = scene.counts['u-masses'];
     expect(st.buildingsCandidate).toBeGreaterThan(0);
     // 1200x800 px at 1 px/m is 1200x800 m: only a small fraction of all buildings
     expect(st.buildingsCandidate).toBeLessThan(total * 0.5);
     // every drawn building path belongs to a tile that intersects the (padded) viewport
-    const houses = scene.poly.get('houses')!;
+    const houses = scene.poly.get('u-masses')!;
     const rect = viewRect(view, 1200, 800);
     const vis = new Set(houses.index.tilesInRect(rect));
     expect(vis.size).toBeLessThan(houses.index.nx * houses.index.ny * 0.2);
@@ -191,11 +193,11 @@ describe('canvas renderer smoke (mock 2D context)', () => {
     expect(log.calls.translate ?? 0).toBeGreaterThan(0);
   });
 
-  it('mid zoom draws blocks and streets but not buildings', () => {
+  it('mid zoom draws blocks, street space and masses', () => {
     const { r } = mk();
     const st = r.draw({ cx, cy, scale: 0.1 });
     expect(st.band).toBe(1);
-    expect(st.buildingsDrawn).toBe(false);
+    expect(st.buildingsDrawn).toBe(true);
   });
 
   it('near frame issues far fewer vertices than a full-map dump and reuses cached paths', () => {
@@ -231,5 +233,19 @@ describe('canvas renderer on a real generated world', () => {
     }
     expect(m.log.calls.fill ?? 0).toBeGreaterThan(0);
     expect(m.log.calls.fillText ?? 0).toBeGreaterThan(0);
+  });
+});
+
+describe('sea islands', () => {
+  const sq = (x: number, y: number, r: number) => [{ x: x - r, y: y - r }, { x: x + r, y: y - r }, { x: x + r, y: y + r }, { x: x - r, y: y + r }];
+  it('treats nested coastline loops and explicit islands as holes of the enclosing sea polygon', () => {
+    const { sea, holes } = seaWithIslands([sq(500, 500, 400), sq(300, 300, 50)], [sq(700, 700, 40)]);
+    expect(sea.length).toBe(1);
+    expect(holes[0].length).toBe(2);
+  });
+  it('keeps disjoint sea polygons as seas', () => {
+    const { sea, holes } = seaWithIslands([sq(100, 100, 50), sq(500, 500, 50)], undefined);
+    expect(sea.length).toBe(2);
+    expect(holes.every((h) => h.length === 0)).toBe(true);
   });
 });
