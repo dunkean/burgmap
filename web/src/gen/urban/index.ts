@@ -9,7 +9,7 @@ import type { World, UrbanLayer, UrbanStreet, PolyH as PolyHT } from '../types';
 import { MORPHOLOGIES, MorphologyParams, Zone } from './morphology';
 import { planRibbonVillage } from './villages';
 import { makeCtx } from './context';
-import { choosePopulation, chooseArchetype, planTownPhases, planFaubourgs, EnclosurePlan } from './phases';
+import { choosePopulation, chooseArchetype, planServedPhases, planFaubourgs, EnclosurePlan } from './phases';
 import { buildPrimary } from './primary';
 import { Streets, LAB_OPEN } from './streets';
 import { mpArea, MultiPoly } from '../geo/bool';
@@ -21,7 +21,7 @@ import { cutPlots, Plot } from './plots';
 import { buildPlot } from './buildings';
 import { wallFeatures } from './walls';
 import { pickChurchBlock, churchFootprint } from './landmarks';
-import { distToRing, pointInRing } from '../geo/poly';
+import { distToRing, pointInRing, area as areaOf, inscribed } from '../geo/poly';
 import { unionMany } from '../geo/bool';
 import type { UrbanBuilding, PolyH } from '../types';
 import type { UrbanParcel } from '../types';
@@ -30,6 +30,12 @@ export interface UrbanResult { layer: UrbanLayer; stats: Record<string, number |
 export interface UrbanDebug { quarters: { poly: Polygon; phase: number; lab: number[] }[] }
 
 const MARKET_AREA = (pop: number): number => (pop < 1200 ? 0 : Math.min(7000, 1300 + pop * 0.22));
+
+/** A point strictly inside a polygon (centroid when inside, else the inscribed-circle center). */
+export function interiorPoint(p: Polygon): Vec2 {
+  const c = polygonCentroid(p);
+  return pointInRing(p, c) ? c : inscribed(p, [], 1).c;
+}
 
 export function mainRoadAngle(world: World): number {
   const c = world.site!.center;
@@ -76,15 +82,18 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     } else archetype = 'nucleated-village';
   }
   if (!plan && archetype === 'nucleated-village') {
-    plan = planTownPhases(ctx, pop, walled, mainAngle, rng.fork('phases'), { nPh: 1, zones: ['village'], faubShare: 0.3 });
+    plan = planServedPhases(ctx, pop, walled, mainAngle, rng.fork('phases'), roads, { nPh: 1, zones: ['village'], faubShare: 0.3 });
     faub = planFaubourgs(ctx, plan.enclosure, roads, ((pop * 0.3) / params.density.village) * 1e4, 0, rng.fork('faubourg'));
     marketArea = 500 + pop * 0.8;
     faubZone = 'village';
   }
   if (!plan) {
-    plan = planTownPhases(ctx, pop, walled, mainAngle, rng.fork('phases'));
+    plan = planServedPhases(ctx, pop, walled, mainAngle, rng.fork('phases'), roads);
     const faubPop = pop * (walled ? 0.17 : 0.1);
-    faub = planFaubourgs(ctx, plan.enclosure, roads, (faubPop / params.density.faubourg) * 1e4, walled ? 22 : 0, rng.fork('faubourg'));
+    // scarce land: what the enclosure could not hold grows along the roads instead
+    const encTarget = plan.phases.reduce((s2, ph) => s2 + (ph.pop / (params.density[ph.zone] * (plan!.densityScale ?? 1))) * 1e4, 0);
+    const short = (plan.shortfall ?? 0) > 0.05 * encTarget ? ((plan.shortfall ?? 0) * params.density.middle) / params.density.faubourg : 0;
+    faub = planFaubourgs(ctx, plan.enclosure, roads, (faubPop / params.density.faubourg) * 1e4 + short, walled ? 22 : 0, rng.fork('faubourg'));
     marketArea = MARKET_AREA(pop);
     extraRadials = params.streetOp !== 'grid';
   }
@@ -99,6 +108,8 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   stats['ms.primary'] = Math.round(t2 - t1);
   stats['quarters'] = prim.quarters.length;
   stats['ha.enclosed'] = Math.round(mpArea(plan.enclosure) / 1e3) / 10;
+  stats['ha.faubourg'] = Math.round(mpArea(faub.region) / 1e3) / 10;
+  stats['ha.shortfall'] = Math.round((plan.shortfall ?? 0) / 1e3) / 10;
 
   // ---- level 2: blocks
   const nucleus = prim.market ? polygonCentroid(prim.market) : ctx.center;
@@ -134,6 +145,19 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     carved.push(...r.blocks);
     streetSpace.push(r.streetSpace);
   });
+  // enclosure pieces, phase-region pieces and footprint pieces that received no block (no street access, cut off
+  // by water) are not urbanized: no wall around empty land
+  const blockPts = carved.map((b) => interiorPoint(b.poly));
+  const holdsBlock = (ph: { outer: Polygon; holes: Polygon[] }) => blockPts.some((p) => pointInRing(ph.outer, p) && !ph.holes.some((h) => pointInRing(h, p)));
+  prim.walls = prim.walls.filter((w) => holdsBlock({ outer: w.ring, holes: [] }));
+  prim.footprint = prim.footprint.filter(holdsBlock);
+  for (const ph of plan.phases) ph.region = ph.region.filter(holdsBlock);
+  // capacity: planned gross density over the urbanized quarters
+  const urbanized = new Set(carved.map((b) => b.quarter));
+  let capacity = 0;
+  const dScale = plan.densityScale ?? 1;
+  prim.quarters.forEach((q, qi) => { if (urbanized.has(qi) && q.kind !== 'market') capacity += (areaOf(q.lp.pts) * params.density[q.zone] * (q.zone === 'faubourg' ? 1 : dScale)) / 1e4; });
+  stats['capacity'] = Math.round(capacity);
   const t4 = performance.now();
   stats['ms.split'] = Math.round(t3 - t2);
   stats['ms.carve'] = Math.round(t4 - t3);
@@ -209,6 +233,10 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   stats['buildings'] = buildings.length;
   stats['closes'] = closes;
 
+  // quarters that received no block (never joined the street network) are not part of the town
+  const keptQ = prim.quarters.map((_, qi) => qi).filter((qi) => urbanized.has(qi));
+  const qMap: number[] = [];
+  keptQ.forEach((qi, k) => { qMap[qi] = k; });
   const toPH = (m: { outer: Polygon; holes: Polygon[] }[]): PolyHT[] => m.map((p) => ({ outer: p.outer, holes: p.holes }));
   const layerStreets: UrbanStreet[] = streets.list.filter((s) => s.ribbon).map((s) => ({
     path: s.path, width: s.widths.reduce((a, b) => a + b, 0) / s.widths.length, widths: s.widths,
@@ -227,8 +255,8 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     landmarks, squares: prim.market ? [prim.market] : [],
     archetype, population: pop, morphology: params.id,
     phases: plan.phases.map((p) => ({ id: p.id, kind: p.kind, zone: p.zone, region: toPH(p.region), walled: p.walled, fossil: p.fossil })),
-    quarters: prim.quarters.map((q, qi) => ({ poly: { outer: q.lp.pts, holes: [] }, phase: q.phase, zone: q.zone, streetSpace: toPH(streetSpace[qi]) })),
-    blockInfo: carved.map((b) => ({ quarter: b.quarter, phase: b.phase, zone: b.zone, kind: b.kind === 'market' && archetype !== 'town' ? 'green' : b.kind })), masses,
+    quarters: keptQ.map((qi) => { const q = prim.quarters[qi]; return { poly: { outer: q.lp.pts, holes: [] }, phase: q.phase, zone: q.zone, streetSpace: toPH(streetSpace[qi]) }; }),
+    blockInfo: carved.map((b) => ({ quarter: qMap[b.quarter], phase: b.phase, zone: b.zone, kind: b.kind === 'market' && archetype !== 'town' ? 'green' : b.kind })), masses,
     backLand: parcels.filter((p) => p.use === 'garden').map((p) => p.poly).concat(plotGardens).map((p) => ({ outer: p, holes: [] })),
   };
   const debug: UrbanDebug = { quarters: prim.quarters.map((q) => ({ poly: q.lp.pts, phase: q.phase, lab: q.lp.lab })) };

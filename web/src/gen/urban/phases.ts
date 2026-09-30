@@ -7,7 +7,7 @@ import { chaikin, simplify, dist, polylineLength } from '../core/geom';
 import type { Rng } from '../core/rng';
 import { Noise2D } from '../core/noise';
 import { marchingSquares } from '../terrain/contour';
-import { distanceField } from '../core/field';
+import { distanceField, forCellsNearPolyline } from '../core/field';
 import { blurGrid } from '../core/grid';
 import type { SizeName } from '../options';
 import type { Archetype, UrbanZone } from '../types';
@@ -16,6 +16,10 @@ import { MultiPoly, PolyH, unionS as union, intersectionS as intersection, diffe
 import { area, cleanRing, orientPos, pointInRing, inscribed } from '../geo/poly';
 import { ribbon } from '../geo/offset';
 import type { MorphologyParams } from './morphology';
+import { MinHeap } from '../core/pq';
+import { rasterizePolys } from '../geo/raster';
+import { insidePieces } from '../geo/split';
+import { D8 } from '../core/grid';
 
 export const POP_RANGE: Record<SizeName, [number, number]> = {
   hamlet: [40, 150], village: [320, 900], town: [2200, 5000], city: [11000, 24000], capital: [40000, 60000],
@@ -103,19 +107,23 @@ function keepMain(m: MultiPoly, center: Vec2, minFrac: number): MultiPoly {
 }
 
 /** Travel-cost field modulated by noise; Infinity where unbuildable. */
-export function buildField(ctx: UrbanCtx, rng: Rng): Float32Array {
+export function buildField(ctx: UrbanCtx, rng: Rng, steepMax = 0.2, blocked?: Uint8Array): Float32Array {
   const { n, cell, terrain, site } = ctx;
   const N = n * n;
   const noise = new Noise2D(rng.fork('phaseNoise'));
   const f = new Float32Array(N);
   const slopeS = site.fields.slopeS;
+  // local slope (~25 m): valley floors and benches in steep country are buildable although the 100 m-blurred
+  // slope says otherwise (it averages in the valley walls)
+  const slopeL = blurGrid(terrain.slope, Math.max(1, Math.round(12 / cell)), 2).data;
   const S = ctx.mapSize;
   for (let i = 0; i < N; i++) {
     const x = ((i % n) + 0.5) * cell, y = (((i / n) | 0) + 0.5) * cell;
     const c = site.cost.data[i];
     const border = x < 0.03 * S || y < 0.03 * S || x > 0.97 * S || y > 0.97 * S;
-    if (terrain.water[i] || !isFinite(c) || slopeS[i] > 0.3 || border) { f[i] = Infinity; continue; }
-    f[i] = c * (1 + 0.14 * noise.fbm(x / 380, y / 380, 2)) + 40 * Math.max(0, slopeS[i] - 0.1);
+    const steep = slopeS[i] > 0.3;
+    if (terrain.water[i] || !isFinite(c) || border || (steep && slopeL[i] > steepMax) || (blocked && blocked[i])) { f[i] = Infinity; continue; }
+    f[i] = c * (1 + 0.14 * noise.fbm(x / 380, y / 380, 2)) + 40 * Math.max(0, (steep ? slopeL[i] : slopeS[i]) - 0.1);
   }
   return f;
 }
@@ -126,16 +134,76 @@ function thresholdFor(sorted: Float32Array, cell: number, targetArea: number): n
   return sorted[k];
 }
 
-export function regionForArea(ctx: UrbanCtx, f: Float32Array, sorted: Float32Array, targetArea: number, closing = 0): MultiPoly {
+/**
+ * Phase field: f (buildability-weighted travel cost) plus its minimax "spill level" from the center,
+ * level(i) = min over 8-paths from the center of max f along the path. Unbuildable land blocks the paths; water
+ * with a finite travel cost (fords, the bridge zone) is crossed without raising the level. Hence
+ * {level < t} is exactly the connected component of {f < t} holding the nucleus (plus the far bank at a bridge):
+ * a phase region never claims disconnected land, and on scarce land it grows along valleys instead.
+ * `sorted` holds the levels of buildable cells, so thresholds are chosen on the nucleus component only.
+ */
+export interface PhaseField { f: Float32Array; lv: Float32Array; sorted: Float32Array }
+
+export function phaseField(ctx: UrbanCtx, f: Float32Array): PhaseField {
+  const { n } = ctx;
+  const N = n * n;
+  const water = ctx.terrain.water;
+  // water is crossed only at the road bridges: land beyond water without a street crossing cannot be urbanized
+  const bridgeCells = new Uint8Array(N);
+  for (const b of ctx.world.bridges ?? []) forCellsNearPolyline([b.a, b.b], n, n, ctx.cell, Math.max(b.width, 6) + ctx.cell, (i) => { bridgeCells[i] = 1; });
+  const pass = (i: number) => isFinite(f[i]) || (water[i] !== 0 && bridgeCells[i] === 1);
+  const lv = new Float32Array(N).fill(Infinity);
+  // start at the center cell, or the nearest buildable cell
+  const cx = Math.min(n - 1, Math.max(0, Math.floor(ctx.center.x / ctx.cell))), cy = Math.min(n - 1, Math.max(0, Math.floor(ctx.center.y / ctx.cell)));
+  let start = cy * n + cx;
+  if (!isFinite(f[start])) {
+    let bd = Infinity;
+    const R = Math.ceil(150 / ctx.cell);
+    for (let y = Math.max(0, cy - R); y <= Math.min(n - 1, cy + R); y++) for (let x = Math.max(0, cx - R); x <= Math.min(n - 1, cx + R); x++) {
+      const i = y * n + x, d = (x - cx) ** 2 + (y - cy) ** 2;
+      if (isFinite(f[i]) && d < bd) { bd = d; start = i; }
+    }
+  }
+  if (pass(start)) {
+    const heap = new MinHeap<number>();
+    lv[start] = isFinite(f[start]) ? f[start] : 0;
+    heap.push(start, lv[start]);
+    while (heap.size) {
+      const key = heap.peekKey();
+      const c = heap.pop()!;
+      if (key > lv[c]) continue;
+      const x0 = c % n, y0 = (c / n) | 0;
+      for (const [dx, dy] of D8) {
+        const x = x0 + dx, y = y0 + dy;
+        if (x < 0 || y < 0 || x >= n || y >= n) continue;
+        const j = y * n + x;
+        if (!pass(j)) continue;
+        const l = Math.max(key, isFinite(f[j]) ? f[j] : key);
+        if (l < lv[j]) { lv[j] = l; heap.push(j, l); }
+      }
+    }
+  }
+  const vals: number[] = [];
+  for (let i = 0; i < N; i++) if (isFinite(f[i]) && isFinite(lv[i])) vals.push(lv[i]);
+  return { f, lv, sorted: Float32Array.from(vals).sort() };
+}
+
+/** Buildable area (m²) of the nucleus component. */
+export const componentArea = (fld: PhaseField, cell: number): number => fld.sorted.length * cell * cell;
+
+export function regionForArea(ctx: UrbanCtx, fld: PhaseField, targetArea: number, closing = 0): MultiPoly {
+  const { f, lv, sorted } = fld;
   const thr = thresholdFor(sorted, ctx.cell, targetArea);
   const N = f.length;
   const v = new Float32Array(N);
   const cap = thr * 1.6 + 120;
-  for (let i = 0; i < N; i++) v[i] = -(isFinite(f[i]) ? Math.min(f[i], cap) : cap);
+  // cells below the threshold but outside the nucleus component are lifted to their spill level (≥ thr)
+  const fx = (i: number) => (f[i] < thr && !(lv[i] < thr) ? lv[i] : f[i]);
+  for (let i = 0; i < N; i++) { const x = fx(i); v[i] = -(isFinite(x) ? Math.min(x, cap) : cap); }
   // smooth the field so that enclosures are smooth, compact curves (not cell-scale wiggles)
   const rad = Math.max(1, Math.round(22 / ctx.cell));
   const b = blurGrid({ w: ctx.n, h: ctx.n, cell: ctx.cell, data: v }, rad, 2).data;
-  for (let i = 0; i < N; i++) v[i] = isFinite(f[i]) ? b[i] : Math.min(b[i], -cap);
+  for (let i = 0; i < N; i++) v[i] = isFinite(fx(i)) ? b[i] : Math.min(b[i], -cap);
   let regs: PolyH[];
   if (closing > 0) {
     // morphological closing (dilate, then erode by `closing` m): enclosures are compact, not lobed
@@ -167,10 +235,22 @@ export function orientedRect(c: Vec2, ang: number, len: number, wid: number): Po
   return orientPos(pts.map(([u, w]) => ({ x: c.x + u * ca - w * sa, y: c.y + u * sa + w * ca })));
 }
 
-export interface EnclosurePlan { phases: PhasePlan[]; enclosure: MultiPoly; walled: boolean }
+export interface EnclosurePlan {
+  phases: PhasePlan[]; enclosure: MultiPoly; walled: boolean;
+  /** Planned enclosed area (m²) that the nucleus component could not provide (scarce land): goes to faubourgs. */
+  shortfall?: number;
+  /** Gross-density multiplier applied on scarce land (1 = as planned). */
+  densityScale?: number;
+}
 
 /** Nested enclosed phases for a town (european-organic or bastide). */
-export interface PhaseOverrides { nPh?: number; zones?: UrbanZone[]; faubShare?: number }
+export interface PhaseOverrides {
+  nPh?: number; zones?: UrbanZone[]; faubShare?: number;
+  /** Cells excluded from growth (land found unreachable by streets in a previous attempt). */
+  blocked?: Uint8Array;
+  /** Multiplies the region areas (compensates water and smoothing losses on scarce land). */
+  areaBoost?: number;
+}
 
 export function planTownPhases(ctx: UrbanCtx, pop: number, walled: boolean, mainAngle: number, rng: Rng, ov: PhaseOverrides = {}): EnclosurePlan {
   const P = ctx.params;
@@ -179,17 +259,23 @@ export function planTownPhases(ctx: UrbanCtx, pop: number, walled: boolean, main
   const faubShare = ov.faubShare ?? (walled ? 0.17 : 0.1);
   const encPop = pop * (1 - faubShare);
   const shares = SHARES[nPh];
-  const f = buildField(ctx, rng);
-  const vals: number[] = [];
-  for (let i = 0; i < f.length; i++) if (isFinite(f[i])) vals.push(f[i]);
-  const sorted = Float32Array.from(vals).sort();
+  // enclosed area target; on scarce land (steep valleys) buildability is relaxed step by step (hillside towns)
+  let total = 0;
+  for (let k = 0; k < nPh; k++) total += ((encPop * shares[k]) / ctx.params.density[zones[k]]) * 1e4;
+  let fld = phaseField(ctx, buildField(ctx, rng, 0.2, ov.blocked));
+  for (const sm of [0.3, 0.4]) {
+    if (componentArea(fld, ctx.cell) >= 1.3 * total) break;
+    fld = phaseField(ctx, buildField(ctx, rng, sm, ov.blocked));
+  }
+  // still scarce: hill towns are denser (taller, tighter houses) — up to 1.35× the planned gross density
+  const densityScale = Math.min(1.35, Math.max(1, (1.3 * total) / Math.max(1, componentArea(fld, ctx.cell))));
   const phases: PhasePlan[] = [];
   let cum = 0;
   let prev: MultiPoly = [];
   for (let k = 0; k < nPh; k++) {
     const ppop = encPop * shares[k];
-    const dens = ctx.params.density[zones[k]];
-    cum += (ppop / dens) * 1e4;
+    const dens = ctx.params.density[zones[k]] * densityScale;
+    cum += (ppop / dens) * 1e4 * (ov.areaBoost ?? 1);
     let R: MultiPoly;
     if (P.streetOp === 'grid' && k === 0) {
       // bastide: planned oriented rectangle, clipped to buildable land
@@ -197,10 +283,10 @@ export function planTownPhases(ctx: UrbanCtx, pop: number, walled: boolean, main
       const A = cum * 1.08;
       const len = Math.sqrt(A * aspect), wid = A / len;
       const rect = orientedRect(ctx.center, mainAngle, len, wid);
-      const land = regionForArea(ctx, f, sorted, cum * 3.2);
+      const land = regionForArea(ctx, fld, cum * 3.2);
       R = intersection(rect, land);
       R = keepMain(R, ctx.center, 0.15);
-    } else R = regionForArea(ctx, f, sorted, cum, P.streetOp === 'organic' ? (k === nPh - 1 ? 55 : 35) : 0);
+    } else R = regionForArea(ctx, fld, cum, P.streetOp === 'organic' ? (k === nPh - 1 ? 55 : 35) : 0);
     if (prev.length) {
       R = union(R, prev);
       // keep R_{k-1} strictly nested
@@ -211,7 +297,7 @@ export function planTownPhases(ctx: UrbanCtx, pop: number, walled: boolean, main
     phases.push({ id: k + 1, kind: zones[k] === 'village' ? 'village' : k === 0 ? 'core' : 'ring', zone: zones[k], region: R, band, age: 1 - k / Math.max(1, nPh), fossil: k < nPh - 1, walled: walled && k === nPh - 1, pop: ppop });
     prev = R;
   }
-  return { phases, enclosure: prev, walled };
+  return { phases, enclosure: prev, walled, shortfall: Math.max(0, cum - mpArea(prev)), densityScale };
 }
 
 /** Dilates a region by g meters (union with the ribbon of its boundary). */
@@ -267,7 +353,11 @@ export function planFaubourgs(ctx: UrbanCtx, enclosure: MultiPoly, roads: RoadIn
     if (polylineLength(out) < 60) continue;
     // stay on dry, reasonably flat land
     let cut = out.length;
-    for (let i = 1; i < out.length; i++) if (ctx.isWater(out[i]) || ctx.slopeAt(out[i]) > 0.28) { cut = i; break; }
+    for (let i = 1; i < out.length; i++) {
+      if (ctx.isWater(out[i])) { cut = i; break; }
+      // ribbons climb along valley roads; they stop where the ground stays steep
+      if (ctx.slopeAt(out[i]) > 0.28 && (i + 1 >= out.length || ctx.slopeAt(out[i + 1]) > 0.36 || ctx.slopeAt(out[i]) > 0.45)) { cut = i; break; }
+    }
     const pts = out.slice(0, cut);
     if (pts.length < 2 || polylineLength(pts) < 60) continue;
     const rb = ribbon(pts, 2 * depth);
@@ -282,4 +372,54 @@ export function planFaubourgs(ctx: UrbanCtx, enclosure: MultiPoly, roads: RoadIn
   void zone;
   region = dropSlivers(region, 1200, 8);
   return { region, paths };
+}
+
+/**
+ * Enclosure components that no road enters and that do not hold the nucleus (land across water or behind a spur
+ * that the phase field reached but no street can serve).
+ */
+export function unservedComponents(enclosure: MultiPoly, roads: { path: Polyline }[], center: Vec2): MultiPoly {
+  const out: MultiPoly = [];
+  for (const ph of enclosure) {
+    if (pointInRing(ph.outer, center)) continue;
+    // a road must run inside the component for a meaningful length (not merely clip a corner)
+    const need = Math.min(60, 0.3 * Math.sqrt(area(ph.outer)));
+    let len = 0;
+    for (const rd of roads) {
+      for (const pc of insidePieces(ph.outer, rd.path)) len += polylineLength(pc.pts);
+      if (len >= need) break;
+    }
+    if (len < need) out.push(ph);
+  }
+  return out;
+}
+
+/** Plans the enclosed phases, re-planning once without the components that no road serves. */
+export function planServedPhases(ctx: UrbanCtx, pop: number, walled: boolean, mainAngle: number, rng: Rng, roads: { path: Polyline }[], ov: PhaseOverrides = {}): EnclosurePlan {
+  let plan = planTownPhases(ctx, pop, walled, mainAngle, rng, ov);
+  for (let it = 0; it < 2; it++) {
+    const bad = unservedComponents(plan.enclosure, roads, ctx.center);
+    if (!bad.length) break;
+    const mask = ov.blocked ? ov.blocked.slice() : new Uint8Array(ctx.n * ctx.n);
+    rasterizePolys(bad.flatMap((ph) => [ph.outer]), ctx.n, ctx.n, ctx.cell, mask);
+    ov = { ...ov, blocked: mask };
+    plan = planTownPhases(ctx, pop, walled, mainAngle, rng, ov);
+  }
+  // the enclosure lost much of its planned area (water, smoothing, unserved land): grow once more
+  const achieved = mpArea(plan.enclosure), planned = achieved + (plan.shortfall ?? 0);
+  if (achieved < 0.9 * planned && achieved > 0) {
+    const boost = Math.min(1.6, planned / achieved);
+    const again = planTownPhases(ctx, pop, walled, mainAngle, rng, { ...ov, areaBoost: boost });
+    if (!unservedComponents(again.enclosure, roads, ctx.center).length) {
+      again.shortfall = Math.max(0, planned - mpArea(again.enclosure));
+      plan = again;
+    }
+  }
+  // whatever remains unserved is not enclosed
+  const bad = unservedComponents(plan.enclosure, roads, ctx.center);
+  if (bad.length) {
+    plan.enclosure = plan.enclosure.filter((ph) => !bad.includes(ph));
+    for (const phs of plan.phases) { phs.region = difference(phs.region, bad); phs.band = difference(phs.band, bad); }
+  }
+  return plan;
 }
