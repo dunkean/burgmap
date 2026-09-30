@@ -175,7 +175,7 @@ export function bridgeRoad(path: Polyline, ctx: BridgeCtx, fordW = 3.0): { path:
       const r = ri.r;
       const sr = arcAt(r.path, ri.nn.i, ri.nn.t);
       const Lr = polylineLength(r.path);
-      for (const off of [0, 14, -14, 28, -28, 46, -46, 70, -70]) {
+      for (const off of [0, 14, -14, 28, -28, 46, -46, 70, -70, 100, -100, 140, -140]) {
         if (built) break;
         const sc = sr + off;
         if (sc < 4 || sc > Lr - 4) continue;
@@ -186,12 +186,12 @@ export function bridgeRoad(path: Polyline, ctx: BridgeCtx, fordW = 3.0): { path:
         const sMc = arcAt(cur, nnRoad.i, nnRoad.t);
         const rdc = tangentAt(cur, sMc, 10);
         if (nc.x * rdc.x + nc.y * rdc.y < 0) nc = { x: -nc.x, y: -nc.y };
-        if (off !== 0 && nnRoad.d > 70) continue;
+        if (off !== 0 && nnRoad.d > 110) continue;
         const nn2 = nc;
         for (let hl = wLoc / 2 + 3; hl <= wLoc / 2 + 22 && !built; hl += 2) {
           const a = { x: C.x - nn2.x * hl, y: C.y - nn2.y * hl }, b = { x: C.x + nn2.x * hl, y: C.y + nn2.y * hl };
           if (!free(a, r, wLoc) || !free(b, r, wLoc)) continue;
-          for (const lead of [26, 40, 58, 80]) {
+          for (const lead of [26, 40, 58, 80, 110]) {
             const sP1 = Math.max(0, sMc - hl - lead), sP2 = Math.min(L, sMc + hl + lead);
             const p1 = pointAt(cur, sP1), p2 = pointAt(cur, sP2);
             const d1 = tangentAt(cur, sP1, 6), d2 = tangentAt(cur, sP2, 6);
