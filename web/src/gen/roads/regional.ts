@@ -11,7 +11,7 @@ type Road = NonNullable<World['roads']>[number];
 type Bridge = NonNullable<World['bridges']>[number];
 
 /** Laplacian relaxation (ends fixed, each point stays within `maxDisp` of where it started). */
-function relax(pl: Polyline, iters: number, maxDisp: number, isWater: (p: Vec2) => boolean): Polyline {
+function relax(pl: Polyline, iters: number, maxDisp: number, isWater: (p: Vec2) => boolean, pin?: (p: Vec2) => boolean): Polyline {
   const pts = resample(pl, 8);
   if (pts.length < 4) return pl;
   // ends stay exactly where they are; interior points keep the relaxed positions
@@ -24,6 +24,7 @@ function relax(pl: Polyline, iters: number, maxDisp: number, isWater: (p: Vec2) 
       const dx = x - orig[i].x, dy = y - orig[i].y, d = Math.hypot(dx, dy);
       if (d > maxDisp) { x = orig[i].x + (dx / d) * maxDisp; y = orig[i].y + (dy / d) * maxDisp; }
       if (isWater({ x, y }) && !isWater(pts[i])) continue; // never pull the road into water
+      if (pin && pin(pts[i])) continue;
       nx[i].x = x; nx[i].y = y;
     }
     for (let i = 0; i < pts.length; i++) pts[i] = nx[i];
@@ -35,7 +36,7 @@ export const ROAD_WIDTH = { major: 8, minor: 5, track: 3 } as const;
 
 const gradeMult = (g: number): number => 1 + 6 * g + 120 * g * g + (g > 0.08 ? 25 * (g - 0.08) : 0);
 
-interface AStarCfg {
+export interface AStarCfg {
   w: number; h: number; cell: number;
   H: Float32Array; pass: Uint8Array; cm: Float32Array;
   used?: Uint8Array; discount: number;
@@ -86,6 +87,66 @@ function astar(cfg: AStarCfg, start: number, isGoal: (idx: number) => boolean): 
   return null;
 }
 
+
+/** Per-cell id of the river/brook (index into terrain.rivers) whose ribbon covers the cell, -1 elsewhere. */
+export function streamIds(terrain: TerrainLayer): Int16Array {
+  const { w: n, cell } = terrain.height;
+  const ids = new Int16Array(n * n).fill(-1);
+  terrain.rivers.forEach((r, ri) => {
+    for (let i = 1; i < r.path.length; i++) {
+      const a = r.path[i - 1], b = r.path[i];
+      const rad = Math.max(Math.max(r.width[i - 1], r.width[i]) / 2, cell * 0.6);
+      const x0 = Math.max(0, Math.floor((Math.min(a.x, b.x) - rad) / cell)), x1 = Math.min(n - 1, Math.floor((Math.max(a.x, b.x) + rad) / cell));
+      const y0 = Math.max(0, Math.floor((Math.min(a.y, b.y) - rad) / cell)), y1 = Math.min(n - 1, Math.floor((Math.max(a.y, b.y) + rad) / cell));
+      const dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy || 1;
+      for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+        const px = (x + 0.5) * cell, py = (y + 0.5) * cell;
+        const t = Math.max(0, Math.min(1, ((px - a.x) * dx + (py - a.y) * dy) / l2));
+        if (Math.hypot(px - a.x - t * dx, py - a.y - t * dy) <= rad && terrain.water[y * n + x] === 3) ids[y * n + x] = ri;
+      }
+    }
+  });
+  return ids;
+}
+
+/** Number of separate crossings of each stream along a cell path (a run of consecutive wet cells = one crossing). */
+export function crossingCounts(cells: number[], ids: Int16Array, pass: Uint8Array): Map<number, number> {
+  const out = new Map<number, number>();
+  let prev = -1;
+  for (const c of cells) {
+    const id = pass[c] >= 2 ? ids[c] : -1;
+    if (id >= 0 && id !== prev) out.set(id, (out.get(id) ?? 0) + 1);
+    if (id >= 0 || pass[c] < 2) prev = id; // stay "in" a stream across gaps of unlabelled wet cells
+  }
+  return out;
+}
+
+/**
+ * A* that discourages crossing the same brook repeatedly (roads in gorges zig-zag over one stream 6+ times):
+ * after each attempt every stream crossed more than once (`maxCross` for the main river) gets its cells' cost
+ * multiplied, and the road is re-routed. The attempt with the fewest excess crossings wins.
+ */
+export function astarFewCrossings(
+  cfg: AStarCfg, start: number, isGoal: (idx: number) => boolean, ids: Int16Array, mainIds: Set<number>, attempts = 4,
+): number[] | null {
+  let best: number[] | null = null, bestExcess = Infinity;
+  let cm = cfg.cm;
+  for (let t = 0; t < attempts; t++) {
+    const path = astar({ ...cfg, cm }, start, isGoal);
+    if (!path) return best;
+    const counts = crossingCounts(path, ids, cfg.pass);
+    let excess = 0;
+    const bad: number[] = [];
+    counts.forEach((c, id) => { const allowed = mainIds.has(id) ? 2 : 1; if (c > allowed) { excess += c - allowed; bad.push(id); } });
+    if (excess < bestExcess) { best = path; bestExcess = excess; }
+    if (excess === 0) break;
+    if (cm === cfg.cm) cm = Float32Array.from(cfg.cm);
+    const set = new Set(bad);
+    for (let i = 0; i < cm.length; i++) if (set.has(ids[i]) && cfg.pass[i] >= 2) cm[i] *= 6;
+  }
+  return best;
+}
+
 interface Exit { idx: number; p: Vec2; ang: number; q: number }
 
 function nearestOnPolyline(pl: Polyline, p: Vec2): { pt: Vec2; d: number } {
@@ -123,6 +184,9 @@ export function routeRoads(
   const f = site.fields;
   const pass = passability(terrain, f);
   const water = terrain.water;
+  const sIds = streamIds(terrain);
+  const mainIds = new Set<number>();
+  terrain.rivers.forEach((rv, ri) => { if (rv.main) mainIds.add(ri); });
   const centerIdx = Math.min(n - 1, Math.floor(site.center.y / cell)) * n + Math.min(n - 1, Math.floor(site.center.x / cell));
   const costC = site.cost.data;
 
@@ -235,12 +299,30 @@ export function routeRoads(
       p = simplify(p, 0.35);
       if (unplanned(p, pw) === 0) return p;
     }
+    // a brook crossing spoils the free smoothing: pin the points within 2 cells of any water, smooth the rest
+    const nearWater = (q: Vec2): boolean => {
+      const cx = Math.min(n - 1, Math.max(0, Math.floor(q.x / cell))), cy = Math.min(n - 1, Math.max(0, Math.floor(q.y / cell)));
+      for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+        const x = cx + dx, y = cy + dy;
+        if (x >= 0 && y >= 0 && x < n && y < n && water[y * n + x] !== 0) return true;
+      }
+      return false;
+    };
+    for (const [iters, disp] of [[36, 3.4], [16, 1.8]] as [number, number][]) {
+      const p = simplify(relax(raw, iters, disp * cell, isWaterPt, nearWater), 0.35);
+      if (unplanned(p, pw) === 0) return p;
+    }
+    // last resort: round the corners of the cell path
+    for (const it of [2, 1]) {
+      const p = resample(chaikin(raw, it), 4);
+      if (unplanned(p, pw) === 0) return p;
+    }
     return raw;
   };
 
   const baseCfg = { w: n, h: n, cell, H, pass, cm, discount: 0.45 };
   chosen.forEach((ex, k) => {
-    const path = astar({ ...baseCfg, used, hf: hCenter, allowBridge: true }, ex.idx, (i) => i === centerIdx);
+    const path = astarFewCrossings({ ...baseCfg, used, hf: hCenter, allowBridge: true }, ex.idx, (i) => i === centerIdx, sIds, mainIds);
     if (!path) return;
     // truncate where the road first touches the existing network
     let cut = path.length;
@@ -303,7 +385,7 @@ export function routeRoads(
       const dx = Math.abs((idx % n) - bx), dy = Math.abs(((idx / n) | 0) - by);
       return 0.95 * cell * (Math.max(dx, dy) + (Math.SQRT2 - 1) * Math.min(dx, dy));
     };
-    const cells = astar({ ...baseCfg, hf: octile, allowBridge: false, discount: 1 }, ia, (i) => i === ib);
+    const cells = astarFewCrossings({ ...baseCfg, hf: octile, allowBridge: false, discount: 1 }, ia, (i) => i === ib, sIds, mainIds);
     if (!cells) continue;
     const pl = smoothPath(cells, pa, pb);
     if (polylineLength(pl) > 1.4 * dd) continue;
