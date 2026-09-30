@@ -8,15 +8,21 @@ import { dist, polylineLength, chaikin, simplify, resample, polygonCentroid } fr
 import type { Rng } from '../core/rng';
 import type { UrbanCtx } from './context';
 import type { PhasePlan } from './phases';
-import type { Zone } from './morphology';
+import type { Zone, MorphologyParams } from './morphology';
 import { MultiPoly, unionS as union, intersectionS as intersection, differenceS as difference, mpArea } from '../geo/bool';
 import { area, pointInRing, distToRing, convexHull, orientPos, cleanRing, segSegT } from '../geo/poly';
 import { ribbon } from '../geo/offset';
 import { LPoly, insidePieces } from '../geo/split';
 import { GridIndex } from '../geo/spatial';
 import { Streets, LAB_OPEN, LAB_WALL, LAB_WATER, jitterWidths } from './streets';
+import { wiggle, crank, axisLines, spiralArm } from './streetops';
+import { disk } from '../geo/offset';
 
-export interface Quarter { lp: LPoly; phase: number; zone: Zone; age: number; kind: 'quarter' | 'market' }
+export interface Quarter {
+  lp: LPoly; phase: number; zone: Zone; age: number; kind: 'quarter' | 'market';
+  /** Morphology of the quarter (its phase's or sector's); the culture that built it. */
+  morph?: MorphologyParams; culture?: string;
+}
 
 export interface WallLine { ring: Polygon; gates: { p: Vec2; dir: Vec2; width: number; street: number }[] }
 
@@ -176,6 +182,19 @@ export interface PrimaryInput {
   extraRadials: boolean;
   /** Zone of the faubourg ribbons (villages use 'village'). */
   faubZone?: Zone;
+  // ---- culture operators (M3b)
+  /** Nucleus shape (default: the European market hull, or a road-oriented rectangle for grids). */
+  nucleus?: { shape: 'hull' | 'rect' | 'square' | 'circle'; area: number; angle: number; ring: number };
+  /** axis: four half-axes from the nucleus to the boundary of `extent` (rank 0); roads stop at that boundary. */
+  axis?: { angle: number; extent: MultiPoly; width: number };
+  /** Region in which the roads follow the lattice (planned grid core). */
+  gridCore?: MultiPoly | null;
+  /** gateToGate: wiggle of the road spines (m). */
+  spineAmp?: number;
+  /** defensiveKinks: crank jogs per radial. */
+  kinks?: number;
+  /** spiral: arms instead of extra radials (count, turns). */
+  spiral?: { arms: number; turns: number };
 }
 
 export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets, rng: Rng): Primary {
@@ -188,7 +207,14 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
     const pl = radialPath(rd.path, nearFoot);
     if (!pl || polylineLength(pl) < 20) continue;
     let sp = smoothStreet(pl);
-    if (P.streetOp === 'grid') sp = gridRadial(sp, inp.enclosure, ctx.center, inp.mainAngle) ?? sp;
+    if (inp.axis) {
+      // planned towns with axes: the road stops at the gate on the axis enclosure; the axes run inside
+      let big = inp.axis.extent[0];
+      for (const ph of inp.axis.extent) if (area(ph.outer) > area(big.outer)) big = ph;
+      if (big && pointInRing(big.outer, sp[sp.length - 1])) sp = cutAtPolygon(sp, big.outer);
+      if (sp.length < 2 || polylineLength(sp) < 15) continue;
+    } else if (inp.gridCore ? inp.gridCore.length : P.streetOp === 'grid') sp = gridRadial(sp, inp.gridCore ?? inp.enclosure, ctx.center, inp.mainAngle) ?? sp;
+    if (inp.spineAmp) sp = wiggle(sp, inp.spineAmp, rng.fork('spine:' + rawRadials.length));
     rawRadials.push({ pl: sp, major: rd.major });
   }
   // roads that join another road before the center must end exactly on it (smoothing moved both)
@@ -212,7 +238,18 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
   // ---- market at the nucleus
   let market: Polygon | null = null;
   const core = inp.phases[0].region;
-  if (inp.marketArea > 0) {
+  if (inp.nucleus && inp.nucleus.area > 0) {
+    const nu = inp.nucleus;
+    const A = nu.area;
+    const mk = nu.shape === 'hull' ? makeMarket(ctx.center, rawRadials.map((r) => r.pl), A, rng.fork('market'), inp.mainAngle)
+      : nu.shape === 'circle' ? disk(ctx.center, Math.sqrt(A / Math.PI), 24)
+      : orientedRectP(ctx.center, nu.angle, Math.sqrt(A * (nu.shape === 'rect' ? 1.3 : 1)), Math.sqrt(A / (nu.shape === 'rect' ? 1.3 : 1)));
+    const clipped = intersection(mk, core);
+    let best: Polygon | null = null;
+    for (const ph of clipped) if (!best || area(ph.outer) > area(best)) best = ph.outer;
+    if (best && area(best) > 0.4 * A) market = cleanRing(best, 0.5, 2);
+    if (market && market.length < 3) market = null;
+  } else if (inp.marketArea > 0) {
     const mk = P.streetOp === 'grid'
       ? orientedRectP(ctx.center, inp.mainAngle, Math.sqrt(inp.marketArea * 1.25), Math.sqrt(inp.marketArea / 1.25))
       : makeMarket(ctx.center, rawRadials.map((r) => r.pl), inp.marketArea, rng.fork('market'), inp.mainAngle);
@@ -230,9 +267,48 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
     let pl = r.pl;
     if (market) pl = cutAtPolygon(pl, market);
     if (pl.length < 2 || polylineLength(pl) < 15) continue;
+    // defensive kinks: cranks near the inner end and near the town entry
+    const kk = inp.kinks ?? 0;
+    const kr = rng.fork('kinks:' + radials.length);
+    for (let j = 0; j < kk; j++) {
+      const L = polylineLength(pl);
+      if (L < 160) break;
+      const sPos = j === 0 ? L - kr.range(70, 110) : kr.range(60, Math.max(61, L * 0.45));
+      pl = crank(pl, sPos, (kr.chance(0.5) ? 1 : -1) * kr.range(9, 14), kr.range(18, 28));
+    }
     const w = P.widthByRank[r.major ? 0 : 1] * P.widthScale;
     const id = streets.add(pl, jitterWidths(pl, w, P.widthJitter, () => wr.float()), r.major ? 0 : 1, 'radial', 1);
     radials.push(id); radialLines.push(pl);
+  }
+  // ---- axes (planned towns): gate to gate through the nucleus
+  const axisEnds: Vec2[] = [];
+  if (inp.axis) {
+    let big = inp.axis.extent[0];
+    for (const ph of inp.axis.extent) if (area(ph.outer) > area(big.outer)) big = ph;
+    if (big) for (const ax of axisLines(ctx.center, inp.axis.angle, big.outer, market)) {
+      const id = streets.add(ax.line, inp.axis.width, 0, 'radial', 1);
+      radials.push(id); radialLines.push(ax.line);
+      axisEnds.push(ax.end);
+    }
+  }
+  // ---- spiral arms (elven): paths winding out from the grove
+  if (inp.spiral && market) {
+    const encR = Math.sqrt(mpArea(inp.enclosure) / Math.PI);
+    const r0 = Math.sqrt(area(market) / Math.PI) + 2;
+    const sr = rng.fork('spiral');
+    const a0 = sr.range(0, 2 * Math.PI);
+    for (let k = 0; k < inp.spiral.arms; k++) {
+      const arm = spiralArm(ctx.center, a0 + (k * 2 * Math.PI) / inp.spiral.arms, r0 - 3, encR * 1.6, inp.spiral.turns);
+      const line = afterExit(arm, [{ outer: market, holes: [] }]);
+      if (!line) continue;
+      let piece: Polyline | null = null;
+      for (const comp of inp.enclosure) { const pcs = insidePieces(comp.outer, line); if (pcs.length && pcs[0].pts.length >= 2) { piece = pcs[0].pts; break; } }
+      if (!piece || polylineLength(piece) < 60) continue;
+      const pl = simplify(piece, 0.3);
+      const w = P.widthByRank[1] * P.widthScale;
+      const id = streets.add(pl, jitterWidths(pl, w, P.widthJitter, () => sr.float()), 1, 'radial', 1);
+      radials.push(id); radialLines.push(pl);
+    }
   }
   // ---- extra radials in wide angular gaps (large towns)
   if (inp.extraRadials) {
@@ -289,7 +365,7 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
   }
   // ---- market ring street (frontage around the square)
   let marketStreet = -1;
-  if (market) marketStreet = streets.add(market.concat([market[0]]), P.widthByRank[2] * P.widthScale, 1, 'ring', 1);
+  if (market) marketStreet = streets.add(market.concat([market[0]]), inp.nucleus?.ring ?? P.widthByRank[2] * P.widthScale, 1, 'ring', 1);
   // ---- network connectivity seed: radials, the market ring, and rings crossed by a radial
   for (const id of radials) streets.connected.add(id);
   if (marketStreet >= 0) streets.connected.add(marketStreet);
@@ -324,6 +400,11 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
             gates.push({ p, dir: { x: (b.x - a.x) / l, y: (b.y - a.y) / l }, width: st.widths[i], street: id });
           }
         }
+      }
+      // axis ends on the wall are gates (the lines end exactly on it)
+      for (const e of axisEnds) if (distToRing(ring, e) < 1 && !gates.some((g) => dist(g.p, e) < 12)) {
+        const l = dist(ctx.center, e) || 1;
+        gates.push({ p: e, dir: { x: (e.x - ctx.center.x) / l, y: (e.y - ctx.center.y) / l }, width: inp.axis!.width, street: -1 });
       }
       walls.push({ ring, gates });
     }

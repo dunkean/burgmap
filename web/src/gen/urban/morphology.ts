@@ -5,17 +5,53 @@
  * plug in by adding data plus operators keyed by `streetOp` / `plotOp` / `buildingOp`.
  */
 
-export type MorphologyId = 'european-organic' | 'bastide';
+export type MorphologyId = string;
 /** Zones drive plot sizes and the burgage cycle: core (oldest phase), middle, edge (youngest), faubourg, village. */
 export type Zone = 'core' | 'middle' | 'edge' | 'faubourg' | 'village';
 export type Range = [number, number];
 
+/** Street operators (URBAN_MORPHOLOGY.md §2). Level 1 ops shape the primary network, level 2 ops split quarters. */
+export type StreetOpId =
+  | 'radials' | 'rings' | 'organicInfill' | 'grid' | 'axis' | 'gateToGate' | 'culDeSacTree' | 'closes'
+  | 'wardWalls' | 'defensiveKinks' | 'ribbon' | 'spiral' | 'switchbacks' | 'extraRadials';
+export type PlotOpId = 'burgage' | 'courtyard' | 'siheyuan' | 'machiya' | 'compound' | 'garden';
+export type BuildingOpId = 'streetFrontRow' | 'courtyardHouse' | 'pavilionCompound' | 'yashiki' | 'machiya' | 'detached' | 'treeHouse' | 'hall' | 'longhouse';
+export type RoofKind = 'gable' | 'hip' | 'flat' | 'dome' | 'pyramidal' | 'pagoda' | 'thatch-round' | 'none' | 'tiled-hip';
+export type Material = 'timber' | 'stone' | 'brick' | 'mud' | 'wood' | 'paper-wood' | 'living-wood' | 'rock';
+/** Architecture of a building type (metadata for later rendering / 3D). */
+export interface ArchSpec { typology: string; roof: RoofKind; storeys: Range; material: Material }
+
 export interface MorphologyParams {
   id: MorphologyId;
-  /** Street operator: organic cross-field splitting, or a (skewed) lattice. */
+  /** Street operators in order (documentation + the level-1/level-3 ops that are run). */
+  streets: StreetOpId[];
+  /** Level-2 street operator: organic cross-field splitting, or a (skewed) lattice. */
   streetOp: 'organic' | 'grid';
-  plotOp: 'burgage';
-  buildingOp: 'streetFrontRow';
+  /** Dead ends: occasional closes (Europe), a tree of derbs (medina), none. */
+  closeOp: 'closes' | 'culDeSacTree' | 'none';
+  plotOp: PlotOpId;
+  buildingOp: BuildingOpId;
+  /** Lattice orientation: along the main road, or true north. */
+  orientation: 'road' | 'cardinal';
+  /** Second lattice (lanes inside wards, e.g. hutongs) spacing per family (0 = none) … */
+  laneSpacing: [number, number];
+  /** … used below this piece area (m²); larger pieces use the coarse lattice (ward streets). */
+  wardArea: number;
+  /** gateToGate: lateral wiggle amplitude (m) of the spines. */
+  spineAmp: number;
+  /** defensiveKinks: crank jogs per radial (masugata, kagi). */
+  kinks: number;
+  /** Courtyard / compound lots: area range per zone (m²); room depth of courtyard houses (m). */
+  houseArea: Record<Zone, Range>;
+  roomDepth: Range;
+  /** culDeSacTree: no point of a block farther than this from a street or a dead end (m). */
+  accessDepth: number;
+  /** Twist (radians) added to the radial/tangential field: spiral streets. */
+  fieldTwist: number;
+  /** Synthetic radials in wide angular gaps. */
+  extraRadials: boolean;
+  /** Architecture of the ordinary buildings. */
+  arch: ArchSpec;
   /** Max heading change of streamlines: curvature × 10° per 10 m. */
   curvature: number;
   /** Amplitude (degrees) and wavelength (m) of the angular noise of the guidance field. */
@@ -73,9 +109,22 @@ export interface MorphologyParams {
 
 const EO: MorphologyParams = {
   id: 'european-organic',
+  streets: ['radials', 'extraRadials', 'rings', 'organicInfill', 'closes'],
   streetOp: 'organic',
+  closeOp: 'closes',
   plotOp: 'burgage',
   buildingOp: 'streetFrontRow',
+  orientation: 'road',
+  laneSpacing: [0, 0],
+  wardArea: 0,
+  spineAmp: 0,
+  kinks: 0,
+  houseArea: { core: [120, 400], middle: [150, 500], edge: [200, 700], faubourg: [250, 800], village: [600, 2000] },
+  roomDepth: [4.5, 6],
+  accessDepth: 30,
+  fieldTwist: 0,
+  extraRadials: true,
+  arch: { typology: 'gabled-row-house', roof: 'gable', storeys: [2, 4], material: 'timber' },
   curvature: 0.55,
   fieldNoise: 17,
   fieldWavelength: 150,
@@ -114,7 +163,10 @@ const EO: MorphologyParams = {
 const BASTIDE: MorphologyParams = {
   ...EO,
   id: 'bastide',
+  streets: ['radials', 'grid', 'closes'],
   streetOp: 'grid',
+  extraRadials: false,
+  arch: { typology: 'arcaded-row-house', roof: 'gable', storeys: [2, 3], material: 'stone' },
   curvature: 0.05,
   fieldNoise: 1.5,
   fieldWavelength: 400,
@@ -136,21 +188,44 @@ const BASTIDE: MorphologyParams = {
   density: { core: 150, middle: 130, edge: 110, faubourg: 55, village: 35 },
 };
 
-export const MORPHOLOGIES: Record<MorphologyId, MorphologyParams> = { 'european-organic': EO, bastide: BASTIDE };
+export const MORPHOLOGIES: Record<string, MorphologyParams> = { 'european-organic': EO, bastide: BASTIDE };
 
-export const MORPHOLOGY_IDS = Object.keys(MORPHOLOGIES) as MorphologyId[];
+export { EO as EO_BASE };
 
-/** Linear blend of numeric parameters (discrete choices from the dominant side) — used by culture mixing later. */
+type Plain = Record<string, unknown>;
+const isObj = (v: unknown): v is Plain => !!v && typeof v === 'object' && !Array.isArray(v);
+/** Deep merge of plain data (arrays and scalars replaced, nested records merged key by key). */
+export function deepMerge<T>(base: T, over: unknown): T {
+  if (!isObj(over)) return base;
+  const out: Plain = { ...(base as Plain) };
+  for (const [k, v] of Object.entries(over)) out[k] = isObj(v) && isObj(out[k]) ? deepMerge(out[k], v) : v;
+  return out as T;
+}
+
+/** A morphology reference: a registered id, or `{ base: id, ...overrides }` (plain data). */
+export type MorphRef = string | ({ base: string } & Record<string, unknown>);
+
+export function resolveMorph(ref: MorphRef | undefined, fallback = 'european-organic'): MorphologyParams {
+  if (!ref) return MORPHOLOGIES[fallback];
+  if (typeof ref === 'string') return MORPHOLOGIES[ref] ?? MORPHOLOGIES[fallback];
+  const { base, ...rest } = ref;
+  const b = MORPHOLOGIES[base] ?? MORPHOLOGIES[fallback];
+  return deepMerge(b, { ...rest, id: typeof rest.id === 'string' ? rest.id : b.id + '*' });
+}
+
+/** Linear blend of numeric parameters; discrete choices (operators, typologies) from the dominant side. */
 export function blendParams(a: MorphologyParams, b: MorphologyParams, t: number): MorphologyParams {
   const mix = (x: unknown, y: unknown): unknown => {
     if (typeof x === 'number' && typeof y === 'number') return x + (y - x) * t;
-    if (Array.isArray(x) && Array.isArray(y)) return x.map((v, i) => mix(v, y[i]));
-    if (x && y && typeof x === 'object' && typeof y === 'object') {
-      const o: Record<string, unknown> = {};
-      for (const k of Object.keys(x)) o[k] = mix((x as Record<string, unknown>)[k], (y as Record<string, unknown>)[k]);
+    if (Array.isArray(x) && Array.isArray(y) && x.every((v) => typeof v === 'number') && x.length === y.length) return x.map((v, i) => mix(v, y[i]));
+    if (isObj(x) && isObj(y)) {
+      const o: Plain = {};
+      for (const k of Object.keys(x)) o[k] = k in y ? mix(x[k], y[k]) : x[k];
       return o;
     }
     return t < 0.5 ? x : y;
   };
-  return mix(a, b) as MorphologyParams;
+  const r = mix(a, b) as MorphologyParams;
+  r.id = t < 0.5 ? a.id : b.id;
+  return r;
 }

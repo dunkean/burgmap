@@ -253,23 +253,71 @@ export interface PhaseOverrides {
   areaBoost?: number;
   /** Keep the smoothed isoline outlines (no polygonal wall fit). */
   organicOutline?: boolean;
+  /** Explicit phase inputs (culture plans); default: the European recipe from ctx.params. */
+  specs?: PhaseInput[];
+}
+
+/** Geometric enclosure of area A centred at c: rect, rounded rect (Roman playing card), square, oval, circle. */
+export function shapePolygon(shape: PhaseInput['shape'], c: Vec2, ang: number, A: number, aspect: number): Polygon {
+  const ca = Math.cos(ang), sa = Math.sin(ang);
+  const at = (u: number, w: number): Vec2 => ({ x: c.x + u * ca - w * sa, y: c.y + u * sa + w * ca });
+  if (shape === 'circle' || shape === 'oval') {
+    const asp = shape === 'circle' ? 1 : aspect;
+    const b = Math.sqrt(A / (Math.PI * asp)), a = b * asp;
+    return orientPos(Array.from({ length: 48 }, (_, k) => { const t = (k / 48) * 2 * Math.PI; return at(a * Math.cos(t), b * Math.sin(t)); }));
+  }
+  const asp = shape === 'square' ? 1 : aspect;
+  const len = Math.sqrt(A * asp), wid = A / len;
+  if (shape !== 'rounded-rect') return orientedRect(c, ang, len, wid);
+  const r = 0.2 * wid, hx = len / 2, hy = wid / 2;
+  const pts: Vec2[] = [];
+  for (const [cx, cy, a0] of [[hx - r, hy - r, 0], [-hx + r, hy - r, Math.PI / 2], [-hx + r, -hy + r, Math.PI], [hx - r, -hy + r, 1.5 * Math.PI]] as [number, number, number][]) {
+    for (let k = 0; k <= 4; k++) { const t = a0 + (k / 4) * (Math.PI / 2); pts.push(at(cx + r * Math.cos(t), cy + r * Math.sin(t))); }
+  }
+  return orientPos(pts);
+}
+
+/** One enclosed phase as planned by a culture: zone, population share, density, shape of its enclosure. */
+export interface PhaseInput {
+  zone: UrbanZone;
+  share: number;
+  density: number;
+  shape: 'organic' | 'rect' | 'rounded-rect' | 'square' | 'oval' | 'circle';
+  /** Orientation of geometric shapes (radians). */
+  angle: number;
+  /** Length / width of rect and oval shapes. */
+  aspect: number;
+  /** Organic shapes: compact enclosure by morphological closing. */
+  closing: boolean;
+  /** The line becomes a ring street (or kept wall) when a later phase surpasses it. */
+  fossil: boolean;
 }
 
 export function planTownPhases(ctx: UrbanCtx, pop: number, walled: boolean, mainAngle: number, rng: Rng, ov: PhaseOverrides = {}): EnclosurePlan {
   const P = ctx.params;
-  const nPh = ov.nPh ?? (P.streetOp === 'grid' ? 1 : pop < 5000 ? 2 : pop < 20000 ? 3 : 4);
-  const zones = ov.zones ?? zonesFor(nPh);
   const faubShare = ov.faubShare ?? (walled ? 0.17 : 0.1);
   const encPop = pop * (1 - faubShare);
+  let specs: PhaseInput[];
+  if (ov.specs?.length) specs = ov.specs;
+  else {
+    const nPh = ov.nPh ?? (P.streetOp === 'grid' ? 1 : pop < 5000 ? 2 : pop < 20000 ? 3 : 4);
+    const zones = ov.zones ?? zonesFor(nPh);
+    specs = zones.map((zone, k) => ({
+      zone, share: SHARES[nPh][k], density: P.density[zone], shape: P.streetOp === 'grid' && k === 0 ? 'rect' : 'organic',
+      angle: mainAngle, aspect: 1.25 + 0.35 * rng.fork('aspect').float(), closing: P.streetOp === 'organic', fossil: k < nPh - 1,
+    }));
+  }
+  const nPh = specs.length;
+  const zones = specs.map((s2) => s2.zone);
   // ring spacing varies from town to town
   const sj = P.shareJitter ?? 0;
   const sr = rng.fork('shares');
-  const raw = SHARES[nPh].map((x) => x * (1 + sj * (2 * sr.float() - 1)));
+  const raw = specs.map((s2) => s2.share * (1 + sj * (2 * sr.float() - 1)));
   const rs = raw.reduce((a, b) => a + b, 0);
   const shares = raw.map((x) => x / rs);
   // enclosed area target; on scarce land (steep valleys) buildability is relaxed step by step (hillside towns)
   let total = 0;
-  for (let k = 0; k < nPh; k++) total += ((encPop * shares[k]) / ctx.params.density[zones[k]]) * 1e4;
+  for (let k = 0; k < nPh; k++) total += ((encPop * shares[k]) / specs[k].density) * 1e4;
   let fld = phaseField(ctx, buildField(ctx, rng, 0.2, ov.blocked));
   for (const sm of [0.3, 0.4]) {
     if (componentArea(fld, ctx.cell) >= 1.3 * total) break;
@@ -282,30 +330,29 @@ export function planTownPhases(ctx: UrbanCtx, pop: number, walled: boolean, main
   let prev: MultiPoly = [];
   for (let k = 0; k < nPh; k++) {
     const ppop = encPop * shares[k];
-    const dens = ctx.params.density[zones[k]] * densityScale;
+    const sp = specs[k];
+    const dens = sp.density * densityScale;
     cum += (ppop / dens) * 1e4 * (ov.areaBoost ?? 1);
     let R: MultiPoly;
-    if (P.streetOp === 'grid' && k === 0) {
-      // bastide: planned oriented rectangle, clipped to buildable land
-      const aspect = 1.25 + 0.35 * rng.float();
-      const A = cum * 1.08;
-      const len = Math.sqrt(A * aspect), wid = A / len;
-      const rect = orientedRect(ctx.center, mainAngle, len, wid);
+    if (sp.shape !== 'organic') {
+      // planned shape (bastide rectangle, Roman playing card, cardinal square, oval, circle), clipped to the
+      // connected buildable land
+      const shp = shapePolygon(sp.shape, ctx.center, sp.angle, cum * 1.08, sp.aspect);
       const land = regionForArea(ctx, fld, cum * 3.2);
-      R = intersection(rect, land);
+      R = intersection(shp, land);
       R = keepMain(R, ctx.center, 0.15);
-    } else R = regionForArea(ctx, fld, cum, P.streetOp === 'organic' ? (k === nPh - 1 ? 55 : 35) : 0);
+    } else R = regionForArea(ctx, fld, cum, sp.closing ? (k === nPh - 1 ? 55 : 35) : 0);
     if (prev.length) {
       R = union(R, prev);
       // keep R_{k-1} strictly nested
     }
     // wall lines (the walled outer phase, and older lines that fossilize into ring streets) are polygons of
     // straight curtains that circumscribe the region
-    if (!ov.organicOutline && (k < nPh - 1 || walled)) R = keepMain(fortifyRegion(ctx, R, prev), ctx.center, 0.1);
+    if (!ov.organicOutline && ((k < nPh - 1 && sp.fossil) || (k === nPh - 1 && walled))) R = keepMain(fortifyRegion(ctx, R, prev), ctx.center, 0.1);
     R = R.map((ph) => ({ outer: ph.outer, holes: ph.holes }));
     let band: MultiPoly = prev.length ? difference(R, prev) : R;
     band = dropSlivers(band, 400, 5);
-    phases.push({ id: k + 1, kind: zones[k] === 'village' ? 'village' : k === 0 ? 'core' : 'ring', zone: zones[k], region: R, band, age: 1 - k / Math.max(1, nPh), fossil: k < nPh - 1, walled: walled && k === nPh - 1, pop: ppop });
+    phases.push({ id: k + 1, kind: zones[k] === 'village' ? 'village' : k === 0 ? 'core' : 'ring', zone: zones[k], region: R, band, age: 1 - k / Math.max(1, nPh), fossil: k < nPh - 1 && sp.fossil, walled: walled && k === nPh - 1, pop: ppop });
     prev = R;
   }
   return { phases, enclosure: prev, walled, shortfall: Math.max(0, cum - mpArea(prev)), densityScale };

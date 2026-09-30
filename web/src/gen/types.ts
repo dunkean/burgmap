@@ -86,7 +86,19 @@ export interface UrbanStreet {
   role: StreetRole;
   phase: number;
 }
-export interface UrbanBlockInfo { quarter: number; phase: number; zone: UrbanZone; kind: 'block' | 'place' | 'market' | 'church' | 'green' }
+export interface UrbanBlockInfo {
+  quarter: number; phase: number; zone: UrbanZone; kind: 'block' | 'place' | 'market' | 'church' | 'green' | 'compound';
+  /** Compound lots: the landmark kind (mosque, temple, castle, yamen, …). */
+  compound?: string;
+  /** Culture that built the block (mixed plans). */
+  culture?: string;
+  /** Morphology id of the block. */
+  morphology?: string;
+}
+/** Plan lines that are not streets: ward walls, moats, compound walls, terrace retaining walls, cliff faces, hedges. */
+export interface UrbanLine { kind: string; path: Polyline; closed?: boolean; width?: number }
+/** Tree canopies drawn over the town (elven). */
+export interface UrbanTree { x: number; y: number; r: number }
 export type ParcelUse = 'plot' | 'garden' | 'place' | 'market' | 'church' | 'green' | 'farm';
 export interface UrbanParcel {
   poly: Polygon; use: ParcelUse | string; block: number;
@@ -94,7 +106,19 @@ export interface UrbanParcel {
   front?: [Vec2, Vec2];
   zone?: UrbanZone;
 }
-export interface UrbanBuilding { poly: Polygon; kind: string; height?: number; parcel?: number }
+export interface UrbanBuilding {
+  poly: Polygon; kind: string; height?: number; parcel?: number;
+  // ---- architecture metadata (M3b; drives later rendering / 3D)
+  /** Typology id (gabled-row-house, courtyard-house, siheyuan-hall, machiya, longhouse, …). */
+  arch?: string;
+  roof?: 'gable' | 'hip' | 'flat' | 'dome' | 'pyramidal' | 'pagoda' | 'thatch-round' | 'none' | 'tiled-hip';
+  storeys?: number;
+  material?: string;
+  /** Inner courtyards of the building (inside its footprint envelope, not part of `poly`). */
+  courtyards?: Polygon[];
+  /** Main facade / ridge orientation (radians). */
+  orientation?: number;
+}
 export interface UrbanWall {
   path: Polyline; closed: boolean; towers: Vec2[]; gates: Vec2[]; thickness: number;
   /** Gate openings: center, street direction (unit) and opening width. */
@@ -134,6 +158,15 @@ export interface UrbanLayer {
   backLand: PolyH[];
   /** Footprint with holes (exact), rural land use is excluded from it. */
   footprintH: PolyH[];
+  // ---- culture (M3b), additive
+  /** Culture preset id, the cultures present (mixes) and render hints. */
+  culture?: string;
+  cultures?: string[];
+  renderHints?: { towerShape: 'round' | 'square'; compoundWalls?: boolean; wardWalls?: boolean; canopy?: boolean; terraces?: boolean; moat?: boolean };
+  lines?: UrbanLine[];
+  trees?: UrbanTree[];
+  /** Water pieces of the plan (moats, tanks, ponds) — parcels of use 'moat' / 'tank' are also listed here. */
+  water?: PolyH[];
 }
 
 export interface World {

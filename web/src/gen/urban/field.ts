@@ -11,6 +11,7 @@ import { gradientAt } from '../core/grid';
 import { smoothstep } from '../core/field';
 import type { UrbanCtx } from './context';
 import type { Streets } from './streets';
+import type { MorphologyParams } from './morphology';
 import { segSegT } from '../geo/poly';
 
 const TAU = Math.PI * 2;
@@ -21,14 +22,18 @@ export class GuidanceField {
     private ctx: UrbanCtx, private nucleus: Vec2, private streets: Streets, private gridAngle: number, rng: Rng,
   ) { this.noise = new Noise2D(rng.fork('fieldNoise')); }
 
+  /** Morphology of the quarter being split (defaults to the context's). */
+  P: MorphologyParams | null = null;
+
   /** Base angle θ of the cross-field at p (the field is defined modulo 90°). */
   angle(p: Vec2): number {
-    const P = this.ctx.params;
+    const P = this.P ?? this.ctx.params;
     const nz = ((P.fieldNoise * Math.PI) / 180) * this.noise.fbm(p.x / P.fieldWavelength, p.y / P.fieldWavelength, 2);
-    if (P.streetOp === 'grid') return this.gridAngle + nz + P.gridSkew * this.noise.fbm(p.x / 600 + 9, p.y / 600 - 3, 2);
+    if (P.streetOp === 'grid') return (P.orientation === 'cardinal' ? 0 : this.gridAngle) + nz + P.gridSkew * this.noise.fbm(p.x / 600 + 9, p.y / 600 - 3, 2);
     const dx = p.x - this.nucleus.x, dy = p.y - this.nucleus.y;
     const r = Math.hypot(dx, dy);
-    let th = Math.atan2(dy, dx);
+    // spiral twist: both families rotate with the distance angle (log-spiral streets)
+    let th = Math.atan2(dy, dx) + (P.fieldTwist ?? 0);
     let cx = Math.cos(4 * th), cy = Math.sin(4 * th);
     // a random low-frequency orientation field breaks the dartboard (regular concentric arcs and spokes)
     const wr = P.fieldRandom ?? 0;

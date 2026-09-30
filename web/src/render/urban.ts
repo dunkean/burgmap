@@ -95,7 +95,7 @@ const mixHex = (a: string, b: string, t: number): string => { const A = hex2(a),
 const lumHex = (h: string): number => { const [r, g, b] = hex2(h); return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255; };
 
 /** Landmark building kinds (drawn distinctly, not as ordinary roofs). */
-export const LANDMARK_KINDS = new Set(['church', 'cathedral']);
+export const LANDMARK_KINDS = new Set(['church', 'cathedral', 'landmark']);
 
 /**
  * Buildings drawn one by one: a roof tone varied slightly per building and a crisp dark outline, so shared party

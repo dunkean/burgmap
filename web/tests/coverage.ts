@@ -17,7 +17,7 @@ export interface CoverageReport {
   minWidth: number; maxAspect: number; narrow: number; long: number; buildings: number;
 }
 
-export function coverage(w: World, landmarkKinds = new Set(['church', 'cathedral'])): CoverageReport {
+export function coverage(w: World, landmarkKinds = new Set(['church', 'cathedral', 'landmark'])): CoverageReport {
   const u = w.urban!;
   const byPhase = new Map<number, { built: number; area: number; blocks: number; zone: string; rect: number; n: number }>();
   const blockBuilt = new Float64Array(u.blocks.length);
