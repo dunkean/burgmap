@@ -344,12 +344,12 @@ export function chooseSite(terrain: TerrainLayer, opts: Options, mapSize: number
     const wt = Math.max(...tr.width), wh = Math.max(...host.width);
     const aq = (0.5 + 0.5 * smoothstep(wt, 2.8, 9)) * (0.55 + 0.45 * (1 - Math.min(1, dist(J, C0) / (0.4 * S))));
     const dmax = 0.35 * Rres + 75;
-    for (const d of [55, 95, 140, 190]) {
+    for (const d of [45, 80, 115]) {
       const P = { x: J.x + bis.x * d, y: J.y + bis.y * d };
       if (!inM(P.x, P.y, 0.05 * S) || water[at(P.x, P.y)]) continue;
       const res = refine(P, 55, { ...needDef(), habMin: 2.0 }, (i, p) => {
         const d1 = distRiver(host, p), d2 = distRiver(tr, p);
-        if (d1 > dmax || d2 > dmax || d1 < wh / 2 + 14 || d2 < 10) return -Infinity;
+        if (d1 > dmax || d2 > dmax || d1 < wh / 2 + 14 || d2 < 10 || dist(p, J) > 150) return -Infinity;
         return 0.8 * (1 - Math.abs(d1 - d2) / dmax) + 0.3 * (1 - smoothstep(Math.max(d1, d2), 60, dmax));
       });
       if (!res) continue;
@@ -486,7 +486,7 @@ export function chooseSite(terrain: TerrainLayer, opts: Options, mapSize: number
       promV.push({ p, q, i });
     }
     for (const a of spaced(promV, 200, 6)) {
-      const res = refine(a.p, rTop, { habMin: 0, slopeMax: capRaw * 0.8, smoothMax: capSmooth * 0.9, bfracMin: Math.min(0.42, bfracCap), rb: 0.45 * Rres }, (i) => 0.6 * smoothstep(H[i] - hb[i], 4, 26));
+      const res = refine(a.p, rTop, { habMin: 0, slopeMax: capRaw * 0.8, smoothMax: capSmooth * 0.9, bfracMin: Math.min(0.42, bfracCap), rb: 0.45 * Rres }, (i) => ((bigRivers.length > 0 || terrain.seaFraction > 0.02) && dw.dist[i] > 450 ? -Infinity : 0.6 * smoothstep(H[i] - hb[i], 4, 26)));
       if (res) setBest('hilltop', { i: res.i, q: q01(res.score, 0.6, a.q), feature: pos(res.i) });
     }
   }
@@ -506,7 +506,7 @@ export function chooseSite(terrain: TerrainLayer, opts: Options, mapSize: number
       e += 0.8 * spring;
       if (e > best) { best = e; bi = i; bs = spring; }
     }
-    if (bi >= 0) setBest('plain', { i: bi, q: clamp01(0.5 * (best / (NOMINAL + 0.8)) + 0.5 * (0.6 + 0.4 * bs)), feature: pos(bi) });
+    if (bi >= 0 && pct(zs, 0.5) < 0.045) setBest('plain', { i: bi, q: clamp01(0.5 * (best / (NOMINAL + 0.8)) + 0.5 * (0.6 + 0.4 * bs)), feature: pos(bi) });
   }
 
   // ---- choose an archetype: probabilities from availability, size, relief, water, prefs ----
@@ -522,8 +522,8 @@ export function chooseSite(terrain: TerrainLayer, opts: Options, mapSize: number
       case 'harbor': return 2.4;
       case 'estuary': return 1.8;
       case 'valley': return 0.55 * (opts.relief === 'valley' || opts.relief === 'mountains' ? 1.6 : 1);
-      case 'hilltop': return HILLTOP_BY_SIZE[SIZE_IDX[opts.size]] * RELIEF_HILL[opts.relief];
-      default: return hasCoast || hasRiver ? 0.15 : 1.0;
+      case 'hilltop': return HILLTOP_BY_SIZE[SIZE_IDX[opts.size]] * RELIEF_HILL[opts.relief] * (hasCoast || hasRiver ? 0.3 : 1);
+      default: return hasCoast || hasRiver ? 0.03 : 1.0;
     }
   };
   const QMIN = 0.22;

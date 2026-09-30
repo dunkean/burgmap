@@ -336,7 +336,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   const cxFor = (bi: number, ang: number) => ({ angle: ang, pop, rng: rng.fork('cmp:' + bi), center: ctx.center });
   const claim = (bi: number, kind: string, ang: number): boolean => {
     const out = buildCompound(kind, carved[bi].poly, cxFor(bi, ang));
-    if (process.env.BURGMAP_DBG) console.log('claim', kind, bi, Math.round(areaOf(carved[bi].poly)), carved[bi].poly.length, 'parcels', out.parcels.length, 'bldgs', out.buildings.length, JSON.stringify(carved[bi].poly), ang);
+    if (typeof process !== 'undefined' && process.env?.BURGMAP_DBG) console.log('claim', kind, bi, Math.round(areaOf(carved[bi].poly)), carved[bi].poly.length, 'parcels', out.parcels.length, 'bldgs', out.buildings.length, JSON.stringify(carved[bi].poly), ang);
     if (!out.parcels.length) return false;
     const first = parcels.length;
     for (const p of out.parcels) parcels.push({ poly: p.poly, use: p.use, block: bi, zone: carved[bi].zone });

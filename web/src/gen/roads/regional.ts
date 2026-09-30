@@ -1,4 +1,5 @@
 import type { Rng } from '../core/rng';
+import { Noise2D } from '../core/noise';
 import { MinHeap } from '../core/pq';
 import { D8, D8_DIST, blurGrid } from '../core/grid';
 import { Vec2, Polyline, chaikin, simplify, polylineLength, dist, resample } from '../core/geom';
@@ -223,6 +224,12 @@ export function routeRoads(
     for (let i = 0; i < N; i++) if (pass[i] >= 2) cm[i] *= 1 + 5 * Math.max(0, wd[i] - 0.25);
   }
 
+  // low-frequency wobble so roads and tracks on open ground meander instead of running ruler-straight
+  {
+    const wob = new Noise2D(r.fork('wobble'));
+    for (let i = 0; i < N; i++) if (pass[i] === 1) cm[i] *= Math.max(0.6, 1 + 0.55 * wob.fbm(((i % n) + 0.5) * cell / 220, (((i / n) | 0) + 0.5) * cell / 220, 2));
+  }
+
   // ---- exits on the border
   const cands: Exit[] = [];
   const step = Math.max(2, Math.round(30 / cell));
@@ -435,6 +442,15 @@ export function routeRoads(
     for (let q = 45; q < Lt - 45 && !hug; q += 6) {
       const p = pointAtLength(pl, q);
       for (let k = 0; k < roads.length; k++) if (nearestOnPolyline(roads[k].path, p).d < 16) { hug = true; break; }
+    }
+    if (!hug) {
+      // no near-parallel duplicate of an existing track
+      for (let k = 0; k < roads.length && !hug; k++) {
+        if (roads[k].kind !== 'track') continue;
+        let near = 0, tot = 0;
+        for (let q = 0; q < Lt; q += 10) { tot++; if (nearestOnPolyline(roads[k].path, pointAtLength(pl, q)).d < 70) near++; }
+        if (near / Math.max(1, tot) > 0.4) hug = true;
+      }
     }
     if (hug) continue;
     trackHosts[roads.length] = [ai, bi];
