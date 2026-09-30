@@ -118,16 +118,79 @@ export function buildField(ctx: UrbanCtx, rng: Rng, steepMax = 0.2, blocked?: Ui
   // slope says otherwise (it averages in the valley walls)
   const slopeL = blurGrid(terrain.slope, Math.max(1, Math.round(12 / cell)), 2).data;
   const S = ctx.mapSize;
+  // growth dials (URBAN_MORPHOLOGY §1): towns stretch along the roads and the waterfront, avoid wet low ground,
+  // and their outlines are irregular (land ownership, soil) — so even a flat site does not give a circle
+  const G = ctx.params.growth ?? { road: 0, water: 0, noise: 0.14, wavelength: 380, elongation: 0, wet: 0 };
+  const P0 = ctx.center;
+  let dRoad: Float32Array | null = null, dBank: Float32Array | null = null;
+  if (G.road > 0) {
+    const m = new Uint8Array(N);
+    for (const rd of ctx.world.roads ?? []) if (rd.kind !== 'track') forCellsNearPolyline(rd.path, n, n, cell, cell * 0.7, (i) => { m[i] = 1; });
+    dRoad = distanceField(m, n, n, cell).dist;
+  }
+  if (G.water > 0) {
+    const m = new Uint8Array(N);
+    for (let i = 0; i < N; i++) if (terrain.water[i]) m[i] = 1;
+    dBank = distanceField(m, n, n, cell).dist;
+  }
+  const hab = site.fields.hab;
+  const wl = G.wavelength;
+  const ang = mainRoadAngleCtx(ctx);
+  const ea = Math.cos(ang), eb = Math.sin(ang);
   for (let i = 0; i < N; i++) {
     const x = ((i % n) + 0.5) * cell, y = (((i / n) | 0) + 0.5) * cell;
     const c = site.cost.data[i];
     const border = x < 0.03 * S || y < 0.03 * S || x > 0.97 * S || y > 0.97 * S;
     const steep = slopeS[i] > 0.3;
     if (terrain.water[i] || !isFinite(c) || border || (steep && slopeL[i] > steepMax) || (blocked && blocked[i])) { f[i] = Infinity; continue; }
-    f[i] = c * (1 + 0.14 * noise.fbm(x / 380, y / 380, 2)) + 40 * Math.max(0, (steep ? slopeL[i] : slopeS[i]) - 0.1);
+    let k = 1 + G.noise * noise.fbm(x / wl, y / wl, 2);
+    if (dRoad) k *= 1 - G.road * Math.exp(-dRoad[i] / 55);
+    // the waterfront attracts, but wet low ground (floodplain, marsh) repels
+    if (dBank) k *= 1 - G.water * Math.exp(-dBank[i] / 70) * (hab[i] > 2.5 ? 1 : -0.6);
+    if (G.wet > 0 && hab[i] < 2) k *= 1 + G.wet * (2 - Math.max(0, hab[i])) / 2;
+    if (G.elongation > 0) {
+      // anisotropic distance: cheaper along the main road axis
+      const dx = x - P0.x, dy = y - P0.y, r = Math.hypot(dx, dy) || 1;
+      const along = Math.abs((dx * ea + dy * eb) / r);
+      k *= 1 - G.elongation * 0.45 * along * along;
+    }
+    f[i] = c * k + 40 * Math.max(0, (steep ? slopeL[i] : slopeS[i]) - 0.1);
+  }
+  // bipolar growth: a second nucleus (a burg across the river, an abbey or castle burg) whose region merges
+  if (G.bipolar && rng.fork('bipolar').chance(G.bipolar)) {
+    const br = rng.fork('bipolar2');
+    const R = Math.max(150, Math.sqrt(estAreaOf(ctx) / Math.PI));
+    const th = ang + br.range(-0.8, 0.8) + (br.chance(0.5) ? Math.PI : 0);
+    const q = { x: P0.x + Math.cos(th) * R * br.range(0.9, 1.3), y: P0.y + Math.sin(th) * R * br.range(0.9, 1.3) };
+    const qi = Math.min(n - 1, Math.max(0, Math.floor(q.y / cell))) * n + Math.min(n - 1, Math.max(0, Math.floor(q.x / cell)));
+    if (isFinite(f[qi])) {
+      const off = R * br.range(0.35, 0.55);
+      for (let i = 0; i < N; i++) {
+        if (!isFinite(f[i])) continue;
+        const x = ((i % n) + 0.5) * cell, y = (((i / n) | 0) + 0.5) * cell;
+        const d2 = off + Math.hypot(x - q.x, y - q.y) * 1.1;
+        if (d2 < f[i]) f[i] = d2;
+      }
+    }
   }
   return f;
 }
+
+/** Main road direction at the center (radians). */
+function mainRoadAngleCtx(ctx: UrbanCtx): number {
+  const c = ctx.center;
+  let best = 0, bl = -1;
+  for (const rd of ctx.world.roads ?? []) {
+    if (rd.kind === 'track') continue;
+    const pl = rd.path;
+    if (Math.hypot(pl[pl.length - 1].x - c.x, pl[pl.length - 1].y - c.y) > 10) continue;
+    const q = pl[Math.max(0, pl.length - 12)];
+    if (pl.length > bl) { bl = pl.length; best = Math.atan2(q.y - c.y, q.x - c.x); }
+  }
+  return best;
+}
+/** Rough urban area of the settlement (m²) from the context window. */
+const estAreaOf = (ctx: UrbanCtx): number => { const R = (ctx.win.x1 - ctx.win.x0) / 2; return Math.PI * Math.max(100, (R - 450) / 2.6) ** 2; };
 
 /** Threshold of f such that the region {f < thr} covers `targetArea` m² (from a sorted list). */
 function thresholdFor(sorted: Float32Array, cell: number, targetArea: number): number {

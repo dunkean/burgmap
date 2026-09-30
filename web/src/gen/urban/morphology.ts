@@ -52,6 +52,12 @@ export interface MorphologyParams {
   extraRadials: boolean;
   /** Architecture of the ordinary buildings. */
   arch: ArchSpec;
+  /**
+   * Growth dials of the phase field: attraction of roads and of the waterfront (fractional cost reduction), low-
+   * frequency noise amplitude and wavelength (m), elongation along the main road (0–1), repulsion of wet low ground,
+   * and the chance of a second nucleus (bipolar town).
+   */
+  growth: { road: number; water: number; noise: number; wavelength: number; elongation: number; wet: number; bipolar?: number };
   /** Max heading change of streamlines: curvature × 10° per 10 m. */
   curvature: number;
   /** Amplitude (degrees) and wavelength (m) of the angular noise of the guidance field. */
@@ -125,6 +131,7 @@ const EO: MorphologyParams = {
   fieldTwist: 0,
   extraRadials: true,
   arch: { typology: 'gabled-row-house', roof: 'gable', storeys: [2, 4], material: 'timber' },
+  growth: { road: 0.3, water: 0.18, noise: 0.26, wavelength: 300, elongation: 0.25, wet: 0.5, bipolar: 0.3 },
   curvature: 0.55,
   fieldNoise: 17,
   fieldWavelength: 150,
@@ -167,6 +174,7 @@ const BASTIDE: MorphologyParams = {
   streetOp: 'grid',
   extraRadials: false,
   arch: { typology: 'arcaded-row-house', roof: 'gable', storeys: [2, 3], material: 'stone' },
+  growth: { road: 0.1, water: 0.05, noise: 0.14, wavelength: 380, elongation: 0, wet: 0.5, bipolar: 0 },
   curvature: 0.05,
   fieldNoise: 1.5,
   fieldWavelength: 400,
