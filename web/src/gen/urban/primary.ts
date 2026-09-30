@@ -240,9 +240,28 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
   if (inp.nucleus && inp.nucleus.area > 0) {
     const nu = inp.nucleus;
     const A = nu.area;
-    const mk = nu.shape === 'hull' ? makeMarket(ctx.center, rawRadials.map((r) => r.pl), A, rng.fork('market'), inp.mainAngle)
-      : nu.shape === 'circle' ? disk(ctx.center, Math.sqrt(A / Math.PI), 24)
-      : orientedRectP(ctx.center, nu.angle, Math.sqrt(A * (nu.shape === 'rect' ? 1.3 : 1)), Math.sqrt(A / (nu.shape === 'rect' ? 1.3 : 1)));
+    const shapeAt = (c: Vec2) => nu.shape === 'circle' ? disk(c, Math.sqrt(A / Math.PI), 24)
+      : orientedRectP(c, nu.angle, Math.sqrt(A * (nu.shape === 'rect' ? 1.3 : 1)), Math.sqrt(A / (nu.shape === 'rect' ? 1.3 : 1)));
+    // planned nuclei (castle, temple, forum) are nudged — by at most half their size — onto dry, flat land
+    let nc = ctx.center;
+    if (nu.shape !== 'hull') {
+      const half = Math.sqrt(A) / 2;
+      const wet = (c: Vec2): number => {
+        let w = 0;
+        for (let i = -4; i <= 4; i++) for (let j = -4; j <= 4; j++) {
+          const q = { x: c.x + (i / 4) * half, y: c.y + (j / 4) * half };
+          if (ctx.isWater(q) || !inMP(core, q)) w++;
+        }
+        return w;
+      };
+      let bw = wet(nc) * 100;
+      for (let r = 0.1; r <= 0.5 && bw > 0; r += 0.1) for (let k = 0; k < 12; k++) {
+        const c = { x: ctx.center.x + Math.cos((k * Math.PI) / 6) * r * half * 2, y: ctx.center.y + Math.sin((k * Math.PI) / 6) * r * half * 2 };
+        const sc = wet(c) * 100 + r * 10;
+        if (sc < bw) { bw = sc; nc = c; }
+      }
+    }
+    const mk = nu.shape === 'hull' ? makeMarket(ctx.center, rawRadials.map((r) => r.pl), A, rng.fork('market'), inp.mainAngle) : shapeAt(nc);
     const clipped = intersection(mk, core);
     let best: Polygon | null = null;
     for (const ph of clipped) if (!best || area(ph.outer) > area(best)) best = ph.outer;

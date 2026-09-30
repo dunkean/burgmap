@@ -176,4 +176,19 @@ export const CULTURE_LIST: Culture[] = [
     hamlet: { form: 'auto', morphology: 'chinese-suburb' },
     render: { towerShape: 'square', wardWalls: true, moat: true, compoundWalls: true },
   },
+  {
+    id: 'japanese-jokamachi', label: 'Japanese castle town (jōkamachi)',
+    nucleus: { kind: 'castle', shape: 'square', area: [40000, 110000], compound: true, ring: 9, orientation: 'road' },
+    core: { morphology: 'jp-samurai', share: 0.3, enclosure: { shape: 'organic', wall: 'none', fossil: 'street' } },
+    ring: { morphology: 'jp-merchant', enclosure: { shape: 'organic', wall: 'none', fossil: 'none' } },
+    phaseCount: [[0, 2], [15000, 3]],
+    faubourg: 'jp-merchant', faubShare: [0.15, 0.15],
+    landmarks: [
+      { role: 'worship', kind: 'jp-temple', place: 'edge', area: [2500, 12000], minPop: 1500, count: 4 },
+      { role: 'extra', kind: 'jp-temple', place: 'edge', area: [2500, 12000], minPop: 9000, count: 3 },
+    ],
+    village: { form: 'auto', morphology: 'jp-merchant' },
+    hamlet: { form: 'auto', morphology: 'jp-merchant' },
+    render: { towerShape: 'square', compoundWalls: true },
+  },
 ];

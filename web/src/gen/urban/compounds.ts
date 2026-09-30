@@ -237,36 +237,61 @@ function shrink(p: Polygon, d: number): Polygon | null {
 }
 
 // ---------------------------------------------------------------- Japanese castle (moats, baileys, keep)
+/**
+ * Nested rectangles in the lot's frame: outer ground (the lot minus the outer moat rectangle), outer moat, ninomaru
+ * bailey, inner moat, honmaru. Each band is split by a causeway on the side facing the town centre axis, so the
+ * parcels are simple polygons that partition the lot exactly.
+ */
 function jpCastle(lot: Polygon, cx: CompoundCtx): CompoundOut {
   const out: CompoundOut = { parcels: [], buildings: [], lines: [], water: [], landmarks: [] };
-  const axis = { x: Math.cos(cx.angle), y: Math.sin(cx.angle) };
-  const c = inscribed(lot, [], 1).c;
-  const R = Math.sqrt(area(lot));
-  const b = bands(lot, [{ w: Math.max(12, R * 0.07), use: 'moat' }, { w: Math.max(14, R * 0.13), use: 'bailey' }, { w: Math.max(8, R * 0.045), use: 'moat' }], axis, c, 7);
-  if (!b.core) return emptyOut(lot, 'compound:castle');
-  out.parcels.push(...b.parcels);
-  out.parcels.push({ poly: b.core, use: 'compound:castle-honmaru' });
-  const hon = out.parcels.length - 1;
-  for (const p of b.parcels) if (p.use === 'moat') out.water.push(p.poly);
-  for (const r of b.rings.slice(1)) out.lines.push({ kind: 'stone-wall', path: r, closed: true, width: 1.6 });
-  // keep (tenshu) in a rear corner of the honmaru, palace ranges, turrets on the bailey corners
-  const f = lotFrame(b.core, cx.angle);
-  const ks = Math.min(11, f.hu * 0.35, f.hv * 0.35);
-  if (ks >= 4) {
-    const keep = rectAt(f.c, cx.angle, -f.hu + 2, -f.hu + 2 + 2 * ks, -f.hv + 2, -f.hv + 2 + 2 * ks);
-    if (inside(b.core, keep, 0.3)) {
-      out.buildings.push({ poly: keep, kind: 'landmark', parcel: hon, arch: 'tenshu', roof: 'pagoda', material: 'wood', storeys: 5 });
-      out.landmarks.push({ kind: 'tenshu-base', poly: rectAt(f.c, cx.angle, -f.hu + 0.6, -f.hu + 3.4 + 2 * ks, -f.hv + 0.6, -f.hv + 3.4 + 2 * ks) });
-    }
-    const goten = [rectAt(f.c, cx.angle, -f.hu * 0.1, f.hu * 0.75, -f.hv * 0.5, f.hv * 0.05), rectAt(f.c, cx.angle, f.hu * 0.2, f.hu * 0.75, f.hv * 0.1, f.hv * 0.6)];
-    for (const g of goten) if (inside(b.core, g, 1)) out.buildings.push({ poly: g, kind: 'landmark', parcel: hon, arch: 'goten-palace', roof: 'tiled-hip', material: 'wood', storeys: 1 });
+  const ang = cx.angle;
+  const f = lotFrame(lot, ang);
+  const H = Math.min(f.hu, f.hv) - 1, aspect = f.hu / Math.max(1, f.hv);
+  if (H < 30) return emptyOut(lot, 'compound:castle');
+  const rect = (k: number) => rectAt(f.c, ang, -(H * aspect) * k, H * aspect * k, -H * k, H * k);
+  const widths = [{ k: 1, use: 'moat' }, { k: 0.8, use: 'bailey' }, { k: 0.52, use: 'moat' }, { k: 0.42, use: 'compound:castle-honmaru' }];
+  const cw = 7; // causeway width
+  const causeway = rectAt(f.c, ang, -3 * H * aspect, 0, -cw / 2, cw / 2);
+  // outer ground: lot minus the outer rectangle (may be several pieces)
+  // (cut open along the causeway line so that no piece has a hole)
+  const slit = rectAt(f.c, ang, -4 * H * aspect - 400, 0, -0.01, 0.01);
+  for (const ph of differenceS(lot, rect(1), slit)) if (!ph.holes.length && area(ph.outer) > 4) out.parcels.push({ poly: ph.outer, use: 'bailey' });
+  for (let i = 0; i < widths.length; i++) {
+    const outer = rect(widths[i].k);
+    const inner = i + 1 < widths.length ? rect(widths[i + 1].k) : null;
+    const band = inner ? differenceS(outer, inner) : [{ outer, holes: [] }];
+    const use = widths[i].use;
+    if (use === 'moat') {
+      // the band is cut by the causeway: two C-shaped halves become one U after removing the strip
+      for (const ph of differenceS(band, causeway)) if (!ph.holes.length && area(ph.outer) > 4) { out.parcels.push({ poly: ph.outer, use: 'moat' }); out.water.push(ph.outer); }
+      for (const ph of intersectionS(band, causeway)) if (!ph.holes.length && area(ph.outer) > 1) out.parcels.push({ poly: ph.outer, use: 'causeway' });
+    } else if (inner) {
+      // a ring band (bailey): split it on the causeway line and the opposite side so each piece is simple
+      const cut = rectAt(f.c, ang, -3 * H * aspect, 3 * H * aspect, -0.01, 0.01);
+      for (const ph of differenceS(band, cut)) if (!ph.holes.length && area(ph.outer) > 4) out.parcels.push({ poly: ph.outer, use });
+    } else out.parcels.push({ poly: outer, use });
+    out.lines.push({ kind: 'stone-wall', path: widths[i].use === 'moat' ? outer : outer, closed: true, width: 1.6 });
   }
-  const baileys = out.parcels.map((p, i) => ({ p, i })).filter((x) => x.p.use === 'bailey');
-  for (const { p, i } of baileys) {
-    const fb = lotFrame(p.poly, cx.angle);
-    const s = Math.min(4.5, fb.hu * 0.4, fb.hv * 0.4);
-    if (s >= 2.3) out.buildings.push({ poly: rectAt(fb.c, cx.angle, -s, s, -s, s), kind: 'landmark', parcel: i, arch: 'yagura-turret', roof: 'tiled-hip', material: 'wood', storeys: 2 });
-  }
+  const hon = out.parcels.findIndex((p) => p.use === 'compound:castle-honmaru');
+  if (hon < 0) return out;
+  const hr = H * 0.42;
+  const ks = Math.min(12, hr * 0.32);
+  // keep (tenshu) on its stone base in the rear corner, palace (goten) ranges in front
+  const keep = rectAt(f.c, ang, hr * aspect - 2 * ks - 2.5, hr * aspect - 2.5, hr - 2 * ks - 2.5, hr - 2.5);
+  out.landmarks.push({ kind: 'tenshu-base', poly: rectAt(f.c, ang, hr * aspect - 2 * ks - 4, hr * aspect - 1, hr - 2 * ks - 4, hr - 1) });
+  out.buildings.push({ poly: keep, kind: 'landmark', parcel: hon, arch: 'tenshu', roof: 'pagoda', material: 'wood', storeys: 5 });
+  const goten = [
+    rectAt(f.c, ang, -hr * aspect * 0.75, hr * aspect * 0.15, -hr * 0.7, -hr * 0.1),
+    rectAt(f.c, ang, -hr * aspect * 0.2, hr * aspect * 0.15, -hr * 0.1, hr * 0.45),
+  ];
+  for (const g of goten) if (inside(out.parcels[hon].poly, g, 1)) out.buildings.push({ poly: g, kind: 'landmark', parcel: hon, arch: 'goten-palace', roof: 'tiled-hip', material: 'wood', storeys: 1 });
+  // corner turrets (yagura) on the bailey
+  out.parcels.forEach((p, i) => {
+    if (p.use !== 'bailey') return;
+    const fb = lotFrame(p.poly, ang);
+    const s = Math.min(4.5, fb.hu * 0.45, fb.hv * 0.45);
+    if (s >= 2.3) out.buildings.push({ poly: rectAt(fb.c, ang, -s, s, -s, s), kind: 'landmark', parcel: i, arch: 'yagura-turret', roof: 'tiled-hip', material: 'wood', storeys: 2 });
+  });
   return out;
 }
 
@@ -471,7 +496,7 @@ export function pickBlock(
     switch (place) {
       case 'adjacent-nucleus': { const fr = ctx.frontsNucleus(i); if (fr <= 8 && d > 0.45 * R) return; s += (fr > 8 ? 2 : 0) - d / Math.max(120, R * 0.4); break; }
       case 'near-nucleus': s -= d / Math.max(80, R * 0.3); break;
-      case 'edge': { const e = ctx.edgeDist(c); if (e > Math.max(90, R * 0.25)) return; s += 1.5 - e / 60; break; }
+      case 'edge': { const e = ctx.edgeDist(c); if (e > Math.max(90, R * 0.25)) return; s += 1.5 - e / 60 + 0.4 * b.phase; break; }
       case 'axis-north': { if (c.y > nucleus.y - 20) return; s += 2 - Math.abs(c.x - nucleus.x) / 40 - d / Math.max(150, R * 0.5); break; }
       case 'east': case 'west': { const sg = place === 'east' ? 1 : -1; if ((c.x - nucleus.x) * sg < R * 0.15) return; s += 1.5 - Math.abs(c.y - nucleus.y) / 80 - Math.abs(d - R * 0.45) / 150; break; }
       case 'gate': { const g = Math.min(...ctx.gates.map((q) => dist(q, c)), 1e9); if (g > 200) return; s += 1.5 - g / 80; break; }
