@@ -1,3 +1,7 @@
+import type { NameFamily } from './names/types';
+import { NAME_FAMILIES } from './names/types';
+import type { ImportedHeight } from './terrain/import';
+
 export type SizeName = 'hamlet' | 'village' | 'town' | 'city' | 'capital';
 export type Relief = 'flat' | 'hills' | 'valley' | 'mountains';
 export type CoastOpt = 'none' | 'N' | 'E' | 'S' | 'W' | 'random';
@@ -28,6 +32,17 @@ export interface Options {
   culture: Culture;
   /** Inhabitants; 0 = automatic from the size preset. */
   population: number;
+  /** Toponym language family; 'auto' (default) follows the culture. */
+  language?: NameFamily | 'auto';
+  /** Draw labels (names) / legend on the map. Display only. */
+  labels?: boolean;
+  legend?: boolean;
+  /** Imported heightmap (pixels; never serialized to the URL). When set it replaces the procedural relief. */
+  importedHeight?: ImportedHeight;
+  /** Imported heightmap: height in meters of a white pixel (default 120). */
+  heightScale?: number;
+  /** Imported heightmap: sea level in meters (pixels below become sea; default 0 = no sea). */
+  importSea?: number;
 }
 
 export interface SizePreset { mapSize: number; grid: number; label: string }
@@ -54,6 +69,11 @@ export const DEFAULTS: Options = {
   landuse: true,
   culture: 'european-organic',
   population: 0,
+  language: 'auto',
+  labels: true,
+  legend: false,
+  heightScale: 120,
+  importSea: 0,
 };
 
 /** Number of regional road exits when the `roads` option is 0 (auto). */
@@ -79,6 +99,15 @@ export function toQuery(o: Options): string {
   if (o.seaLevel !== undefined) p.set('seaLevel', String(o.seaLevel));
   if (o.contours !== DEFAULTS.contours) p.set('contours', o.contours ? '1' : '0');
   if (o.landuse !== DEFAULTS.landuse) p.set('landuse', o.landuse ? '1' : '0');
+  if (o.language && o.language !== 'auto') p.set('lang', o.language);
+  if (o.labels === false) p.set('labels', '0');
+  if (o.legend) p.set('legend', '1');
+  // the image itself is never put in the URL: only a marker plus its two scalars
+  if (o.importedHeight) {
+    p.set('hm', 'custom');
+    p.set('hscale', String(o.heightScale ?? 120));
+    p.set('hsea', String(o.importSea ?? 0));
+  }
   return p.toString();
 }
 
@@ -107,13 +136,24 @@ export function fromQuery(q: string | URLSearchParams): Options {
   o.contours = c === null ? DEFAULTS.contours : c === '1' || c === 'true';
   const lu = p.get('landuse');
   o.landuse = lu === null ? DEFAULTS.landuse : lu === '1' || lu === 'true';
+  const lang = p.get('lang');
+  o.language = lang !== null && (NAME_FAMILIES as string[]).includes(lang) ? (lang as NameFamily) : 'auto';
+  o.labels = p.get('labels') !== '0' && p.get('labels') !== 'false';
+  o.legend = p.get('legend') === '1' || p.get('legend') === 'true';
+  const hs = Number(p.get('hscale')), hz = Number(p.get('hsea'));
+  if (Number.isFinite(hs) && p.get('hscale') !== null) o.heightScale = Math.max(1, Math.min(9000, hs));
+  if (Number.isFinite(hz) && p.get('hsea') !== null) o.importSea = Math.max(-1000, Math.min(9000, hz));
   return o;
 }
+
+/** True when the URL asks for a custom heightmap that the page cannot rebuild from the link alone. */
+export const wantsCustomHeight = (q: string | URLSearchParams): boolean =>
+  (typeof q === 'string' ? new URLSearchParams(q.startsWith('?') ? q.slice(1) : q) : q).get('hm') === 'custom';
 
 /** Parse "k=v" overrides (used by the preview script). */
 export function applyOverride(o: Options, k: string, v: string): void {
   const rec = o as unknown as Record<string, unknown>;
-  if (k === 'roads' || k === 'seaLevel' || k === 'population') rec[k] = Number(v);
-  else if (k === 'contours' || k === 'landuse') rec[k] = v === '1' || v === 'true';
+  if (k === 'roads' || k === 'seaLevel' || k === 'population' || k === 'heightScale' || k === 'importSea') rec[k] = Number(v);
+  else if (k === 'contours' || k === 'landuse' || k === 'labels' || k === 'legend') rec[k] = v === '1' || v === 'true';
   else rec[k] = v;
 }

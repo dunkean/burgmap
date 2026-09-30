@@ -6,9 +6,12 @@ import { chooseSite } from './site/site';
 import { routeRoads } from './roads/regional';
 import { generateRural } from './landuse/rural';
 import { generateUrban } from './urban';
+import { generateNames } from './names';
 
-export function generate(options: Options): World {
+/** `onStage` (optional) is told which stage is about to run, for progress display. */
+export function generate(options: Options, onStage?: (stage: string) => void): World {
   const t0 = performance.now();
+  onStage?.('terrain');
   const root = new Rng('burgmap:' + options.seed);
   const { terrain, timings } = generateTerrain(options, root);
   const stats: Record<string, number | string> = {};
@@ -26,6 +29,7 @@ export function generate(options: Options): World {
   const world: World = { seed: options.seed, options, mapSize, terrain, stats };
 
   const t1 = performance.now();
+  onStage?.('site & roads');
   world.site = chooseSite(terrain, options, mapSize, root);
   const t2 = performance.now();
   stats['ms.site'] = r(t2 - t1);
@@ -43,6 +47,7 @@ export function generate(options: Options): World {
   stats['roads'] = rr.roads.length;
   stats['bridges'] = rr.bridges.length;
 
+  onStage?.('town');
   const ur = generateUrban(world, root);
   world.urban = ur.layer;
   world.debug = { urban: ur.debug };
@@ -50,11 +55,17 @@ export function generate(options: Options): World {
   for (const [k, v] of Object.entries(ur.stats)) stats[k.startsWith('ms.') ? k : 'urban.' + k] = v;
   stats['ms.urbanTotal'] = r(t3b - t3);
 
+  onStage?.('fields & woods');
   const lu = generateRural(world, root);
   world.landuse = lu.layer;
   const t4 = performance.now();
   stats['ms.landuse'] = r(t4 - t3b);
   for (const [k, v] of Object.entries(lu.stats)) stats['landuse.' + k] = v;
+
+  onStage?.('names');
+  world.names = generateNames(world, root);
+  stats['ms.names'] = r(performance.now() - t4);
+  stats['names.town'] = world.names.town;
 
   stats['ms.total'] = r(performance.now() - t0);
   return world;

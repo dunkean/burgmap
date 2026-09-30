@@ -8,9 +8,17 @@ import { renderTerrainRaster, pngDataUrl } from './raster';
 import { f1, pathD, seaWithIslands } from './util';
 import { landuseLayer, roadsLayer, siteLayer } from './landuse';
 import { urbanLayer } from './urban';
+import { labelsSvg } from './svgLabels';
+import { cartoucheModel, legendModel, panelSvg } from './legend';
+import { FONT_STACKS } from './labelStyles';
+import type { Measure } from './mapLabels';
 
 export interface RenderOptions {
   style?: StyleName; contours?: boolean; raster?: boolean; landuse?: boolean; debug?: boolean;
+  /** Name labels (default: world.options.labels !== false), legend (default: world.options.legend) and cartouche (default on). */
+  labels?: boolean; legend?: boolean; cartouche?: boolean;
+  /** Text width measurer for label placement (browser: canvas based; default: estimate). */
+  measure?: Measure;
 }
 
 function contourLayer(world: World, pal: Palette, u: number): string {
@@ -48,13 +56,6 @@ function rippleLayer(world: World, pal: Palette, u: number): string {
   return `<g class="ripples" fill="none" stroke="${pal.ripple}" stroke-linecap="round">${out}</g>`;
 }
 
-function niceLength(target: number): number {
-  const opts = [25, 50, 100, 200, 250, 500, 1000, 2000];
-  let best = opts[0];
-  for (const o of opts) if (o <= target) best = o;
-  return best;
-}
-
 function decor(world: World, pal: Palette, u: number): string {
   const S = world.mapSize;
   const m = 22 * u;
@@ -63,18 +64,6 @@ function decor(world: World, pal: Palette, u: number): string {
   // frame
   s += `<rect x="${f1(5 * u)}" y="${f1(5 * u)}" width="${f1(S - 10 * u)}" height="${f1(S - 10 * u)}" fill="none" stroke="${pal.frame}" stroke-width="${f1(2 * u)}"/>`;
   s += `<rect x="${f1(9 * u)}" y="${f1(9 * u)}" width="${f1(S - 18 * u)}" height="${f1(S - 18 * u)}" fill="none" stroke="${pal.frame}" stroke-width="${f1(0.7 * u)}"/>`;
-  // scale bar
-  const L = niceLength(S * 0.2);
-  const x0 = m + 6 * u, y0 = S - m - 8 * u;
-  const bh = 5 * u;
-  s += `<rect x="${f1(x0 - 8 * u)}" y="${f1(y0 - 20 * u)}" width="${f1(L + 40 * u)}" height="${f1(40 * u)}" fill="${pal.paper}" opacity="0.72"/>`;
-  const seg = 4;
-  for (let i = 0; i < seg; i++) {
-    s += `<rect x="${f1(x0 + (L * i) / seg)}" y="${f1(y0 - bh / 2)}" width="${f1(L / seg)}" height="${f1(bh)}" fill="${i % 2 ? pal.paper : pal.ink}" stroke="${pal.ink}" stroke-width="${f1(0.8 * u)}"/>`;
-  }
-  s += `<text x="${f1(x0)}" y="${f1(y0 - 8 * u)}" font-size="${f1(fs)}" text-anchor="middle">0</text>`;
-  s += `<text x="${f1(x0 + L / 2)}" y="${f1(y0 - 8 * u)}" font-size="${f1(fs)}" text-anchor="middle">${L / 2}</text>`;
-  s += `<text x="${f1(x0 + L)}" y="${f1(y0 - 8 * u)}" font-size="${f1(fs)}" text-anchor="start"> ${L} m</text>`;
   // north arrow
   const cx = S - m - 22 * u, cy = m + 34 * u, r = 26 * u;
   s += `<circle cx="${f1(cx)}" cy="${f1(cy)}" r="${f1(r * 1.15)}" fill="${pal.paper}" opacity="0.72"/>`;
@@ -141,7 +130,14 @@ export function renderSvg(world: World, opts: RenderOptions = {}): string {
   else parts.push(siteLayer(world, pal, u, !!opts.debug));
 
   parts.push('</g>');
+  if (opts.labels ?? world.options.labels !== false) parts.push(labelsSvg(world, pal, opts.measure, !!(opts.legend ?? world.options.legend)));
   parts.push(decor(world, pal, u));
+  const fam = FONT_STACKS[style] ?? pal.fontFamily;
+  if (opts.cartouche !== false) parts.push(panelSvg(cartoucheModel(world, pal, 1 / u), 22 * u, 22 * u, u, fam, 'cartouche'));
+  if (opts.legend ?? !!world.options.legend) {
+    const lg = legendModel(world, pal);
+    parts.push(panelSvg(lg, 22 * u, S - 22 * u - lg.h * u, u, fam, 'legend'));
+  }
   parts.push('</svg>');
   return parts.join('\n');
 }

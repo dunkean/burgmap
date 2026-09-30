@@ -1,8 +1,9 @@
 import type { Vec2, Polygon, Polyline } from './core/geom';
 import type { Grid } from './core/grid';
 import type { Options } from './options';
+import type { NamesLayer } from './names/types';
 
-export type { Vec2, Polygon, Polyline, Grid, Options };
+export type { Vec2, Polygon, Polyline, Grid, Options, NamesLayer };
 
 export interface River { path: Polyline; width: number[]; name?: string; main?: boolean }
 
@@ -140,6 +141,8 @@ export interface World {
   bridges?: { a: Vec2; b: Vec2; width: number }[];
   urban?: UrbanLayer;
   landuse?: LandUseLayer;
+  /** Toponyms with anchor geometry (M5a). */
+  names?: NamesLayer;
   /** Stage-internal data for debug rendering (not part of the contract). */
   debug?: Record<string, unknown>;
   stats: Record<string, number | string>;

@@ -17,6 +17,9 @@ import { buildScene, Scene, PolyLayer, LineLayer, TextureLayer, textureMarks, LA
 import { selectLod, lineWidth, Lod, BAND_MIN_EDGE } from './lod';
 import { View, viewRect, Rect4 } from './view';
 import { Label, placeLabels } from './labels';
+import { buildMapLabels, placeMapLabels, MapLabel, PlacedMapLabel, estimateWidth } from './mapLabels';
+import { fontString, FONT_STACKS, KindStyle } from './labelStyles';
+import { cartoucheModel, legendModel, drawPanelCanvas, Panel } from './legend';
 
 export interface CanvasLike { width: number; height: number; getContext(id: '2d'): CanvasRenderingContext2D | null }
 
@@ -40,11 +43,17 @@ export interface FrameStats {
   buildingsCandidate: number; buildingsDrawn: boolean; textureTiles: number;
 }
 
+export interface Overlays { labels: boolean; legend: boolean; cartouche: boolean }
+
 export interface CanvasRenderer {
   scene: Scene;
   palette: Palette;
   draw(view: View): FrameStats;
   setLabels(labels: Label[]): void;
+  /** Toggle the name labels, the legend and the cartouche (defaults: labels per world.options.labels, legend per world.options.legend, cartouche on). */
+  setOverlays(o: Partial<Overlays>): void;
+  /** Labels placed in the last frame (debug / tests). */
+  lastPlaced(): PlacedMapLabel[];
   drawMinimap(target: CanvasLike, view: View, viewW: number, viewH: number): void;
   lastStats(): FrameStats;
   dispose(): void;
@@ -132,6 +141,12 @@ export function createCanvasRenderer(canvas: CanvasLike, world: World, style: St
   const cache: PathMap = new Map();
   let built = 0;
   let labels: Label[] = [];
+  const overlays: Overlays = { labels: world.options.labels !== false, legend: !!world.options.legend, cartouche: true };
+  const mapLabels: MapLabel[] = buildMapLabels(world, pal.name, pal);
+  const family = FONT_STACKS[pal.name] ?? pal.fontFamily;
+  const widthCache = new Map<string, number>();
+  let placedLast: PlacedMapLabel[] = [];
+  let legendPanel: Panel | null = null;
   let terrainImg: CanvasImageSource | null | undefined;
   let densityImg: CanvasImageSource | null | undefined;
   const patterns = new Map<string, CanvasPattern | null>();
@@ -475,9 +490,9 @@ export function createCanvasRenderer(canvas: CanvasLike, world: World, style: St
     ctx.strokeStyle = pal.frame; ctx.lineWidth = lw(2 * u, 1.5); ctx.setLineDash([]);
     ctx.strokeRect(0, 0, S, S);
 
-    // 8. labels (screen space)
+    // 8. labels, cartouche, legend (screen space)
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     if (labels.length) {
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       const measure = (text: string, size: number): number => {
         ctx.font = `${size}px ${pal.fontFamily}`;
         return ctx.measureText(text).width;
@@ -492,6 +507,27 @@ export function createCanvasRenderer(canvas: CanvasLike, world: World, style: St
         ctx.globalAlpha = 1; ctx.fillStyle = pl.label.color ?? pal.ink;
         ctx.fillText(pl.label.text, pl.x, pl.y);
       }
+    }
+    placedLast = [];
+    if (overlays.labels && mapLabels.length) {
+      const measure = (text: string, size: number, st: KindStyle): number => {
+        const key = `${st.italic ? 'i' : ''}${st.bold ? 'b' : ''}|${Math.round(size * 10)}|${text}`;
+        let w = widthCache.get(key);
+        if (w === undefined) {
+          ctx.font = fontString(st, Math.round(size * 10) / 10, family);
+          w = ctx.measureText(text).width;
+          if (widthCache.size > 20000) widthCache.clear();
+          widthCache.set(key, w);
+        }
+        return w;
+      };
+      placedLast = placeMapLabels(mapLabels, view, cssW, cssH, measure);
+      drawMapLabels(ctx, placedLast, pal, family);
+    }
+    if (overlays.cartouche) drawPanelCanvas(ctx, cartoucheModel(world, pal, sc), 12, 12, family);
+    if (overlays.legend) {
+      legendPanel ??= legendModel(world, pal);
+      drawPanelCanvas(ctx, legendPanel, 12, Math.max(12, cssH - legendPanel.h - 34), family);
     }
     ctx.setTransform(1, 0, 0, 1, 0, 0);
 
@@ -579,11 +615,52 @@ export function createCanvasRenderer(canvas: CanvasLike, world: World, style: St
     scene, palette: pal,
     draw,
     setLabels(l: Label[]) { labels = l; },
+    setOverlays(o: Partial<Overlays>) { Object.assign(overlays, o); },
+    lastPlaced: () => placedLast,
     drawMinimap,
     lastStats: () => stats,
     dispose() { cache.clear(); terrainImg = densityImg = undefined; },
   };
 }
+
+/** Glyph-by-glyph label painting (halo first): handles straight, letter-spaced, small-cap and curved text alike. */
+function drawMapLabels(ctx: CanvasRenderingContext2D, placed: PlacedMapLabel[], pal: Palette, family: string): void {
+  ctx.lineJoin = 'round'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  for (const pl of placed) {
+    const st = pl.label.st;
+    const halo = Math.max(2.4, pl.size * 0.26);
+    const curved = pl.glyphs.some((g) => g.a !== 0);
+    for (const pass of [0, 1] as const) {
+      ctx.globalAlpha = pass === 0 ? 0.8 : 1;
+      ctx.strokeStyle = pal.paper; ctx.fillStyle = st.color; ctx.lineWidth = halo;
+      let lastSize = -1;
+      for (const g of pl.glyphs) {
+        if (g.ch === ' ') continue;
+        if (g.size !== lastSize) { ctx.font = fontString(st, Math.round(g.size * 10) / 10, family); lastSize = g.size; }
+        if (curved) {
+          ctx.save(); ctx.translate(g.x, g.y); ctx.rotate(g.a);
+          if (pass === 0) ctx.strokeText(g.ch, 0, 0); else ctx.fillText(g.ch, 0, 0);
+          ctx.restore();
+        } else if (pass === 0) ctx.strokeText(g.ch, g.x, g.y); else ctx.fillText(g.ch, g.x, g.y);
+      }
+    }
+    ctx.globalAlpha = 1;
+    if (pl.symbol) {
+      const { x, y, r } = pl.symbol;
+      ctx.lineWidth = 1.1; ctx.strokeStyle = st.color; ctx.fillStyle = st.color;
+      ctx.beginPath();
+      switch (st.symbol) {
+        case 'cross': ctx.moveTo(x, y - r * 1.25); ctx.lineTo(x, y + r * 1.25); ctx.moveTo(x - r * 0.85, y - r * 0.3); ctx.lineTo(x + r * 0.85, y - r * 0.3); ctx.lineWidth = 1.6; ctx.stroke(); break;
+        case 'tri': ctx.moveTo(x, y - r * 1.1); ctx.lineTo(x + r * 1.1, y + r * 0.8); ctx.lineTo(x - r * 1.1, y + r * 0.8); ctx.closePath(); ctx.fill(); break;
+        case 'square': ctx.rect(x - r * 0.9, y - r * 0.9, r * 1.8, r * 1.8); ctx.fill(); break;
+        case 'ring': ctx.arc(x, y, r * 0.85, 0, TAU); ctx.fillStyle = pal.paper; ctx.fill(); ctx.stroke(); break;
+        default: ctx.arc(x, y, r, 0, TAU); ctx.fill(); ctx.strokeStyle = pal.paper; ctx.lineWidth = 1; ctx.stroke();
+      }
+    }
+  }
+  ctx.textAlign = 'start'; ctx.textBaseline = 'alphabetic';
+}
+void estimateWidth;
 
 function drawBridges(ctx: CanvasRenderingContext2D, world: World, pal: Palette, rect: Rect4, sc: number): void {
   const s = Math.max(1, (world.mapSize / 1600) * 0.85);

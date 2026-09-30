@@ -16,7 +16,7 @@ p.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') logs.
 p.on('pageerror', e => logs.push(`[pageerror] ${e.message}`));
 const url = base + (base.includes('?') ? '&' : '?') + query;
 await p.goto(url);
-await p.waitForFunction(() => /ms total|Error/.test(document.getElementById('status')?.textContent ?? ''), null, { timeout: 120000 });
+await p.waitForFunction(() => /Generated in|failed/.test(document.getElementById('gentime')?.textContent ?? '') || /Error/.test(document.getElementById('status')?.textContent ?? ''), null, { timeout: 120000 });
 await p.waitForTimeout(800);
 console.log('status:', await p.evaluate(() => document.getElementById('status').textContent));
 for (const sc of scales) {
