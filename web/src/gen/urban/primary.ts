@@ -446,8 +446,11 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
   if (inp.nucleusRings && market) {
     const encOK = (p: Vec2) => inMP(enc, p) && enc.every((ph) => distToRing(ph.outer, p) > 6) && !nearWater(ctx, p, 5);
     const nr = rng.fork('nrings');
+    // at least two rings between the nucleus and the edge of a small town (40 m minimum spacing)
+    const halfEnc = Math.sqrt(mpArea(enc)) / 2, halfNuc = Math.sqrt(area(market)) / 2;
+    const spacing = Math.max(40, Math.min(inp.nucleusRings.spacing, (halfEnc - halfNuc) / 2.6));
     for (let k = 1; k < 20; k++) {
-      const ringP = outsetConvex(convexHull(market), k * inp.nucleusRings.spacing * nr.range(0.92, 1.08) + inp.nucleusRings.width / 2);
+      const ringP = outsetConvex(convexHull(market), k * spacing * nr.range(0.92, 1.08) + inp.nucleusRings.width / 2);
       if (!ringP.some(encOK)) break;
       // dense resample so the runs are cut close to the enclosure and the water
       const dense: Vec2[] = [];
