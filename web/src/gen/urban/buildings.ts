@@ -20,7 +20,7 @@ import { dist } from '../core/geom';
 import type { Rng } from '../core/rng';
 import type { MorphologyParams } from './morphology';
 import type { Plot } from './plots';
-import { clipHalfPlaneConvex, isConvex } from '../geo/split';
+import { clipHalfPlaneConvex, isConvex, polyInside } from '../geo/split';
 import { intersection, intersectionS, difference, unionS } from '../geo/bool';
 import { area, cleanRing, isSimple, obb, orientPos } from '../geo/poly';
 import { ribbon } from '../geo/offset';
@@ -41,7 +41,8 @@ export function clipPlot(plot: Polygon, hps: HalfPlane[], convex: boolean): Poly
   // may produce a zero-width bridge when the result is disconnected: detect that and use a boolean instead.
   let cur = plot;
   for (const h of hps) { cur = clipHalfPlaneConvex(cur, h.p, h.n); if (cur.length < 3) return []; }
-  if (convex || isSimple(cur)) return [cur];
+  // a concave subject may give a simple result that bridges across a concavity: accept it only when it stays inside
+  if (convex || (isSimple(cur) && polyInside(plot, cur))) return [cur];
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const q of plot) { minX = Math.min(minX, q.x); maxX = Math.max(maxX, q.x); minY = Math.min(minY, q.y); maxY = Math.max(maxY, q.y); }
   const m = 5;
@@ -162,7 +163,8 @@ export function courtyardRing(Q: Polygon, rd: number, axis: Vec2): { pieces: Pol
     const ch = clipHalfPlaneConvex(court, c, nrm);
     for (const h of half) {
       const d = ch.length >= 3 ? difference(h, ch) : [{ outer: h, holes: [] }];
-      for (const ph of d) if (!ph.holes.length && area(ph.outer) > 4) pieces.push(ph.outer);
+      // (a boolean that fell back to coarse snapping may leave cm slivers outside the lot: keep exact pieces only)
+      for (const ph of d) if (!ph.holes.length && area(ph.outer) > 4 && polyInside(q, ph.outer)) pieces.push(ph.outer);
     }
   }
   if (!pieces.length) return null;

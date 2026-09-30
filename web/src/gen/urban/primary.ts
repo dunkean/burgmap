@@ -17,6 +17,7 @@ import { GridIndex } from '../geo/spatial';
 import { Streets, LAB_OPEN, LAB_WALL, LAB_WATER, jitterWidths } from './streets';
 import { wiggle, crank, axisLines, spiralArm, outsetConvex, resampleAt } from './streetops';
 import { disk } from '../geo/offset';
+import { openHoles } from './plots';
 
 export interface Quarter {
   lp: LPoly; phase: number; zone: Zone; age: number; kind: 'quarter' | 'market';
@@ -551,6 +552,8 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
       const rb = ribbon(line, 0.04);
       pieces = difference(pieces, rb);
     }
+    // pieces that still have holes are split through them (exact partition; the cuts are open land)
+    if (pieces.some((ph) => ph.holes.length)) pieces = pieces.flatMap((ph) => (ph.holes.length ? openHoles(ph) : [ph]));
     for (const ph of pieces) {
       const pts = ph.outer;
       if (area(pts) < 150) continue;

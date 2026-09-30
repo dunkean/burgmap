@@ -58,7 +58,7 @@ export interface PhasePlan {
 }
 
 export const zonesFor = (n: number): UrbanZone[] =>
-  n === 1 ? ['core'] : n === 2 ? ['core', 'middle'] : n === 3 ? ['core', 'middle', 'edge'] : ['core', 'middle', 'edge', 'edge'];
+  n === 1 ? ['core'] : n === 2 ? ['core', 'middle'] : ['core', 'middle', ...Array.from({ length: n - 2 }, () => 'edge' as UrbanZone)];
 
 const SHARES: Record<number, number[]> = { 1: [1], 2: [0.42, 0.58], 3: [0.24, 0.36, 0.4], 4: [0.13, 0.22, 0.3, 0.35] };
 

@@ -30,6 +30,7 @@ import { approachGates, axisLines, outsetConvex } from './streetops';
 import { distToRing, pointInRing, area as areaOf, inscribed, convexHull } from '../geo/poly';
 import { unionMany } from '../geo/bool';
 import { StreetGraph } from '../geo/graph';
+import { polyInside } from '../geo/split';
 import type { UrbanBuilding, PolyH, UrbanParcel } from '../types';
 
 export interface UrbanResult { layer: UrbanLayer; stats: Record<string, number | string>; debug: UrbanDebug }
@@ -408,6 +409,11 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
       buildings.push({ poly: b.poly, kind: b.kind, parcel: parcelIndexOfPlot[pi], arch: b.arch, roof: b.roof, storeys: b.storeys, material: b.material, courtyards: b.courtyards, orientation: b.orientation });
     }
   });
+  // final guard of the partition (level 4 ⊂ level 3): a footprint must lie inside its parcel
+  for (let i = buildings.length - 1; i >= 0; i--) {
+    const b = buildings[i];
+    if (b.parcel !== undefined && !polyInside(parcels[b.parcel].poly, b.poly)) buildings.splice(i, 1);
+  }
   for (const b of buildings) if (b.parcel !== undefined) perBlock[parcels[b.parcel].block].push(b.poly);
   const t6 = performance.now();
   const masses: PolyH[] = [];

@@ -144,14 +144,21 @@ export function resolvePlan(cultureId: string, pop: number, mix?: CultureMix | n
     const given = specs.map((p) => p.share ?? 0);
     shares = given.every((x) => x > 0) ? given : SHARES[Math.min(5, specs.length)] ?? specs.map(() => 1 / specs.length);
   } else if (m && mix!.mode === 'phases') {
-    // growth phases: the primary culture builds the old town, the secondary the extensions (share t)
-    const n = Math.max(2, countFor(c, pop));
-    const k2 = Math.max(1, Math.min(n - 1, Math.round(n * mix!.t)));
-    specs = [...phaseSpecs(c, n - k2), ...Array.from({ length: k2 }, () => ({ ...(m.ring ?? m.core), culture: m.id }))];
-    const base = SHARES[Math.min(5, n)];
-    const s1 = base.slice(0, n - k2).reduce((a, b) => a + b, 0), s2 = 1 - s1;
+    // growth phases: the primary culture builds the old town (all its phases, weight 1 − t), the secondary builds
+    // the extension rings around it (weight t) with its own morphology
     const t = Math.max(0.1, Math.min(0.9, mix!.t));
-    shares = base.map((x, k) => (k < n - k2 ? (x / s1) * (1 - t) : (x / s2) * t));
+    const n1 = countFor(c, pop);
+    const n2 = Math.max(1, Math.min(3, Math.round((n1 * t) / (1 - t))));
+    const ext: PhaseSpec = m.ring ? { ...m.ring, culture: m.id }
+      : { morphology: m.core.morphology, enclosure: { shape: 'organic', wall: m.core.enclosure.wall, fossil: 'street', towers: m.core.enclosure.towers }, culture: m.id };
+    specs = [...phaseSpecs(c, n1), ...Array.from({ length: n2 }, () => ({ ...ext, share: undefined }))];
+    const group = (list: PhaseSpec[], total: number): number[] => {
+      const base = SHARES[Math.min(5, list.length)];
+      const fixed = list.reduce((a, p) => a + (p.share ?? 0), 0);
+      const free = base.reduce((a, x, k) => a + (list[k].share ? 0 : x), 0);
+      return list.map((p, k) => total * (p.share ?? (free > 0 ? (base[k] / free) * Math.max(0.05, 1 - fixed) : 0)));
+    };
+    shares = [...group(specs.slice(0, n1), 1 - t), ...group(specs.slice(n1), t)];
     faubRef = m.faubourg ?? c.faubourg;
     faubShare = m.faubShare;
   } else {
@@ -160,7 +167,7 @@ export function resolvePlan(cultureId: string, pop: number, mix?: CultureMix | n
     shares = SHARES[Math.min(5, n)];
   }
   // phases with an explicit share keep it; the others share the rest in the default proportions
-  if (!override?.phases?.length && specs.some((p) => p.share)) {
+  if (!override?.phases?.length && !(m && mix!.mode === 'phases') && specs.some((p) => p.share)) {
     const fixed = specs.reduce((a, p) => a + (p.share ?? 0), 0);
     const free = shares.reduce((a, x, k) => a + (specs[k].share ? 0 : x), 0);
     shares = shares.map((x, k) => specs[k].share ?? (free > 0 ? (x / free) * Math.max(0.05, 1 - fixed) : 0));
