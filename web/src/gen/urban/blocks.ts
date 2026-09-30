@@ -14,7 +14,7 @@ import { Streets, jitterWidths, LAB_WALL } from './streets';
 import { LPoly, splitByChord, rayHit, locate } from '../geo/split';
 import { area, obb, inscribed, interiorAngle, pointInRing, cleanRing, bboxOf } from '../geo/poly';
 import { GridIndex } from '../geo/spatial';
-import { MultiPoly, union, difference, mpArea } from '../geo/bool';
+import { MultiPoly, union, difference, differenceS, mpArea } from '../geo/bool';
 import { ribbon, disk } from '../geo/offset';
 
 export type PieceKind = 'block' | 'place' | 'market';
@@ -275,6 +275,38 @@ export interface CarvedBlock { poly: Polygon; kind: PieceKind; phase: number; zo
  * Blocks = pieces minus street ribbons (§2.5), computed per piece against the ribbons of the streets around it.
  * Street space of a quarter = quarter minus its blocks.
  */
+/**
+ * Removes the tips of vertices sharper than `minAng`: the triangle beyond the point where the tip is `width`
+ * wide is cut away (exact local difference). Returns the largest remaining piece.
+ */
+export function truncateAcute(poly: Polygon, minAng: number, width: number): Polygon {
+  let cur = poly;
+  for (let guard = 0; guard < 6; guard++) {
+    let hit = -1;
+    for (let i = 0; i < cur.length; i++) if (interiorAngle(cur, i) < minAng) { hit = i; break; }
+    if (hit < 0) return cur;
+    const n = cur.length;
+    const v = cur[hit], a = cur[(hit - 1 + n) % n], b = cur[(hit + 1) % n];
+    const th = interiorAngle(cur, hit);
+    const la = dist(v, a), lb = dist(v, b);
+    const l = Math.min(width / 2 / Math.max(0.05, Math.sin(th / 2)), 0.95 * Math.min(la, lb));
+    const ua = { x: (a.x - v.x) / la, y: (a.y - v.y) / la }, ubv = { x: (b.x - v.x) / lb, y: (b.y - v.y) / lb };
+    // slightly larger triangle beyond the tip so the difference is clean
+    const tri = [
+      { x: v.x - (ua.x + ubv.x) * 0.5, y: v.y - (ua.y + ubv.y) * 0.5 },
+      { x: v.x + ua.x * l, y: v.y + ua.y * l },
+      { x: v.x + ubv.x * l, y: v.y + ubv.y * l },
+    ];
+    const res = differenceS(cur, tri);
+    if (!res.length) return [];
+    let best = res[0];
+    for (const r of res) if (area(r.outer) > area(best.outer)) best = r;
+    if (best.outer.length < 3 || Math.abs(area(best.outer) - area(cur)) < 1e-6) return cur;
+    cur = best.outer;
+  }
+  return cur;
+}
+
 /** Street ribbons cut into short chunks in a spatial index (fast local differences). */
 export type RibbonIndex = GridIndex<{ poly: Polygon; bb: { x0: number; y0: number; x1: number; y1: number } }>;
 export function buildRibbonIndex(streets: Streets, extraLines: { path: Polygon; width: number }[] = []): RibbonIndex {
@@ -312,9 +344,12 @@ export function carveBlocks(q: Quarter, pieces: Piece[], ribbonIndex: RibbonInde
       if (c.bb.x1 < bb.x0 || c.bb.x0 > bb.x1 || c.bb.y1 < bb.y0 || c.bb.y0 > bb.y1) continue;
       cutters.push(c.poly);
     }
-    const res = cutters.length ? difference(pc.lp.pts, ...cutters.map((c) => [{ outer: c, holes: [] }] as MultiPoly)) : [{ outer: pc.lp.pts, holes: [] }];
+    const res = cutters.length ? differenceS(pc.lp.pts, ...cutters.map((c) => [{ outer: c, holes: [] }] as MultiPoly)) : [{ outer: pc.lp.pts, holes: [] }];
     for (const ph of res) {
-      const poly = cleanRing(ph.outer, 0.15, 0.5);
+      let poly = cleanRing(ph.outer, 0.05, 0.5, 0.002, false);
+      if (poly.length < 3) continue;
+      // acute tips at forks become street space (a small open triangle), never needle blocks
+      poly = truncateAcute(poly, (22 * Math.PI) / 180, 5);
       if (poly.length < 3) continue;
       const a = area(poly);
       if (a < 40) continue;

@@ -9,7 +9,7 @@ import type { Rng } from '../core/rng';
 import type { UrbanCtx } from './context';
 import type { PhasePlan } from './phases';
 import type { Zone } from './morphology';
-import { MultiPoly, union, intersection, difference, mpArea } from '../geo/bool';
+import { MultiPoly, unionS as union, intersectionS as intersection, differenceS as difference, mpArea } from '../geo/bool';
 import { area, pointInRing, distToRing, convexHull, orientPos, cleanRing, segSegT } from '../geo/poly';
 import { ribbon } from '../geo/offset';
 import { LPoly, insidePieces } from '../geo/split';
@@ -188,6 +188,24 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
     let sp = smoothStreet(pl);
     if (P.streetOp === 'grid') sp = gridRadial(sp, inp.enclosure, ctx.center, inp.mainAngle) ?? sp;
     rawRadials.push({ pl: sp, major: rd.major });
+  }
+  // roads that join another road before the center must end exactly on it (smoothing moved both)
+  for (const r of rawRadials) {
+    const e = r.pl[r.pl.length - 1];
+    if (dist(e, ctx.center) < 6) continue;
+    let best: Vec2 | null = null, bd = 15;
+    for (const o of rawRadials) {
+      if (o === r) continue;
+      for (let i = 1; i < o.pl.length; i++) {
+        const a = o.pl[i - 1], b = o.pl[i];
+        const dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy || 1;
+        const t = Math.max(0, Math.min(1, ((e.x - a.x) * dx + (e.y - a.y) * dy) / l2));
+        const q = { x: a.x + t * dx, y: a.y + t * dy };
+        const d = dist(q, e);
+        if (d < bd) { bd = d; best = q; }
+      }
+    }
+    if (best) r.pl = r.pl.slice(0, -1).concat([best]);
   }
   // ---- market at the nucleus
   let market: Polygon | null = null;

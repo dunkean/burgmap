@@ -4,7 +4,7 @@ import { dist } from '../core/geom';
 import { sampleGrid } from '../core/grid';
 import type { World, SiteLayer, TerrainLayer } from '../types';
 import type { MorphologyParams } from './morphology';
-import { MultiPoly, union, intersection, unionMany } from '../geo/bool';
+import { MultiPoly, unionS as union, intersectionS as intersection, unionMany } from '../geo/bool';
 import { ribbon } from '../geo/offset';
 import { cleanRing, orientPos } from '../geo/poly';
 import { simplify } from '../core/geom';
@@ -69,7 +69,7 @@ export function makeCtx(world: World, params: MorphologyParams, radius: number):
   for (const co of terrain.coastline) { const r = cleanRing(simplify(co.concat([co[0]]), 0.5).slice(0, -1)); if (r.length >= 3) parts.push(orientPos(r)); }
   let water: MultiPoly = [];
   if (parts.length) {
-    const u = unionMany(parts);
+    const u = unionMany(parts, 24, true);
     water = intersection(u, box);
     water = union(water);
   }

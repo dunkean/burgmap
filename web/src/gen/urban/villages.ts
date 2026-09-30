@@ -9,7 +9,7 @@ import { dist, polylineLength } from '../core/geom';
 import type { Rng } from '../core/rng';
 import type { UrbanCtx } from './context';
 import type { PhasePlan } from './phases';
-import { MultiPoly, difference } from '../geo/bool';
+import { MultiPoly, differenceS as difference } from '../geo/bool';
 import { ribbon } from '../geo/offset';
 import { pointInRing, area } from '../geo/poly';
 

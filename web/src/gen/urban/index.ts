@@ -121,18 +121,24 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   const plots: Plot[] = [];
   const parcels: UrbanParcel[] = [];
   const blockInfill: number[] = [];
+  const slowest = { ms: 0, bi: -1, n: 0 };
   carved.forEach((b, bi) => {
     const br = rng.fork('blk:' + bi);
     const infill = Math.max(0, Math.min(1, params.infill[b.zone] + br.range(-0.08, 0.08)));
     blockInfill.push(infill);
     if (b.kind !== 'block') { parcels.push({ poly: b.poly, use: b.kind === 'market' ? (archetype === 'town' ? 'market' : 'green') : 'place', block: bi, zone: b.zone }); return; }
+    const tb0 = performance.now();
     const r = cutPlots(b.poly, bi, b.zone, infill, params, streets, br);
+    const tb1 = performance.now() - tb0;
+    if (tb1 > slowest.ms) { slowest.ms = tb1; slowest.bi = bi; slowest.n = b.poly.length; }
     for (const p of r.plots) { plots.push(p); parcels.push({ poly: p.poly, use: 'plot', block: bi, front: p.front, zone: b.zone }); }
     for (const g of r.back) parcels.push({ poly: g, use: 'garden', block: bi, zone: b.zone });
   });
   const t5 = performance.now();
   stats['ms.plots'] = Math.round(t5 - t4);
   stats['plots'] = plots.length;
+  stats['ms.slowestBlock'] = Math.round(slowest.ms);
+  stats['slowestBlockVerts'] = slowest.n;
 
   // ---- level 4: buildings, unioned into masses per block
   const buildings: UrbanBuilding[] = [];
@@ -151,7 +157,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   }
   const t6 = performance.now();
   const masses: PolyH[] = [];
-  perBlock.forEach((list) => { if (list.length) for (const ph of unionMany(list)) masses.push({ outer: ph.outer, holes: ph.holes }); });
+  perBlock.forEach((list) => { if (list.length) for (const ph of unionMany(list, 24, true)) masses.push({ outer: ph.outer, holes: ph.holes }); });
   const t7 = performance.now();
   stats['ms.buildings'] = Math.round(t6 - t5);
   stats['ms.masses'] = Math.round(t7 - t6);

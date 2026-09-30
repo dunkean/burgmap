@@ -11,7 +11,7 @@ import { blurGrid } from '../core/grid';
 import type { SizeName } from '../options';
 import type { Archetype, UrbanZone } from '../types';
 import type { UrbanCtx } from './context';
-import { MultiPoly, PolyH, union, intersection, difference, mpArea } from '../geo/bool';
+import { MultiPoly, PolyH, unionS as union, intersectionS as intersection, differenceS as difference, mpArea } from '../geo/bool';
 import { area, cleanRing, orientPos, pointInRing, inscribed } from '../geo/poly';
 import { ribbon } from '../geo/offset';
 import type { MorphologyParams } from './morphology';

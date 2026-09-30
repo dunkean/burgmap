@@ -10,19 +10,19 @@ import type { MorphologyParams } from './morphology';
 import type { Plot } from './plots';
 import { clipHalfPlaneConvex, isConvex } from '../geo/split';
 import { intersection } from '../geo/bool';
-import { area, inscribed, cleanRing } from '../geo/poly';
+import { area, inscribed, cleanRing, isSimple } from '../geo/poly';
+import { truncateAcute } from './blocks';
 
 export interface HalfPlane { p: Vec2; n: Vec2 }
 export interface Bldg { poly: Polygon; kind: 'house' | 'rear' | 'back' | 'barn' | 'shed' | 'garden' }
 
 /** plot ∩ ⋂ half-planes (exact Sutherland–Hodgman when the plot is convex, polygon-clipping otherwise). */
 export function clipPlot(plot: Polygon, hps: HalfPlane[], convex: boolean): Polygon[] {
-  if (convex) {
-    let cur = plot;
-    for (const h of hps) { cur = clipHalfPlaneConvex(cur, h.p, h.n); if (cur.length < 3) return []; }
-    return [cur];
-  }
-  // build the convex region from a large square around the plot
+  // Sutherland–Hodgman against a convex region is exact and never leaves the subject; for a concave subject it
+  // may produce a zero-width bridge when the result is disconnected: detect that and use a boolean instead.
+  let cur = plot;
+  for (const h of hps) { cur = clipHalfPlaneConvex(cur, h.p, h.n); if (cur.length < 3) return []; }
+  if (convex || isSimple(cur)) return [cur];
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const q of plot) { minX = Math.min(minX, q.x); maxX = Math.max(maxX, q.x); minY = Math.min(minY, q.y); maxY = Math.max(maxY, q.y); }
   const m = 5;
@@ -92,7 +92,9 @@ function buildPlotRaw(pl: Plot, infill: number, P: MorphologyParams, rng: Rng): 
   };
   const add = (hps: HalfPlane[], kind: Bldg['kind']) => {
     for (const r of clipPlot(poly, hps, convex)) {
-      const c = cleanRing(r, 0.05, 0.5, 0.01);
+      let c = cleanRing(r, 0.005, 0.5, 0.002, false);
+      if (c.length < 3) continue;
+      c = truncateAcute(c, (20 * Math.PI) / 180, 2);
       if (c.length < 3 || area(c) < 10) continue;
       if (inscribed(c, [], 0.25).r < 1.1) continue;
       out.push({ poly: c, kind });

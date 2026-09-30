@@ -40,8 +40,8 @@ export function minAngle(p: Polygon): number {
  * Snap to 1 cm, drop duplicate vertices, edges shorter than `minEdge`, and vertices whose turn is below
  * `colDeg` degrees (collinear). Keeps orientation. Returns [] when the ring degenerates.
  */
-export function cleanRing(p: Polygon, minEdge = 0.3, colDeg = 1, triMax = Infinity): Polygon {
-  let pts = p.map(snapPt);
+export function cleanRing(p: Polygon, minEdge = 0.3, colDeg = 1, triMax = Infinity, snapIt = true): Polygon {
+  let pts = snapIt ? p.map(snapPt) : p.slice();
   const colSin = Math.sin((colDeg * Math.PI) / 180);
   for (let iter = 0; iter < 6; iter++) {
     const n0 = pts.length;
@@ -65,7 +65,7 @@ export function cleanRing(p: Polygon, minEdge = 0.3, colDeg = 1, triMax = Infini
       if (lu < 1e-9 || lv < 1e-9) continue;
       const s = (ux * vy - uy * vx) / (lu * lv), co = (ux * vx + uy * vy) / (lu * lv);
       if (Math.abs(s) < colSin && co > 0 && 0.5 * Math.abs(ux * vy - uy * vx) <= triMax) continue; // straight through
-      if (Math.abs(s) < 1e-3 && co < 0) continue; // zero-width spike
+      if (co < -0.99 && 0.5 * Math.abs(ux * vy - uy * vx) < 0.05) continue; // hair / spike (out and back)
       keep.push(b);
     }
     pts = keep;

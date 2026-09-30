@@ -16,9 +16,10 @@ import { dist, polygonArea } from '../core/geom';
 import type { Rng } from '../core/rng';
 import type { MorphologyParams, Zone } from './morphology';
 import type { Streets } from './streets';
-import { MultiPoly, PolyH, intersection, difference, union, mpArea } from '../geo/bool';
-import { area, interiorAngle, pointInRing, distToSeg, inscribed, cleanRing, orientPos } from '../geo/poly';
+import { MultiPoly, PolyH, intersectionS, differenceS, unionS, mpArea } from '../geo/bool';
+import { area, interiorAngle, pointInRing, distToSeg, inscribed, cleanRing, orientPos, bboxOf, snapPt } from '../geo/poly';
 import { sweepLeft } from '../geo/offset';
+import { stitchUnion } from '../geo/stitch';
 import { rayHit, splitByChord, lpoly } from '../geo/split';
 
 export interface Plot {
@@ -183,8 +184,12 @@ export function cutPlots(
     }
     const S = sweepLeft(pl, depth, startDir, endDir, startLen, endLen);
     if (S.length < 3) continue;
-    let T = intersection(B, S);
-    if (taken.length) T = difference(T, taken);
+    let T = intersectionS(B, S);
+    if (taken.length) {
+      const tb = T.length ? bboxOf(T.flatMap((ph) => ph.outer)) : null;
+      const prev = tb ? taken.filter((ph) => { const b = bboxOf(ph.outer); return !(b.x0 > tb.x1 || b.x1 < tb.x0 || b.y0 > tb.y1 || b.y1 < tb.y0); }) : [];
+      if (prev.length) T = differenceS(T, ...prev.map((ph) => [ph] as MultiPoly));
+    }
     // keep the pieces touching the run
     T = T.filter((ph) => {
       if (area(ph.outer) < 4) return false;
@@ -195,7 +200,9 @@ export function cutPlots(
       return false;
     });
     if (!T.length) continue;
-    taken = taken.length ? union(taken, T) : T;
+    // back land fully enclosed by a territory belongs to it (plots never have holes)
+    T = T.map((ph) => ({ outer: ph.outer, holes: [] }));
+    taken = taken.concat(T);
     territories.push({ run, poly: T, depth: dz });
   }
   // ---- 4. cut territories into plots
@@ -274,49 +281,84 @@ export function cutPlots(
       }
     }
   }
-  // ---- 5. cleanup: merge tiny / narrow plots into their predecessor on the same frontage
+  // ---- 5. back land = block − territories
+  const backMP: MultiPoly = taken.length ? differenceS(B, ...taken.map((ph) => [ph] as MultiPoly)) : [{ outer: B, holes: [] }];
+  const gardens: Polygon[] = [...leftovers];
+  for (const ph of backMP) {
+    if (!ph.holes.length) { gardens.push(ph.outer); continue; }
+    // rare: back land around an island of plots; keep it exact by cutting it open with the island
+    const pieces = differenceS(ph.outer, ...ph.holes.map((h) => [{ outer: h, holes: [] }] as MultiPoly));
+    for (const q of pieces) gardens.push(q.outer);
+  }
+  // ---- 6. cleanup: slivers, acute wedges and tiny pieces merge into the neighbour sharing the longest edge
+  type Cell = { poly: Polygon; plot: Plot | null };
+  const cells: Cell[] = plots.map((p) => ({ poly: p.poly, plot: p as Plot | null })).concat(gardens.map((g) => ({ poly: g, plot: null })));
+  const minAng = (p: Polygon) => { let m = Infinity; for (let i = 0; i < p.length; i++) m = Math.min(m, interiorAngle(p, i)); return m; };
+  const isBad = (c: Cell): boolean => {
+    const a = area(c.poly);
+    if (a < (c.plot ? 35 : 25)) return true;
+    if (c.plot && dist(c.plot.front[0], c.plot.front[1]) < 3) return true;
+    if (minAng(c.poly) < (15 * Math.PI) / 180) return true;
+    return a < 600 && inscribed(c.poly, [], 0.2).r < 1.25;
+  };
+  const shared = (X: Polygon, Y: Polygon): number => {
+    let s2 = 0;
+    for (let k = 0; k < X.length; k++) {
+      const a = X[k], b = X[(k + 1) % X.length];
+      const m = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      for (let j = 0; j < Y.length; j++) if (distToSeg(m, Y[j], Y[(j + 1) % Y.length]) < 0.05) { s2 += dist(a, b); break; }
+    }
+    return s2;
+  };
+  const bbs = cells.map((c) => bboxOf(c.poly));
+  const bad = cells.map((c) => isBad(c));
+  const near = (i: number, j: number) => {
+    const a = bbs[i], b = bbs[j];
+    return !(b.x0 > a.x1 + 0.1 || b.x1 < a.x0 - 0.1 || b.y0 > a.y1 + 0.1 || b.y1 < a.y0 - 0.1);
+  };
+  for (let pass = 0; pass < 3; pass++) {
+    let changed = false;
+    for (let i = 0; i < cells.length; i++) {
+      const c = cells[i];
+      if (!c || !bad[i]) continue;
+      let best = -1, bl = 0;
+      for (let j = 0; j < cells.length; j++) {
+        if (j === i || !cells[j] || !near(i, j)) continue;
+        let sh = shared(c.poly, cells[j].poly);
+        if (sh <= 0) continue;
+        if (c.plot && cells[j].plot) sh *= 1.5; // plots prefer plots
+        if (!c.plot && cells[j].plot && area(c.poly) > 150) sh *= 0.5; // real gardens stay gardens
+        if (sh > bl) { bl = sh; best = j; }
+      }
+      if (best < 0) continue;
+      const st = stitchUnion(cells[best].poly, c.poly);
+      let merged1: Polygon | null = st;
+      if (!merged1) {
+        const u = unionS(cells[best].poly, c.poly);
+        if (u.length === 1 && !u[0].holes.length) merged1 = u[0].outer;
+      }
+      if (!merged1) continue;
+      const tgt = cells[best];
+      // a plot swallowed by a garden keeps its frontage: the merged cell becomes the plot
+      if (c.plot && !tgt.plot) tgt.plot = c.plot;
+      else if (c.plot && tgt.plot && dist(tgt.plot.front[1], c.plot.front[0]) < 0.05) { tgt.plot.front = [tgt.plot.front[0], c.plot.front[1]]; tgt.plot.sideB = c.plot.sideB; }
+      else if (c.plot && tgt.plot && dist(c.plot.front[1], tgt.plot.front[0]) < 0.05) { tgt.plot.front = [c.plot.front[0], tgt.plot.front[1]]; tgt.plot.sideA = c.plot.sideA; }
+      tgt.poly = merged1;
+      bbs[best] = bboxOf(tgt.poly);
+      bad[best] = isBad(tgt);
+      (cells as (Cell | null)[])[i] = null;
+      changed = true;
+    }
+    if (!changed) break;
+  }
   const merged: Plot[] = [];
-  for (const p of plots) {
-    const a = area(p.poly);
-    const fw = dist(p.front[0], p.front[1]);
-    const prev = merged[merged.length - 1];
-    if ((a < 35 || fw < 3) && prev && prev.block === p.block && dist(prev.front[1], p.front[0]) < 0.05) {
-      const u = union(prev.poly, p.poly);
-      if (u.length === 1 && !u[0].holes.length) {
-        prev.poly = u[0].outer; prev.front = [prev.front[0], p.front[1]]; prev.sideB = p.sideB;
-        continue;
-      }
-    }
-    merged.push(p);
-  }
-  // ---- back land = block − territories; slivers join an adjacent plot
-  const backMP: MultiPoly = taken.length ? difference(B, taken) : [{ outer: B, holes: [] }];
-  const back: Polygon[] = [...leftovers];
-  for (const ph of backMP) back.push(ph.outer);
   const keepBack: Polygon[] = [];
-  for (const bpoly of back) {
-    const a = area(bpoly);
-    const thin = a < 400 ? inscribed(bpoly, [], 0.3).r < 1.6 : false;
-    if (a >= 60 && !thin) { keepBack.push(bpoly); continue; }
-    // merge into the plot sharing the longest boundary
-    let best = -1, bl = 0;
-    for (let i = 0; i < merged.length; i++) {
-      const pp = merged[i].poly;
-      let shared = 0;
-      for (let k = 0; k < bpoly.length; k++) {
-        const m = { x: (bpoly[k].x + bpoly[(k + 1) % bpoly.length].x) / 2, y: (bpoly[k].y + bpoly[(k + 1) % bpoly.length].y) / 2 };
-        for (let j = 0; j < pp.length; j++) if (distToSeg(m, pp[j], pp[(j + 1) % pp.length]) < 0.05) { shared += dist(bpoly[k], bpoly[(k + 1) % bpoly.length]); break; }
-      }
-      if (shared > bl) { bl = shared; best = i; }
-    }
-    if (best >= 0) {
-      const u = union(merged[best].poly, bpoly);
-      if (u.length === 1 && !u[0].holes.length) { merged[best].poly = u[0].outer; continue; }
-    }
-    if (a >= 8) keepBack.push(bpoly);
+  for (const c of cells) {
+    if (!c) continue;
+    const poly = cleanRing(c.poly, 0.005, 0.5, 0.002, false);
+    const pp = poly.length >= 3 ? poly : c.poly;
+    if (c.plot) { c.plot.poly = pp; merged.push(c.plot); } else keepBack.push(pp);
   }
-  for (const p of merged) { const c = cleanRing(p.poly, 0.01, 0.5, 0.002); if (c.length >= 3) p.poly = c; }
-  void polygonArea; void mpArea; void ({} as PolyH); void ({} as Polyline);
   // side fronts: plot edges lying on a frontage edge of the block, not parallel to the main frontage
   const frontEdges: [Vec2, Vec2][] = [];
   for (let i = 0; i < n; i++) if (isF(i)) frontEdges.push([B[i], B[(i + 1) % n]]);
