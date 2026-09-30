@@ -139,7 +139,7 @@ function buildingsSvg(ub: NonNullable<World['urban']>, U: Palette['urban'], lw: 
 }
 
 const GROUND_USES = new Set(['bailey', 'causeway', 'ghat', 'castle-honmaru', 'compound:castle-honmaru', 'bailey-gate']);
-const WALL_LINES: Record<string, number> = { 'compound-wall': 1, 'citadel-wall': 2.4, 'stone-wall': 1.8, prakara: 1.6, 'ward-wall': 1.1 };
+const WALL_LINES: Record<string, number> = { 'compound-wall': 1, 'citadel-wall': 2.4, 'stone-wall': 1.8, prakara: 1.6, 'ward-wall': 1.8 };
 
 /** Compound grounds, water pieces (moats, tanks) and the moat outside the town wall (drawn under the buildings). */
 function cultureUnderlay(ub: NonNullable<World['urban']>, pal: Palette, lw: (m: number, px: number) => string): string {

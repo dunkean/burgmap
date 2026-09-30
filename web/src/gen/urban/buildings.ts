@@ -68,7 +68,7 @@ function separated(A: Polygon, B: Polygon): boolean {
 }
 
 /** Drops pieces that overlap earlier ones (fanned plots narrow with depth, so side wings may collide). */
-function dropOverlaps(list: Bldg[]): Bldg[] {
+export function dropOverlaps(list: Bldg[]): Bldg[] {
   const kept: Bldg[] = [];
   for (const b of list) {
     let ok = true;

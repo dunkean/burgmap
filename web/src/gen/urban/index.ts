@@ -394,11 +394,10 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
       }
     });
   }
-  if (hints.moat) {
-    for (const w of prim.walls) {
-      const off = outsetConvex(convexHull(w.ring), 12);
-      if (off.length >= 3) lines.push({ kind: 'moat', path: off, closed: true, width: 9 });
-    }
+  if (hints.moat && prim.walls.length) {
+    // one moat around the whole (planned, convex) enclosure
+    const off = outsetConvex(convexHull(prim.walls.flatMap((w) => w.ring)), 12);
+    if (off.length >= 3) lines.push({ kind: 'moat', path: off, closed: true, width: 9 });
   }
   // ---- elven canopy: trees over the town, clear of the houses
   const trees: UrbanTree[] = [];

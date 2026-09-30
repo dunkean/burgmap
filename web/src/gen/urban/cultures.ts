@@ -44,7 +44,7 @@ M['medina-souk'] = morph('medina-souk', M['medina'], {
 
 M['chinese'] = morph('chinese', MORPHOLOGIES['bastide'], {
   streets: ['axis', 'grid', 'wardWalls'], closeOp: 'none', plotOp: 'siheyuan', buildingOp: 'pavilionCompound', orientation: 'cardinal',
-  gridSpacing: [230, 230], laneSpacing: [0, 58], wardArea: 26000, gridSkew: 0,
+  gridSpacing: [240, 240], laneSpacing: [58, 0], wardArea: 26000, gridSkew: 0, fieldNoise: 0,
   blockSize: { core: [9000, 16000], middle: [9000, 16000], edge: [9000, 16000], faubourg: [4500, 14000] },
   minBlock: 1500, minWidth: 22, widthByRank: [14, 10, 7, 4.5, 3],
   frontage: { core: [14, 22], middle: [14, 22], edge: [15, 24] }, plotDepth: { core: [22, 34], middle: [22, 34], edge: [24, 36] }, plotTilt: 0,
@@ -103,6 +103,12 @@ M['dwarven'] = morph('dwarven', MORPHOLOGIES['bastide'], {
   arch: { typology: 'stone-hall', roof: 'flat', storeys: [1, 2], material: 'rock' },
 });
 
+M['chinese-suburb'] = morph('chinese-suburb', EO, {
+  streets: ['radials', 'organicInfill'], plotOp: 'siheyuan', buildingOp: 'pavilionCompound', extraRadials: false,
+  frontage: { faubourg: [14, 22], village: [22, 40] }, plotDepth: { faubourg: [22, 34], village: [30, 50] },
+  coverage: { faubourg: [0.4, 0.55], village: [0.2, 0.35] }, arch: { typology: 'siheyuan-hall', roof: 'tiled-hip', storeys: [1, 1], material: 'brick' },
+});
+
 Object.assign(MORPHOLOGIES, M);
 
 // ---------------------------------------------------------------- cultures
@@ -148,5 +154,26 @@ export const CULTURE_LIST: Culture[] = [
     },
     hamlet: { form: 'auto', morphology: { base: 'medina', buildingOp: 'courtyardHouse' } },
     render: { towerShape: 'square' },
+  },
+  {
+    id: 'chinese', label: 'Chinese walled city',
+    nucleus: { kind: 'drum-tower', shape: 'square', area: [1600, 4000], compound: false, ring: 10, orientation: 'cardinal' },
+    core: { morphology: 'chinese', enclosure: { shape: 'square', wall: 'wall', fossil: 'wall', towers: 'square', gates: 'cardinal', orientation: 'cardinal', aspect: [1, 1.2] } },
+    ring: { morphology: 'chinese', enclosure: { shape: 'rect', wall: 'wall', fossil: 'street', towers: 'square', gates: 'cardinal', orientation: 'cardinal', aspect: [1.1, 1.3] } },
+    phaseCount: [[0, 1], [30000, 2]],
+    faubourg: 'chinese-suburb', faubShare: [0.12, 0.1],
+    landmarks: [
+      { role: 'power', kind: 'yamen', place: 'axis-north', area: [4000, 16000], minPop: 1500 },
+      { role: 'worship', kind: 'chinese-temple', place: 'east', area: [3000, 12000], minPop: 1500 },
+      { role: 'civic', kind: 'chinese-temple', place: 'west', area: [3000, 12000], minPop: 4000 },
+      { role: 'market', kind: 'walled-market', place: 'east', area: [4000, 14000], minPop: 6000 },
+      { role: 'extra', kind: 'walled-market', place: 'west', area: [4000, 14000], minPop: 9000 },
+    ],
+    village: {
+      form: 'walled', morphology: 'chinese', enclosure: { shape: 'square', wall: 'wall', fossil: 'none', towers: 'square', gates: 'cardinal', orientation: 'cardinal' },
+      nucleus: { kind: 'none', shape: 'square', area: [0, 0], compound: false, ring: 8, orientation: 'cardinal' },
+    },
+    hamlet: { form: 'auto', morphology: 'chinese-suburb' },
+    render: { towerShape: 'square', wardWalls: true, moat: true, compoundWalls: true },
   },
 ];

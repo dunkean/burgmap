@@ -157,9 +157,10 @@ function axialCompound(lot: Polygon, cx: CompoundCtx, typ: 'yamen' | 'chinese-te
     const v0 = sgn < 0 ? -hv : hv - 5, v1 = sgn < 0 ? -hv + 5 : hv;
     out.buildings.push({ poly: rectAt(f.c, ang, -hu + 9, hu - 4, v0, v1), kind: 'landmark', parcel: 0, arch: typ + '-side-range', roof: 'tiled-hip', material: 'wood', storeys: 1 });
   }
-  if (typ === 'chinese-temple' && hv - hw > 12) {
-    const ps = 5;
-    out.buildings.push({ poly: rectAt(f.c, ang, hu - 14, hu - 14 + 2 * ps, -hv + 6, -hv + 6 + 2 * ps), kind: 'landmark', parcel: 0, arch: 'pagoda', roof: 'pagoda', material: 'brick', storeys: 7 });
+  // pagoda in the side corridor just inside the gate, clear of the halls and the side range
+  const ps = 4.5;
+  if (typ === 'chinese-temple' && hv - hw > 2 * ps + 7) {
+    out.buildings.push({ poly: rectAt(f.c, ang, -hu + 7.5, -hu + 7.5 + 2 * ps, -hv + 6, -hv + 6 + 2 * ps), kind: 'landmark', parcel: 0, arch: 'pagoda', roof: 'pagoda', material: 'brick', storeys: 7 });
   }
   out.lines.push({ kind: 'compound-wall', path: lot, closed: true, width: 1.4 });
   return out;

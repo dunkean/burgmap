@@ -13,11 +13,12 @@ import type { GuidanceField } from './field';
 import { Streets, jitterWidths, LAB_WALL } from './streets';
 import { polygonArea } from '../core/geom';
 import { LPoly, splitByChord, rayHit, locate, isConvex, segCrossesRing } from '../geo/split';
-import { area, obb, inscribed, interiorAngle, pointInRing, cleanRing, bboxOf, isSimple, convexWidth } from '../geo/poly';
+import { area, obb, inscribed, interiorAngle, pointInRing, cleanRing, bboxOf, isSimple, convexWidth, segSegT } from '../geo/poly';
 import { GridIndex } from '../geo/spatial';
 import { MultiPoly, union, difference, differenceS, intersectionS, mpArea } from '../geo/bool';
 import { ribbon, disk } from '../geo/offset';
 
+export const SPLIT_DBG: { on: boolean; why: Record<string, number> } = { on: false, why: {} };
 export type PieceKind = 'block' | 'place' | 'market' | 'church' | 'compound';
 export interface Piece { lp: LPoly; phase: number; zone: Zone; age: number; quarter: number; kind: PieceKind; level: number; morph?: MorphologyParams; compound?: string }
 
@@ -117,9 +118,21 @@ export function splitQuarter(ctx: UrbanCtx, q: Quarter, qi: number, streets: Str
           for (const q2 of pts) { const m = (q2.x - o.nucleus.x) * nrm.x + (q2.y - o.nucleus.y) * nrm.y; m0 = Math.min(m0, m); m1 = Math.max(m1, m); }
           const cm = (ob.c.x - o.nucleus.x) * nrm.x + (ob.c.y - o.nucleus.y) * nrm.y;
           const lines: number[] = [];
-          for (let k = Math.ceil((m0 + P.minWidth) / sp); k * sp < m1 - P.minWidth; k++) lines.push(k * sp + sp / 2);
+          for (let k = Math.ceil((m0 + P.minWidth - sp / 2) / sp); k * sp + sp / 2 < m1 - P.minWidth; k++) lines.push(k * sp + sp / 2);
           lines.sort((a, b) => Math.abs(a - cm) - Math.abs(b - cm));
-          for (const L of lines.slice(0, 3)) res[fi].push({ x: ob.c.x + nrm.x * (L - cm), y: ob.c.y + nrm.y * (L - cm) });
+          // a seed in each inside interval of the lattice line (non-convex pieces)
+          for (const L of lines.slice(0, 3)) {
+            const o = { x: ob.c.x + nrm.x * (L - cm), y: ob.c.y + nrm.y * (L - cm) };
+            const far = 1e4, a = { x: o.x - d.x * far, y: o.y - d.y * far }, b = { x: o.x + d.x * far, y: o.y + d.y * far };
+            const ts: number[] = [];
+            for (let i = 0; i < pts.length; i++) { const r = segSegT(a, b, pts[i], pts[(i + 1) % pts.length]); if (r) ts.push(r.t); }
+            ts.sort((x, y) => x - y);
+            for (let i = 0; i + 1 < ts.length && i < 4; i += 2) {
+              const tm = (ts[i] + ts[i + 1]) / 2;
+              if ((ts[i + 1] - ts[i]) * 2 * far < 2 * P.minWidth) continue;
+              res[fi].push({ x: a.x + (b.x - a.x) * tm, y: a.y + (b.y - a.y) * tm });
+            }
+          }
         }
         return res;
       };
@@ -184,11 +197,11 @@ export function splitQuarter(ctx: UrbanCtx, q: Quarter, qi: number, streets: Str
         if (!fwd) continue;
         chord = [seed, ...fwd.slice(1)];
       } else {
-        if (!pointInRing(pts, seed)) continue;
+        if (!pointInRing(pts, seed)) { if (SPLIT_DBG.on) SPLIT_DBG.why['seedOut'] = (SPLIT_DBG.why['seedOut'] ?? 0) + 1; continue; }
         const f = fams[fi];
         const fwd = field.trace(pts, seed, f, maxTurn);
         const back = field.trace(pts, seed, f + Math.PI, maxTurn);
-        if (!fwd || !back) continue;
+        if (!fwd || !back) { if (SPLIT_DBG.on) SPLIT_DBG.why['traceFail'] = (SPLIT_DBG.why['traceFail'] ?? 0) + 1; continue; }
         chord = back.slice().reverse().concat(fwd.slice(1));
       }
       chord = simplify(chord, 0.25);
@@ -196,11 +209,11 @@ export function splitQuarter(ctx: UrbanCtx, q: Quarter, qi: number, streets: Str
       let res = splitByChord(pc.lp, snapped, TMP_LABEL);
       let used = snapped;
       if (!res) { res = splitByChord(pc.lp, chord, TMP_LABEL); used = chord; }
-      if (!res) continue;
+      if (!res) { if (SPLIT_DBG.on) SPLIT_DBG.why['splitFail'] = (SPLIT_DBG.why['splitFail'] ?? 0) + 1; continue; }
       const la = endLabel(pc.lp, used[0]), lb = endLabel(pc.lp, used[used.length - 1]);
       // must hang off the connected network
       const ca = la >= 0 && streets.connected.has(la), cb = lb >= 0 && streets.connected.has(lb);
-      if (!ca && !cb) continue;
+      if (!ca && !cb) { if (SPLIT_DBG.on) SPLIT_DBG.why['notConnected'] = (SPLIT_DBG.why['notConnected'] ?? 0) + 1; continue; }
       if ((la === LAB_WALL && lb < 0) || (lb === LAB_WALL && la < 0)) continue;
       const [A, B] = res;
       const aA = area(A.pts), aB = area(B.pts);
@@ -219,7 +232,7 @@ export function splitQuarter(ctx: UrbanCtx, q: Quarter, qi: number, streets: Str
         const obx = obb(X.pts);
         cost += 0.25 * Math.max(0, obx.hu / Math.max(1, obx.hv) - 2.5);
       }
-      if (!ok) continue;
+      if (!ok) { if (SPLIT_DBG.on) SPLIT_DBG.why['areaAngle'] = (SPLIT_DBG.why['areaAngle'] ?? 0) + 1; continue; }
       cost += rng.float() * 0.08;
       cands.push({ A, B, chord: used, cost, placeA, placeB, rank });
     }
@@ -234,7 +247,7 @@ export function splitQuarter(ctx: UrbanCtx, q: Quarter, qi: number, streets: Str
       }
       if (ok) { best = c; break; }
     }
-    if (!best) { out.push(pc); continue; }
+    if (!best) { if (SPLIT_DBG.on) SPLIT_DBG.why[cands.length ? 'width' : 'noCand'] = (SPLIT_DBG.why[cands.length ? 'width' : 'noCand'] ?? 0) + 1; out.push(pc); continue; }
     const role = best.rank <= 2 ? 'street' : 'lane';
     const w = P.widthByRank[best.rank] * P.widthScale;
     const id = streets.add(best.chord, jitterWidths(best.chord, w, P.widthJitter, () => rng.float()), best.rank, role, pc.phase);

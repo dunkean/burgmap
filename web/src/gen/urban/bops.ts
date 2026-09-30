@@ -18,7 +18,7 @@ import { dist } from '../core/geom';
 import type { Rng } from '../core/rng';
 import type { MorphologyParams, ArchSpec } from './morphology';
 import type { Plot } from './plots';
-import { buildPlot, clipPlot, courtyardRing, rectify, shapeOf, MIN_BW, type Bldg, type HalfPlane, type CourtHint } from './buildings';
+import { buildPlot, clipPlot, courtyardRing, rectify, shapeOf, dropOverlaps, MIN_BW, type Bldg, type HalfPlane, type CourtHint } from './buildings';
 import { area, inscribed, distToRing, orientPos, cleanRing, pointInRing } from '../geo/poly';
 import { isConvex } from '../geo/split';
 import { disk } from '../geo/offset';
@@ -138,7 +138,7 @@ function pavilionCompound(pl: Plot, P: MorphologyParams, rng: Rng): ArchBldg[] {
   }
   // deep lots: a rear range (houzhaofang)
   if (D > 30 && !northAtBack) hall(rectIn(pl, f, u0, u1, back1 - 5, back1), 'siheyuan-rear-range');
-  if (D > 34 && northAtBack) hall(rectIn(pl, f, u0 + 2, u1 - 2, front0 + gateD + 7, front0 + gateD + 12), 'siheyuan-middle-hall');
+  if (D > 34 && northAtBack) hall(rectIn(pl, f, u0 + sideW + 1.2, u1 - sideW - 1.2, front0 + gateD + 7, front0 + gateD + 12), 'siheyuan-middle-hall');
   return out;
 }
 
@@ -252,6 +252,12 @@ function hall(pl: Plot, P: MorphologyParams, rng: Rng): ArchBldg[] {
 
 /** Buildings of a plot by the morphology's building operator (gardens have kind 'garden'). */
 export function buildOn(pl: Plot, cov: number, P: MorphologyParams, rng: Rng, hint?: CourtHint): ArchBldg[] {
+  const all = buildOnRaw(pl, cov, P, rng, hint);
+  const gardens = all.filter((b) => b.kind === 'garden');
+  return (dropOverlaps(all.filter((b) => b.kind !== 'garden')) as ArchBldg[]).concat(gardens);
+}
+
+function buildOnRaw(pl: Plot, cov: number, P: MorphologyParams, rng: Rng, hint?: CourtHint): ArchBldg[] {
   switch (P.buildingOp) {
     case 'courtyardHouse': return courtyardHouse(pl, P, rng);
     case 'pavilionCompound': return pavilionCompound(pl, P, rng).map((b) => ({ ...b, poly: rectify(b.poly, pl.front[0], unitT(pl), pl.nrm) ?? b.poly }));

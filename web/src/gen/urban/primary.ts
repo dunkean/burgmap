@@ -209,9 +209,8 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
     let sp = smoothStreet(pl);
     if (inp.axis) {
       // planned towns with axes: the road stops at the gate on the axis enclosure; the axes run inside
-      let big = inp.axis.extent[0];
-      for (const ph of inp.axis.extent) if (area(ph.outer) > area(big.outer)) big = ph;
-      if (big && pointInRing(big.outer, sp[sp.length - 1])) sp = cutAtPolygon(sp, big.outer);
+      const hull = orientPos(convexHull(inp.axis.extent.flatMap((ph) => ph.outer)));
+      if (hull.length >= 3 && pointInRing(hull, sp[sp.length - 1])) sp = cutAtPolygon(sp, hull);
       if (sp.length < 2 || polylineLength(sp) < 15) continue;
     } else if (inp.gridCore ? inp.gridCore.length : P.streetOp === 'grid') sp = gridRadial(sp, inp.gridCore ?? inp.enclosure, ctx.center, inp.mainAngle) ?? sp;
     if (inp.spineAmp) sp = wiggle(sp, inp.spineAmp, rng.fork('spine:' + rawRadials.length));
@@ -283,9 +282,9 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
   // ---- axes (planned towns): gate to gate through the nucleus
   const axisEnds: Vec2[] = [];
   if (inp.axis) {
-    let big = inp.axis.extent[0];
-    for (const ph of inp.axis.extent) if (area(ph.outer) > area(big.outer)) big = ph;
-    if (big) for (const ax of axisLines(ctx.center, inp.axis.angle, big.outer, market)) {
+    // the axes span the whole planned enclosure (crossing a river on bridges)
+    const hull = convexHull(inp.axis.extent.flatMap((ph) => ph.outer));
+    if (hull.length >= 3) for (const ax of axisLines(ctx.center, inp.axis.angle, orientPos(hull), market)) {
       const id = streets.add(ax.line, inp.axis.width, 0, 'radial', 1);
       radials.push(id); radialLines.push(ax.line);
       axisEnds.push(ax.end);
