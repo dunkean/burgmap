@@ -89,7 +89,7 @@ export function renderSvg(world: World, opts: RenderOptions = {}): string {
   for (const r of t.rivers) {
     if (r.path.length < 2) continue;
     const w = r.width.map((v, i) => {
-      const taper = r.main ? 1 : Math.min(1, 0.35 + (0.65 * i) / 7);
+      const taper = r.main || r.edgeFed ? 1 : Math.min(1, 0.35 + (0.65 * i) / 7);
       return Math.max(minW, v * taper);
     });
     ribbons.push(pathD(offsetRibbon(r.path, w), true));

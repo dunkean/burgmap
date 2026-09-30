@@ -121,7 +121,7 @@ export function buildScene(world: World, tileSize = TILE_SIZE): Scene {
   const centre: Polyline[] = [];
   for (const r of t.rivers) {
     if (r.path.length < 2) continue;
-    const w = r.width.map((v, i) => Math.max(minW, v * (r.main ? 1 : Math.min(1, 0.35 + (0.65 * i) / 7))));
+    const w = r.width.map((v, i) => Math.max(minW, v * (r.main || r.edgeFed ? 1 : Math.min(1, 0.35 + (0.65 * i) / 7))));
     ribbons.push(offsetRibbon(r.path, w));
     centre.push(r.path);
   }

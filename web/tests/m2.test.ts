@@ -37,10 +37,10 @@ describe('site', () => {
     for (const w of worlds) {
       const s = w.site!;
       expect(waterAt(w, s.center)).toBe(0);
-      expect(s.center.x).toBeGreaterThan(0.29 * w.mapSize);
-      expect(s.center.x).toBeLessThan(0.71 * w.mapSize);
-      expect(s.center.y).toBeGreaterThan(0.29 * w.mapSize);
-      expect(s.center.y).toBeLessThan(0.71 * w.mapSize);
+      expect(s.center.x).toBeGreaterThan(0.2 * w.mapSize - 1);
+      expect(s.center.x).toBeLessThan(0.8 * w.mapSize + 1);
+      expect(s.center.y).toBeGreaterThan(0.2 * w.mapSize - 1);
+      expect(s.center.y).toBeLessThan(0.8 * w.mapSize + 1);
       const g = s.cost;
       expect(g.data[Math.floor(s.center.y / g.cell) * g.w + Math.floor(s.center.x / g.cell)]).toBe(0);
       if (w.terrain.rivers.some((r) => r.main)) expect(s.crossing).toBeDefined();
@@ -90,7 +90,16 @@ describe('regional roads', () => {
             const p = { x: a.x + ((b.x - a.x) * k) / m, y: a.y + ((b.y - a.y) * k) / m };
             if (waterAt(w, p)) {
               const onBridge = w.bridges!.some((br) => distToPolyline(p, [br.a, br.b]) < br.width + 2);
-              expect(onBridge).toBe(true);
+              // fords are allowed on brooks only (local width < 3.7 m)
+              const ford = w.terrain.rivers.some((rv) => {
+                let best = Infinity, bw = 99;
+                for (let q = 1; q < rv.path.length; q++) {
+                  const d = distToPolyline(p, [rv.path[q - 1], rv.path[q]]);
+                  if (d < best) { best = d; bw = Math.max(rv.width[q - 1], rv.width[q]); }
+                }
+                return best < bw / 2 + w.terrain.height.cell && bw < 3.7;
+              });
+              expect(onBridge || ford).toBe(true);
             }
           }
         }

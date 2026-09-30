@@ -35,6 +35,8 @@ export function generate(options: Options, onStage?: (stage: string) => void): W
   stats['ms.site'] = r(t2 - t1);
   stats['site.x'] = r(world.site.center.x);
   stats['site.y'] = r(world.site.center.y);
+  stats['site.archetype'] = world.site.archetype;
+  stats['site.offers'] = Object.entries(world.site.offers).map(([k, v]) => `${k}:${v}`).join(' ');
   stats['site.crossing'] = world.site.crossing ? 1 : 0;
   stats['site.harbor'] = world.site.harbor ? 1 : 0;
   stats['site.citadel'] = world.site.citadelSpot ? 1 : 0;
