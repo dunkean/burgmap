@@ -35,20 +35,20 @@ export class Streets {
 
   /** Nearest street segment to p within r: street id, distance and the local half width. */
   nearest(p: Vec2, r: number, filter?: (s: StreetRec) => boolean): { s: number; d: number; hw: number; seg: number } | null {
-    let best: { s: number; d: number; hw: number; seg: number } | null = null;
-    for (const ref of this.idx.queryPt(p, r)) {
+    let bs = -1, bd = r, bseg = 0, bt = 0;
+    this.idx.forEachIn(p.x - r, p.y - r, p.x + r, p.y + r, (ref) => {
       const st = this.list[ref.s];
-      if (filter && !filter(st)) continue;
+      if (filter && !filter(st)) return;
       const a = st.path[ref.i], b = st.path[ref.i + 1];
-      const d = distToSeg(p, a, b);
-      if (d <= r && (!best || d < best.d)) {
-        const dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy;
-        const t = l2 === 0 ? 0 : Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / l2));
-        const hw = (st.widths[ref.i] * (1 - t) + st.widths[ref.i + 1] * t) / 2;
-        best = { s: ref.s, d, hw, seg: ref.i };
-      }
-    }
-    return best;
+      const dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy;
+      const t = l2 === 0 ? 0 : Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / l2));
+      const d = Math.hypot(p.x - a.x - t * dx, p.y - a.y - t * dy);
+      if (d < bd || (d === bd && bs >= 0 && ref.s < bs)) { bd = d; bs = ref.s; bseg = ref.i; bt = t; }
+    });
+    if (bs < 0) return null;
+    const st = this.list[bs];
+    const hw = (st.widths[bseg] * (1 - bt) + st.widths[bseg + 1] * bt) / 2;
+    return { s: bs, d: bd, hw, seg: bseg };
   }
 
   query(poly: Polygon, margin: number): StreetRec[] {

@@ -17,10 +17,10 @@ import type { Rng } from '../core/rng';
 import type { MorphologyParams, Zone } from './morphology';
 import type { Streets } from './streets';
 import { MultiPoly, PolyH, intersectionS, differenceS, difference, unionS, mpArea } from '../geo/bool';
-import { area, interiorAngle, pointInRing, distToSeg, inscribed, cleanRing, orientPos, bboxOf, snapPt, isSimple } from '../geo/poly';
+import { area, interiorAngle, pointInRing, distToSeg, inscribed, cleanRing, orientPos, bboxOf, snapPt, isSimple, convexWidth } from '../geo/poly';
 import { sweepLeft } from '../geo/offset';
 import { stitchUnion } from '../geo/stitch';
-import { rayHit, splitByChord, lpoly } from '../geo/split';
+import { rayHit, splitByChord, lpoly, isConvex } from '../geo/split';
 
 export interface Plot {
   poly: Polygon;
@@ -331,7 +331,8 @@ export function cutPlots(
     if (a < (c.plot ? 35 : 25)) return true;
     if (c.plot && dist(c.plot.front[0], c.plot.front[1]) < 3) return true;
     if (minAng(c.poly) < (15 * Math.PI) / 180) return true;
-    return a < 600 && inscribed(c.poly, [], 0.2).r < 1.25;
+    if (a >= 600) return false;
+    return (isConvex(c.poly, 1e-3) ? convexWidth(c.poly) / 2 : inscribed(c.poly, [], 0.2).r) < 1.25;
   };
   const shared = (X: Polygon, Y: Polygon): number => {
     let s2 = 0;

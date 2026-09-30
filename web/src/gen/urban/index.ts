@@ -109,7 +109,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   const streetSpace: MultiPoly[] = [];
   const ribIdx = buildRibbonIndex(streets, prim.walls.map((w) => ({ path: w.ring.concat([w.ring[0]]), width: 2.6 + 3 })));
   prim.quarters.forEach((q, qi) => {
-    const r = carveBlocks(q, pieces[qi], ribIdx, []);
+    const r = carveBlocks(q, pieces[qi], ribIdx, streets, (2.6 + 3) / 2);
     carved.push(...r.blocks);
     streetSpace.push(r.streetSpace);
   });

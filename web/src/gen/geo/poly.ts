@@ -240,6 +240,21 @@ export function inscribed(outer: Polygon, holes: Polygon[] = [], precision = 0.5
   return { c: { x: best.x, y: best.y }, r: Math.max(0, best.d) };
 }
 
+/** Minimal width of a convex polygon (rotating calipers, O(n²) for small n). */
+export function convexWidth(p: Polygon): number {
+  let best = Infinity;
+  const n = p.length;
+  for (let i = 0; i < n; i++) {
+    const a = p[i], b = p[(i + 1) % n];
+    const l = Math.hypot(b.x - a.x, b.y - a.y);
+    if (l < 1e-9) continue;
+    let far = 0;
+    for (const q of p) far = Math.max(far, Math.abs((b.x - a.x) * (q.y - a.y) - (b.y - a.y) * (q.x - a.x)) / l);
+    best = Math.min(best, far);
+  }
+  return best;
+}
+
 /** Shoelace area of a polygon with holes. */
 export function areaWithHoles(outer: Polygon, holes: Polygon[] = []): number {
   let a = area(outer);

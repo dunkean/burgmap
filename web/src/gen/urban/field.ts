@@ -31,14 +31,10 @@ export class GuidanceField {
     let th = Math.atan2(dy, dx);
     // blend (in 4θ space) with the tangent of the nearest primary street
     let cx = Math.cos(4 * th), cy = Math.sin(4 * th);
-    const ns = this.streets.nearest(p, 70, (s) => s.rank <= 1);
-    if (ns) {
-      const st = this.streets.list[ns.s];
-      const a = st.path[ns.seg], b = st.path[ns.seg + 1];
-      const ts = Math.atan2(b.y - a.y, b.x - a.x);
-      const w = Math.exp(-ns.d / 35) * 0.85;
-      cx = (1 - w) * cx + w * Math.cos(4 * ts);
-      cy = (1 - w) * cy + w * Math.sin(4 * ts);
+    const al = this.primaryAlign(p);
+    if (al) {
+      cx = (1 - al.w) * cx + al.w * al.c;
+      cy = (1 - al.w) * cy + al.w * al.s;
     }
     // contours on slopes: streets follow the contour, lanes climb
     const g = this.ctx.terrain.height;
@@ -54,6 +50,36 @@ export class GuidanceField {
     th = Math.atan2(cy, cx) / 4;
     // near the nucleus the radial field is singular: fade the noise in with distance
     return th + nz * smoothstep(r, 20, 120);
+  }
+
+  /**
+   * Alignment to the nearest primary street (rank ≤ 1): weight and the street tangent in 4θ form. The primary
+   * network is complete before level 2, so it is rasterized once (5 m) on first use.
+   */
+  private tiles = new Map<number, Float32Array>();
+  private primaryAlign(p: Vec2): { w: number; c: number; s: number } | null {
+    const R = 6, T = 16;
+    const gi = Math.round(p.x / R), gj = Math.round(p.y / R);
+    const ti = Math.floor(gi / T), tj = Math.floor(gj / T);
+    const key = (ti + 4096) * 8192 + (tj + 4096);
+    let tile = this.tiles.get(key);
+    if (!tile) {
+      tile = new Float32Array(T * T * 3);
+      for (let j = 0; j < T; j++) for (let i = 0; i < T; i++) {
+        const q = { x: (ti * T + i) * R, y: (tj * T + j) * R };
+        const ns = this.streets.nearest(q, 70, (st) => st.rank <= 1);
+        if (!ns) continue;
+        const st = this.streets.list[ns.s];
+        const a = st.path[ns.seg], b = st.path[ns.seg + 1];
+        const ts = Math.atan2(b.y - a.y, b.x - a.x);
+        const k = (j * T + i) * 3;
+        tile[k] = Math.exp(-ns.d / 35) * 0.85; tile[k + 1] = Math.cos(4 * ts); tile[k + 2] = Math.sin(4 * ts);
+      }
+      this.tiles.set(key, tile);
+    }
+    const k = ((gj - tj * T) * T + (gi - ti * T)) * 3;
+    if (tile[k] <= 0) return null;
+    return { w: tile[k], c: tile[k + 1], s: tile[k + 2] };
   }
 
   /** Of the four cross directions at p, the one closest to heading h. */

@@ -31,8 +31,9 @@ export function pickChurchBlock(
       if (ns && marketStreet >= 0 && ns.s === marketStreet) front += dist(p, q);
     }
     const d = dist(polygonCentroid(b.poly), nucleus);
+    if (front <= 8 && d > 400) return;
     const fit = a >= amin && a <= amax ? 1 : 0.4;
-    const s = (front > 8 ? 2 : 0) + fit - d / 250 + Math.min(1, inscribed(b.poly, [], 1).r / 25);
+    const s = (front > 8 ? 2 : 0) + fit - d / 250 + Math.min(1, inscribed(b.poly, [], 2).r / 25);
     if (s > bs) { bs = s; best = i; }
   });
   return best;

@@ -11,8 +11,9 @@ import type { Zone } from './morphology';
 import type { Quarter } from './primary';
 import type { GuidanceField } from './field';
 import { Streets, jitterWidths, LAB_WALL } from './streets';
-import { LPoly, splitByChord, rayHit, locate } from '../geo/split';
-import { area, obb, inscribed, interiorAngle, pointInRing, cleanRing, bboxOf } from '../geo/poly';
+import { polygonArea } from '../core/geom';
+import { LPoly, splitByChord, rayHit, locate, isConvex } from '../geo/split';
+import { area, obb, inscribed, interiorAngle, pointInRing, cleanRing, bboxOf, isSimple, convexWidth } from '../geo/poly';
 import { GridIndex } from '../geo/spatial';
 import { MultiPoly, union, difference, differenceS, mpArea } from '../geo/bool';
 import { ribbon, disk } from '../geo/offset';
@@ -213,7 +214,7 @@ export function splitQuarter(ctx: UrbanCtx, q: Quarter, qi: number, streets: Str
     for (const c of cands.slice(0, 6)) {
       let ok = true;
       for (const [X, isPlace] of [[c.A, c.placeA], [c.B, c.placeB]] as [LPoly, boolean][]) {
-        const w = inscribed(X.pts, [], 1).r * 2;
+        const w = isConvex(X.pts, 1e-3) ? convexWidth(X.pts) : inscribed(X.pts, [], 1).r * 2;
         if (isPlace ? w < 6 : w < P.minWidth) { ok = false; break; }
       }
       if (ok) { best = c; break; }
@@ -237,9 +238,11 @@ export function addCloses(ctx: UrbanCtx, pieces: Piece[], streets: Streets, rng:
   let n = 0;
   for (const pc of pieces) {
     if (pc.kind !== 'block') continue;
-    const ins = inscribed(pc.lp.pts, [], 1.5);
     const maxDepth = P.plotDepth[pc.zone][1];
-    if (ins.r < maxDepth * 0.95 || !rng.chance(P.deadEndRatio)) continue;
+    if (!rng.chance(P.deadEndRatio)) continue;
+    if (obb(pc.lp.pts).hv < maxDepth * 0.95) continue; // the inscribed radius never exceeds the OBB half-width
+    const ins = inscribed(pc.lp.pts, [], 1.5);
+    if (ins.r < maxDepth * 0.95) continue;
     // longest street edge
     let bi = -1, bl = 0;
     const pts = pc.lp.pts;
@@ -307,6 +310,59 @@ export function truncateAcute(poly: Polygon, minAng: number, width: number): Pol
   return cur;
 }
 
+/**
+ * Block of a piece = the piece inset edge by edge by the half-width of the street each edge lies on (the wall band
+ * for wall edges, nothing for open land or water). Exact line-offset construction; returns null when the inset is
+ * not a valid simple polygon with the same edge directions (the caller then uses the ribbon boolean).
+ */
+export function insetPiece(lp: LPoly, streets: Streets, wallHalf: number): Polygon | null {
+  const P = lp.pts, n = P.length;
+  if (n < 3) return null;
+  const d: number[] = [], u: Vec2[] = [], nn: Vec2[] = [];
+  for (let i = 0; i < n; i++) {
+    const a = P[i], b = P[(i + 1) % n];
+    const l = dist(a, b);
+    if (l < 1e-9) return null;
+    u.push({ x: (b.x - a.x) / l, y: (b.y - a.y) / l });
+    nn.push({ x: -(b.y - a.y) / l, y: (b.x - a.x) / l });
+    const lab = lp.lab[i];
+    if (lab >= 0) {
+      const m = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      const ns = streets.nearest(m, 20, (st) => st.id === lab);
+      const st = streets.list[lab];
+      d.push(ns ? ns.hw : (st?.widths[0] ?? 4) / 2);
+    } else d.push(lab === LAB_WALL ? wallHalf : 0);
+  }
+  const out: Vec2[] = [];
+  for (let i = 0; i < n; i++) {
+    const j = (i - 1 + n) % n;
+    const pa = { x: P[i].x + nn[j].x * d[j], y: P[i].y + nn[j].y * d[j] };
+    const pb = { x: P[i].x + nn[i].x * d[i], y: P[i].y + nn[i].y * d[i] };
+    const cr = u[j].x * u[i].y - u[j].y * u[i].x;
+    if (Math.abs(cr) < 0.03) {
+      // (nearly) collinear edges: a step if the offsets differ, else one point
+      if (Math.abs(d[i] - d[j]) < 0.05) out.push({ x: (pa.x + pb.x) / 2, y: (pa.y + pb.y) / 2 });
+      else { out.push(pa, pb); }
+      continue;
+    }
+    const t = ((pb.x - pa.x) * u[i].y - (pb.y - pa.y) * u[i].x) / cr;
+    const q = { x: pa.x + u[j].x * t, y: pa.y + u[j].y * t };
+    // guard against extreme miters at sharp corners
+    if (dist(q, P[i]) > 6 * Math.max(d[i], d[j], 0.5)) return null;
+    out.push(q);
+  }
+  // validity: positive, simple, every original edge keeps its direction
+  if (polygonArea(out) <= 0 || !isSimple(out)) return null;
+  const m = out.length;
+  if (m === n) {
+    for (let i = 0; i < n; i++) {
+      const a = out[i], b = out[(i + 1) % n];
+      if ((b.x - a.x) * u[i].x + (b.y - a.y) * u[i].y <= 0.02) return null;
+    }
+  }
+  return out;
+}
+
 /** Street ribbons cut into short chunks in a spatial index (fast local differences). */
 export type RibbonIndex = GridIndex<{ poly: Polygon; bb: { x0: number; y0: number; x1: number; y1: number } }>;
 export function buildRibbonIndex(streets: Streets, extraLines: { path: Polygon; width: number }[] = []): RibbonIndex {
@@ -335,10 +391,22 @@ export function buildRibbonIndex(streets: Streets, extraLines: { path: Polygon; 
   return idx;
 }
 
-export function carveBlocks(q: Quarter, pieces: Piece[], ribbonIndex: RibbonIndex, wallBands: Polygon[]): { blocks: CarvedBlock[]; streetSpace: MultiPoly } {
+export function carveBlocks(q: Quarter, pieces: Piece[], ribbonIndex: RibbonIndex, streets: Streets, wallHalf: number): { blocks: CarvedBlock[]; streetSpace: MultiPoly } {
+  const closes = streets.list.filter((s) => s.role === 'close').map((s) => { const b = bboxOf(s.path); return { x0: b.x0 - 3, y0: b.y0 - 3, x1: b.x1 + 3, y1: b.y1 + 3 }; });
   const blocks: CarvedBlock[] = [];
   for (const pc of pieces) {
     const bb = bboxOf(pc.lp.pts);
+    // fast exact path: inset every edge by the half-width of the street it borders
+    const hasClose = closes.some((c) => !(c.x0 > bb.x1 || c.x1 < bb.x0 || c.y0 > bb.y1 || c.y1 < bb.y0));
+    const ins = hasClose ? null : insetPiece(pc.lp, streets, wallHalf);
+    if (ins) {
+      let poly = truncateAcute(ins, (22 * Math.PI) / 180, 5);
+      if (poly.length >= 3 && area(poly) >= 40 && (isConvex(poly, 1e-3) ? convexWidth(poly) / 2 : inscribed(poly, [], 0.5).r) >= 2.2) {
+        poly = cleanRing(poly, 0.05, 0.5, 0.002, false);
+        if (poly.length >= 3) blocks.push({ poly, kind: pc.kind, phase: pc.phase, zone: pc.zone, age: pc.age, quarter: pc.quarter });
+      }
+      continue;
+    }
     const cutters: Polygon[] = [];
     for (const c of ribbonIndex.query(bb.x0 - 1, bb.y0 - 1, bb.x1 + 1, bb.y1 + 1)) {
       if (c.bb.x1 < bb.x0 || c.bb.x0 > bb.x1 || c.bb.y1 < bb.y0 || c.bb.y0 > bb.y1) continue;

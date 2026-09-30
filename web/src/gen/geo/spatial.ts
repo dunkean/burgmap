@@ -39,4 +39,14 @@ export class GridIndex<T> {
     return out;
   }
   queryPt(p: Vec2, r: number): T[] { return this.query(p.x - r, p.y - r, p.x + r, p.y + r); }
+  /** Visits items of the overlapped cells WITHOUT de-duplication (fast; fine for min-distance searches). */
+  forEachIn(x0: number, y0: number, x1: number, y1: number, fn: (it: T) => void): void {
+    const c = this.cell;
+    for (let ix = Math.floor(x0 / c); ix <= Math.floor(x1 / c); ix++) {
+      for (let iy = Math.floor(y0 / c); iy <= Math.floor(y1 / c); iy++) {
+        const l = this.cells.get(this.key(ix, iy));
+        if (l) for (let k = 0; k < l.length; k++) fn(l[k]);
+      }
+    }
+  }
 }

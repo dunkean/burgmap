@@ -10,7 +10,7 @@ import type { MorphologyParams } from './morphology';
 import type { Plot } from './plots';
 import { clipHalfPlaneConvex, isConvex } from '../geo/split';
 import { intersection } from '../geo/bool';
-import { area, inscribed, cleanRing, isSimple } from '../geo/poly';
+import { area, inscribed, cleanRing, isSimple, convexWidth } from '../geo/poly';
 import { truncateAcute } from './blocks';
 
 export interface HalfPlane { p: Vec2; n: Vec2 }
@@ -33,12 +33,29 @@ export function clipPlot(plot: Polygon, hps: HalfPlane[], convex: boolean): Poly
 
 const dot = (a: Vec2, b: Vec2) => a.x * b.x + a.y * b.y;
 
+/** True when some edge of either convex polygon separates them (touching allowed within 1 cm). */
+function separated(A: Polygon, B: Polygon): boolean {
+  for (const [P, Q] of [[A, B], [B, A]] as [Polygon, Polygon][]) {
+    const n = P.length;
+    for (let i = 0; i < n; i++) {
+      const a = P[i], b = P[(i + 1) % n];
+      const l = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+      // positive orientation: inside is to the left; Q is separated if all its vertices are right of (or on) the edge
+      let all = true;
+      for (const q of Q) if (((b.x - a.x) * (q.y - a.y) - (b.y - a.y) * (q.x - a.x)) / l > 0.01) { all = false; break; }
+      if (all) return true;
+    }
+  }
+  return false;
+}
+
 /** Drops pieces that overlap earlier ones (fanned plots narrow with depth, so side wings may collide). */
 function dropOverlaps(list: Bldg[]): Bldg[] {
   const kept: Bldg[] = [];
   for (const b of list) {
     let ok = true;
     for (const k of kept) {
+      if (isConvex(b.poly, 1e-3) && isConvex(k.poly, 1e-3) && separated(b.poly, k.poly)) continue;
       const r = intersection(b.poly, k.poly);
       if (r.length && r.reduce((s, ph) => s + area(ph.outer), 0) > 0.02) { ok = false; break; }
     }
@@ -96,7 +113,7 @@ function buildPlotRaw(pl: Plot, infill: number, P: MorphologyParams, rng: Rng): 
       if (c.length < 3) continue;
       c = truncateAcute(c, (20 * Math.PI) / 180, 2);
       if (c.length < 3 || area(c) < 10) continue;
-      if (inscribed(c, [], 0.25).r < 1.1) continue;
+      if ((isConvex(c, 1e-3) ? convexWidth(c) / 2 : inscribed(c, [], 0.25).r) < 1.1) continue;
       out.push({ poly: c, kind });
     }
   };
