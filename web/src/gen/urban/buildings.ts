@@ -307,7 +307,10 @@ function buildPlotRaw(pl: Plot, cov: number, P: MorphologyParams, rng: Rng, hint
   const [sb0, sb1] = P.setback[zone];
   const [bd0, bd1] = P.buildDepth[zone];
   if (zone === 'village') { farmstead(pl, poly, convex, fa, t, n, W, D, band, add, addGarden, rng); return out; }
-  const sb = rng.range(sb0, sb1);
+  // faubourg fade: toward the end of the ribbon some plots stay gardens and houses stand free, set back
+  const fade = pl.fade ?? 0;
+  if (fade > 0 && rng.chance(0.5 * Math.pow(fade, 1.4))) { addGarden(0); return out; }
+  const sb = rng.range(sb0, sb1) + (fade > 0 ? rng.range(0, 3.5) * fade : 0);
   // front depth varies plot by plot: the rear line of the street front is jagged
   const hd = Math.min(D - sb, rng.range(bd0, bd1) * (pl.wide ? 1.15 : 1) * rng.range(0.85, 1.15));
   const A = area(poly);
@@ -383,7 +386,8 @@ function buildPlotRaw(pl: Plot, cov: number, P: MorphologyParams, rng: Rng, hint
     cornerRanges();
     return out;
   }
-  add([...band(sb, sb + hd), ...(cov < 0.45 && zone === 'faubourg' && rng.chance(0.35) ? [shift(sides[s0], rng.range(1.5, 2.5))] : [])], 'house');
+  const gapW = zone === 'faubourg' ? Math.min(W - MIN_BW - 0.5, W * (fade * rng.range(0.25, 0.55) + (cov < 0.45 && rng.chance(0.35) ? 0.15 : 0))) : 0;
+  add([...band(sb, sb + hd), ...(gapW > 1 ? [shift(sides[s0], gapW)] : [])], 'house');
   cornerRanges();
   const rest = D - sb - hd;
   if (rest < 3) return out;

@@ -3,7 +3,7 @@
  * R_1 ⊂ … ⊂ R_n sized by population and density, plus faubourg ribbons along the roads outside the enclosure.
  */
 import type { Vec2, Polygon, Polyline } from '../core/geom';
-import { chaikin, simplify, dist, polylineLength } from '../core/geom';
+import { chaikin, simplify, dist, polylineLength, resample } from '../core/geom';
 import type { Rng } from '../core/rng';
 import { Noise2D } from '../core/noise';
 import { marchingSquares } from '../terrain/contour';
@@ -14,7 +14,7 @@ import type { Archetype, UrbanZone } from '../types';
 import type { UrbanCtx } from './context';
 import { MultiPoly, PolyH, unionS as union, intersectionS as intersection, differenceS as difference, mpArea } from '../geo/bool';
 import { area, cleanRing, orientPos, pointInRing, inscribed } from '../geo/poly';
-import { ribbon } from '../geo/offset';
+import { ribbon, sweepLeft } from '../geo/offset';
 import type { MorphologyParams } from './morphology';
 import { MinHeap } from '../core/pq';
 import { rasterizePolys } from '../geo/raster';
@@ -459,9 +459,11 @@ export function planFaubourgs(ctx: UrbanCtx, enclosure: MultiPoly, roads: RoadIn
   const pieces: MultiPoly[] = [];
   const paths: Polyline[] = [];
   const blocked = dilate(enclosure, glacis);
+  const noise = new Noise2D(rng.fork('faubNoise'));
   for (const c of cands) {
-    const depth = rng.range(42, 66);
-    const L = Math.min(520, (area * c.w) / W / (2 * depth * 0.85)) + glacis;
+    const depth = rng.range(40, 60);
+    // the built ribbon fades out: its mean depth over the length is about 0.62 of the depth at the gate
+    const L = Math.min(560, (area * c.w) / W / (2 * depth * 0.62 * 0.85)) + glacis;
     if (L < 70 + glacis) continue;
     // cut the outward path at length L
     const out: Polyline = [c.pts[0]];
@@ -479,12 +481,51 @@ export function planFaubourgs(ctx: UrbanCtx, enclosure: MultiPoly, roads: RoadIn
       // ribbons climb along valley roads; they stop where the ground stays steep
       if (ctx.slopeAt(out[i]) > 0.28 && (i + 1 >= out.length || ctx.slopeAt(out[i + 1]) > 0.36 || ctx.slopeAt(out[i]) > 0.45)) { cut = i; break; }
     }
-    const pts = out.slice(0, cut);
-    if (pts.length < 2 || polylineLength(pts) < 60) continue;
-    const rb = ribbon(pts, 2 * depth);
-    if (rb.length < 3) continue;
-    pieces.push([{ outer: rb, holes: [] }]);
-    paths.push(pts);
+    const pts0 = out.slice(0, cut);
+    if (pts0.length < 2 || polylineLength(pts0) < 60) continue;
+    // resample every 8 m: the depth varies along the road
+    const pts = resample(pts0, 8);
+    const cum = [0];
+    for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + dist(pts[i - 1], pts[i]));
+    const Lr = cum[cum.length - 1];
+    // per side: depth tapers with the distance from the gate (rows → gaps → scattered houses → fields), with an
+    // irregular rear line (field boundaries), and is zero where the side meets water or steep ground
+    for (const side of [1, -1]) {
+      const sideBias = rng.range(0.75, 1.2);
+      const ph = rng.range(0, 100);
+      const depths = pts.map((p, i) => {
+        const t = (cum[i] - glacis) / Math.max(1, Lr - glacis);
+        const taper = t <= 0 ? 1 : Math.max(0, 1 - 0.75 * Math.pow(Math.max(0, t), 1.3));
+        const irregular = 1 + 0.32 * noise.fbm(cum[i] / 70 + ph, side * 3.1 + ph, 2);
+        let d = depth * sideBias * taper * irregular;
+        // the end of the ribbon closes gradually
+        d *= Math.min(1, (Lr - cum[i]) / 45 + 0.25);
+        // water or steep ground on this side: the ribbon keeps to the other side
+        const a2 = pts[Math.max(0, i - 1)], b2 = pts[Math.min(pts.length - 1, i + 1)];
+        const l2 = dist(a2, b2) || 1;
+        const nx = (-(b2.y - a2.y) / l2) * side, ny = ((b2.x - a2.x) / l2) * side;
+        for (const k of [0.35, 0.7, 1]) {
+          const q = { x: p.x + nx * d * k, y: p.y + ny * d * k };
+          if (ctx.isWater(q) || ctx.slopeAt(q) > 0.3) { d = Math.min(d, Math.max(0, d * k - 12)); break; }
+        }
+        return Math.max(0, d);
+      });
+      // one-sided sweep (left of the path for side 1; the reversed path for side −1)
+      const sm = depths.map((_, i) => { let s2 = 0, n2 = 0; for (let k = Math.max(0, i - 2); k <= Math.min(depths.length - 1, i + 2); k++) { s2 += depths[k]; n2++; } return s2 / n2; });
+      // keep the stretches deeper than 14 m (the ribbon can stop and restart)
+      let run: number[] = [];
+      const flush = () => {
+        if (run.length >= 3) {
+          const pl = run.map((i) => pts[i]), dd = run.map((i) => sm[i] + 0.3);
+          const sw = side > 0 ? sweepLeft(pl, dd) : sweepLeft(pl.slice().reverse(), dd.slice().reverse());
+          if (sw.length >= 3) pieces.push([{ outer: sw, holes: [] }]);
+        }
+        run = [];
+      };
+      sm.forEach((d, i) => { if (d >= 14) run.push(i); else flush(); });
+      flush();
+    }
+    paths.push(pts0);
   }
   if (!pieces.length) return { region: [], paths: [] };
   let region = union(pieces[0], ...pieces.slice(1));

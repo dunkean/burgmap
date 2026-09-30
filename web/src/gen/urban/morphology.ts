@@ -161,7 +161,7 @@ const EO: MorphologyParams = {
   setback: { core: [0, 0.3], middle: [0, 0.8], edge: [0.5, 3], faubourg: [0.5, 3], village: [3, 10] },
   sideGap: { core: [0, 0], middle: [0, 1.2], edge: [0.5, 2.5], faubourg: [0.8, 3], village: [3, 8] },
   infill: { core: 0.92, middle: 0.62, edge: 0.38, faubourg: 0.3, village: 0.12 },
-  coverage: { core: [0.86, 0.94], middle: [0.77, 0.86], edge: [0.53, 0.67], faubourg: [0.38, 0.52], village: [0.12, 0.3] },
+  coverage: { core: [0.86, 0.94], middle: [0.77, 0.86], edge: [0.53, 0.67], faubourg: [0.5, 0.62], village: [0.12, 0.3] },
   bigCourtChance: 0.3,
   footprintConformity: { core: 0.92, middle: 0.75, edge: 0.6, faubourg: 0.4, village: 0.3 },
   ringGaps: 2.2,

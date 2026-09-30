@@ -97,7 +97,9 @@ export function splitQuarter(ctx: UrbanCtx, q: Quarter, qi: number, streets: Str
     let target = bmin * Math.pow(bmax / bmin, rng.float());
     target *= 0.85 + 0.15 * smoothstep(dn, 50, 320);
     const aspect = ob.hu / Math.max(1, ob.hv);
-    if ((A0 < target && aspect < 2.6) || A0 < 2 * P.minBlock) { out.push(pc); continue; }
+    // faubourg ribbons are long by nature: only occasional lanes cross them
+    const maxAspect = pc.zone === 'faubourg' ? 7 : 2.6;
+    if ((A0 < target && aspect < maxAspect) || A0 < 2 * P.minBlock) { out.push(pc); continue; }
     const cands: Cand[] = [];
     const th = field.angle(ob.c);
     const fams = [th, th + Math.PI / 2];

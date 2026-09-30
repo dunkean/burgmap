@@ -361,6 +361,11 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   carved.forEach((b, bi) => { if (b.compound && !compoundOf[bi]) claim(bi, b.compound, b.compound === 'great-mosque' ? QIBLA : blockMorph[bi].orientation === 'cardinal' ? 0 : blockMorph[bi].orientation === 'terrain' ? terrainAngle : mainAngle); });
 
   // ---- level 3: plots (by the block's plot operator)
+  const encRingsF = eplan.enclosure.map((ph) => ph.outer);
+  const faubFade = (p: Vec2): number => {
+    const d = encRingsF.length ? Math.min(...encRingsF.map((r) => distToRing(r, p))) : 0;
+    return Math.max(0, Math.min(1, (d - 50) / 330));
+  };
   const plots: Plot[] = [];
   const plotMorph: MorphologyParams[] = [];
   const blockInfill: number[] = [];
@@ -378,9 +383,13 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
       return;
     }
     const tb0 = performance.now();
-    const r = P.plotOp === 'courtyard' || P.plotOp === 'compound' ? cutCourtyards(b.poly, bi, b.zone, P, streets, br)
+    // faubourgs: plots widen along the ribbon (continuous rows at the gate, wider lots further out)
+    const fade = b.zone === 'faubourg' ? faubFade(interiorPoint(b.poly)) : 0;
+    const Pb = fade > 0 ? { ...P, frontage: { ...P.frontage, faubourg: [P.frontage.faubourg[0] * (1 + 0.9 * fade), P.frontage.faubourg[1] * (1 + 1.3 * fade)] as [number, number] } } : P;
+    const r = Pb.plotOp === 'courtyard' || P.plotOp === 'compound' ? cutCourtyards(b.poly, bi, b.zone, P, streets, br)
       : P.plotOp === 'garden' ? { plots: [], back: [b.poly] }
-      : cutPlots(b.poly, bi, b.zone, infill, P, streets, br);
+      : cutPlots(b.poly, bi, b.zone, infill, Pb, streets, br);
+    if (fade > 0) for (const p of r.plots) p.fade = faubFade({ x: (p.front[0].x + p.front[1].x) / 2, y: (p.front[0].y + p.front[1].y) / 2 });
     const tb1 = performance.now() - tb0;
     if (tb1 > slowest.ms) { slowest.ms = tb1; slowest.bi = bi; slowest.n = b.poly.length; }
     for (const p of r.plots) { plots.push(p); plotMorph.push(P); parcels.push({ poly: p.poly, use: 'plot', block: bi, front: p.front, zone: b.zone }); }
@@ -406,7 +415,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   };
   plots.forEach((pl, pi) => {
     const pr = rng.fork('pl:' + pi);
-    const cov = Math.max(0, Math.min(1, blockInfill[pl.block] + pr.range(-0.03, 0.03)));
+    const cov = Math.max(0, Math.min(1, (blockInfill[pl.block] + pr.range(-0.03, 0.03)) * (1 - 0.4 * (pl.fade ?? 0))));
     for (const b of buildOn(pl, cov, plotMorph[pi], pr, courtHint(pl))) {
       if (b.kind === 'garden') { plotGardens.push(b.poly); continue; }
       buildings.push({ poly: b.poly, kind: b.kind, parcel: parcelIndexOfPlot[pi], arch: b.arch, roof: b.roof, storeys: b.storeys, material: b.material, courtyards: b.courtyards, orientation: b.orientation });

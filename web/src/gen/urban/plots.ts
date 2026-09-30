@@ -41,6 +41,8 @@ export interface Plot {
   /** Frontage run within the block and order along it (neighbouring plots share courts). */
   run: number;
   order: number;
+  /** Faubourgs: 0 at the gate … 1 at the far end of the ribbon (density fades). */
+  fade?: number;
 }
 
 interface Run { pts: Vec2[]; edges: number[]; rank: number; street: number; len: number; prio: number }
