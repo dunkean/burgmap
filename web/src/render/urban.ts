@@ -124,11 +124,64 @@ function buildingsSvg(ub: NonNullable<World['urban']>, U: Palette['urban'], lw: 
     const d = ch.map((b) => pathD(b.poly, true)).join('');
     s += `<defs><pattern id="p-lmhatch" patternUnits="userSpaceOnUse" width="1.6" height="1.6" patternTransform="rotate(45)"><path d="M0 0.8H1.6" stroke="${U.landmarkEdge}" stroke-width="0.35" stroke-opacity="0.55"/></pattern></defs>`;
     s += `<g class="u-landmarks"><path d="${d}" fill="${U.landmark}" stroke="${U.landmarkEdge}" stroke-width="${lw(0.8, 0.4)}"/><path d="${d}" fill="url(#p-lmhatch)"/>`;
-    let cx = 0, cy = 0, n = 0, x0 = Infinity, x1 = -Infinity;
-    for (const b of ch) for (const q of b.poly) { cx += q.x; cy += q.y; n++; x0 = Math.min(x0, q.x); x1 = Math.max(x1, q.x); }
-    cx /= n; cy /= n;
-    const r = Math.max(2.5, (x1 - x0) * 0.08);
-    s += `<path d="M${f1(cx - r)} ${f1(cy)}H${f1(cx + r)}M${f1(cx)} ${f1(cy - r * 1.4)}V${f1(cy + r)}" stroke="${U.landmarkEdge}" stroke-width="${lw(0.9, 0.5)}"/></g>`;
+    // a cross on each church (Christian landmarks only)
+    const churches = ch.filter((b) => b.kind === 'church' || b.kind === 'cathedral');
+    if (churches.length) {
+      let cx = 0, cy = 0, n = 0, x0 = Infinity, x1 = -Infinity;
+      for (const b of churches) for (const q of b.poly) { cx += q.x; cy += q.y; n++; x0 = Math.min(x0, q.x); x1 = Math.max(x1, q.x); }
+      cx /= n; cy /= n;
+      const r = Math.max(2.5, (x1 - x0) * 0.08);
+      s += `<path d="M${f1(cx - r)} ${f1(cy)}H${f1(cx + r)}M${f1(cx)} ${f1(cy - r * 1.4)}V${f1(cy + r)}" stroke="${U.landmarkEdge}" stroke-width="${lw(0.9, 0.5)}"/>`;
+    }
+    s += '</g>';
+  }
+  return s;
+}
+
+const GROUND_USES = new Set(['bailey', 'causeway', 'ghat', 'castle-honmaru', 'compound:castle-honmaru', 'bailey-gate']);
+const WALL_LINES: Record<string, number> = { 'compound-wall': 1, 'citadel-wall': 2.4, 'stone-wall': 1.8, prakara: 1.6, 'ward-wall': 1.1 };
+
+/** Compound grounds, water pieces (moats, tanks) and the moat outside the town wall (drawn under the buildings). */
+function cultureUnderlay(ub: NonNullable<World['urban']>, pal: Palette, lw: (m: number, px: number) => string): string {
+  const U = pal.urban;
+  let s = '';
+  const moats = (ub.lines ?? []).filter((l) => l.kind === 'moat');
+  if (moats.length) s += `<path class="u-moat" d="${moats.map((l) => pathD(l.path, !!l.closed)).join('')}" fill="none" stroke="${pal.riverFill}" stroke-width="${f1(moats[0].width ?? 8)}" stroke-linejoin="miter"/>`;
+  const grounds = ub.parcels.filter((p) => (typeof p.use === 'string' && p.use.startsWith('compound:')) || GROUND_USES.has(p.use));
+  if (grounds.length) s += `<path class="u-compounds" d="${grounds.map((p) => pathD(p.poly, true)).join('')}" fill="${U.place}"/>`;
+  const sahn = ub.landmarks.filter((l) => l.kind === 'sahn');
+  if (sahn.length) s += `<path d="${sahn.map((l) => pathD(l.poly, true)).join('')}" fill="${U.place}" stroke="${U.plotLine}" stroke-width="${lw(0.2, 0.1)}"/><path d="${sahn.map((l) => pathD(l.poly, true)).join('')}" fill="url(#p-upave)"/>`;
+  const cem = ub.landmarks.filter((l) => l.kind === 'cemetery');
+  if (cem.length) s += `<path d="${cem.map((l) => pathD(l.poly, true)).join('')}" fill="${U.garden}"/><path d="${cem.map((l) => pathD(l.poly, true)).join('')}" fill="url(#p-ugrave)"/>`;
+  const water = (ub.water ?? []).map((w) => pathD(w.outer, true)).join('');
+  if (water) s += `<path class="u-water" d="${water}" fill="${pal.riverFill}" stroke="${pal.waterEdge}" stroke-width="${lw(0.5, 0.3)}"/>`;
+  const bases = ub.landmarks.filter((l) => l.kind === 'tenshu-base');
+  if (bases.length) s += `<path d="${bases.map((l) => pathD(l.poly, true)).join('')}" fill="${U.wallFill}" stroke="${U.wall}" stroke-width="${lw(0.4, 0.2)}"/>`;
+  return s;
+}
+
+/** Plan lines (enclosure walls, ward walls, prakaras, hedges, steps) and tree canopies (drawn over the buildings). */
+function cultureOverlay(ub: NonNullable<World['urban']>, pal: Palette, lw: (m: number, px: number) => string): string {
+  const U = pal.urban;
+  let s = '';
+  const byKind = new Map<string, string[]>();
+  for (const l of ub.lines ?? []) {
+    if (l.kind === 'moat') continue;
+    const k = l.kind;
+    if (!byKind.has(k)) byKind.set(k, []);
+    byKind.get(k)!.push(pathD(l.path, !!l.closed));
+  }
+  for (const [k, ds] of byKind) {
+    const d = ds.join('');
+    if (k === 'hedge') s += `<path d="${d}" fill="none" stroke="${pal.treeInk ?? '#4a6a3a'}" stroke-width="${lw(2.6, 0.8)}" stroke-opacity="0.8" stroke-dasharray="3 1.5"/>`;
+    else if (k === 'ghat-steps') s += `<path d="${d}" fill="none" stroke="${U.plotLine}" stroke-width="${lw(0.3, 0.12)}"/>`;
+    else if (k === 'terrace') s += `<path d="${d}" fill="none" stroke="${U.wall}" stroke-width="${lw(1.2, 0.5)}"/>`;
+    else s += `<path class="u-line-${k}" d="${d}" fill="none" stroke="${U.wall}" stroke-width="${lw(WALL_LINES[k] ?? 1, 0.4)}" stroke-linejoin="miter" stroke-linecap="square"/>`;
+  }
+  const trees = ub.trees ?? [];
+  if (trees.length) {
+    const fill = pal.treeFill ?? '#7f9a5a', ink = pal.treeInk ?? '#4a6a3a';
+    s += `<g class="u-canopy" fill="${fill}" fill-opacity="0.78" stroke="${ink}" stroke-width="${lw(0.35, 0.15)}">` + trees.map((t) => `<circle cx="${f1(t.x)}" cy="${f1(t.y)}" r="${f1(t.r)}"/>`).join('') + '</g>';
   }
   return s;
 }
@@ -166,7 +219,9 @@ export function urbanLayer(world: World, pal: Palette, u: number, debug: boolean
   // plot hairlines first: the buildings cover them, so they read on yards and gardens only (cadastre style)
   const plotD = ub.parcels.filter((p) => p.use === 'plot').map((p) => pathD(p.poly, true)).join('');
   s += `<path class="u-plots" d="${plotD}" fill="none" stroke="${U.plotLine}" stroke-opacity="${f1(U.plotAlpha * 0.75)}" stroke-width="${lw(U.plotW, 0.05)}"/>`;
+  s += cultureUnderlay(ub, pal, lw);
   s += buildingsSvg(ub, U, lw);
+  s += cultureOverlay(ub, pal, lw);
   // main streets keep a legible minimum width at small scales (drawn over the street space only where wider)
   const mains = ub.streets.filter((st) => st.rank <= 1 && st.role !== 'close');
   const minW = 2.4 * u;

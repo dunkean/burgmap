@@ -87,7 +87,8 @@ function courtyardHouse(pl: Plot, P: MorphologyParams, rng: Rng): ArchBldg[] {
   const A = area(pl.poly);
   const solid = (): ArchBldg[] => (shapeOf(pl.poly).w >= MIN_BW ? [tag({ poly: pl.poly, kind: 'house' }, P.arch, rng)] : []);
   if (!f || A < 70) return solid();
-  const rd = rng.range(P.roomDepth[0], P.roomDepth[1]);
+  // big lots keep a proportionate court (≈ 15–20 % of the lot), not a vast yard
+  const rd = Math.max(rng.range(P.roomDepth[0], P.roomDepth[1]), 0.28 * Math.sqrt(A));
   const ring = courtyardRing(pl.poly, rd, f.n);
   if (!ring || area(ring.court) < 9) return solid();
   const ori = Math.atan2(f.n.y, f.n.x);

@@ -131,4 +131,22 @@ export const CULTURE_LIST: Culture[] = [
     village: { form: 'auto' }, hamlet: { form: 'auto' },
     render: { towerShape: 'round' },
   },
+  {
+    id: 'medina', label: 'Medina (North Africa)',
+    nucleus: { kind: 'mosque', shape: 'rect', area: [3200, 9000], compound: true, ring: 3.2, orientation: 'qibla' },
+    core: { morphology: 'medina-souk', share: 0.1, enclosure: { shape: 'organic', wall: 'wall', fossil: 'none', towers: 'square' } },
+    ring: { morphology: 'medina', enclosure: { shape: 'organic', wall: 'wall', fossil: 'none', towers: 'square' } },
+    phaseCount: [[0, 2], [9000, 3]],
+    faubourg: 'medina', faubShare: [0.04, 0.06],
+    landmarks: [
+      { role: 'power', kind: 'kasbah', place: 'edge', area: [8000, 30000], minPop: 1500 },
+      { role: 'extra', kind: 'hammam', place: 'near-nucleus', area: [500, 3000], minPop: 2000 },
+    ],
+    village: {
+      form: 'walled', morphology: 'medina', enclosure: { shape: 'rect', wall: 'wall', fossil: 'none', towers: 'square', orientation: 'road' },
+      nucleus: { kind: 'mosque', shape: 'rect', area: [500, 900], compound: true, ring: 3, orientation: 'qibla' },
+    },
+    hamlet: { form: 'auto', morphology: { base: 'medina', buildingOp: 'courtyardHouse' } },
+    render: { towerShape: 'square' },
+  },
 ];

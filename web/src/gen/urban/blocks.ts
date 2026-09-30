@@ -19,7 +19,7 @@ import { MultiPoly, union, difference, differenceS, intersectionS, mpArea } from
 import { ribbon, disk } from '../geo/offset';
 
 export type PieceKind = 'block' | 'place' | 'market' | 'church' | 'compound';
-export interface Piece { lp: LPoly; phase: number; zone: Zone; age: number; quarter: number; kind: PieceKind; level: number; morph?: MorphologyParams }
+export interface Piece { lp: LPoly; phase: number; zone: Zone; age: number; quarter: number; kind: PieceKind; level: number; morph?: MorphologyParams; compound?: string }
 
 const TMP_LABEL = -100;
 
@@ -290,7 +290,7 @@ export function addCloses(ctx: UrbanCtx, pieces: Piece[], streets: Streets, rng:
   return n;
 }
 
-export interface CarvedBlock { poly: Polygon; kind: PieceKind; phase: number; zone: Zone; age: number; quarter: number }
+export interface CarvedBlock { poly: Polygon; kind: PieceKind; phase: number; zone: Zone; age: number; quarter: number; compound?: string }
 
 /**
  * Blocks = pieces minus street ribbons (§2.5), computed per piece against the ribbons of the streets around it.
@@ -427,7 +427,7 @@ export function carveBlocks(q: Quarter, pieces: Piece[], ribbonIndex: RibbonInde
         let poly = truncateAcute(p0, (22 * Math.PI) / 180, 5);
         if (poly.length < 3 || area(poly) < 40 || (isConvex(poly, 1e-3) ? convexWidth(poly) / 2 : inscribed(poly, [], 0.5).r) < 2.2) continue;
         poly = cleanRing(poly, 0.05, 0.5, 0.002, false);
-        if (poly.length >= 3) blocks.push({ poly, kind: pc.kind, phase: pc.phase, zone: pc.zone, age: pc.age, quarter: pc.quarter });
+        if (poly.length >= 3) blocks.push({ poly, kind: pc.kind, phase: pc.phase, zone: pc.zone, age: pc.age, quarter: pc.quarter, compound: pc.compound });
       }
       continue;
     }
@@ -450,7 +450,7 @@ export function carveBlocks(q: Quarter, pieces: Piece[], ribbonIndex: RibbonInde
       const a = area(poly);
       if (a < 40) continue;
       if (inscribed(poly, [], 0.5).r < 2.2) continue;
-      blocks.push({ poly, kind: pc.kind, phase: pc.phase, zone: pc.zone, age: pc.age, quarter: pc.quarter });
+      blocks.push({ poly, kind: pc.kind, phase: pc.phase, zone: pc.zone, age: pc.age, quarter: pc.quarter, compound: pc.compound });
     }
   }
   // street space = quarter minus its blocks (blocks lie inside the quarter): quarter with blocks as holes

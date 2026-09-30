@@ -94,7 +94,8 @@ export function culDeSacTree(pieces: Piece[], streets: Streets, rng: Rng): numbe
         for (let j = 0; j <= k && ok; j++) {
           const p = { x: a.x + ((b.x - a.x) * j) / k, y: a.y + ((b.y - a.y) * j) / k };
           const along = dist(start, p);
-          if (along < 3 + (onStreet ? (onStreet as typeof acc[number]).hw : 0)) continue;
+          // the root necessarily starts at the edge (street) or on the parent derb
+          if (along < (onStreet ? (onStreet as typeof acc[number]).hw + gapB + 1 : w + 6)) continue;
           if (!pointInRing(pts, p) || distToRing(pts, p) < gapB) ok = false;
           for (let si = 0; si < slits.length && ok; si++) if (si !== parent || along > 10) if (distPl(p, slits[si]) < (si === parent ? w + 6 : gapS)) ok = false;
         }

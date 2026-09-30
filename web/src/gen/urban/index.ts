@@ -231,6 +231,35 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   for (const st of streets.list) if (!streets.connected.has(st.id) && st.ribbon) { streets.demote(st.id); demoted++; }
   if (demoted) for (const list of pieces) for (const pc of list) pc.lp.lab = pc.lp.lab.map((l) => (l >= 0 && !streets.list[l].ribbon ? LAB_OPEN : l));
   stats['demotedStreets'] = demoted;
+  // ---- landmark lots, claimed as whole pieces before dead ends and plots (URBAN_GEOMETRY §3.4)
+  if (archetype !== 'hamlet') {
+    const allPieces = pieces.flat();
+    const encR = Math.sqrt(mpArea(eplan.enclosure) / Math.PI);
+    const encRings = eplan.enclosure.map((ph) => ph.outer);
+    const gates = prim.walls.flatMap((w) => w.gates.map((g) => g.p));
+    const taken = new Set<number>();
+    const frontsNucleus = (i: number): number => {
+      let front = 0;
+      const lp = allPieces[i].lp;
+      for (let k = 0; k < lp.pts.length; k++) if (lp.lab[k] === prim.marketStreet && prim.marketStreet >= 0) front += dist(lp.pts[k], lp.pts[(k + 1) % lp.pts.length]);
+      return front;
+    };
+    const cb: ClaimBlock[] = allPieces.map((pc) => ({ poly: pc.lp.pts, kind: pc.kind, phase: pc.phase, zone: pc.zone, quarter: pc.quarter }));
+    for (const lm of plan.landmarks) {
+      if (pop < lm.minPop) continue;
+      const count = lm.count ?? 1;
+      for (let k = 0; k < count; k++) {
+        const pi = pickBlock(cb, lm.place, lm.area, nucleus, encR, {
+          frontsNucleus, edgeDist: (p) => Math.min(...encRings.map((r) => distToRing(r, p)), 1e9), gates, rng: rng.fork('lm:' + lm.kind + k), taken,
+        });
+        if (pi < 0) break;
+        taken.add(pi);
+        allPieces[pi].kind = lm.kind === 'church' ? 'church' : 'compound';
+        allPieces[pi].compound = lm.kind;
+        cb[pi].kind = allPieces[pi].kind;
+      }
+    }
+  }
   const closes = addCloses(ctx, pieces.flat(), streets, rng.fork('closes'));
   const derbs = culDeSacTree(pieces.flat(), streets, rng.fork('derbs'));
   const carved: CarvedBlock[] = [];
@@ -269,6 +298,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   const cxFor = (bi: number, ang: number) => ({ angle: ang, pop, rng: rng.fork('cmp:' + bi), center: ctx.center });
   const claim = (bi: number, kind: string, ang: number): boolean => {
     const out = buildCompound(kind, carved[bi].poly, cxFor(bi, ang));
+    if (process.env.BURGMAP_DBG) console.log('claim', kind, bi, Math.round(areaOf(carved[bi].poly)), carved[bi].poly.length, 'parcels', out.parcels.length, 'bldgs', out.buildings.length, JSON.stringify(carved[bi].poly), ang);
     if (!out.parcels.length) return false;
     const first = parcels.length;
     for (const p of out.parcels) parcels.push({ poly: p.poly, use: p.use, block: bi, zone: carved[bi].zone });
@@ -289,37 +319,8 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     if (mbi >= 0 && ck) claim(mbi, ck, nucleusIn?.angle ?? mainAngle);
     else landmarks.push({ kind: nucleusKind === 'forum' ? 'forum' : archetype === 'town' ? 'market' : 'green', poly: prim.market });
   }
-  if (archetype !== 'hamlet') {
-    const encR = Math.sqrt(mpArea(eplan.enclosure) / Math.PI);
-    const encRings = eplan.enclosure.map((ph) => ph.outer);
-    const gates = prim.walls.flatMap((w) => w.gates.map((g) => g.p));
-    const taken = new Set<number>();
-    const frontsNucleus = (i: number): number => {
-      if (prim.marketStreet < 0) return 0;
-      let front = 0;
-      const b = carved[i].poly;
-      for (let k = 0; k < b.length; k++) {
-        const p = b[k], q = b[(k + 1) % b.length];
-        const ns = streets.nearest({ x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 }, 8);
-        if (ns && ns.s === prim.marketStreet) front += dist(p, q);
-      }
-      return front;
-    };
-    const cb: ClaimBlock[] = carved.map((b) => ({ poly: b.poly, kind: b.kind, phase: b.phase, zone: b.zone, quarter: b.quarter }));
-    for (const lm of plan.landmarks) {
-      if (pop < lm.minPop) continue;
-      const count = lm.count ?? 1;
-      for (let k = 0; k < count; k++) {
-        const bi = pickBlock(cb, lm.place, lm.area, nucleus, encR, {
-          frontsNucleus, edgeDist: (p) => Math.min(...encRings.map((r) => distToRing(r, p)), 1e9), gates, rng: rng.fork('lm:' + lm.kind + k), taken,
-        });
-        if (bi < 0) break;
-        taken.add(bi);
-        const ang = lm.kind === 'great-mosque' ? QIBLA : blockMorph[bi].orientation === 'cardinal' ? 0 : mainAngle;
-        if (claim(bi, lm.kind, ang)) cb[bi].kind = carved[bi].kind;
-      }
-    }
-  }
+  // landmark lots claimed at level 2 (see above) are filled here
+  carved.forEach((b, bi) => { if (b.compound && !compoundOf[bi]) claim(bi, b.compound, b.compound === 'great-mosque' ? QIBLA : blockMorph[bi].orientation === 'cardinal' ? 0 : mainAngle); });
 
   // ---- level 3: plots (by the block's plot operator)
   const plots: Plot[] = [];

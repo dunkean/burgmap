@@ -159,6 +159,12 @@ export function resolvePlan(cultureId: string, pop: number, mix?: CultureMix | n
     specs = phaseSpecs(c, n);
     shares = SHARES[Math.min(5, n)];
   }
+  // phases with an explicit share keep it; the others share the rest in the default proportions
+  if (!override?.phases?.length && specs.some((p) => p.share)) {
+    const fixed = specs.reduce((a, p) => a + (p.share ?? 0), 0);
+    const free = shares.reduce((a, x, k) => a + (specs[k].share ? 0 : x), 0);
+    shares = shares.map((x, k) => specs[k].share ?? (free > 0 ? (x / free) * Math.max(0.05, 1 - fixed) : 0));
+  }
   if (override && override.faubourg !== undefined) faubRef = override.faubourg;
   const phases: ResolvedPhase[] = specs.map((sp, k) => {
     let morph = resolveMorph(sp.morphology);

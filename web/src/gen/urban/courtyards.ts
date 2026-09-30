@@ -112,7 +112,10 @@ export function cutCourtyards(block: Polygon, bi: number, zone: Zone, P: Morphol
         if (frontLen(X, F).len < 3.5 || frontLen(Y, F).len < 3.5) continue;
         if (shapeOf(X).w < minW || shapeOf(Y).w < minW) continue;
         if (minAng(X) < 0.35 || minAng(Y) < 0.35) continue;
-        const sc = Math.abs(aX - aY) / A + pen + Math.abs(t - 0.5);
+        // courtyard lots are compact (inward-facing houses), not deep strips
+        const sX = shapeOf(X), sY = shapeOf(Y);
+        if (Math.max(sX.asp, sY.asp) > 4.5) continue;
+        const sc = Math.abs(aX - aY) / A + pen + Math.abs(t - 0.5) + 0.3 * (Math.max(0, sX.asp - 2) + Math.max(0, sY.asp - 2));
         if (sc < bs) { bs = sc; best = [X, Y]; }
       }
       if (best) break;

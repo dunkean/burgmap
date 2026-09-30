@@ -40,26 +40,34 @@ const inside = (lot: Polygon, pts: Polygon, margin: number) => pts.every((p) => 
  */
 function fitScale(lot: Polygon, build: (s: number) => Polygon[], margin: number): number {
   if (build(1).every((p) => inside(lot, p, margin))) return 1;
-  let lo = 0.05, hi = 1;
+  let lo = 0.001, hi = 1;
   if (!build(lo).every((p) => inside(lot, p, margin))) return 0;
-  for (let k = 0; k < 14; k++) {
+  for (let k = 0; k < 20; k++) {
     const m = (lo + hi) / 2;
     if (build(m).every((p) => inside(lot, p, margin))) lo = m; else hi = m;
   }
   return lo;
 }
 
-/** Frame of a lot: inscribed centre and the half extents of the largest centred rectangle at angle `ang`. */
+/**
+ * Frame of a lot: the largest centred rectangle at angle `ang` (around the inscribed centre), trying the lot's own
+ * aspect and more compact ones; scored by area × √(short / long side).
+ */
 function lotFrame(lot: Polygon, ang: number): { c: Vec2; hu: number; hv: number } {
   const ins = inscribed(lot, [], 1);
   const c = ins.c;
-  // grow a rectangle aspect-matched to the lot's OBB until it touches
   const ob = obb(lot);
   const ca = Math.cos(ang), sa = Math.sin(ang);
   const projU = Math.abs(ob.u.x * ca + ob.u.y * sa);
-  const ratio = projU > 0.7 ? ob.hu / Math.max(1, ob.hv) : ob.hv / Math.max(1, ob.hu);
-  const s = fitScale(lot, (k) => [rectAt(c, ang, -k * 400 * ratio, k * 400 * ratio, -k * 400, k * 400)], 0.5);
-  return { c, hu: s * 400 * ratio, hv: s * 400 };
+  const r0 = projU > 0.7 ? ob.hu / Math.max(1, ob.hv) : ob.hv / Math.max(1, ob.hu);
+  let best = { c, hu: 0, hv: 0 }, bs = -1;
+  for (const ratio of [r0, Math.sqrt(r0), 1]) {
+    const s = fitScale(lot, (k) => [rectAt(c, ang, -k * 400 * ratio, k * 400 * ratio, -k * 400, k * 400)], 0.5);
+    const hu = s * 400 * ratio, hv = s * 400;
+    const sc = hu * hv * Math.sqrt(Math.min(hu, hv) / Math.max(1e-6, Math.max(hu, hv)));
+    if (sc > bs) { bs = sc; best = { c, hu, hv }; }
+  }
+  return best;
 }
 
 const emptyOut = (lot: Polygon, use: string): CompoundOut => ({ parcels: [{ poly: lot, use }], buildings: [], lines: [], water: [], landmarks: [] });
@@ -69,16 +77,16 @@ function greatMosque(lot: Polygon, cx: CompoundCtx): CompoundOut {
   const out = emptyOut(lot, 'compound:great-mosque');
   const f = lotFrame(lot, cx.angle);
   const hu = f.hu - 1, hv = f.hv - 1;
-  if (hu < 12 || hv < 12) return out;
+  if (hu < 7 || hv < 7) return out;
   // u points to the qibla: the prayer hall is on the qibla side (55 %), the court (sahn) behind it with arcades
   const hallU0 = hu - 2 * hu * 0.55;
   const hall = rectAt(f.c, cx.angle, hallU0, hu, -hv, hv);
-  const riw = Math.min(5, hv * 0.18);
+  const riw = Math.max(2.4, Math.min(5, hv * 0.18));
   const riwaqs = [
     rectAt(f.c, cx.angle, -hu, hallU0 - 1.2, -hv, -hv + riw),
     rectAt(f.c, cx.angle, -hu, hallU0 - 1.2, hv - riw, hv),
   ];
-  const mS = Math.min(8, Math.max(5, hv * 0.22));
+  const mS = Math.min(8, Math.max(4.5, hv * 0.22));
   const minaret = rectAt(f.c, cx.angle, -hu, -hu + mS, -mS / 2, mS / 2);
   const back = [rectAt(f.c, cx.angle, -hu, -hu + riw, -hv + riw + 1.2, -mS / 2 - 1.2), rectAt(f.c, cx.angle, -hu, -hu + riw, mS / 2 + 1.2, hv - riw - 1.2)];
   out.buildings.push({ poly: hall, kind: 'landmark', parcel: 0, arch: 'hypostyle-prayer-hall', roof: 'flat', material: 'mud', storeys: 1, orientation: cx.angle });
@@ -92,9 +100,10 @@ function greatMosque(lot: Polygon, cx: CompoundCtx): CompoundOut {
 // ---------------------------------------------------------------- kasbah (walled citadel with palace)
 function kasbah(lot: Polygon, cx: CompoundCtx): CompoundOut {
   const out = emptyOut(lot, 'compound:kasbah');
+  out.lines.push({ kind: 'citadel-wall', path: lot, closed: true, width: 2.5 });
   const f = lotFrame(lot, cx.angle);
   const hu = f.hu - 2, hv = f.hv - 2;
-  if (hu < 15 || hv < 15) return out;
+  if (hu < 11 || hv < 11) return out;
   // palace: a courtyard building in the middle, a small mosque, barracks ranges along the walls
   const pw = Math.min(hu, hv) * 0.55;
   const palace = [rectAt(f.c, cx.angle, -pw, pw, -pw, -pw * 0.45), rectAt(f.c, cx.angle, -pw, pw, pw * 0.45, pw), rectAt(f.c, cx.angle, -pw, -pw * 0.55, -pw * 0.45 + 1, pw * 0.45 - 1), rectAt(f.c, cx.angle, pw * 0.55, pw, -pw * 0.45 + 1, pw * 0.45 - 1)];
@@ -102,7 +111,6 @@ function kasbah(lot: Polygon, cx: CompoundCtx): CompoundOut {
   out.buildings.push({ poly: rectAt(f.c, cx.angle, -hu, -hu + 7, -hv, hv * 0.4), kind: 'landmark', parcel: 0, arch: 'barracks', roof: 'flat', material: 'mud', storeys: 1 });
   const ms = Math.min(14, hv * 0.35);
   out.buildings.push({ poly: rectAt(f.c, cx.angle, hu - ms, hu, hv - ms, hv), kind: 'landmark', parcel: 0, arch: 'kasbah-mosque', roof: 'flat', material: 'mud', storeys: 1 });
-  out.lines.push({ kind: 'citadel-wall', path: lot, closed: true, width: 2.5 });
   return out;
 }
 
@@ -162,7 +170,7 @@ function walledMarket(lot: Polygon, cx: CompoundCtx): CompoundOut {
   const out = emptyOut(lot, 'compound:walled-market');
   const f = lotFrame(lot, 0);
   const hu = f.hu - 2, hv = f.hv - 2;
-  if (hu < 12 || hv < 12) return out;
+  if (hu < 7 || hv < 7) return out;
   const pitch = 13, rowD = 5;
   for (let v = -hv; v + rowD <= hv; v += pitch) {
     for (const [a, b] of [[-hu, -2], [2, hu]] as [number, number][]) {
@@ -452,10 +460,13 @@ export function pickBlock(
     if (b.kind !== 'block' || ctx.taken.has(i)) return;
     const a = area(b.poly);
     if (a < amin * 0.7 || a > amax * 1.8) return;
+    // landmark lots are compact
+    const rIns = inscribed(b.poly, [], 2).r;
+    if (rIns < 0.3 * Math.sqrt(amin)) return;
     const c = polygonCentroid(b.poly);
     const d = dist(c, nucleus);
     let s = a >= amin && a <= amax ? 1 : 0.3;
-    s += Math.min(1, inscribed(b.poly, [], 3).r / Math.sqrt(amin) * 0.8) + ctx.rng.float() * 0.3;
+    s += Math.min(1, (rIns / Math.sqrt(amin)) * 0.8) + ctx.rng.float() * 0.3;
     switch (place) {
       case 'adjacent-nucleus': { const fr = ctx.frontsNucleus(i); if (fr <= 8 && d > 0.45 * R) return; s += (fr > 8 ? 2 : 0) - d / Math.max(120, R * 0.4); break; }
       case 'near-nucleus': s -= d / Math.max(80, R * 0.3); break;
