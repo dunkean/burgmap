@@ -1,14 +1,17 @@
 import { Rng } from '../core/rng';
 import { Noise2D } from '../core/noise';
 import { MinHeap } from '../core/pq';
+import { priorityFloodFast, type FloodResult } from '../core/flood';
 import { Grid, createGrid, sampleGrid, slopeGrid, blurGrid, D8, D8_DIST } from '../core/grid';
-import { Vec2, Polyline, Polygon, chaikin, simplify, resample, polylineLength, dist, polygonArea } from '../core/geom';
+import { Vec2, Polyline, Polygon, chaikin, simplify, resample, polylineLength, dist, polygonArea, polygonContains, distToPolyline } from '../core/geom';
 import { Options, SIZE_PRESETS, RiverOpt } from '../options';
 import type { TerrainLayer, River } from '../types';
 import { generateHeightfield, HeightPlan, OPPOSITE, SIDE_VEC, Side } from './heightfield';
 import { marchingSquares } from './contour';
+import { resolveDepressions } from './erosion';
 
 const EPS = 0.002;
+const clamp = (v: number, a: number, b: number): number => (v < a ? a : v > b ? b : v);
 const smooth = (t: number): number => { t = t < 0 ? 0 : t > 1 ? 1 : t; return t * t * (3 - 2 * t); };
 
 /** Sea = cells at/below sea level connected to the map border through such cells. */
@@ -30,7 +33,7 @@ export function seaMaskOf(h: Grid, seaLevel: number): Uint8Array {
   return mask;
 }
 
-export interface FloodResult { filled: Float32Array; receiver: Int32Array; order: Int32Array }
+export type { FloodResult };
 
 /**
  * Priority-flood depression filling with epsilon (Barnes, Lehman & Mulla 2014).
@@ -39,41 +42,7 @@ export interface FloodResult { filled: Float32Array; receiver: Int32Array; order
  * `order` lists cells in pop order (receivers always precede their donors).
  */
 export function priorityFlood(h: Grid, sea: Uint8Array): FloodResult {
-  const { w, h: hh } = h;
-  const N = w * hh;
-  const src = h.data;
-  const filled = new Float32Array(N);
-  const receiver = new Int32Array(N).fill(-1);
-  const closed = new Uint8Array(N);
-  const order = new Int32Array(N);
-  let no = 0;
-  const heap = new MinHeap<number>();
-  for (let y = 0; y < hh; y++) {
-    for (let x = 0; x < w; x++) {
-      const i = y * w + x;
-      if (sea[i] || x === 0 || y === 0 || x === w - 1 || y === hh - 1) {
-        closed[i] = 1; filled[i] = src[i]; heap.push(i, src[i]);
-      }
-    }
-  }
-  while (heap.size) {
-    const c = heap.pop()!;
-    order[no++] = c;
-    const cx = c % w, cy = (c / w) | 0;
-    const fc = filled[c];
-    for (let k = 0; k < 8; k++) {
-      const nx = cx + D8[k][0], ny = cy + D8[k][1];
-      if (nx < 0 || ny < 0 || nx >= w || ny >= hh) continue;
-      const n = ny * w + nx;
-      if (closed[n]) continue;
-      closed[n] = 1;
-      const v = src[n];
-      filled[n] = v > fc ? v : fc + EPS;
-      receiver[n] = c;
-      heap.push(n, filled[n]);
-    }
-  }
-  return { filled, receiver, order };
+  return priorityFloodFast(h.data, h.w, h.h, sea, EPS);
 }
 
 export function accumulate(receiver: Int32Array, order: Int32Array, inject?: { idx: number; amount: number }[]): Float32Array {
@@ -122,6 +91,7 @@ function routeMainRiver(
   const range = Math.max(1, maxH - minH);
 
   const N = w * hh;
+  const noiseCache = new Float32Array(N).fill(NaN);
   const dst = new Float64Array(N).fill(Infinity);
   const prev = new Int32Array(N).fill(-1);
   const done = new Uint8Array(N);
@@ -148,7 +118,9 @@ function routeMainRiver(
       const dh = filled[n] - filled[c];
       const upSlope = dh > 0 ? dh / d : 0;
       const hn = (filled[n] - minH) / range;
-      const nm = 1 + 0.55 * rn.fbm(nx * cell / 260, ny * cell / 260, 2);
+      let nv = noiseCache[n];
+      if (nv !== nv) { nv = rn.fbm(nx * cell / 260, ny * cell / 260, 2); noiseCache[n] = nv; }
+      const nm = 1 + 0.55 * nv;
       const cost = d * (1 + 40 * upSlope + 1.5 * hn) * nm;
       const nd = dst[c] + cost;
       if (nd < dst[n]) { dst[n] = nd; prev[n] = c; heap.push(n, nd); }
@@ -218,7 +190,7 @@ function smoothAndMeander(
 interface Carved { bed: number[] }
 
 /** Carve a channel + floodplain + valley along the polyline into the height grid (in place). */
-function carveRiver(height: Grid, pl: Polyline, widths: number[], seaLevel: number, wallS: number, amp: number, filled: Float32Array): Carved {
+function carveRiver(height: Grid, pl: Polyline, widths: number[], seaLevel: number, wallS: number, amp: number, filled: Float32Array, ek = 1): Carved {
   const { w, h, cell } = height;
   const H = height.data;
   const n = pl.length;
@@ -241,13 +213,16 @@ function carveRiver(height: Grid, pl: Polyline, widths: number[], seaLevel: numb
   const bestT = new Float32Array(w * h);
   const fpHalf = (wd: number) => 1.7 * wd + 7;
   const wallSlope = wallS;
-  const maxCut = Math.max(30, amp * 0.45);
+  const maxCut = Math.min(Math.max(30, amp * 0.45), 110 * Math.sqrt(ek));
   const reach = (wd: number) => fpHalf(wd) + (maxCut / wallSlope) * 1.3;
   const touched: number[] = [];
   const seen = new Uint8Array(w * h);
-  for (let i = 0; i < n - 1; i++) {
-    const a = pl[i], b = pl[i + 1];
-    const vh = Math.max(reach(widths[i]), reach(widths[i + 1]));
+  // nearest-chord search on a decimated polyline (chords of ~2 cells); indices stay in original vertex units
+  const stride = Math.max(1, Math.round((cell * 1.6) / Math.max(1e-6, ds)));
+  for (let i = 0; i < n - 1; i += stride) {
+    const i2 = Math.min(n - 1, i + stride), span = i2 - i;
+    const a = pl[i], b = pl[i2];
+    const vh = Math.max(reach(widths[i]), reach(widths[i2]));
     const x0 = Math.max(0, Math.floor((Math.min(a.x, b.x) - vh) / cell)), x1 = Math.min(w - 1, Math.floor((Math.max(a.x, b.x) + vh) / cell));
     const y0 = Math.max(0, Math.floor((Math.min(a.y, b.y) - vh) / cell)), y1 = Math.min(h - 1, Math.floor((Math.max(a.y, b.y) + vh) / cell));
     const dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy || 1;
@@ -260,7 +235,7 @@ function carveRiver(height: Grid, pl: Polyline, widths: number[], seaLevel: numb
         const idx = yy * w + xx;
         if (d < bestD[idx]) {
           if (!seen[idx]) { seen[idx] = 1; touched.push(idx); }
-          bestD[idx] = d; bestT[idx] = i + t;
+          bestD[idx] = d; bestT[idx] = i + t * span;
         }
       }
     }
@@ -306,6 +281,132 @@ function carveRiver(height: Grid, pl: Polyline, widths: number[], seaLevel: numb
     if (bestD[idx] > fpHalf(lerpAt(widths, f)) * 1.15) H[idx] = origSave[k] - bl.data[idx];
   });
   return { bed };
+}
+
+/** Drown the lower course of the main river: a funnel-shaped estuary below sea level that widens to the mouth. */
+function carveEstuary(height: Grid, pl: Polyline, widths: number[], lest: number): void {
+  const { w, h, cell } = height;
+  const H = height.data;
+  const n = pl.length;
+  // arc length measured back from the mouth (last vertex)
+  const sFrom = new Array<number>(n).fill(0);
+  for (let i = n - 2; i >= 0; i--) sFrom[i] = sFrom[i + 1] + dist(pl[i], pl[i + 1]);
+  const start = sFrom.findIndex((s) => s <= lest);
+  if (start < 0) return;
+  const rAt = (i: number) => {
+    const t = Math.min(1, sFrom[i] / lest);
+    return (widths[i] / 2) * (1 + 6 * Math.pow(1 - t, 1.5)) + 2;
+  };
+  for (let i = Math.max(0, start - 1); i < n - 1; i++) {
+    const a = pl[i], b = pl[i + 1];
+    const rm = Math.max(rAt(i), rAt(i + 1)) * 1.9;
+    const x0 = Math.max(0, Math.floor((Math.min(a.x, b.x) - rm) / cell)), x1 = Math.min(w - 1, Math.floor((Math.max(a.x, b.x) + rm) / cell));
+    const y0 = Math.max(0, Math.floor((Math.min(a.y, b.y) - rm) / cell)), y1 = Math.min(h - 1, Math.floor((Math.max(a.y, b.y) + rm) / cell));
+    const dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy || 1;
+    for (let yy = y0; yy <= y1; yy++) for (let xx = x0; xx <= x1; xx++) {
+      const px = (xx + 0.5) * cell, py = (yy + 0.5) * cell;
+      const t = Math.max(0, Math.min(1, ((px - a.x) * dx + (py - a.y) * dy) / l2));
+      const d = Math.hypot(px - a.x - t * dx, py - a.y - t * dy);
+      const r = rAt(i) * (1 - t) + rAt(i + 1) * t;
+      if (d > r * 1.9) continue;
+      const s = sFrom[i] * (1 - t) + sFrom[i + 1] * t;
+      const f = smooth((lest - s) / (0.6 * lest));
+      const tgt = -0.7 + 3.2 * (1 - f);
+      const mix = smooth((d - r) / (0.9 * r));
+      const v = tgt * (1 - mix) + H[yy * w + xx] * mix;
+      const idx = yy * w + xx;
+      if (v < H[idx]) H[idx] = v;
+    }
+  }
+}
+
+interface LakeSite { idx: number }
+
+/** Picks concave valley-floor spots on medium drainage lines and carves a bowl with a lowest rim (the outlet). */
+function carveLakes(
+  height: Grid, acc1: Float32Array, sea: Uint8Array, mainPoly: Polyline | null, count: number, rng: Rng, ek: number, amp: number,
+): LakeSite[] {
+  const { w, cell } = height;
+  const H = height.data;
+  const N = w * w;
+  const ra0 = Math.max(3.5 * cell, 85 * Math.pow(ek, 0.75));
+  const ringR = Math.max(4, Math.round((ra0 * 3.2) / cell));
+  const margin = Math.floor(w * 0.13) + ringR;
+  const lo = 0.02 * N, hi = 0.25 * N;
+  const seed = rng.int(1, 1 << 30);
+  const dirs: [number, number][] = [];
+  for (let k = 0; k < 12; k++) dirs.push([Math.cos((k * Math.PI) / 6), Math.sin((k * Math.PI) / 6)]);
+  const cands: { i: number; score: number; ax: number; ay: number }[] = [];
+  const step = w > 400 ? 2 : 1;
+  for (let y = margin; y < w - margin; y += step) for (let x = margin; x < w - margin; x += step) {
+    const i = y * w + x;
+    if (sea[i] || H[i] < Math.max(4, 0.05 * amp) || acc1[i] < lo || acc1[i] > hi) continue;
+    let mh = 0, mn = Infinity, mx = -Infinity, seaNear = false, gx = 0, gy = 0;
+    for (const [dx, dy] of dirs) {
+      const j = (y + Math.round(dy * ringR)) * w + x + Math.round(dx * ringR);
+      const v = H[j];
+      if (sea[j] || v < 1) seaNear = true;
+      mh += v; if (v < mn) mn = v; if (v > mx) mx = v;
+      gx += dx * v; gy += dy * v;
+    }
+    if (seaNear) continue;
+    mh /= dirs.length;
+    const R = ringR * cell;
+    const conc = (mh - H[i]) / R;
+    const tilt = (mx - mn) / (2 * R);
+    if (conc < 0.012 || tilt > 0.09) continue;
+    const jit = ((Math.imul(i ^ seed, 2654435761) >>> 0) / 4294967296);
+    cands.push({ i, score: conc * 8 - tilt * 5 + jit * 0.5, ax: -gx, ay: -gy });
+  }
+  void N;
+  cands.sort((a, b) => b.score - a.score || a.i - b.i);
+  const out: LakeSite[] = [];
+  const centers: { x: number; y: number }[] = [];
+  const mapSize = w * cell;
+  for (const c of cands.slice(0, 400)) {
+    if (out.length >= count) break;
+    const cx = (c.i % w + 0.5) * cell, cy = (((c.i / w) | 0) + 0.5) * cell;
+    if (mainPoly && distToPolyline({ x: cx, y: cy }, mainPoly) < 140 * Math.sqrt(ek) + ra0 * 2) continue;
+    if (centers.some((o) => Math.hypot(o.x - cx, o.y - cy) < 0.3 * mapSize)) continue;
+    // elongated along the valley (downhill) direction, with a lumpy shoreline
+    const ang = Math.atan2(c.ay, c.ax);
+    const ra = ra0 * rng.range(0.9, 1.6), rb = ra0 * rng.range(0.55, 0.9);
+    const ca = Math.cos(ang), sa = Math.sin(ang);
+    const ph1 = rng.range(0, 6.28), ph2 = rng.range(0, 6.28);
+    const wob = (th: number) => 1 + 0.13 * Math.sin(3 * th + ph1) + 0.08 * Math.sin(5 * th + ph2);
+    // level = lowest rim sample; refuse hillsides where the rim drops steeply
+    let zMin = Infinity, zMax = -Infinity;
+    for (let k = 0; k < 24; k++) {
+      const th = (k * 2 * Math.PI) / 24;
+      const lx = Math.cos(th) * ra * 1.2 * wob(th), ly = Math.sin(th) * rb * 1.2 * wob(th);
+      const v = sampleGrid(height, cx + lx * ca - ly * sa, cy + lx * sa + ly * ca);
+      if (v < zMin) zMin = v;
+      if (v > zMax) zMax = v;
+    }
+    if ((zMax - zMin) / (2 * ra) > 0.07 || zMin < 2) continue;
+    const level = zMin;
+    const D = rng.range(4.5, 11) * Math.pow(ek, 0.3);
+    const rm = Math.max(ra, rb) * 1.9;
+    const x0 = Math.max(0, Math.floor((cx - rm) / cell)), x1 = Math.min(w - 1, Math.floor((cx + rm) / cell));
+    const y0 = Math.max(0, Math.floor((cy - rm) / cell)), y1 = Math.min(w - 1, Math.floor((cy + rm) / cell));
+    for (let yy = y0; yy <= y1; yy++) for (let xx = x0; xx <= x1; xx++) {
+      const px = (xx + 0.5) * cell - cx, py = (yy + 0.5) * cell - cy;
+      const lx = px * ca + py * sa, ly = -px * sa + py * ca;
+      const th = Math.atan2(ly, lx);
+      const u = Math.hypot(lx / ra, ly / rb) / wob(th);
+      const idx = yy * w + xx;
+      if (u < 1) {
+        const tgt = level - D * (1 - u * u);
+        if (tgt < H[idx]) H[idx] = tgt;
+      } else if (u < 1.7 && H[idx] > level) {
+        const t = smooth((u - 1) / 0.7);
+        H[idx] = level + (H[idx] - level) * t;
+      }
+    }
+    out.push({ idx: c.i });
+    centers.push({ x: cx, y: cy });
+  }
+  return out;
 }
 
 function labelLakes(depth: Float32Array, sea: Uint8Array, w: number, h: number, thr: number): { comp: Int32Array; sizes: number[] } {
@@ -389,16 +490,39 @@ function incise(height: Grid, amp: number, strength: number): void {
 
 export interface TerrainTimings { height: number; hydrology: number; rivers: number; polygons: number }
 
+/** Grid resolution for an extent: ~4 m cells for small maps, coarser for big ones, capped at MAX_GRID. */
+export const MAX_GRID = 768;
+export function gridForExtent(mapSize: number): number {
+  const cellTarget = mapSize <= 1600 ? 4 : 4 * Math.pow(mapSize / 1600, 0.63);
+  return Math.max(240, Math.min(MAX_GRID, Math.round(mapSize / cellTarget)));
+}
+
+export type LakesOpt = 'auto' | 'none' | 'some';
+
+/** Generation entry point for the standard presets: extent comes from the size option. */
 export function generateTerrain(opts: Options, root: Rng): { terrain: TerrainLayer; timings: TerrainTimings } {
-  const preset = SIZE_PRESETS[opts.size];
-  const mapSize = preset.mapSize, n = preset.grid;
-  const rng = root.fork('terrain');
+  return terrainForExtent(opts, SIZE_PRESETS[opts.size].mapSize, root);
+}
+
+/**
+ * Pure terrain + hydrology for any extent (600 m .. 40 km). Noise wavelengths are in meters, so a big
+ * map shows regional relief (several valleys, big river, bays) and a small one local relief.
+ * `opts.lakes` ('auto' | 'none' | 'some', not part of the typed Options yet) is read when present.
+ */
+export function terrainForExtent(opts: Options, mapSize: number, root?: Rng): { terrain: TerrainLayer; timings: TerrainTimings } {
+  const n = gridForExtent(mapSize);
+  const rng = (root ?? new Rng('burgmap:' + opts.seed)).fork('terrain');
+  const lakesOpt: LakesOpt = ((opts as unknown as { lakes?: LakesOpt }).lakes) ?? 'auto';
   const t0 = performance.now();
   const { height, plan } = generateHeightfield(opts, mapSize, n, rng);
+  // closed depressions are breached instead of filled (no flat plateaus); real lakes are carved on purpose later
+  resolveDepressions(height, 2, 0.7);
   const t1 = performance.now();
   const seaLevel = 0;
   const cell = height.cell;
   const N = n * n;
+  const ek = plan.k; // extent scale factor (1 at 2400 m)
+  const widthK = clamp(Math.pow(mapSize / 2400, 0.55), 0.6, 6);
 
   // ---- pass 1: hydrology on the raw terrain
   const sea = seaMaskOf(height, seaLevel);
@@ -409,7 +533,8 @@ export function generateTerrain(opts: Options, root: Rng): { terrain: TerrainLay
   let mainPoly: Polyline | null = null;
   let mainWidths: number[] = [];
   let inject: { idx: number; amount: number }[] = [];
-  const cls = opts.river === 'none' ? null : RIVER_CLASS[opts.river];
+  const cls0 = opts.river === 'none' ? null : RIVER_CLASS[opts.river];
+  const cls: RiverClass | null = cls0 ? { wSrc: cls0.wSrc * widthK, wMouth: cls0.wMouth * widthK, inject: cls0.inject } : null;
   const slopeRaw = slopeGrid(height);
   const slopeAt = (q: Vec2) => sampleGrid(slopeRaw, q.x, q.y);
   let seaFrac = 0;
@@ -417,20 +542,21 @@ export function generateTerrain(opts: Options, root: Rng): { terrain: TerrainLay
 
   if (cls) {
     const rrng = rng.fork('river');
-    const route = routeMainRiver(height, flood.filled, sea, plan, rrng, plan.amp);
-    if (route) {
+      const route = routeMainRiver(height, flood.filled, sea, plan, rrng, plan.amp);
+      if (route) {
       const hasSea = plan.seaSide !== null;
       const approxW = (cls.wSrc + cls.wMouth) / 2;
-      const poly = smoothAndMeander(route.poly, Math.max(cell * 0.9, 3), approxW, slopeAt, rrng.fork('meander'), true, hasSea);
+      const poly = smoothAndMeander(route.poly, Math.max(cell * 0.9, 3), approxW, slopeAt, rrng.fork('meander'), true, hasSea, 90 * Math.min(ek, 6), 16 * Math.min(ek, 6));
       if (hasSea && poly.length > 3) {
         const a = poly[poly.length - 4], b = poly[poly.length - 1];
         const l = dist(a, b) || 1;
         const ext = cell * 1.5;
         poly.push({ x: b.x + ((b.x - a.x) / l) * ext, y: b.y + ((b.y - a.y) / l) * ext });
       }
-      // provisional widths (final widths recomputed from accumulation below)
+          // provisional widths (final widths recomputed from accumulation below)
       const provisional = poly.map((_, i) => cls.wSrc + (cls.wMouth - cls.wSrc) * Math.pow(i / Math.max(1, poly.length - 1), 0.7));
-      carveRiver(height, poly, provisional, seaLevel, plan.relief === 'mountains' ? 0.5 : 0.24, plan.amp, flood.filled);
+      carveRiver(height, poly, provisional, seaLevel, plan.relief === 'mountains' ? 0.5 : 0.24, plan.amp, flood.filled, ek);
+          if (hasSea) carveEstuary(height, poly, provisional, 700 * Math.sqrt(ek));
       mainPoly = poly;
       const pi = Math.min(N - 1, Math.max(0, Math.floor(poly[Math.min(2, poly.length - 1)].y / cell) * n + Math.floor(poly[Math.min(2, poly.length - 1)].x / cell)));
       inject = [{ idx: pi, amount: cls.inject * N }];
@@ -440,9 +566,21 @@ export function generateTerrain(opts: Options, root: Rng): { terrain: TerrainLay
   }
 
   // erosion: dendritic valleys along drainage (main river trench already cut, so it stays dominant)
-  const iters = plan.relief === 'mountains' ? [0.05] : plan.relief === 'flat' ? [0.09] : [0.07, 0.05];
+  const iters = plan.relief === 'mountains' ? [0.02] : plan.relief === 'flat' ? [0.05] : [0.04, 0.03];
   for (const st of iters) incise(height, plan.amp, st);
   if (plan.relief === 'mountains') { const sm = blurGrid(height, 1, 1); for (let i = 0; i < N; i++) if (height.data[i] > 1) height.data[i] = sm.data[i]; }
+
+  // ---- lakes: carve a few natural basins into valley floors (before the final hydrology pass)
+  const lakeSites: { idx: number }[] = [];
+  {
+    const lrng = rng.fork('lakes');
+    const auto = ({ flat: 0.1, hills: 0.2, valley: 0.24, mountains: 0.36 } as const)[plan.relief];
+    const want = lakesOpt === 'none' ? 0 : lakesOpt === 'some' ? (mapSize > 6000 ? 3 : mapSize > 2000 ? 2 : 1) : (lrng.chance(auto) ? (mapSize > 8000 && lrng.chance(0.5) ? 2 : 1) : 0);
+    if (want > 0) {
+      const acc1 = accumulate(flood.receiver, flood.order);
+      lakeSites.push(...carveLakes(height, acc1, sea, mainPoly, want, lrng, ek, plan.amp));
+    }
+  }
 
   // ---- pass 2: hydrology on the carved terrain
   const sea2 = seaMaskOf(height, seaLevel);
@@ -488,35 +626,65 @@ export function generateTerrain(opts: Options, root: Rng): { terrain: TerrainLay
   }
   void mainIdx;
 
-  // ---- lakes from fill depth
+  // ---- lakes: only carved basins (real depressions on a valley floor) become lakes; other pits are filled
   const depth = new Float32Array(N);
   for (let i = 0; i < N; i++) depth[i] = flood.filled[i] - height.data[i];
-  const depthThr = plan.relief === 'flat' ? 1.2 : plan.relief === 'mountains' ? 6 : 3;
-  const { comp, sizes } = labelLakes(depth, sea2, n, n, depthThr);
-  const minCells = Math.max(12, 9000 / (cell * cell));
-  const maxDepth = new Float32Array(sizes.length);
-  for (let i = 0; i < N; i++) if (comp[i] >= 0 && depth[i] > maxDepth[comp[i]]) maxDepth[comp[i]] = depth[i];
-  const lakeDeep = plan.relief === 'flat' ? 2.2 : plan.relief === 'mountains' ? 14 : 7;
-  const ranked = sizes.map((s, id) => ({ s, id })).filter((e) => e.s >= minCells && e.s <= N * 0.02 && maxDepth[e.id] >= lakeDeep).sort((a, b) => b.s - a.s || a.id - b.id).slice(0, 2);
-  const keep = new Set(ranked.map((e) => e.id));
+  const { comp } = labelLakes(depth, sea2, n, n, 0.45);
+  const keep = new Set<number>();
+  for (const c of lakeSites) {
+    let id = comp[c.idx];
+    if (id < 0) {
+      // centre may sit on the very rim: look at the immediate neighbourhood
+      const cx = c.idx % n, cy = (c.idx / n) | 0;
+      for (let dy = -2; dy <= 2 && id < 0; dy++) for (let dx = -2; dx <= 2; dx++) {
+        const x = cx + dx, y = cy + dy;
+        if (x >= 0 && y >= 0 && x < n && y < n && comp[y * n + x] >= 0) { id = comp[y * n + x]; break; }
+      }
+    }
+    if (id >= 0) keep.add(id);
+  }
   const lakeField = new Float32Array(N).fill(-1);
   for (let i = 0; i < N; i++) if (comp[i] >= 0 && keep.has(comp[i])) lakeField[i] = 1;
+  // remove every other depression (no reservoirs on slopes, no wet bowls)
+  for (let i = 0; i < N; i++) if (lakeField[i] < 0 && !sea2[i] && depth[i] > 0) height.data[i] = flood.filled[i];
   const t3 = performance.now();
 
   // ---- natural streams
   const recv = flood.receiver;
   // displayed-stream threshold scales with map size: only meaningful brooks are drawn (all of it stays in `flow`)
-  const sizeK = preset.mapSize / 2400;
-  const thr = Math.max(180, N * (cls ? 0.024 : 0.03) * Math.max(0.6, sizeK));
+  const sizeK = mapSize / 2400;
+  const thr = Math.max(180, N * (cls ? 0.024 : 0.03) * Math.max(0.6, Math.min(2.5, sizeK)));
   const isStream = new Uint8Array(N);
   for (let i = 0; i < N; i++) if (acc[i] >= thr && !sea2[i] && lakeField[i] <= 0) isStream[i] = 1;
   const hasUp = new Uint8Array(N);
   for (let i = 0; i < N; i++) if (isStream[i] && recv[i] >= 0 && isStream[recv[i]]) hasUp[recv[i]] = 1;
   const sources: number[] = [];
   for (let i = 0; i < N; i++) if (isStream[i] && !hasUp[i] && !mainMask[i]) sources.push(i);
-  // deterministic order: descending accumulation of the stream's eventual size is unknown; use index order
   const visited = new Uint8Array(N);
-  const naturalRaw: { cells: number[]; endsAt: number }[] = [];
+  const naturalRaw: { cells: number[]; endsAt: number; forced?: boolean }[] = [];
+  // lake outlets first: every lake drains through a real river
+  for (const id of keep) {
+    let bestC = -1, bestA = -1;
+    for (let i = 0; i < N; i++) {
+      if (comp[i] !== id) continue;
+      const r = recv[i];
+      if (r < 0 || comp[r] === id) continue;
+      if (acc[i] > bestA) { bestA = acc[i]; bestC = i; }
+    }
+    if (bestC < 0) continue;
+    const cells: number[] = [bestC];
+    let c = recv[bestC], endsAt = -1;
+    for (let steps = 0; steps < 6000; steps++) {
+      if (c < 0) break;
+      if (sea2[c] || lakeField[c] > 0 || mainMask[c] || visited[c]) { endsAt = c; break; }
+      cells.push(c); visited[c] = 1;
+      if (steps > 30 && isStream[c]) { c = recv[c]; if (c >= 0) endsAt = c; break; }
+      c = recv[c];
+    }
+    visited[bestC] = 1;
+    if (cells.length >= 2) naturalRaw.push({ cells, endsAt, forced: true });
+  }
+  const natural: { cells: number[]; endsAt: number; forced?: boolean }[] = [];
   for (const s of sources) {
     if (visited[s]) continue;
     const cells: number[] = [];
@@ -530,42 +698,75 @@ export function generateTerrain(opts: Options, root: Rng): { terrain: TerrainLay
       if (sea2[r] || lakeField[r] > 0) { endsAt = r; break; }
       c = r;
     }
-    if (cells.length >= 4) naturalRaw.push({ cells, endsAt });
+    if (cells.length >= 4) natural.push({ cells, endsAt });
   }
   // cap the number of tributaries by upstream area
-  const maxTrib = ({ hamlet: 2, village: 2, town: 3, city: 4, capital: 5 } as const)[opts.size] + (cls ? 0 : 1);
-  if (naturalRaw.length > maxTrib) {
-    const ranked = naturalRaw.map((r, k) => ({ k, a: acc[r.cells[r.cells.length - 1]] }))
+  const maxTrib = (mapSize < 2000 ? 2 : mapSize < 3000 ? 3 : mapSize < 4200 ? 4 : mapSize < 7000 ? 5 : mapSize < 15000 ? 7 : 9) + (cls ? 0 : 1);
+  if (natural.length > maxTrib) {
+    const ranked = natural.map((r, k) => ({ k, a: acc[r.cells[r.cells.length - 1]] }))
       .sort((p, q) => q.a - p.a || p.k - q.k).slice(0, maxTrib);
     const keepK = new Set(ranked.map((e) => e.k));
-    const kept = naturalRaw.filter((_, k) => keepK.has(k));
-    naturalRaw.length = 0; naturalRaw.push(...kept);
+    const kept = natural.filter((_, k) => keepK.has(k));
+    natural.length = 0; natural.push(...kept);
   }
+  naturalRaw.push(...natural);
   const refMouth = cls ? accMouth : Math.max(thr * 2, ...naturalRaw.map((r) => acc[r.cells[r.cells.length - 1]]));
-  const wRefMouth = cls ? cls.wMouth : 4.6;
-  const wMinNat = cls ? 1.8 : 1.6;
+  const wRefMouth = cls ? cls.wMouth : 4.6 * widthK;
+  const wMinNat = (cls ? 1.8 : 1.6) * Math.min(widthK, 2);
   for (const r of naturalRaw) {
     const pts: Vec2[] = r.cells.map((i) => ({ x: ((i % n) + 0.5) * cell, y: (((i / n) | 0) + 0.5) * cell }));
     if (r.endsAt >= 0) pts.push({ x: ((r.endsAt % n) + 0.5) * cell, y: (((r.endsAt / n) | 0) + 0.5) * cell });
-    if (polylineLength(pts) < 120) continue;
-    const rawAcc = r.cells.map((i) => acc[i]);
-    if (r.endsAt >= 0) rawAcc.push(acc[r.endsAt]);
+    if (!r.forced && polylineLength(pts) < 120 * Math.min(ek, 3)) continue;
     const simp = simplify(pts, cell * 1.4);
-    const sm = smoothAndMeander(simp, Math.max(cell * 0.9, 3), 4, slopeAt, rng.fork('nm:' + r.cells[0]), true, false, 200, 7);
+    const sm = smoothAndMeander(simp, Math.max(cell * 0.9, 3), 4, slopeAt, rng.fork('nm:' + r.cells[0]), true, false, 200 * Math.min(ek, 4), 7 * Math.min(ek, 3));
     // widths: sample accumulation from nearest cell
     let wv = sm.map((q) => {
       let m = 0;
       const cx = Math.floor(q.x / cell), cy = Math.floor(q.y / cell);
       for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
         const x = cx + dx, y = cy + dy;
-        if (x >= 0 && y >= 0 && x < n && y < n && isStream[y * n + x]) m = Math.max(m, acc[y * n + x]);
+        if (x >= 0 && y >= 0 && x < n && y < n && (isStream[y * n + x] || r.forced)) m = Math.max(m, acc[y * n + x]);
       }
       return Math.max(m, thr);
     });
     for (let i = 1; i < wv.length; i++) wv[i] = Math.max(wv[i], wv[i - 1]);
     wv = movingAvg(wv, 8);
     const widths = wv.map((a) => Math.max(wMinNat, Math.min(wRefMouth * 0.8, wRefMouth * Math.pow(a / refMouth, 0.5))));
+    if (r.forced && r.endsAt >= 0 && !sea2[r.endsAt] && lakeField[r.endsAt] <= 0) {
+      // join the stream/river it runs into: meandering smoothing leaves a small gap otherwise
+      const e = sm[sm.length - 1];
+      let bd = 90 * Math.min(ek, 3) + 4 * cell, bp: Vec2 | null = null;
+      for (const rv of rivers) {
+        const { pt, d } = nearestOnPath(rv.path, e);
+        if (d < bd) { bd = d; bp = pt; }
+      }
+      if (bp && bd > 1) { sm.push(bp); widths.push(widths[widths.length - 1]); }
+    }
     rivers.push({ path: sm, width: widths });
+  }
+
+  // ---- polygons (sea and lakes): needed before the water mask so river ribbons can be clipped at the shore
+  const seaField = new Float32Array(N);
+  for (let i = 0; i < N; i++) seaField[i] = sea2[i] ? Math.max(0.05, seaLevel - height.data[i]) : -Math.max(0.05, height.data[i] - seaLevel);
+  const seaLoops = regionPolygons(seaField, n, n, cell, cell * cell * 6);
+  // loops of opposite orientation to the biggest one are islands (holes in the sea)
+  let coastline: Polygon[] = seaLoops;
+  const islands: Polygon[] = [];
+  if (seaLoops.length > 1) {
+    let big = seaLoops[0];
+    for (const p of seaLoops) if (Math.abs(polygonArea(p)) > Math.abs(polygonArea(big))) big = p;
+    const sg = Math.sign(polygonArea(big));
+    coastline = seaLoops.filter((p) => Math.sign(polygonArea(p)) === sg);
+    for (const p of seaLoops) if (Math.sign(polygonArea(p)) !== sg) islands.push(p);
+  }
+  let lakes = regionPolygons(lakeField, n, n, cell, cell * cell * 6);
+  lakes = lakes.filter((p) => Math.abs(polygonArea(p)) >= 2500);
+
+  // ---- clip river ribbons at the shoreline (sea and lakes): cut where a river enters water, keep the mouth point
+  const waterPolys = coastline.concat(lakes);
+  for (let k = rivers.length - 1; k >= 0; k--) {
+    const clipped = clipRiverAtWater(rivers[k], waterPolys);
+    if (!clipped) rivers.splice(k, 1); else rivers[k] = clipped;
   }
 
   // ---- water mask
@@ -590,14 +791,6 @@ export function generateTerrain(opts: Options, root: Rng): { terrain: TerrainLay
     }
   }
 
-  // ---- polygons
-  const seaField = new Float32Array(N);
-  for (let i = 0; i < N; i++) seaField[i] = sea2[i] ? Math.max(0.05, seaLevel - height.data[i]) : -Math.max(0.05, height.data[i] - seaLevel);
-  const coastline = regionPolygons(seaField, n, n, cell, cell * cell * 6);
-  let lakes = regionPolygons(lakeField, n, n, cell, cell * cell * 6);
-  void comp;
-  lakes = lakes.filter((p) => Math.abs(polygonArea(p)) >= 9000);
-
   const slope = slopeGrid(height);
   const flowGrid: Grid = createGrid(n, n, cell);
   flowGrid.data.set(acc);
@@ -611,5 +804,62 @@ export function generateTerrain(opts: Options, root: Rng): { terrain: TerrainLay
     height, slope, water, flow: flowGrid, seaLevel, seaFraction: seaCells / N, coastline, lakes, rivers,
     receiver: flood.receiver, filled: flood.filled, downSide: plan.downSide, seaSide: plan.seaSide,
   };
+  if (islands.length) (terrain as TerrainLayer & { islands?: Polygon[] }).islands = islands;
   return { terrain, timings: { height: t1 - t0, hydrology: t2 - t1, rivers: t3 - t2, polygons: t4 - t3 } };
+}
+
+function nearestOnPath(pl: Polyline, p: Vec2): { pt: Vec2; d: number } {
+  let best = Infinity, bp = pl[0];
+  for (let i = 1; i < pl.length; i++) {
+    const a = pl[i - 1], b = pl[i];
+    const dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy;
+    const t = l2 === 0 ? 0 : Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / l2));
+    const q = { x: a.x + t * dx, y: a.y + t * dy };
+    const d = Math.hypot(p.x - q.x, p.y - q.y);
+    if (d < best) { best = d; bp = q; }
+  }
+  return { pt: bp, d: best };
+}
+
+/**
+ * Cut a river polyline where it runs into sea/lake polygons: an initial stretch inside water (a lake outlet
+ * that starts in its lake) is trimmed to the shore, and the course ends at the first entry into water (the mouth).
+ */
+export function clipRiverAtWater(r: River, polys: Polygon[]): River | null {
+  const inside = (p: Vec2): boolean => { for (const pg of polys) if (polygonContains(pg, p)) return true; return false; };
+  const pts = r.path;
+  const n = pts.length;
+  if (n < 2 || !polys.length) return r;
+  const lerp = (a: Vec2, b: Vec2, t: number): Vec2 => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+  const flags = pts.map(inside);
+  if (!flags.some((f) => f)) return r;
+  // bisect the shore crossing between an inside and an outside point; returns t of the outside-most sample
+  const cross = (a: Vec2, b: Vec2, aInside: boolean): number => {
+    let lo = 0, hi = 1; // lo has the same state as a
+    for (let it = 0; it < 24; it++) {
+      const m = (lo + hi) / 2;
+      if (inside(lerp(a, b, m)) === aInside) lo = m; else hi = m;
+    }
+    return aInside ? hi : lo; // the outside side
+  };
+  let start = 0;
+  const path: Vec2[] = [], width: number[] = [];
+  if (flags[0]) {
+    let j = 0;
+    while (j < n && flags[j]) j++;
+    if (j >= n) return null;
+    const t = cross(pts[j - 1], pts[j], true);
+    path.push(lerp(pts[j - 1], pts[j], t)); width.push(r.width[j - 1] + (r.width[j] - r.width[j - 1]) * t);
+    start = j;
+  }
+  for (let i = start; i < n; i++) {
+    if (flags[i]) {
+      const t = cross(pts[i - 1], pts[i], false);
+      path.push(lerp(pts[i - 1], pts[i], t)); width.push(r.width[i - 1] + (r.width[i] - r.width[i - 1]) * t);
+      break;
+    }
+    path.push(pts[i]); width.push(r.width[i]);
+  }
+  if (path.length < 2) return null;
+  return { ...r, path, width };
 }
