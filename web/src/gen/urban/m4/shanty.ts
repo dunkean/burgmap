@@ -20,13 +20,14 @@ import type { UrbanCtx } from '../context';
 import type { ReserveApi, ReservedLot } from '../primary';
 import type { CompoundCtx } from '../compounds';
 import { isoRegions, dilate } from '../phases';
+import { distanceField } from '../../core/field';
+import { rasterizePolys } from '../../geo/raster';
 import { MultiPoly, differenceS, intersectionS, mpArea } from '../../geo/bool';
 import { area, orientPos, pointInRing, distToRing, bboxOf, cleanRing, inscribed } from '../../geo/poly';
 import { ribbon } from '../../geo/offset';
 import { insetConvex } from '../../geo/offset';
 import { isConvex, segCrossesRing, polyInside } from '../../geo/split';
 import { shapeOf } from '../buildings';
-import { LineIndex } from './lots';
 import { Mask } from './site';
 import { giveAccess, phaseAt, type M4State } from './reserve';
 import { emptyOut, type Out } from './kit';
@@ -47,12 +48,25 @@ export function reserveShanty(s: M4State, api: ReserveApi, si: ShantyIn, amount:
   const ctx = s.ctx, r = s.rng.fork('shanty');
   const t = ctx.terrain, g = t.height, n = g.w, cell = g.cell;
   const target = (s.pop < 20000 ? 18000 : s.pop < 45000 ? 40000 : 70000) * (amount === 'many' ? 2.5 : 1);
-  const foot = new Mask(ctx.mapSize, dilate(api.footprint, 10), 4);
-  const band = new Mask(ctx.mapSize, dilate(api.footprint, 320), 6);
-  const wallIdx = new LineIndex(api.enclosure.map((ph) => ({ path: ph.outer.concat([ph.outer[0]]), hw: 0 })));
-  const roadIdx = new LineIndex(si.roads.map((path) => ({ path, hw: 0 })));
-  const nuis = new LineIndex(si.nuisance.map((p) => ({ path: p.concat([p[0]]), hw: 0 })));
-  const avoidM = new Mask(ctx.mapSize, dilate(si.avoid.map((p) => ({ outer: p, holes: [] })), 25), 5);
+  // distance to the footprint and to the other lots (raster masks + chamfer distance: no polygon dilation)
+  const polyField = (polys: Polygon[]): Float32Array => distanceField(rasterizePolys(polys, n, n, cell), n, n, cell).dist;
+  const dFoot = polyField(api.footprint.flatMap((ph) => [ph.outer]));
+  const dAvoid = si.avoid.length ? polyField(si.avoid) : null;
+  // distance fields (chamfer) to the wall line, the roads and the nuisance trades, on the terrain grid
+  const lineField = (lines: Polyline[]): Float32Array => {
+    const mask = new Uint8Array(n * n);
+    for (const pl of lines) for (let i = 1; i < pl.length; i++) {
+      const a = pl[i - 1], b = pl[i], L = dist(a, b), k = Math.max(1, Math.ceil(L / (cell * 0.5)));
+      for (let j = 0; j <= k; j++) {
+        const x = Math.floor((a.x + ((b.x - a.x) * j) / k) / cell), y = Math.floor((a.y + ((b.y - a.y) * j) / k) / cell);
+        if (x >= 0 && y >= 0 && x < n && y < n) mask[y * n + x] = 1;
+      }
+    }
+    return distanceField(mask, n, n, cell).dist;
+  };
+  const dWall = lineField(api.enclosure.map((ph) => ph.outer.concat([ph.outer[0]])));
+  const dRoad = lineField(si.roads);
+  const dNuis = si.nuisance.length ? lineField(si.nuisance.map((p) => p.concat([p[0]]))) : null;
   const hab = ctx.site.fields.hab;
   const W = { zone: [2.2, 0.6, 0.6, 0.8], bidonville: [0.8, 0.8, 0.6, 1.8], gecekondu: [0.5, 2.0, 0.6, 0.8], riverbank: [0.6, 0.6, 2.2, 0.8] }[kind];
   // value field (lower = less valued); NaN where not allowed
@@ -61,19 +75,19 @@ export function reserveShanty(s: M4State, api: ReserveApi, si: ShantyIn, amount:
   for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
     const i = y * n + x;
     const p = { x: (x + 0.5) * cell, y: (y + 0.5) * cell };
-    if (t.water[i] || !band.has(p) || foot.has(p) || avoidM.has(p)) continue;
+    if (t.water[i] || dFoot[i] > 320 || dFoot[i] < 12 || (dAvoid && dAvoid[i] < 25)) continue;
     const sl = ctx.slopeAt(p);
     if (sl > 0.42) continue;
-    const dr = roadIdx.dist(p, 30);
+    const dr = dRoad[i];
     if (dr < 9) continue;
-    const dW = wallIdx.dist(p, 120);
+    const dW = dWall[i];
     const glacis = api.gates.length && dW < 110 ? 1 - dW / 110 : 0;
     const steep = Math.max(0, Math.min(1, (sl - 0.08) / 0.2));
     const flood = hab[i] < 4 ? 1 - hab[i] / 4 : 0;
     // between two roads: near a road but the second road also within 150 m in another direction is approximated by
     // the road distance being moderate
     const fringe = dr < 70 ? 0.5 : 0.2;
-    const dn = nuis.dist(p, 160);
+    const dn = dNuis ? dNuis[i] : 1e9;
     const near = dn < 150 ? 1 - dn / 150 : 0;
     const value = 1 - (W[0] * glacis + W[1] * steep + W[2] * flood + W[3] * fringe + 1.2 * near) / 3 + 0.25 * Math.min(1, dist(p, si.nucleus) / 1500) + 0.08 * r.float() * 0;
     v[i] = -value; // isoRegions keeps v > level

@@ -94,14 +94,14 @@ export function reserveMills(s: M4State, api: ReserveApi, ai: ActIn, n: number):
     const Lr = r.range(70, 105), d = cd.w / 2 + r.range(13, 17), yard = 16;
     const sgn = cd.side;
     const rect = rectAt(cd.c, cd.ang, -Lr / 2 - 6, Lr / 2 + 6, sgn > 0 ? 0 : -(d + 2 + yard), sgn > 0 ? d + 2 + yard : 0);
+    // cheap tests first (dry beyond the bank, clear of roads, streets and the other lots), the boolean last
+    let wet = false;
+    for (let u = -Lr / 2; u <= Lr / 2 && !wet; u += 8) for (let v = cd.w / 2 + 4; v <= d + 2 + yard - 1; v += 5) if (ctx.isWater(frameAt(cd.c, cd.ang, u, sgn * v))) { wet = true; break; }
+    const rc = frameAt(cd.c, cd.ang, 0, sgn * (d + yard) / 2);
+    if (wet || !roadIdx.clear(rect, 3) || all().some((o) => distToRing(o, rc) < 40 || pointInRing(o, rc)) || !clearStreets(api, rect, 3)) continue;
     const landM = differenceS(rect, ctx.water);
     const lot = landM.filter((ph) => !ph.holes.length).map((ph) => ph.outer).sort((x, y) => area(y) - area(x))[0];
     if (!lot || area(lot) < 0.55 * area(rect)) continue;
-    // dry beyond the bank, clear of streets, roads and the other lots
-    let wet = false;
-    for (let u = -Lr / 2; u <= Lr / 2 && !wet; u += 8) for (let v = cd.w / 2 + 4; v <= d + 2 + yard - 1; v += 5) if (ctx.isWater(frameAt(cd.c, cd.ang, u, sgn * v))) { wet = true; break; }
-    if (wet || !roadIdx.clear(lot, 3) || all().some((o) => distToRing(o, polygonCentroid(lot)) < 40 || pointInRing(o, polygonCentroid(lot)))) continue;
-    if (!clearStreets(api, lot, 3)) continue;
     const toward = frameAt(cd.c, cd.ang, 0, sgn * (d + 2 + yard + 6));
     const acc = accessOrTrack(s, api, lot, toward, { ...ai, avoid: all() }, roadIdx, ai.roads);
     if (!acc) continue;
@@ -252,7 +252,7 @@ export function reserveArena(s: M4State, api: ReserveApi, ai: ActIn): ReservedLo
     centers: gridAround(s.ctx, ai.nucleus, coreR + 2.6 * a, 22).filter((p) => !coreM.has(p)),
     angles: [0, Math.PI / 4, Math.PI / 2, -Math.PI / 4], scales: [1], refine: 8,
     outside: coreM, margin: 9, avoid: ai.avoid, gap: 30,
-    score: (poly, c) => -Math.abs(dist(c, ai.nucleus) - coreR - a - 12) / 40 + (encM.has(c) ? 0.5 : 0),
+    score: (poly, c) => -Math.abs(dist(c, ai.nucleus) - coreR - a - 12) / 40 + (encM.has(c) ? 2 : 0),
   }, r);
   if (!res) return null;
   const lot = res.poly;
@@ -388,21 +388,21 @@ export function buildArena(B: Polygon, cx: CompoundCtx): Out {
   const k = 0.58;
   const piazza = ellipseAt(c, ang, a * k, b * k, 36);
   const pz = inter(piazza, B);
-  const cavea = pieces(differenceS(B, piazza));
+  // the cavea is an annulus (one polygon with the piazza as its hole); the radial wedges cut it into simple plots
+  const cavea = differenceS(B, piazza);
   if (cavea.length !== 1 || !pz.length) { out.parcels.push({ poly: B, use: 'place' }); return out; }
   for (const p of pz) out.parcels.push({ poly: p, use: 'place' });
   out.landmarks.push({ kind: 'arena-piazza', poly: piazza });
   // radial cuts: n plots round the cavea (frontage ~ 9–12 m on the ring street)
   const per = Math.PI * (3 * (a + b) - Math.sqrt((3 * a + b) * (a + 3 * b)));
   const n = Math.max(12, Math.round(per / cx.rng.range(9.5, 12)));
-  const ring = cavea[0];
   const a0 = cx.rng.range(0, TAU);
   // a gateway (vomitorium) left open on the axis: one plot is a passage
   for (let i = 0; i < n; i++) {
     const t0 = a0 + (i / n) * TAU, t1 = a0 + ((i + 1) / n) * TAU;
     const p0 = frameAt(c, ang, a * 1.6 * Math.cos(t0), b * 1.6 * Math.sin(t0)), p1 = frameAt(c, ang, a * 1.6 * Math.cos(t1), b * 1.6 * Math.sin(t1));
     const wedge = orientPos([c, p0, p1]);
-    for (const q of inter(ring, wedge)) {
+    for (const q of pieces(intersectionS(cavea, wedge))) {
       const pi = out.parcels.length;
       const passage = i === 0 || i === Math.floor(n / 2);
       // frontage: the outer arc chord

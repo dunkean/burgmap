@@ -473,6 +473,14 @@ export function carveBlocks(q: Quarter, pieces: Piece[], ribbonIndex: RibbonInde
       // (the clamp may leave a micro tip: truncated again, it can only shrink, so the block stays in its piece)
       poly = cleanRing(truncateAcute(cleanRing(poly, 0.05, 0.5, 0.002, false), (22 * Math.PI) / 180, 5), 0.05, 0.5, 0.002, false);
       if (poly.length < 3) continue;
+      // dropping a nearly collinear reflex vertex grows the ring a little: on long edges of large blocks that adds up,
+      // so the cleaned ring is clamped to the piece once more (and only de-duplicated afterwards)
+      if (mpArea(differenceS(poly, pc.lp.pts)) > 0.01) {
+        const cl2 = intersectionS(poly, pc.lp.pts);
+        if (!cl2.length) continue;
+        poly = cleanRing(cl2.reduce((b, x) => (area(x.outer) > area(b.outer) ? x : b)).outer, 0.01, 0.01, Infinity, false);
+        if (poly.length < 3) continue;
+      }
       const a = area(poly);
       if (a < 40) continue;
       if (inscribed(poly, [], 0.5).r < 2.2) continue;

@@ -220,7 +220,7 @@ export function urbanLayer(world: World, pal: Palette, u: number, debug: boolean
     const d = yards.map((p) => pathD(p.poly, true)).join('');
     s += `<g class="u-churchyard"><path d="${d}" fill="${U.garden}"/><path d="${d}" fill="url(#p-ugrave)"/></g>`;
   }
-  const blockD = ub.blocks.filter((_, i) => ub.blockInfo[i]?.kind === 'block').map((b) => pathD(b, true)).join('');
+  const blockD = ub.blocks.filter((_, i) => ub.blockInfo[i]?.kind === 'block').map((b) => pathD(b, true)).concat(ub.parcels.filter((p) => p.use === 'arena-plot' || p.use === 'inn').map((p) => pathD(p.poly, true))).join('');
   s += `<path class="u-blocks" d="${blockD}" fill="${U.yard}"/>`;
   if (ub.backLand.length) {
     const d = ub.backLand.map(phD).join('');

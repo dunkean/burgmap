@@ -290,9 +290,9 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
       if (flags.arena) tm('arena', () => push(reserveArena(st, api, ai)));
       if (flags.activities && archetype === 'town') {
         tm('activities', () => {
-          for (const l of reserveTanneries(st, api, ai)) push(l);
-          for (const l of reserveMills(st, api, ai, pop < 6000 ? 1 : pop < 25000 ? 2 : 3)) push(l);
-          for (const l of reserveWindmills(st, api, ai, pop < 6000 ? 1 : pop < 25000 ? 3 : 4)) push(l);
+          tm('tannery', () => { for (const l of reserveTanneries(st, api, ai)) push(l); });
+          tm('mills', () => { for (const l of reserveMills(st, api, ai, pop < 6000 ? 1 : pop < 25000 ? 2 : 3)) push(l); });
+          tm('windmills', () => { for (const l of reserveWindmills(st, api, ai, pop < 6000 ? 1 : pop < 25000 ? 3 : 4)) push(l); });
           const rs: Parameters<typeof reserveRoadside>[3] = [{ kind: 'gallows', size: [16, 16], dmin: 140, dmax: 520 }];
           if (pop >= 4000) rs.push({ kind: 'lazar-house', size: [52, 38], dmin: 300, dmax: 900 });
           if (pop >= 9000) rs.push({ kind: 'cemetery', size: [80, 55], dmin: 40, dmax: 260 });

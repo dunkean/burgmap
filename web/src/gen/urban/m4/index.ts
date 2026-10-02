@@ -70,7 +70,10 @@ export function m4Flags(opts: Options, culture: Culture, pop: number, archetype:
   const shanty = sh === 'auto' ? (town && pop >= 9000 ? 'some' : 'none') : town ? sh : 'none';
   return {
     castle, cathedral, palace, monasteries, monastery: cat.monastery, marketHall: cat.marketHall && town,
-    port: cat.port && opts.port !== 'no', arena, activities: opts.activities !== 'no', suburbs, shanty, shantyKind: cat.shanty,
+    // fantasy cultures keep their own plan: no gallows, lazar houses or shanty belts unless asked for
+    port: cat.port && opts.port !== 'no', arena,
+    activities: opts.activities === 'yes' || (opts.activities !== 'no' && !culture.fantasy), suburbs,
+    shanty: culture.fantasy && sh === 'auto' ? 'none' : shanty, shantyKind: cat.shanty,
   };
 }
 

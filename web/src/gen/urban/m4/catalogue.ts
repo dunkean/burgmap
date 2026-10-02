@@ -169,8 +169,8 @@ export function reserveMonasteries(s: M4State, api: ReserveApi, ci: CatalogueIn,
     const order = ORDERS[(k + (outside ? 1 : 0)) % ORDERS.length];
     const avoid = [...ci.avoid, ...out.map((o) => o.poly)];
     const centers = outside
-      ? api.gates.flatMap((g) => gridAround(s.ctx, g, 300, 36)).filter((p) => !outM.has(p) && roadIdx.dist(p, 30) > 22)
-      : gridAround(s.ctx, ci.nucleus, encR * 1.05, 26).filter((p) => inM.has(p) && ringIdx.dist(p, Math.max(140, 0.35 * encR)) < Math.max(140, 0.35 * encR));
+      ? api.gates.flatMap((g) => gridAround(s.ctx, g, 280, 40)).filter((p) => !outM.has(p) && roadIdx.dist(p, 30) > 22)
+      : gridAround(s.ctx, ci.nucleus, encR * 1.05, 32).filter((p) => inM.has(p) && ringIdx.dist(p, Math.max(140, 0.35 * encR)) < Math.max(140, 0.35 * encR));
     const res = siteLot(s.ctx, api.streets, {
       shape: (c, a, kk) => rectAt(c, a, (-L / 2) * kk, (L / 2) * kk, (-W / 2) * kk, (W / 2) * kk),
       centers, angles: outside ? [0, Math.PI / 2] : [0, -0.22, 0.22, Math.PI / 2], scales: [1, 0.8], refine: 12,

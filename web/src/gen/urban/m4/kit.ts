@@ -20,7 +20,8 @@ export function pieces(m: MultiPoly, minA = 2): Polygon[] {
   const out: Polygon[] = [];
   for (const ph of m) for (const q of ph.holes.length ? openHoles(ph) : [ph]) {
     if (q.holes.length) continue;
-    const r = cleanRing(q.outer, 0.05, 0.5, Infinity, false);
+    // (de-duplication only: dropping nearly collinear vertices would move shared boundaries between neighbours)
+    const r = cleanRing(q.outer, 0.01, 0.01, Infinity, false);
     if (r.length >= 3 && area(r) > minA) out.push(r);
   }
   return out;
