@@ -9,6 +9,7 @@ import { registerBuilders } from '../compounds';
 import { buildCastle, type CastleVariant } from './castle';
 import { buildCathedralClose, buildPalace, buildMonastery, buildMadrasa, buildHospital } from './plans';
 import { buildShipyard, buildRopewalk } from './port';
+import { buildShanty } from './shanty';
 import { buildWatermill, buildWindmill, buildTannery, buildGallows, buildLazarHouse, buildCemetery, buildArena } from './activities';
 
 /** Per-culture M4 catalogue (URBAN_MORPHOLOGY.md: each culture has its own landmarks). */
@@ -81,6 +82,6 @@ export function registerM4(): void {
     'm4-castle': buildCastle, 'm4-cathedral-close': buildCathedralClose, 'm4-palace-eu': buildPalace, 'm4-palace': buildPalace,
     'm4-monastery': buildMonastery, 'm4-madrasa': buildMadrasa, 'm4-shipyard': buildShipyard, 'm4-ropewalk': buildRopewalk,
     'm4-watermill': buildWatermill, 'm4-windmill': buildWindmill, 'm4-tannery': buildTannery, 'm4-gallows': buildGallows,
-    'm4-lazar-house': buildLazarHouse, 'm4-cemetery': buildCemetery, 'm4-arena': buildArena, hospital: buildHospital,
+    'm4-lazar-house': buildLazarHouse, 'm4-cemetery': buildCemetery, 'm4-arena': buildArena, hospital: buildHospital, 'm4-shanty': buildShanty,
   });
 }

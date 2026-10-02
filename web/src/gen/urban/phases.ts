@@ -461,7 +461,7 @@ export interface RoadIn { path: Polyline; major: boolean }
  * Faubourg ribbons along the roads outside the enclosure: the road from its entry point outward, buffered by a
  * per-road depth, minus the dilated enclosure and water.
  */
-export function planFaubourgs(ctx: UrbanCtx, enclosure: MultiPoly, roads: RoadIn[], area: number, glacis: number, rng: Rng, zone: UrbanZone = 'faubourg'): { region: MultiPoly; paths: Polyline[] } {
+export function planFaubourgs(ctx: UrbanCtx, enclosure: MultiPoly, roads: RoadIn[], area: number, glacis: number, rng: Rng, zone: UrbanZone = 'faubourg', thick = 1): { region: MultiPoly; paths: Polyline[] } {
   if (area < 1500 || !roads.length) return { region: [], paths: [] };
   const inside = (p: Vec2) => enclosure.some((ph) => pointInRing(ph.outer, p) && !ph.holes.some((h) => pointInRing(h, p)));
   const cands: { pts: Polyline; w: number }[] = [];
@@ -481,9 +481,10 @@ export function planFaubourgs(ctx: UrbanCtx, enclosure: MultiPoly, roads: RoadIn
   const blocked = dilate(enclosure, glacis);
   const noise = new Noise2D(rng.fork('faubNoise'));
   for (const c of cands) {
-    const depth = rng.range(40, 60);
+    // (thick > 1: suburbs, deeper ribbons that reach further out)
+    const depth = rng.range(40, 60) * thick;
     // the built ribbon fades out: its mean depth over the length is about 0.62 of the depth at the gate
-    const L = Math.min(560, (area * c.w) / W / (2 * depth * 0.62 * 0.85)) + glacis;
+    const L = Math.min(560 * Math.sqrt(thick), (area * c.w) / W / (2 * depth * 0.62 * 0.85)) + glacis;
     if (L < 70 + glacis) continue;
     // cut the outward path at length L
     const out: Polyline = [c.pts[0]];

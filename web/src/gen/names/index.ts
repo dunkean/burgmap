@@ -286,6 +286,14 @@ export function generateNames(world: World, root: Rng): NamesLayer {
       add({ kind: 'church', text: V.worship(sname, w0.big), rank: w0.big ? 1 : 2, anchor: w0.c, sub: sname });
     });
 
+    // M4 name hooks: landmark sites get a name unless a user generator already set one
+    for (const st of u.sites ?? []) {
+      if (st.name) continue;
+      if (st.kind === 'castle' || st.kind === 'kasbah' || st.kind === 'motte') st.name = V.castle(town);
+      else if (st.kind === 'cathedral-close') st.name = V.worship(saintOf('cathedral'), true);
+      else if (st.kind === 'monastery' || st.kind === 'madrasa') st.name = V.worship(saintOf('site:' + st.id), false);
+    }
+
     // squares
     const squareCenters: Vec2[] = [];
     u.squares.forEach((sq, i) => {
@@ -307,6 +315,7 @@ export function generateNames(world: World, root: Rng): NamesLayer {
     {
       const gs: { p: Vec2; i: number }[] = [];
       for (const wl of u.walls ?? []) {
+        if (wl.role && wl.role !== 'town' && wl.role !== 'outer') continue;
         (wl.gateInfo?.map((g) => g.p) ?? wl.gates).forEach((g) => { if (!gs.some((o) => dist(o.p, g) < 25)) gs.push({ p: g, i: gs.length }); });
       }
       const pairs: { g: number; r: number; d: number }[] = [];

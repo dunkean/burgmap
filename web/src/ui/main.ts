@@ -84,6 +84,33 @@ registry.add(checkControl($<HTMLInputElement>('contours'), 'contours', true));
 registry.add(checkControl($<HTMLInputElement>('landuse'), 'landuse', true));
 registry.add(checkControl($<HTMLInputElement>('labels'), 'labels', true));
 registry.add(checkControl($<HTMLInputElement>('legend'), 'legend', true));
+// ---------- Plan section: landmarks, activities, suburbs (M4), in the #planExtra slot
+{
+  const slot = $('planExtra');
+  slot.textContent = '';
+  const tri: [string, string][] = [['auto', 'Auto'], ['yes', 'On'], ['no', 'Off']];
+  const rows: [keyof Options, string, [string, string][]][] = [
+    ['castle', 'Castle / citadel', tri],
+    ['cathedral', 'Cathedral close', tri],
+    ['palace', 'Palace', tri],
+    ['monasteries', 'Monasteries', tri],
+    ['port', 'Port (quays, piers, shipyard)', tri],
+    ['arena', 'Arena (fossil oval)', tri],
+    ['activities', 'Mills, trades, inns, gallows', tri],
+    ['suburbs', 'Suburbs', [['auto', 'Auto'], ['none', 'None'], ['some', 'Some'], ['many', 'Many']]],
+    ['shantytowns', 'Shanty towns', [['auto', 'Auto'], ['none', 'None'], ['some', 'Some'], ['many', 'Many']]],
+  ];
+  for (const [key, label, items] of rows) {
+    const id = 'm4-' + String(key);
+    const lab = document.createElement('label');
+    lab.htmlFor = id; lab.textContent = label;
+    const sel = document.createElement('select');
+    sel.id = id;
+    fillSelect(sel, items, String(opts[key] ?? 'auto'));
+    slot.append(lab, sel);
+    registry.add(selectControl(sel, key, (v) => v as never));
+  }
+}
 registry.writeAll(opts);
 
 // ---------- heightmap import ----------

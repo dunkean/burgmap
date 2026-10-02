@@ -39,7 +39,7 @@ export interface NucleusSpec {
   ring: number;
   orientation?: 'road' | 'cardinal' | 'qibla' | 'terrain';
 }
-export type LandmarkPlace = 'adjacent-nucleus' | 'near-nucleus' | 'edge' | 'axis-north' | 'east' | 'west' | 'any' | 'gate' | 'high' | 'spread';
+export type LandmarkPlace = 'adjacent-nucleus' | 'near-nucleus' | 'edge' | 'axis-north' | 'east' | 'west' | 'any' | 'gate' | 'high' | 'spread' | 'suburb';
 export interface LandmarkSpec {
   role: 'worship' | 'power' | 'market' | 'civic' | 'extra';
   /** Footprint builder id (landmarks.ts). */

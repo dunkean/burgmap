@@ -10,7 +10,7 @@ import type { UrbanCtx } from './context';
 import type { Zone, MorphologyParams } from './morphology';
 import type { Quarter } from './primary';
 import type { GuidanceField } from './field';
-import { Streets, jitterWidths, LAB_WALL } from './streets';
+import { Streets, jitterWidths, LAB_WALL, LAB_OPEN as LAB_OPEN_B } from './streets';
 import { polygonArea } from '../core/geom';
 import { LPoly, splitByChord, rayHit, locate, isConvex, segCrossesRing } from '../geo/split';
 import { area, obb, inscribed, interiorAngle, pointInRing, cleanRing, bboxOf, isSimple, convexWidth, segSegT } from '../geo/poly';
@@ -19,7 +19,7 @@ import { MultiPoly, union, difference, differenceS, intersectionS, mpArea } from
 import { ribbon, disk } from '../geo/offset';
 
 export const SPLIT_DBG: { on: boolean; why: Record<string, number> } = { on: false, why: {} };
-export type PieceKind = 'block' | 'place' | 'market' | 'church' | 'compound' | 'green';
+export type PieceKind = 'block' | 'place' | 'market' | 'church' | 'compound' | 'green' | 'shanty';
 export interface Piece { lp: LPoly; phase: number; zone: Zone; age: number; quarter: number; kind: PieceKind; level: number; morph?: MorphologyParams; compound?: string; lot?: string }
 
 const TMP_LABEL = -100;
@@ -451,6 +451,13 @@ export function carveBlocks(q: Quarter, pieces: Piece[], ribbonIndex: RibbonInde
     for (const c of ribbonIndex.query(bb.x0 - 1, bb.y0 - 1, bb.x1 + 1, bb.y1 + 1)) {
       if (c.bb.x1 < bb.x0 || c.bb.x0 > bb.x1 || c.bb.y1 < bb.y0 || c.bb.y0 > bb.y1) continue;
       cutters.push(c.poly);
+    }
+    // open edges (no street) get the same 3 cm margin as the exact inset: the neighbouring quarter's boundary was
+    // computed by another boolean and may sit a centimetre off, so blocks on both sides must not touch
+    for (let i = 0; i < pc.lp.pts.length; i++) {
+      if (pc.lp.lab[i] !== LAB_OPEN_B) continue;
+      const a = pc.lp.pts[i], b = pc.lp.pts[(i + 1) % pc.lp.pts.length];
+      if (dist(a, b) > 0.05) cutters.push(ribbon([a, b], 0.06));
     }
     const res = cutters.length ? differenceS(pc.lp.pts, ...cutters.map((c) => [{ outer: c, holes: [] }] as MultiPoly)) : [{ outer: pc.lp.pts, holes: [] }];
     for (const ph of res) {

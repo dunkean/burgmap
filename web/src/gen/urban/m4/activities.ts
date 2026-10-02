@@ -281,9 +281,10 @@ export function buildWatermill(B: Polygon, cx: CompoundCtx): Out {
   const millP = largest(mill);
   if (!millP) { out.parcels.push({ poly: B, use: 'mill-yard' }); return out; }
   for (const q of mill) out.parcels.push({ poly: q, use: 'mill' });
-  const raceP = pieces(differenceS(intersectionS(band, B), M));
+  const raceP = pieces(differenceS(intersectionS(band, B), ...mill.map((q) => [{ outer: q, holes: [] }])));
   for (const q of raceP) { out.parcels.push({ poly: q, use: 'mill-race' }); out.water.push(q); }
-  for (const q of pieces(differenceS(B, band, M))) {
+  // the rest is B minus exactly the pieces above (one boolean against the same polygons: no slivers)
+  for (const q of pieces(differenceS(B, ...[...mill, ...raceP].map((x) => [{ outer: x, holes: [] }])))) {
     const cc = polygonCentroid(q);
     const v = -(cc.x - c.x) * Math.sin(ang) + (cc.y - c.y) * Math.cos(ang);
     out.parcels.push({ poly: q, use: v * sg < dd ? 'mill-island' : 'mill-yard' });

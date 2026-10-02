@@ -28,7 +28,7 @@ import { stitchUnion } from '../geo/stitch';
 import { truncateAcute } from './blocks';
 
 export interface HalfPlane { p: Vec2; n: Vec2 }
-export type BldgKind = 'house' | 'rear' | 'back' | 'barn' | 'shed' | 'garden' | 'hall' | 'landmark' | 'church' | 'cathedral';
+export type BldgKind = 'house' | 'rear' | 'back' | 'barn' | 'shed' | 'garden' | 'hall' | 'landmark' | 'church' | 'cathedral' | 'hut';
 export interface Bldg { poly: Polygon; kind: BldgKind }
 
 export const BLD_STATS = { on: false, plot: 0, raw: 0, norm: 0, fin: 0 };

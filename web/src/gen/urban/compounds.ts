@@ -516,8 +516,8 @@ export function buildCompound(kind: string, lot: Polygon, cx: CompoundCtx): Comp
     const par = out.parcels[bd.parcel]?.poly;
     return par && polyInside(par, bd.poly) && area(bd.poly) > 2;
   });
-  // no overlapping footprints (small lots squeeze nested layouts)
-  out.buildings = dropOverlaps(out.buildings) as typeof out.buildings;
+  // no overlapping footprints (small lots squeeze nested layouts); hut cells are disjoint by construction
+  if (kind !== 'm4-shanty') out.buildings = dropOverlaps(out.buildings) as typeof out.buildings;
   return out;
 }
 
@@ -530,7 +530,7 @@ export interface ClaimBlock { poly: Polygon; kind: string; phase: number; zone: 
  */
 export function pickBlock(
   blocks: ClaimBlock[], place: string, [amin, amax]: [number, number], nucleus: Vec2, R: number,
-  ctx: { frontsNucleus: (i: number) => number; edgeDist: (p: Vec2) => number; gates: Vec2[]; rng: Rng; taken: Set<number>; others?: Vec2[]; sep?: number },
+  ctx: { frontsNucleus: (i: number) => number; edgeDist: (p: Vec2) => number; gates: Vec2[]; rng: Rng; taken: Set<number>; others?: Vec2[]; sep?: number; targets?: Vec2[] },
 ): number {
   let best = -1, bs = -Infinity;
   blocks.forEach((b, i) => {
@@ -559,6 +559,15 @@ export function pickBlock(
         break;
       }
       case 'gate': { const g = Math.min(...ctx.gates.map((q) => dist(q, c)), 1e9); if (g > 200) return; s += 1.5 - g / 80; break; }
+      case 'suburb': {
+        // a suburb (faubourg or absorbed village) block, near its village green, apart from the other churches
+        if (b.zone !== 'faubourg' && b.zone !== 'village') return;
+        const dOther = Math.min(...(ctx.others ?? []).map((q) => dist(q, c)), 1e9);
+        if (dOther < (ctx.sep ?? 200)) return;
+        const dt = Math.min(...(ctx.targets ?? []).map((q) => dist(q, c)), 1e9);
+        s += (ctx.targets?.length ? 1.5 - Math.min(dt, 600) / 120 : 0) + Math.min(1.5, dOther / 400);
+        break;
+      }
       default: break;
     }
     if (s > bs) { bs = s; best = i; }

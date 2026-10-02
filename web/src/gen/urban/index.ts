@@ -15,7 +15,7 @@ import { planRibbonVillage } from './villages';
 import { makeCtx } from './context';
 import { choosePopulation, chooseArchetype, planServedPhases, planFaubourgs, EnclosurePlan, zonesFor, PhaseInput } from './phases';
 import { buildPrimary, Quarter } from './primary';
-import { Streets, LAB_OPEN } from './streets';
+import { Streets, LAB_OPEN, LAB_WALL } from './streets';
 import { mpArea, MultiPoly, differenceS } from '../geo/bool';
 import { GuidanceField } from './field';
 import { splitQuarter, addCloses, carveBlocks, buildRibbonIndex, Piece, CarvedBlock } from './blocks';
@@ -41,6 +41,8 @@ import { marketHall } from './m4/market';
 import { reservePort, portPieceBuildings } from './m4/port';
 import { pickInns, innBuildings } from './m4/inns';
 import { reserveMills, reserveWindmills, reserveTanneries, reserveRoadside, reserveArena } from './m4/activities';
+import { reserveShanty } from './m4/shanty';
+import { outerEnclosure, absorbedVillages, joinVillages, reserveVillages, quarterWall, type Village } from './m4/suburbs';
 import type { ReservedLot } from './primary';
 import { unionS } from '../geo/bool';
 
@@ -92,8 +94,13 @@ export function contourAngle(world: World, p: Vec2): number {
   return Math.atan2(gy, gx) + Math.PI / 2;
 }
 
+/** Level-2 compounds listed as landmark sites (name hooks). */
+const L2_SITES: Record<string, 'power' | 'worship' | 'market' | 'civic' | 'activity'> = {
+  hospital: 'civic', kasbah: 'power', 'great-mosque': 'worship', yamen: 'power', 'chinese-temple': 'worship', 'walled-market': 'market',
+  'jp-temple': 'worship', 'hindu-temple': 'worship', palace: 'power', basilica: 'civic', 'roman-temple': 'worship', castle: 'power', hammam: 'civic',
+};
 /** Parcel uses of the open port pieces. */
-const LOT_USE: Record<string, string> = { 'm4-quay': 'quay', 'm4-pier': 'pier', 'm4-slipway': 'slipway' };
+const LOT_USE: Record<string, string> = { 'm4-quay': 'quay', 'm4-pier': 'pier', 'm4-slipway': 'slipway', 'm4-green': 'green' };
 const castleTower = (cid: string): 'round' | 'square' => (cid === 'medina' || cid === 'chinese' || cid === 'indian-temple' ? 'square' : 'round');
 
 export function generateUrban(world: World, root: Rng): UrbanResult {
@@ -135,6 +142,8 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   const quays: Polyline[] = [];
   const siteLines: UrbanLine[] = [];
   let castle: CastlePlan | null = null;
+  let outerPhase = false;
+  let villages: Village[] = [];
   // the castle is sited on the enclosure before the faubourgs and the streets; it may extend the enclosure
   const siteCastleOn = (ep: EnclosurePlan): void => {
     if (!flags.castle || !ep.enclosure.length) return;
@@ -198,11 +207,23 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     // scarce land: what the enclosure could not hold grows along the roads instead
     const encTarget = eplan.phases.reduce((s2, ph, k) => s2 + (ph.pop / (plan.phases[k].morph.density[ph.zone] * (eplan!.densityScale ?? 1))) * 1e4, 0);
     const short = (eplan.shortfall ?? 0) > 0.05 * encTarget ? ((eplan.shortfall ?? 0) * params.density.middle) / plan.faubourg.density.faubourg : 0;
-    faub = planFaubourgs(ctx, eplan.enclosure, roads, (faubPop / plan.faubourg.density.faubourg) * 1e4 + short, walled ? 22 : 0, rng.fork('faubourg'));
+    // suburbs (M4): none, the faubourg ribbons, or thick suburbs (an outer wall for a city, absorbed villages)
+    const faubArea = (faubPop / plan.faubourg.density.faubourg) * 1e4 + short;
+    const sub = flags.suburbs;
+    faub = sub === 'none' ? { region: [] } : planFaubourgs(ctx, eplan.enclosure, roads, faubArea * (sub === 'many' ? 2.4 : 1), walled ? 22 : 0, rng.fork('faubourg'), 'faubourg', sub === 'many' ? 1.6 : 1);
+    if (sub === 'many') {
+      if (walled && pop >= 9000 && outerEnclosure(ctx, eplan, faub.region, pop)) {
+        outerPhase = true;
+        faub = planFaubourgs(ctx, eplan.enclosure, roads, faubArea * 0.6, 22, rng.fork('faubourg2'), 'faubourg', 1.2);
+      }
+      villages = absorbedVillages(ctx, eplan.enclosure, faub.region, roads, pop >= 40000 ? 3 : 2, rng.fork('villages'));
+      faub = { region: joinVillages(faub.region, villages, eplan.enclosure, ctx) };
+    }
     marketArea = plan.nucleus.area === 'market' ? MARKET_AREA(pop) : 0;
     extraRadials = plan.phases.some((p) => p.morph.extraRadials && p.morph.streetOp !== 'grid');
     nucleusSpec = plan.nucleus;
     phaseMorphs = plan.phases.map((p) => p.morph);
+    if (outerPhase) phaseMorphs.push(plan.faubourg);
   }
   const allStreetOps = new Set(phaseMorphs.flatMap((m) => m.streets));
   const stats: Record<string, number | string> = { pop, archetype, walled: walled ? 1 : 0, morphology: params.id, culture: culture.id };
@@ -261,6 +282,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
       if (castle) ci.avoid.push((castle as CastlePlan).lot);
       if (flags.port && archetype === 'town') tm('port', () => { for (const l of reservePort(st, api, { avoid: ci.avoid.slice(), nucleus: ci.nucleus, harbor: world.site!.harbor, roads: nonTrack, bridges: world.bridges ?? [] })) push(l); });
       quays.push(...(st.quays ?? []));
+      if (villages.length) for (const l of reserveVillages(st, api, villages, ci.avoid)) push(l);
       if (flags.cathedral) tm('cathedral', () => push(reserveCathedral(st, api, ci)));
       if (flags.palace) tm('palace', () => push(reservePalace(st, api, ci)));
       if (flags.monasteries && flags.monastery) tm('monastery', () => { for (const l of reserveMonasteries(st, api, ci, flags.monasteries, flags.monastery!)) push(l); });
@@ -277,6 +299,10 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
           for (const l of reserveRoadside(st, api, ai, rs)) push(l);
         });
       }
+      if (flags.shanty !== 'none') tm('shanty', () => {
+        const nuisance = out.filter((l) => l.kind === 'm4-tannery').map((l) => l.poly);
+        for (const l of reserveShanty(st, api, { avoid: ci.avoid.slice(), roads: nonTrack, nucleus: ci.nucleus, nuisance, walled: eplan!.walled }, flags.shanty as 'some' | 'many', flags.shantyKind)) push(l);
+      });
       return out;
     },
   }, streets, rng.fork('primary'));
@@ -355,7 +381,11 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     };
     const cb: ClaimBlock[] = allPieces.map((pc) => ({ poly: pc.lp.pts, kind: pc.kind, phase: pc.phase, zone: pc.zone, quarter: pc.quarter, height: ctx.heightAt(interiorPoint(pc.lp.pts)) }));
     const placed = new Map<string, Vec2[]>();
-    for (const lm of plan.landmarks) {
+    // suburbs get their own parish churches, near their places and village greens
+    const suburbPts = villages.map((v) => v.c);
+    const lmList = [...plan.landmarks];
+    if (flags.suburbs === 'many' && archetype === 'town' && plan.culture.id !== 'medina') lmList.push({ role: 'extra', kind: 'parish-church', place: 'suburb', area: [700, 5000], minPop: 0, count: Math.max(1, suburbPts.length + (outerPhase ? 2 : 1)), sep: 200, culture: culture.id });
+    for (const lm of lmList) {
       if (pop < lm.minPop) continue;
       // the kasbah is the culture's castle: sited at level 1 by the castle rule (or switched off)
       if (lm.kind === 'kasbah' && (castle || opts.castle === 'no')) continue;
@@ -366,7 +396,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
       for (let k = 0; k < count; k++) {
         const others = kin.flatMap((kk) => placed.get(kk) ?? []);
         const pi = pickBlock(cb, lm.place, lm.area, nucleus, encR, {
-          frontsNucleus, edgeDist: (p) => Math.min(...encRings.map((r) => distToRing(r, p)), 1e9), gates, rng: rng.fork('lm:' + lm.kind + k), taken, others, sep: lm.sep,
+          frontsNucleus, edgeDist: (p) => Math.min(...encRings.map((r) => distToRing(r, p)), 1e9), gates, rng: rng.fork('lm:' + lm.kind + k + lm.place), taken, others, sep: lm.sep, targets: suburbPts,
         });
         if (pi < 0) break;
         placed.set(lm.kind, [...(placed.get(lm.kind) ?? []), interiorPoint(allPieces[pi].lp.pts)]);
@@ -389,6 +419,25 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     for (const b of r.blocks) { carved.push(b); blockMorph.push(q.morph ?? params); blockCulture.push(q.culture ?? culture.id); }
     streetSpace.push(r.streetSpace);
   });
+  const lines: UrbanLine[] = [];
+  // ---- sub-quarters (M4): the walled Jewish quarter (mellah) of a large medina, at the edge, by the kasbah
+  if (culture.id === 'medina' && pop >= 6000 && archetype === 'town') {
+    const kc = castle ? polygonCentroid((castle as CastlePlan).C) : null;
+    let bq = -1, bs = -Infinity;
+    prim.quarters.forEach((q, qi) => {
+      if (q.kind !== 'quarter' || q.zone === 'core' || q.zone === 'faubourg' || !q.lp.lab.includes(LAB_WALL)) return;
+      const A = areaOf(q.lp.pts);
+      if (A < 12000 || A > 90000) return;
+      const c = interiorPoint(q.lp.pts);
+      const sc = (kc ? -dist(c, kc) / 100 : dist(c, ctx.center) / 200) - Math.abs(A - 35000) / 40000;
+      if (sc > bs) { bs = sc; bq = qi; }
+    });
+    if (bq >= 0) {
+      const bl = carved.filter((b) => b.quarter === bq && b.kind === 'block').map((b) => b.poly);
+      for (const w of quarterWall(bl)) lines.push({ kind: 'ward-wall', path: w, width: 1.6 });
+      if (bl.length) sites.push({ id: 'mellah', kind: 'mellah', role: 'suburb', lot: prim.quarters[bq].lp.pts, anchor: interiorPoint(prim.quarters[bq].lp.pts), culture: culture.id });
+    }
+  }
   const blockPts = carved.map((b) => interiorPoint(b.poly));
   const holdsBlock = (ph: { outer: Polygon; holes: Polygon[] }) => blockPts.some((p) => pointInRing(ph.outer, p) && !ph.holes.some((h) => pointInRing(h, p)));
   prim.walls = prim.walls.filter((w) => holdsBlock({ outer: w.ring, holes: [] }));
@@ -408,7 +457,6 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   const landmarks: UrbanLayer['landmarks'] = [];
   const parcels: UrbanParcel[] = [];
   const buildings: UrbanBuilding[] = [];
-  const lines: UrbanLine[] = [];
   const waterPieces: PolyH[] = [];
   const compoundOf: (string | undefined)[] = carved.map(() => undefined);
   const perBlock: Polygon[][] = carved.map(() => []);
@@ -418,6 +466,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   const claim = (bi: number, kind: string, ang: number): boolean => {
     const out = buildCompound(kind, carved[bi].poly, cxFor(bi, ang));
     if (out.walls) extraWalls.push(...out.walls);
+    if (L2_SITES[kind]) sites.push({ id: kind + ':' + bi, kind, role: L2_SITES[kind], lot: carved[bi].poly, anchor: interiorPoint(carved[bi].poly), culture: blockCulture[bi] ?? culture.id });
     if (out.trees) compoundTrees.push(...out.trees);
     if (!out.parcels.length) return false;
     const first = parcels.length;
@@ -428,7 +477,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     lines.push(...out.lines);
     for (const w of out.water) waterPieces.push({ outer: w, holes: [] });
     landmarks.push(...out.landmarks);
-    carved[bi].kind = kind === 'church' || kind === 'parish-church' ? 'church' : out.parcels[0].use === 'place' ? 'place' : 'compound';
+    carved[bi].kind = kind === 'church' || kind === 'parish-church' ? 'church' : kind === 'm4-shanty' ? 'shanty' : out.parcels[0].use === 'place' ? 'place' : 'compound';
     compoundOf[bi] = kind;
     return true;
   };
@@ -527,6 +576,10 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
 
   // ---- level 4: buildings (by the block's building operator), unioned into masses per block
   const plotGardens: Polygon[] = [];
+  const tan = sites.find((x) => x.kind === 'tannery');
+  const craftAt: Vec2 | null = tan ? tan.anchor : null;
+  if (tan) sites.push({ id: 'craft-quarter', kind: 'craft-quarter', role: 'suburb', lot: tan.lot, anchor: tan.anchor, culture: culture.id, tags: { trade: 'tanners, dyers, fullers' } });
+  if (quays.length) sites.push({ id: 'merchant-quarter', kind: 'merchant-quarter', role: 'suburb', lot: (sites.find((x) => x.kind === 'harbour' || x.kind === 'river-port') ?? sites[0]).lot, anchor: (sites.find((x) => x.kind === 'harbour' || x.kind === 'river-port') ?? sites[0]).anchor, culture: culture.id });
   const parcelIndexOfPlot: number[] = [];
   parcels.forEach((pc, i) => { if (pc.use === 'plot') parcelIndexOfPlot.push(i); });
   const courtHint = (pl: Plot) => {
@@ -538,9 +591,15 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     const pr = rng.fork('pl:' + pi);
     const cov = Math.max(0, Math.min(1, (blockInfill[pl.block] + pr.range(-0.03, 0.03)) * (1 - 0.4 * (pl.fade ?? 0))));
     let first = smithies.has(pl);
+    const fm = { x: (pl.front[0].x + pl.front[1].x) / 2, y: (pl.front[0].y + pl.front[1].y) / 2 };
+    const onQuay = quays.length > 0 && !!streets.nearest(fm, 10, (st) => st.role === 'quay');
+    const craft = craftAt && dist(fm, craftAt) < 170;
     for (const b of buildOn(pl, cov, plotMorph[pi], pr, courtHint(pl))) {
       if (b.kind === 'garden') { plotGardens.push(b.poly); continue; }
       if (first && b.kind === 'house') { b.arch = 'smithy'; first = false; }
+      // the warehouse row on the quay (merchant quarter) and the craftsmen's quarter by the tanneries
+      if (onQuay && b.kind === 'house') { b.arch = 'warehouse'; b.storeys = 3; }
+      else if (craft && b.kind === 'house') b.arch = 'craft-workshop';
       buildings.push({ poly: b.poly, kind: b.kind, parcel: parcelIndexOfPlot[pi], arch: b.arch, roof: b.roof, storeys: b.storeys, material: b.material, courtyards: b.courtyards, orientation: b.orientation });
     }
   });
