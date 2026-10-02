@@ -476,8 +476,16 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
       }
       // keep the part inside the enclosure (the first long inside piece)
       if (zig.length >= 3) {
-        const pcs = insidePieces(big.outer, zig).filter((p2) => !p2.pts.some((q) => ctx.isWater(q)));
-        const pc = pcs.sort((a2, b2) => polylineLength(b2.pts) - polylineLength(a2.pts))[0];
+        // (a stream crossing the hold cuts the ramp: its dry stretches are kept, the longest one is the ramp)
+        const dryRuns: { pts: Vec2[] }[] = [];
+        for (const p2 of insidePieces(big.outer, zig)) {
+          let cur: Vec2[] = [];
+          const dense = resampleAt(p2.pts, 4);
+          for (const q of dense) { if (ctx.isWater(q)) { if (cur.length >= 2) dryRuns.push({ pts: cur }); cur = []; } else cur.push(q); }
+          if (cur.length >= 2) dryRuns.push({ pts: cur });
+        }
+        const pc0 = dryRuns.sort((a2, b2) => polylineLength(b2.pts) - polylineLength(a2.pts))[0];
+        const pc = pc0 ? { pts: simplify(pc0.pts, 0.3) } : undefined;
         if (pc && polylineLength(pc.pts) > 80) {
           const id = streets.add(pc.pts, sw.width, 1, 'radial', 1);
           radials.push(id); radialLines.push(pc.pts);

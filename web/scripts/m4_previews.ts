@@ -26,6 +26,9 @@ const SHOTS: Shot[] = [
   { name: 'crop_monastery', label: 'Monastery precinct', o: { seed: '2', size: 'city' }, crop: { site: 'monastery', w: 300 }, px: 1000 },
   { name: 'crop_shanty', label: 'Shanty town: huts and footpaths', o: { seed: '1', size: 'city', suburbs: 'many', shantytowns: 'many' }, crop: { site: 'shanty', w: 260 }, px: 1000 },
   { name: 'crop_arena', label: 'Arena fossilized as an oval of houses', o: { seed: '4', size: 'town', culture: 'roman-core', arena: 'yes' }, crop: { site: 'arena', w: 300 }, px: 1000 },
+  { name: 'double_walls', label: 'Double enceinte, two castles', o: { seed: '1', size: 'town', walls: 'double', castles: '2' }, px: 1300 },
+  { name: 'crop_parish', label: 'Parish church embedded in the fabric', o: { seed: '2', size: 'city' }, crop: { site: 'parish-church', w: 220 }, px: 900 },
+  { name: 'crop_bridge', label: 'Inhabited bridge', o: { seed: '2', size: 'city' }, crop: { site: 'inhabited-bridge', w: 260 }, px: 900 },
   { name: 'crop_mill', label: 'Watermill: weir, race, mill', o: { seed: '2', size: 'city' }, crop: { site: 'watermill', w: 240 }, px: 900 },
 ];
 
