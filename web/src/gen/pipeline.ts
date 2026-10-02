@@ -10,7 +10,7 @@ import { generateUrban } from './urban';
 import { generateNames } from './names';
 
 /** `onStage` (optional) is told which stage is about to run, for progress display. */
-export function generate(options: Options, onStage?: (stage: string) => void): World {
+export function generate(options: Options, onStage?: (stage: string, partial?: World) => void): World {
   const t0 = performance.now();
   onStage?.('terrain');
   const root = new Rng('burgmap:' + options.seed);
@@ -30,7 +30,7 @@ export function generate(options: Options, onStage?: (stage: string) => void): W
   const world: World = { seed: options.seed, options, mapSize, terrain, stats };
 
   const t1 = performance.now();
-  onStage?.('site & roads');
+  onStage?.('site & roads', world);
   // the culture's site preferences apply unless the options set their own
   const cprefs = getCulture(options.culture).sitePrefs;
   world.site = chooseSite(terrain, options.sitePrefs || !cprefs ? options : { ...options, sitePrefs: cprefs }, mapSize, root);
@@ -52,7 +52,7 @@ export function generate(options: Options, onStage?: (stage: string) => void): W
   stats['roads'] = rr.roads.length;
   stats['bridges'] = rr.bridges.length;
 
-  onStage?.('town');
+  onStage?.('town', world);
   const ur = generateUrban(world, root);
   world.urban = ur.layer;
   world.debug = { urban: ur.debug };
@@ -60,7 +60,7 @@ export function generate(options: Options, onStage?: (stage: string) => void): W
   for (const [k, v] of Object.entries(ur.stats)) stats[k.startsWith('ms.') ? k : 'urban.' + k] = v;
   stats['ms.urbanTotal'] = r(t3b - t3);
 
-  onStage?.('fields & woods');
+  onStage?.('fields & woods', world);
   const lu = generateRural(world, root);
   world.landuse = lu.layer;
   const t4 = performance.now();
