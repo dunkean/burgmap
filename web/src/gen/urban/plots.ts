@@ -17,8 +17,9 @@ import type { Rng } from '../core/rng';
 import type { MorphologyParams, Zone } from './morphology';
 import type { Streets } from './streets';
 import { MultiPoly, PolyH, intersectionS, differenceS, difference, unionS, mpArea } from '../geo/bool';
-import { area, interiorAngle, pointInRing, distToSeg, inscribed, cleanRing, orientPos, bboxOf, snapPt, isSimple, convexWidth, obb } from '../geo/poly';
+import { area, interiorAngle, pointInRing, distToSeg, inscribed, cleanRing, orientPos, bboxOf, snapPt, isSimple, convexWidth, obb, convexHull } from '../geo/poly';
 import { clipPlot } from './buildings';
+import { truncateAcute } from './blocks';
 import { sweepLeft } from '../geo/offset';
 import { stitchUnion } from '../geo/stitch';
 import { rayHit, splitByChord, lpoly, isConvex, locate } from '../geo/split';
@@ -399,7 +400,9 @@ export function cutPlots(
     if (c.grown) return minAng(c.poly) < (12 * Math.PI) / 180;
     if (minAng(c.poly) < (15 * Math.PI) / 180) return true;
     if (a >= 600) return false;
-    return (isConvex(c.poly, 1e-3) ? convexWidth(c.poly) / 2 : inscribed(c.poly, [], 0.2).r) < 1.25;
+    // (the half width of the hull bounds the inscribed radius: thin cells are found without the polylabel search)
+    if (convexWidth(convexHull(c.poly)) / 2 < 1.25) return true;
+    return (isConvex(c.poly, 1e-3) ? convexWidth(c.poly) / 2 : inscribed(c.poly, [], 0.3).r) < 1.25;
   };
   const shared = (X: Polygon, Y: Polygon): number => {
     let s2 = 0;
@@ -474,9 +477,13 @@ export function cutPlots(
     const ns = streets.nearest(q, 12);
     return !!ns && (Math.abs(ns.d - ns.hw) < Math.max(0.5, 0.25 * ns.hw) || ns.d < ns.hw);
   };
-  const frontLen = (P: Polygon): number => {
+  const frontLen = (P: Polygon, hint?: Vec2): number => {
     let L = 0;
-    for (let k = 0; k < P.length && L < 3.6; k++) {
+    // (start at the edge nearest the plot's frontage: most plots are proved on their first edge)
+    let k0 = 0;
+    if (hint) { let bd = Infinity; for (let k = 0; k < P.length; k++) { const d = distToSeg(hint, P[k], P[(k + 1) % P.length]); if (d < bd) { bd = d; k0 = k; } } }
+    for (let kk = 0; kk < P.length && L < 3.6; kk++) {
+      const k = (k0 + kk) % P.length;
       const a = P[k], b = P[(k + 1) % P.length];
       const le = dist(a, b), m = Math.max(1, Math.ceil(le / 0.5));
       for (let j = 0; j < m; j++) {
@@ -488,10 +495,10 @@ export function cutPlots(
   };
   for (let i = 0; i < merged.length; i++) {
     const p = merged[i];
-    if (!p || frontLen(p.poly) >= 3.6) continue;
+    if (!p || frontLen(p.poly, { x: (p.front[0].x + p.front[1].x) / 2, y: (p.front[0].y + p.front[1].y) / 2 }) >= 3.6) continue;
     let best = -1, bl = 0;
     for (let j = 0; j < merged.length; j++) {
-      if (j === i || !merged[j] || frontLen(merged[j].poly) < 3.6) continue;
+      if (j === i || !merged[j] || frontLen(merged[j].poly, { x: (merged[j].front[0].x + merged[j].front[1].x) / 2, y: (merged[j].front[0].y + merged[j].front[1].y) / 2 }) < 3.6) continue;
       const sh = shared(p.poly, merged[j].poly);
       if (sh > bl) { bl = sh; best = j; }
     }
@@ -549,7 +556,7 @@ export function cutPlots(
     const a = area(c.poly);
     if (a < (c.plot ? 35 : 20)) return true;
     if (minAng(c.poly) < (12 * Math.PI) / 180) return true;
-    return a < 600 && inscribed(c.poly, [], 0.2).r < 1.05;
+    return a < 600 && (convexWidth(convexHull(c.poly)) / 2 < 1.05 || inscribed(c.poly, [], 0.3).r < 1.05);
   };
   for (let i = 0; i < cellsF.length; i++) {
     const c = cellsF[i];
@@ -569,6 +576,33 @@ export function cutPlots(
     (cellsF as ({ poly: Polygon; plot: Plot | null } | null)[])[i] = null;
   }
   for (let i = cellsF.length - 1; i >= 0; i--) if (!cellsF[i]) cellsF.splice(i, 1);
+  // spikes (§3.2.6): a needle tip (< 12°) of a large cell is cut where it is 0.5 m wide and given to the neighbour
+  // sharing most of it when that leaves no needle there; a tip nobody can take (a few m²) stays out of the plots
+  const blockA = area(B);
+  let lost = 0;
+  for (let i = 0; i < cellsF.length; i++) {
+    const c = cellsF[i];
+    if (minAng(c.poly) >= (12 * Math.PI) / 180 || area(c.poly) < 150) continue;
+    const cut = truncateAcute(c.poly, (12 * Math.PI) / 180, 0.5);
+    if (cut.length < 3 || !isSimple(cut) || minAng(cut) < (12 * Math.PI) / 180) continue;
+    const tips = differenceS(c.poly, cut).filter((ph) => !ph.holes.length && area(ph.outer) > 0.01);
+    // (all or nothing: the neighbours change only when every tip finds a home)
+    const pending = new Map<number, Polygon>();
+    let ok = true, drop = 0;
+    for (const tp of tips) {
+      let best = -1, bl = 0;
+      for (let j = 0; j < cellsF.length; j++) { if (j === i) continue; const sh = shared(tp.outer, pending.get(j) ?? cellsF[j].poly); if (sh > bl) { bl = sh; best = j; } }
+      let u: Polygon | null = best >= 0 ? stitchUnion(pending.get(best) ?? cellsF[best].poly, tp.outer) : null;
+      if (u && (!isSimple(u) || minAng(u) < (12 * Math.PI) / 180)) u = null;
+      if (u) { pending.set(best, u); continue; }
+      if (lost + drop + area(tp.outer) < 0.002 * blockA) { drop += area(tp.outer); continue; }
+      ok = false; break;
+    }
+    if (!ok) continue;
+    c.poly = cut;
+    lost += drop;
+    for (const [j, u] of pending) cellsF[j].poly = u;
+  }
   const plotsF: Plot[] = [];
   const backF: Polygon[] = [];
   for (const c of cellsF) { if (c.plot) { c.plot.poly = c.poly; plotsF.push(c.plot); } else backF.push(c.poly); }

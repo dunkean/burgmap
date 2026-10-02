@@ -22,7 +22,7 @@ import type { MorphologyParams } from './morphology';
 import type { Plot } from './plots';
 import { clipHalfPlaneConvex, isConvex, polyInside } from '../geo/split';
 import { intersection, intersectionS, difference, differenceS, unionS } from '../geo/bool';
-import { area, cleanRing, isSimple, obb, orientPos, bboxOf } from '../geo/poly';
+import { area, cleanRing, isSimple, obb, orientPos, bboxOf, segSegT, pointInRing, distToRing } from '../geo/poly';
 import { ribbon } from '../geo/offset';
 import { stitchUnion } from '../geo/stitch';
 import { truncateAcute } from './blocks';
@@ -72,11 +72,40 @@ function separated(A: Polygon, B: Polygon): boolean {
 }
 
 /** Drops pieces that overlap earlier ones (fanned plots narrow with depth, so side wings may collide). */
+/**
+ * Cheap proof that two simple polygons do not overlap (they may touch): disjoint boxes, or no proper edge crossing
+ * and no vertex of either strictly inside the other (≥ 1 cm from its boundary). False means "maybe".
+ */
+export function clearOf(A: Polygon, B: Polygon): boolean {
+  const a = bboxOf(A), b = bboxOf(B);
+  if (a.x0 >= b.x1 - 0.01 || b.x0 >= a.x1 - 0.01 || a.y0 >= b.y1 - 0.01 || b.y0 >= a.y1 - 0.01) return true;
+  for (let i = 0; i < A.length; i++) {
+    const p = A[i], q = A[(i + 1) % A.length];
+    for (let j = 0; j < B.length; j++) {
+      const r = segSegT(p, q, B[j], B[(j + 1) % B.length]);
+      if (r && r.t > 1e-6 && r.t < 1 - 1e-6 && r.u > 1e-6 && r.u < 1 - 1e-6) return false;
+    }
+  }
+  const inQ = (Q: Polygon, v: Vec2) => pointInRing(Q, v) && distToRing(Q, v) > 0.01;
+  // vertices, and points along the edges (collinear overlaps put every vertex on the other's boundary)
+  const strictlyIn = (P: Polygon, Q: Polygon) => P.some((v, i) => {
+    if (inQ(Q, v)) return true;
+    const w = P[(i + 1) % P.length];
+    for (const t of [0.25, 0.5, 0.75]) if (inQ(Q, { x: v.x + (w.x - v.x) * t, y: v.y + (w.y - v.y) * t })) return true;
+    return false;
+  });
+  if (strictlyIn(A, B) || strictlyIn(B, A)) return false;
+  // all vertices on or outside the other, no crossing: overlapping only when one lies on the other (shared ring)
+  const cA = { x: A.reduce((s, v) => s + v.x, 0) / A.length, y: A.reduce((s, v) => s + v.y, 0) / A.length };
+  return !(pointInRing(B, cA) && distToRing(B, cA) > 0.01 && pointInRing(A, cA));
+}
+
 export function dropOverlaps(list: Bldg[]): Bldg[] {
   const kept: Bldg[] = [];
   for (const b of list) {
     let ok = true;
     for (const k of kept) {
+      if (clearOf(b.poly, k.poly)) continue;
       if (isConvex(b.poly, 1e-3) && isConvex(k.poly, 1e-3) && separated(b.poly, k.poly)) continue;
       const r = intersectionS(b.poly, k.poly);
       if (r.length && r.reduce((s, ph) => s + area(ph.outer), 0) > 0.02) { ok = false; break; }
@@ -100,7 +129,7 @@ export function trimOverlaps(list: Bldg[]): Bldg[] {
       for (const p of pieces) {
         const pb = bboxOf(p);
         if (pb.x0 >= kb.x1 - 0.01 || pb.x1 <= kb.x0 + 0.01 || pb.y0 >= kb.y1 - 0.01 || pb.y1 <= kb.y0 + 0.01) { next.push(p); continue; }
-        if (isConvex(p, 1e-3) && isConvex(k.poly, 1e-3) && separated(p, k.poly)) { next.push(p); continue; }
+        if (clearOf(p, k.poly) || (isConvex(p, 1e-3) && isConvex(k.poly, 1e-3) && separated(p, k.poly))) { next.push(p); continue; }
         const r = intersectionS(p, k.poly);
         if (!r.length || r.reduce((s2, ph) => s2 + area(ph.outer), 0) <= 0.02) { next.push(p); continue; }
         for (const ph of differenceS(p, k.poly)) if (!ph.holes.length && area(ph.outer) > 1) next.push(cleanRing(ph.outer, 0.005, 0.5, 0.002, false));

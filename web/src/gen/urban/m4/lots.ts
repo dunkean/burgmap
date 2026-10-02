@@ -71,9 +71,19 @@ export function segPolyDist(a: Vec2, b: Vec2, poly: Polygon): number {
 export function samplePoly(poly: Polygon, step: number): Vec2[] {
   const out: Vec2[] = [];
   const bb = bboxOf(poly);
-  for (let y = bb.y0 + step / 2; y < bb.y1; y += step) for (let x = bb.x0 + step / 2; x < bb.x1; x += step) {
-    const p = { x, y };
-    if (pointInRing(poly, p)) out.push(p);
+  // scanlines: the inside intervals of each row (even–odd crossings), sampled on the same lattice
+  const xs: number[] = [];
+  for (let y = bb.y0 + step / 2; y < bb.y1; y += step) {
+    xs.length = 0;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const p = poly[i], q = poly[j];
+      if ((p.y > y) !== (q.y > y)) xs.push(p.x + ((y - p.y) * (q.x - p.x)) / (q.y - p.y));
+    }
+    xs.sort((u, v) => u - v);
+    for (let t = 0; t + 1 < xs.length; t += 2) {
+      const k0 = Math.ceil((xs[t] - bb.x0 - step / 2) / step), k1 = Math.floor((xs[t + 1] - bb.x0 - step / 2) / step);
+      for (let k = Math.max(0, k0); k <= k1; k++) { const x = bb.x0 + step / 2 + k * step; if (x < bb.x1) out.push({ x, y }); }
+    }
   }
   for (let i = 0; i < poly.length; i++) {
     const a = poly[i], b = poly[(i + 1) % poly.length];

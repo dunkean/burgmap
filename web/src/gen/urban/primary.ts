@@ -446,6 +446,7 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
       }
     }
   }
+  let rampId = -1;
   // ---- switchback ramp (dwarven): from the lowest to the highest point of the enclosure, legs along the contour
   if (inp.switchbacks) {
     const sw = inp.switchbacks;
@@ -528,6 +529,7 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
         const pc = pc0 ? { pts: simplify(pc0.pts, 0.3) } : undefined;
         if (pc && polylineLength(pc.pts) > 80) {
           const id = streets.add(pc.pts, sw.width, 1, 'radial', 1);
+          rampId = id;
           radials.push(id); radialLines.push(pc.pts);
         }
       }
@@ -620,7 +622,7 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
   }
   // ---- quarters: phase bands minus the market, cut by the radials
   const cutters: Polygon[] = [];
-  // (each cutter overshoots its ends by 0.5 m: a radial ending exactly on the band boundary must still cut it
+  // (the ramp's cutter overshoots its ends by 0.5 m: a ramp led exactly onto the wall must still cut the band
   // through, not leave a slit joined by a hairline)
   const overshoot = (pl: Polyline): Polyline => {
     if (pl.length < 2) return pl;
@@ -628,7 +630,7 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
     return [ext(pl[0], pl[1]), ...pl, ext(pl[pl.length - 1], pl[pl.length - 2])];
   };
   for (const id of radials) {
-    const rb = ribbon(overshoot(streets.list[id].path), 0.04);
+    const rb = ribbon(id === rampId ? overshoot(streets.list[id].path) : streets.list[id].path, 0.04);
     if (rb.length >= 3) cutters.push(rb);
   }
   for (const c of extraCuts) { const rb = ribbon(c, 0.04); if (rb.length >= 3) cutters.push(rb); }
@@ -756,11 +758,16 @@ function distSeg(p: Vec2, a: Vec2, b: Vec2): number {
   return Math.hypot(p.x - a.x - t * dx, p.y - a.y - t * dy);
 }
 
+/** Water edges of a context in a grid index (built once per context). */
+const WATER_IDX = new WeakMap<UrbanCtx, GridIndex<{ a: Vec2; b: Vec2 }>>();
 function nearWaterBoundary(ctx: UrbanCtx, p: Vec2, tol: number): boolean {
-  for (const ph of ctx.water) {
-    if (distToRing(ph.outer, p) < tol) return true;
-    for (const h of ph.holes) if (distToRing(h, p) < tol) return true;
+  let idx = WATER_IDX.get(ctx);
+  if (!idx) {
+    idx = new GridIndex<{ a: Vec2; b: Vec2 }>(25);
+    for (const ph of ctx.water) for (const r of [ph.outer, ...ph.holes]) for (let i = 0; i < r.length; i++) idx.insertSeg(r[i], r[(i + 1) % r.length], { a: r[i], b: r[(i + 1) % r.length] });
+    WATER_IDX.set(ctx, idx);
   }
+  for (const s of idx.queryPt(p, tol)) if (distSeg(p, s.a, s.b) < tol) return true;
   return false;
 }
 function nearWater(ctx: UrbanCtx, p: Vec2, tol: number): boolean {

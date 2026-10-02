@@ -350,7 +350,8 @@ export function buildShanty(B: Polygon, cx: CompoundCtx): Out {
       if (h.length < 3) return;
       // no pebbles: a hut is a rectangle (the oriented box of the cell's inset, of the same area, trimmed by the
       // inset where it pokes out: square corners, now and then a cut one)
-      if (!(h.length === 4 && shapeOf(h).w >= 4.5)) { const r = rectFit(h); if (r) h = r; }
+      // (the last, tightest pass keeps the cell insets: the packing comes first there)
+      if (rect && !(h.length === 4 && shapeOf(h).w >= 4.5)) { const r = rectFit(h); if (r && area(r) >= 0.8 * area(h)) h = r; }
       let A = area(h);
       if (A > 40) {
         // keep huts to 15–40 m²: scale about a point inside (the centroid of a convex inset, else its inscribed centre)
@@ -419,7 +420,7 @@ export function buildShanty(B: Polygon, cx: CompoundCtx): Out {
       const leanTo = orientPos([at(off - ext, t0), at(off + ext, t0), at(off + ext, t1), at(off - ext, t1)]);
       if (polyInside(cell, leanTo) && leanTo.every((q) => distToRing(cell, q) >= 0.9)) {
         const u = stitchUnion(poly, leanTo);
-        if (u && isSimple(u) && shapeOf(u).asp <= 3) poly = u;
+        if (u && isSimple(u) && shapeOf(u).asp <= 3 && area(u) <= 40) poly = u;
       }
     }
     out.buildings.push({ poly, kind: 'hut', parcel: h.parcel, arch: 'shack', roof: 'flat', material: 'timber', storeys: 1 });

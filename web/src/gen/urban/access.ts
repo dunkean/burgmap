@@ -72,21 +72,31 @@ export function blockReach(block: Polygon, blds: Polygon[], streetAt0: StreetAt 
   if (sa.parts) {
     // street ribbons (with the slack) stamped on the raster: only the cells near each segment are visited
     const { segs, places } = sa.parts(bb.x0, bb.y0, bb.x1, bb.y1);
-    for (const sg of segs) {
+    // segments bucketed on a coarse grid (8 m) over the raster; the block's outer boundary cells (one scan) test
+    // only the segments of their bucket (a long street's box would otherwise be scanned cell by cell)
+    const BK = 8, bw = Math.ceil((w * cell) / BK) + 1, bh = Math.ceil((h * cell) / BK) + 1;
+    const buckets: number[][] = Array.from({ length: bw * bh }, () => []);
+    segs.forEach((sg, si) => {
       const r = sg.hw * 1.15 + 1.2;
-      const cx0 = Math.max(0, Math.floor((Math.min(sg.a.x, sg.b.x) - r - x0) / cell)), cx1 = Math.min(w - 1, Math.ceil((Math.max(sg.a.x, sg.b.x) + r - x0) / cell));
-      const cy0 = Math.max(0, Math.floor((Math.min(sg.a.y, sg.b.y) - r - y0) / cell)), cy1 = Math.min(h - 1, Math.ceil((Math.max(sg.a.y, sg.b.y) + r - y0) / cell));
-      for (let y = cy0; y <= cy1; y++) for (let x = cx0; x <= cx1; x++) {
+      const gx0 = Math.max(0, Math.floor((Math.min(sg.a.x, sg.b.x) - r - x0) / BK)), gx1 = Math.min(bw - 1, Math.floor((Math.max(sg.a.x, sg.b.x) + r - x0) / BK));
+      const gy0 = Math.max(0, Math.floor((Math.min(sg.a.y, sg.b.y) - r - y0) / BK)), gy1 = Math.min(bh - 1, Math.floor((Math.max(sg.a.y, sg.b.y) + r - y0) / BK));
+      for (let gy = gy0; gy <= gy1; gy++) for (let gx = gx0; gx <= gx1; gx++) buckets[gy * bw + gx].push(si);
+    });
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      if (!boundaryOut(x, y, i)) continue;
+      const p = at(i);
+      const bk = buckets[Math.min(bh - 1, Math.floor((p.y - y0) / BK)) * bw + Math.min(bw - 1, Math.floor((p.x - x0) / BK))];
+      for (const si of bk) { const sg = segs[si]; if (distToSeg(p, sg.a, sg.b) <= sg.hw * 1.15 + 1.2) { streetCell[i] = 1; break; } }
+    }
+    if (places.length) {
+      const pb = places.map((q) => { const b2 = bboxOf(q); return { q, x0: b2.x0 - 0.8, y0: b2.y0 - 0.8, x1: b2.x1 + 0.8, y1: b2.y1 + 0.8 }; });
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
         const i = y * w + x;
         if (streetCell[i] || !boundaryOut(x, y, i)) continue;
-        if (distToSeg(at(i), sg.a, sg.b) <= r) streetCell[i] = 1;
+        const p = at(i);
+        if (pb.some((o) => p.x >= o.x0 && p.x <= o.x1 && p.y >= o.y0 && p.y <= o.y1 && (pointInRing(o.q, p) || distToRing(o.q, p) < 0.8))) streetCell[i] = 1;
       }
-    }
-    if (places.length) for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-      const i = y * w + x;
-      if (streetCell[i] || !boundaryOut(x, y, i)) continue;
-      const p = at(i);
-      if (places.some((q) => pointInRing(q, p) || distToRing(q, p) < 0.8)) streetCell[i] = 1;
     }
   } else {
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const i = y * w + x; if (boundaryOut(x, y, i) && streetAt(at(i))) streetCell[i] = 1; }
@@ -117,15 +127,25 @@ export function blockReach(block: Polygon, blds: Polygon[], streetAt0: StreetAt 
     if (i + w < N) visit(i + w);
   }
   // reach masks: next to a reached cell (8-neighbourhood) or within ~1 m of the street edge
+  // (the street cells are few: their ~1 m neighbourhoods are stamped; the reached cells are tested from the
+  // building cells' side, 8 neighbours each, a building being settled at its first hit)
   const near = new Uint8Array(N);
   const R = Math.max(1, Math.round(1 / cell));
   for (let i = 0; i < N; i++) {
-    if (!seen[i] && !streetCell[i]) continue;
-    const x = i % w, y = (i / w) | 0, r = streetCell[i] ? R : 1;
-    for (let yy = Math.max(0, y - r); yy <= Math.min(h - 1, y + r); yy++) for (let xx = Math.max(0, x - r); xx <= Math.min(w - 1, x + r); xx++) near[yy * w + xx] = 1;
+    if (!streetCell[i]) continue;
+    const x = i % w, y = (i / w) | 0;
+    for (let yy = Math.max(0, y - R); yy <= Math.min(h - 1, y + R); yy++) for (let xx = Math.max(0, x - R); xx <= Math.min(w - 1, x + R); xx++) near[yy * w + xx] = 1;
   }
   const ok = blds.map(() => false);
-  for (let i = 0; i < N; i++) { const k = bid[i]; if (k && near[i]) ok[k - 1] = true; }
+  for (let i = 0; i < N; i++) {
+    const k = bid[i];
+    if (!k || ok[k - 1]) continue;
+    if (near[i]) { ok[k - 1] = true; continue; }
+    const x = i % w;
+    const l = x > 0, r = x < w - 1, u = i >= w, d = i + w < N;
+    if ((l && seen[i - 1]) || (r && seen[i + 1]) || (u && seen[i - w]) || (d && seen[i + w])
+      || (l && u && seen[i - w - 1]) || (r && u && seen[i - w + 1]) || (l && d && seen[i + w - 1]) || (r && d && seen[i + w + 1])) ok[k - 1] = true;
+  }
   void pointInRing;
   ACC_STATS.ms += performance.now() - tA;
   return ok;

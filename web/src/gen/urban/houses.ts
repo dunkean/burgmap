@@ -291,7 +291,8 @@ export function burgageHouse(pl: Plot, cov: number, P: MorphologyParams, rng: Rn
     // YARD: the yard is what the coverage leaves unbuilt (the access gateway, 1.6 m through the front range, opens
     // into it). Wide plots: an L (wing along one side) with the yard beside it; narrow plots: a rear range, the yard
     // across the plot. A smaller outbuilding (or, on dense plots, a back house) closes the yard at the back.
-    const U = Math.max(9, (1 - cov) * A - 1.6 * hd - sb * W);
+    // (the access stage and the shape rules take a few % more: aim slightly higher)
+    const U = Math.max(9, (1 - cov - 0.06) * A - 1.6 * hd - sb * W);
     const backD = rest >= 4.5 + 3 + 4.5 ? Math.min(rest - 7.5, cov >= 0.75 ? rng.range(5.5, 8) : rng.range(4.5, 6.5)) : 0;
     const L = rest - backD;
     let yw = clamp(U / Math.max(1, L), 3, W);
