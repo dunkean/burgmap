@@ -18,6 +18,36 @@ Status: [ ] open · [~] in progress · [x] done
 - [ ] Chinese: the interior of the walled city is too empty.
 - [ ] General: cultures are uneven in quality. Each preset must reach the European preset's level.
 
+## New cultures (next culture agent)
+
+Each culture gets a `scale` range: the settlement classes it can produce.
+
+- **Village/hamlet-only cultures.** Above their maximum population they degrade to a large village or a confederation of villages, or the UI caps the population with a note.
+  - [ ] **Barbarian / Germanic–Celtic–Norse village**:
+    - longhouses and byre-houses in a palisaded or ditched enclosure, with a chieftain's hall at the center;
+    - sunken huts (Grubenhäuser), granaries on posts, cattle pens;
+    - irregular yards, no streets, only trampled paths.
+    - Variants: Viking farmstead cluster; Celtic roundhouse village in a ringfort.
+  - [ ] **Native North American**, three variants:
+    - *Iroquoian palisaded longhouse village*: parallel bark longhouses of 20–60 m inside a double palisade, cornfields around;
+    - *Plains tipi camp*: a circle of tipis with the opening facing east, council lodge, horse herds;
+    - *Pueblo*: terraced, agglutinated stone/adobe room blocks around plazas, kivas (round sunken chambers).
+    
+    The pueblo can scale up to a town (Taos, Chaco great houses).
+  - [ ] **Bantu kraal / African village**: a ring of round huts around a central cattle kraal, granaries, a thorn fence.
+  - [ ] **Nomad camp** (from the spec): tents in concentric circles around the chief's tent.
+- **City cultures**
+  - [ ] **Inca**:
+    - kancha blocks (rectangular walled compounds with houses around a courtyard) on an orthogonal grid adapted to the terrain;
+    - a great central plaza (haukaypata), ushnu platform, temple (Coricancha-like), fortress on the hill (Sacsayhuamán-like zigzag walls);
+    - agricultural terraces on the slopes around;
+    - canalized streams through the town.
+  - [ ] Remaining historical presets from URBAN_MORPHOLOGY §3b, by priority: Aztec, Maya, Khmer, Byzantine, Russian kremlin, Venetian, Persian, Ottoman, Sahel, Hanseatic, Norse ring fort, Celtic oppidum, Korean.
+  - [ ] Remaining fantasy presets from §3c: halfling, orcish, gnomish, stilt-town, wizard city, necropolis.
+
+## Global settlement parameter
+- [ ] **Sprawl / density factor** (`sprawl` ∈ 0.5 … 2, default 1). It multiplies the extent for a given population, lowers coverage, loosens plots, makes gardens more frequent and spreads faubourgs and suburbs. Below 1 it gives a compact dense town. It must interact with the culture defaults (a medina stays dense relative to its own baseline). Expose it in the UI and the URL.
+
 ## Building footprints: realism, proportions, variety (all cultures)
 - [ ] Proportions:
   - dwellings mostly 1:1 to 1:2.2, with depth tied to the number of bays;
