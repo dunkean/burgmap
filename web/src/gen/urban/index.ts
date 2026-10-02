@@ -4,7 +4,7 @@
  * (level 4). The culture (URBAN_MORPHOLOGY.md) chooses the phases and their enclosures, the nucleus, the street
  * operators, the plot and building operators per quarter, and the landmark catalogue.
  */
-import type { Vec2, Polygon } from '../core/geom';
+import type { Vec2, Polygon, Polyline } from '../core/geom';
 import { dist } from '../core/geom';
 import type { Rng } from '../core/rng';
 import type { World, UrbanLayer, UrbanStreet, PolyH as PolyHT, UrbanLine, UrbanTree } from '../types';
@@ -37,13 +37,16 @@ import { siteCastle, type CastlePlan } from './m4/castle';
 import { reserveCastle, type M4State } from './m4/reserve';
 import { reserveCathedral, reservePalace, reserveMonasteries } from './m4/catalogue';
 import { LineIndex } from './m4/lots';
+import { marketHall } from './m4/market';
+import { reservePort, portPieceBuildings } from './m4/port';
 import type { ReservedLot } from './primary';
 import { unionS } from '../geo/bool';
 
 export interface UrbanResult { layer: UrbanLayer; stats: Record<string, number | string>; debug: UrbanDebug }
 export interface UrbanDebug { quarters: { poly: Polygon; phase: number; lab: number[] }[] }
 
-const MARKET_AREA = (pop: number): number => (pop < 1200 ? 0 : Math.min(7000, 1300 + pop * 0.22));
+/** Grand-place (M4): 0.2–1 ha, growing with the town. */
+const MARKET_AREA = (pop: number): number => (pop < 1200 ? 0 : Math.min(10000, 1800 + pop * 0.3));
 /** Qibla from the Maghreb, roughly east-south-east (map angle, y down). */
 const QIBLA = 0.2;
 const NUCLEUS_COMPOUND: Record<string, string> = { mosque: 'great-mosque', castle: 'castle', temple: 'hindu-temple', grove: 'grove', 'drum-tower': 'drum-tower' };
@@ -87,6 +90,8 @@ export function contourAngle(world: World, p: Vec2): number {
   return Math.atan2(gy, gx) + Math.PI / 2;
 }
 
+/** Parcel uses of the open port pieces. */
+const LOT_USE: Record<string, string> = { 'm4-quay': 'quay', 'm4-pier': 'pier', 'm4-slipway': 'slipway' };
 const castleTower = (cid: string): 'round' | 'square' => (cid === 'medina' || cid === 'chinese' || cid === 'indian-temple' ? 'square' : 'round');
 
 export function generateUrban(world: World, root: Rng): UrbanResult {
@@ -124,6 +129,8 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   const flags = m4Flags(opts, culture, pop, archetype, rng.fork('m4'));
   const sites: UrbanSite[] = [];
   const lotData = new Map<string, unknown>();
+  const lotKind = new Map<string, string>();
+  const quays: Polyline[] = [];
   let castle: CastlePlan | null = null;
   // the castle is sited on the enclosure before the faubourgs and the streets; it may extend the enclosure
   const siteCastleOn = (ep: EnclosurePlan): void => {
@@ -244,9 +251,11 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
       if (castle) { const l = reserveCastle(st, api, castle); if (l) out.push(l); else castle = null; }
       const nonTrack = (world.roads ?? []).filter((r) => r.kind !== 'track').map((r) => r.path);
       const ci = { avoid: [] as Polygon[], nucleus: api.market ? polygonCentroid(api.market) : ctx.center, castle: castle ? (castle as CastlePlan).lot : null, roads: nonTrack };
-      const push = (l: ReservedLot | null) => { if (l) { out.push(l); ci.avoid.push(l.poly); } };
-      if (castle) ci.avoid.push((castle as CastlePlan).lot);
       const tm = (k: string, f: () => void) => { const t = performance.now(); f(); stats['ms.lot.' + k] = Math.round(performance.now() - t); };
+      const push = (l: ReservedLot | null) => { if (l) { out.push(l); ci.avoid.push(l.poly); lotKind.set(l.id, l.kind); } };
+      if (castle) ci.avoid.push((castle as CastlePlan).lot);
+      if (flags.port && archetype === 'town') tm('port', () => { for (const l of reservePort(st, api, { avoid: ci.avoid.slice(), nucleus: ci.nucleus, harbor: world.site!.harbor, roads: nonTrack, bridges: world.bridges ?? [] })) push(l); });
+      quays.push(...(st.quays ?? []));
       if (flags.cathedral) tm('cathedral', () => push(reserveCathedral(st, api, ci)));
       if (flags.palace) tm('palace', () => push(reservePalace(st, api, ci)));
       if (flags.monasteries && flags.monastery) tm('monastery', () => { for (const l of reserveMonasteries(st, api, ci, flags.monasteries, flags.monastery!)) push(l); });
@@ -420,6 +429,9 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     const d = encRingsF.length ? Math.min(...encRingsF.map((r) => distToRing(r, p))) : 0;
     return Math.max(0, Math.min(1, (d - 50) / 330));
   };
+  // the quay apron piece nearest the nucleus carries the fish market and the customs house
+  let firstQuay = -1;
+  carved.forEach((b, bi) => { if (b.lot && lotKind.get(b.lot) === 'm4-quay' && (firstQuay < 0 || dist(interiorPoint(b.poly), nucleus) < dist(interiorPoint(carved[firstQuay].poly), nucleus))) firstQuay = bi; });
   const plots: Plot[] = [];
   const plotMorph: MorphologyParams[] = [];
   const blockInfill: number[] = [];
@@ -432,8 +444,11 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     blockInfill.push(infill);
     if (compoundOf[bi]) return;
     if (b.kind !== 'block') {
-      const use = b.kind === 'market' ? (archetype === 'town' ? 'market' : 'green') : b.kind === 'church' ? 'church' : 'place';
+      const lk = b.lot ? lotKind.get(b.lot) : undefined;
+      const use = lk && LOT_USE[lk] ? LOT_USE[lk] : b.kind === 'market' ? (archetype === 'town' ? 'market' : 'green') : b.kind === 'church' ? 'church' : 'place';
+      const pi = parcels.length;
       parcels.push({ poly: b.poly, use, block: bi, zone: b.zone });
+      if (lk) for (const hb of portPieceBuildings(lk, b.poly, lotData.get(b.lot!), nucleus, bi === firstQuay)) buildings.push({ ...hb, parcel: pi });
       return;
     }
     const tb0 = performance.now();
@@ -449,6 +464,14 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     for (const p of r.plots) { plots.push(p); plotMorph.push(P); parcels.push({ poly: p.poly, use: 'plot', block: bi, front: p.front, zone: b.zone }); }
     for (const g of r.back) parcels.push({ poly: g, use: 'garden', block: bi, zone: b.zone });
   });
+  // ---- the market hall (or town hall with its belfry) standing on the grand-place
+  if (flags.marketHall) {
+    const mi = parcels.findIndex((p) => p.use === 'market');
+    if (mi >= 0) {
+      const hb = marketHall(parcels[mi].poly, pop, rng.fork('hall'));
+      if (hb) buildings.push({ ...hb, parcel: mi });
+    }
+  }
   // blocks that received no plot (no street frontage: along water, behind a wall) stay kitchen gardens / orchards
   const plotted = new Set(parcels.filter((p) => p.use === 'plot').map((p) => p.block));
   carved.forEach((b, bi) => { if (b.kind === 'block' && !compoundOf[bi] && !plotted.has(bi)) b.kind = 'green'; });
@@ -497,6 +520,8 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   stats['buildings'] = buildings.length;
   stats['closes'] = closes + derbs;
 
+  // ---- the stone quay edges
+  for (const q of quays) lines.push({ kind: 'quay-edge', path: q, width: 1.1 });
   // ---- plan lines: ward walls (fang), compound walls of courtyard / yashiki lots, moat outside the town wall
   const hints = plan.render;
   if (hints.wardWalls) {
@@ -603,7 +628,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     backLand: parcels.filter((p) => p.use === 'garden').map((p) => p.poly).concat(plotGardens).map((p) => ({ outer: p, holes: [] })),
     culture: culture.id, cultures: plan.cultures.map((c) => c.id), renderHints: { ...hints, towerShape },
     lines, trees, water: waterPieces,
-    sites,
+    sites, quays,
   };
   const debug: UrbanDebug = { quarters: prim.quarters.map((q) => ({ poly: q.lp.pts, phase: q.phase, lab: q.lp.lab })) };
   stats['ms.urban'] = Math.round(performance.now() - t0);

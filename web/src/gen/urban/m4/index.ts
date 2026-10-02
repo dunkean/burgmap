@@ -8,6 +8,7 @@ import type { Culture } from '../culture';
 import { registerBuilders } from '../compounds';
 import { buildCastle, type CastleVariant } from './castle';
 import { buildCathedralClose, buildPalace, buildMonastery, buildMadrasa } from './plans';
+import { buildShipyard, buildRopewalk } from './port';
 
 /** Per-culture M4 catalogue (URBAN_MORPHOLOGY.md: each culture has its own landmarks). */
 export interface M4Catalogue {
@@ -77,6 +78,6 @@ export function registerM4(): void {
   registered = true;
   registerBuilders({
     'm4-castle': buildCastle, 'm4-cathedral-close': buildCathedralClose, 'm4-palace-eu': buildPalace, 'm4-palace': buildPalace,
-    'm4-monastery': buildMonastery, 'm4-madrasa': buildMadrasa,
+    'm4-monastery': buildMonastery, 'm4-madrasa': buildMadrasa, 'm4-shipyard': buildShipyard, 'm4-ropewalk': buildRopewalk,
   });
 }

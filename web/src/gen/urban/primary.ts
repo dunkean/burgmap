@@ -32,8 +32,8 @@ export interface ReservedLot {
   id: string; kind: string; poly: Polygon; phase: number; zone: Zone;
   /** Streets registered for it that cut the partition (connectors to the network). */
   cuts: Polyline[];
-  /** Kind of the piece: a compound lot (default) or an open place (quay apron, pier). */
-  piece?: 'lot' | 'place';
+  /** Kind of the piece: a compound lot (default), an open place (quay apron, pier) or an ordinary quarter. */
+  piece?: 'lot' | 'place' | 'quarter';
 }
 export interface ReserveApi {
   streets: Streets; market: Polygon | null; marketStreet: number; radialLines: Polyline[];
@@ -621,7 +621,7 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
       const mp = taken.length ? difference(l.poly, ...taken) : difference(l.poly);
       taken.push(l.poly);
       const pcs = mp.filter((ph) => !ph.holes.length && area(ph.outer) > 20);
-      if (pcs.length) bands.push({ mp: pcs, phase: l.phase, zone: l.zone, age: 0.5, lot: l, place: l.piece === 'place' });
+      if (pcs.length) bands.push({ mp: pcs, phase: l.phase, zone: l.zone, age: l.piece === 'quarter' ? 0.4 : 0.5, lot: l.piece === 'quarter' ? undefined : l, place: l.piece === 'place' });
     }
     footprint = union(footprint, ...lots.map((l) => l.poly));
   }
@@ -665,7 +665,7 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
       const lab = pts.map((p, i) => labelOf(mid(p, pts[(i + 1) % pts.length])));
       if (!lab.some((l) => l >= 0) && !b.lot) continue; // no street access: not urbanized
       if (b.lot && b.lot.piece !== 'place') quarters.push({ lp: { pts, lab }, phase: b.phase, zone: b.zone, age: b.age, kind: 'lot', lot: b.lot.id, compound: b.lot.kind });
-      else if (b.lot) quarters.push({ lp: { pts, lab }, phase: b.phase, zone: b.zone, age: b.age, kind: 'place', lot: b.lot.id, compound: b.lot.kind });
+      else if (b.lot) quarters.push({ lp: { pts, lab }, phase: b.phase, zone: b.zone, age: b.age, kind: 'place', lot: b.lot.id });
       else quarters.push({ lp: { pts, lab }, phase: b.phase, zone: b.zone, age: b.age, kind: b.place ? 'place' : 'quarter' });
     }
   }

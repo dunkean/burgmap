@@ -27,6 +27,8 @@ export interface M4State {
   lotData: Map<string, unknown>;
   sites: UrbanSite[];
   culture: string;
+  /** Stone quay edges planned by the port. */
+  quays?: Polyline[];
 }
 
 export interface Access {
