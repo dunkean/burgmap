@@ -29,7 +29,7 @@ import { GridIndex } from '../geo/spatial';
 import { wallFeatures } from './walls';
 import { buildCompound, pickBlock, ClaimBlock } from './compounds';
 import { approachGates, axisLines, outsetConvex } from './streetops';
-import { distToRing, pointInRing, area as areaOf, inscribed, convexHull, distToSeg, segSegT } from '../geo/poly';
+import { distToRing, pointInRing, area as areaOf, inscribed, convexHull, distToSeg, segSegT, bboxOf } from '../geo/poly';
 import { outerRing } from './m4/castle';
 import { unionMany } from '../geo/bool';
 import { StreetGraph } from '../geo/graph';
@@ -526,8 +526,10 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     return true;
   };
   const nucleusKind = nucleusSpec?.kind ?? 'market';
+  // (the nucleus block, found before its claim turns it into a compound: a claimed nucleus is not an open square)
+  const marketBi = carved.findIndex((b) => b.kind === 'market');
   if (prim.market) {
-    const mbi = carved.findIndex((b) => b.kind === 'market');
+    const mbi = marketBi;
     const ck = NUCLEUS_COMPOUND[nucleusKind];
     if (mbi >= 0 && ck) claim(mbi, ck, nucleusIn?.angle ?? mainAngle);
     else landmarks.push({ kind: nucleusKind === 'forum' ? 'forum' : archetype === 'town' ? 'market' : 'green', poly: prim.market });
@@ -539,9 +541,12 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
 
   // ---- level 3: plots (by the block's plot operator)
   const encRingsF = eplan.enclosure.map((ph) => ph.outer);
+  // (many suburbs: the suburban belt is a garden suburb, looser than the ribbons at the gates)
+  const subK = flags.suburbs === 'many' ? 1 : 0;
   const faubFade = (p: Vec2): number => {
     const d = encRingsF.length ? Math.min(...encRingsF.map((r) => distToRing(r, p))) : 0;
-    return Math.max(0, Math.min(1, (d - 50) / 330));
+    const f = Math.max(0, Math.min(1, (d - 50) / 330));
+    return subK ? Math.min(1, 0.12 + 1.35 * f) : f;
   };
   // the quay apron piece nearest the nucleus carries the fish market and the customs house
   let firstQuay = -1;
@@ -856,6 +861,15 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     kind: s.rank <= 1 ? 'main' : s.rank <= 2 ? 'street' : 'alley', rank: s.rank, role: s.role, phase: s.phase,
   }));
   const towerShape = hints.towerShape;
+  // within 4 m of the water or in it (wall stretches along the water are left out): the water edges in a grid index
+  // (the polygons are long river ribbons; a full scan per 2 m sample of every wall was the slowest part of the walls)
+  const waterSegs = new GridIndex<{ a: Vec2; b: Vec2 }>(25);
+  const waterBB = ctx.water.map((ph) => bboxOf(ph.outer));
+  for (const ph of ctx.water) { const r = ph.outer; for (let i = 0; i < r.length; i++) waterSegs.insertSeg(r[i], r[(i + 1) % r.length], { a: r[i], b: r[(i + 1) % r.length] }); }
+  const nearW = (q: Vec2): boolean => {
+    for (const s of waterSegs.queryPt(q, 4)) if (distToSeg(q, s.a, s.b) < 4) return true;
+    return ctx.water.some((ph, i) => q.x >= waterBB[i].x0 && q.x <= waterBB[i].x1 && q.y >= waterBB[i].y0 && q.y <= waterBB[i].y1 && pointInRing(ph.outer, q));
+  };
   // the outer wall of a double enceinte: the curtain line offset by the lists, gates aligned on the inner gates,
   // a barbican in front of each outer gate
   const outerWalls = (): UrbanWall[] => {
@@ -883,8 +897,9 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
           { x: best.x - t.x * (g.width / 2 + 1) + o.x * dp, y: best.y - t.y * (g.width / 2 + 1) + o.y * dp },
         ], width: 1.6 });
       }
-      const nearW = (q: Vec2) => ctx.water.some((ph) => distToRing(ph.outer, q) < 4 || pointInRing(ph.outer, q));
-      const wf = wallFeatures(ring, gates, rng.fork('owall:' + wi), ctx.isWater, nearW, 50);
+      // (towers staggered against the inner curtain's)
+      const inner = wallFeatures(w.ring, w.gates, rng.fork('wall:' + wi), ctx.isWater, nearW).towers;
+      const wf = wallFeatures(ring, gates, rng.fork('owall:' + wi), ctx.isWater, nearW, 50, inner);
       out.push({ path: ring, closed: true, towers: wf.towers, gates: gates.map((g) => g.p), thickness: 1.8, gateInfo: gates, pieces: wf.pieces, gateTowers: wf.gateTowers, towerScale: wf.towerScale.map((x) => x * 0.8), curtains: wf.curtains, towerShape, role: 'outer' });
     });
     return out;
@@ -895,7 +910,6 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     streets: layerStreets,
     blocks: carved.map((b) => b.poly), parcels, buildings,
     walls: prim.walls.map((w, wi): UrbanWall | null => {
-      const nearW = (q: Vec2) => ctx.water.some((ph) => distToRing(ph.outer, q) < 4 || pointInRing(ph.outer, q));
       const wf = wallFeatures(w.ring, w.gates, rng.fork('wall:' + wi), ctx.isWater, nearW);
       if (wallKind === 'hedge') {
         // a living hedge: a plan line, no masonry
@@ -910,7 +924,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
       const wf = wallFeatures(w.ring, w.gates, rng.fork('xwall:' + wi), ctx.isWater, skip, 40);
       return { path: w.ring, closed: true, towers: wf.towers, gates: w.gates.map((g) => g.p), thickness: 3.2, gateInfo: w.gates, pieces: wf.pieces, gateTowers: wf.gateTowers, towerScale: wf.towerScale.map((x) => x * 1.15), curtains: wf.curtains, towerShape: castleTower(culture.id), role: w.role === 'castle' ? 'castle' : 'quarter' };
     })),
-    landmarks, squares: prim.market && !compoundOf[carved.findIndex((b) => b.kind === 'market')] ? [prim.market] : [],
+    landmarks, squares: prim.market && !(marketBi >= 0 && compoundOf[marketBi]) ? [prim.market] : [],
     archetype, population: pop, morphology: params.id,
     phases: eplan.phases.map((p) => ({ id: p.id, kind: p.kind, zone: p.zone, region: toPH(p.region), walled: p.walled, fossil: p.fossil })),
     quarters: keptQ.map((qi) => { const q = prim.quarters[qi]; return { poly: { outer: q.lp.pts, holes: [] }, phase: q.phase, zone: q.zone, streetSpace: toPH(streetSpace[qi]) }; }),

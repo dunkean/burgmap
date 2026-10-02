@@ -192,7 +192,10 @@ export function cutPlots(
       // opposite runs meet near the medial line; a much more important street takes a larger share
       const frac = Math.max(0.5, Math.min(0.85, 0.5 + 0.17 * (fr[h.edge].rank - run.rank)));
       const cap = farFront ? frac * h.t + 1.2 : h.t + 0.5;
-      return deepFill ? (farFront ? Math.max(Math.min(dz, cap), Math.min(cap, h.t * 0.5 + 1.2)) : cap) : Math.min(dz, cap);
+      // (no seams: back land narrower than ~7 m per side, between opposite lot ends or before an edge without a
+      // street — an unwalled town edge, a quarter boundary — would read as a gap; the lots run on, back to back)
+      const short = farFront ? cap - dz < 7 : cap - dz < 14;
+      return deepFill ? (farFront ? Math.max(Math.min(dz, cap), Math.min(cap, h.t * 0.5 + 1.2)) : cap) : short ? cap : Math.min(dz, cap);
     });
     // smooth depths along the run
     depth = depth.map((_, j) => {

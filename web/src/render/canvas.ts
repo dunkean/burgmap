@@ -463,6 +463,9 @@ export function createCanvasRenderer(canvas: CanvasLike, world: World, style: Ma
       paved('u-greens', U.garden, gardenPat, 0.6);
       paved('u-yards', U.garden, gravePat);
       fillPolys('u-blocks', U.yard);
+      // urban water (moats, tanks, mill races) and the moat line outside a planned town's wall
+      strokeLines(linesOf((l) => l.role === 'uline' && l.kind === 'moat'), pal.riverFill, (l) => lw(l.width, 1));
+      if (polyL('u-water')) { fillPolys('u-water', pal.riverFill); strokePolys('u-water', pal.riverEdge, lw(0.5, 0.4)); }
       paved('u-backland', U.garden, gardenPat);
       // building masses (courtyards are holes -> evenodd), with a soft drop shadow when zoomed in
       const masses = polyL('u-masses');
@@ -519,10 +522,22 @@ export function createCanvasRenderer(canvas: CanvasLike, world: World, style: Ma
           if (U.lit && lod.band >= 2) drawLit(ctx, rect, sc, U.lit.color, U.lit.density);
         }
       }
+      // landmark buildings: the landmark tone, outlined
+      if (polyL('u-lmb')) { fillPolys('u-lmb', U.landmark); strokePolys('u-lmb', U.landmarkEdge, lw(0.7, near ? 0.5 : 1.4)); }
+      // plan lines: walls of compounds and wards, quay edges, terraces, hedges, footpaths
+      {
+        const ul = (kinds: string[]) => linesOf((l) => l.role === 'uline' && kinds.includes(l.kind));
+        strokeLines(ul(['compound-wall', 'ward-wall', 'citadel-wall', 'stone-wall', 'prakara', 'barbican', 'quay-edge']), U.wall, (l) => lw(l.width * 0.9, 0.8), 1, [], 'butt');
+        strokeLines(ul(['terrace']), U.massEdge, (l) => lw(l.width * 0.6, 0.7));
+        if (near) strokeLines(ul(['hachure']), U.massEdge, (l) => lw(l.width, 0.4), 0.7);
+        strokeLines(ul(['hedge']), '#5f7a3a', (l) => lw(l.width, 1));
+        if (near) strokeLines(ul(['footpath']), U.street, (l) => lw(l.width, 0.6));
+      }
       // churches: distinct outlined mass with a cross
       if (polyL('u-church')) {
         fillPolys('u-church', U.landmark);
-        strokePolys('u-church', U.landmarkEdge, lw(0.8, 0.6));
+        // (zoomed out, a small church keeps a legible outline: at least ~1.6 px)
+        strokePolys('u-church', U.landmarkEdge, lw(0.8, near ? 0.6 : 1.6));
         if (lod.band >= 2) strokeLines(linesOf((l) => l.role === 'cross'), U.landmarkEdge, (l) => lw(l.width, 0.6));
       }
       // plot hairlines: a dark pass (reads on yards) and a light pass (reads on roofs)
@@ -536,6 +551,9 @@ export function createCanvasRenderer(canvas: CanvasLike, world: World, style: Ma
       strokeLines(thin, U.street, (l) => minPx(l) / sc);
       strokePolys('block-edges', U.blockEdge, lw(U.blockEdgeW, 0.3));
       if (polyL('landmarks') && near) strokePolys('landmarks', U.landmark, lw(0.6, 0.6), 0.5, [px(5), px(3)]);
+      // zoomed out: the landmark sites (wells, crosses, markets, compounds' named buildings) as a solid outline of at
+      // least ~1.8 px, so the small ones stay visible on the full map
+      else if (polyL('landmarks')) strokePolys('landmarks', U.landmarkEdge, lw(0.6, 1.8), 0.9);
     }
     // walls: casing + fill (stretches between gate openings), towers and gate towers
     const walls = linesOf((l) => l.role === 'wall');

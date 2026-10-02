@@ -24,7 +24,7 @@ const turnAt = (a: Vec2, b: Vec2, c: Vec2): number => {
 
 export function wallFeatures(
   ring: Polygon, gates: { p: Vec2; width: number }[], rng: Rng, isWater: (p: Vec2) => boolean,
-  nearWater: (p: Vec2) => boolean = () => false, spacing = 55,
+  nearWater: (p: Vec2) => boolean = () => false, spacing = 55, stagger?: Vec2[],
 ): WallFeatures {
   void rng;
   const pts = ring.concat([ring[0]]);
@@ -114,6 +114,32 @@ export function wallFeatures(
         const s = s0 + ((s1 - s0) * j) / m;
         if (!nearGate(s, 6)) all.push({ s, p: at(s), scale: 0.9, tower: true });
       }
+    }
+    // the outer wall of a double enceinte: its towers stand midway between the towers of the inner curtain (each
+    // covers the gap between two inner ones), not in front of them
+    if (stagger && stagger.length >= 2) {
+      const proj = (q: Vec2): number => {
+        let bs = 0, bd = Infinity;
+        for (let i = 1; i < pts.length; i++) {
+          const p0 = pts[i - 1], p1 = pts[i];
+          const dx = p1.x - p0.x, dy = p1.y - p0.y, l2 = dx * dx + dy * dy || 1;
+          const t = Math.max(0, Math.min(1, ((q.x - p0.x) * dx + (q.y - p0.y) * dy) / l2));
+          const d = Math.hypot(q.x - p0.x - t * dx, q.y - p0.y - t * dy);
+          if (d < bd) { bd = d; bs = cum[i - 1] + t * Math.sqrt(l2); }
+        }
+        return bs;
+      };
+      const sIn = stagger.map(proj).sort((x, y) => x - y);
+      for (const st of all) if (st.tower) st.tower = false;
+      for (let k = 0; k < sIn.length; k++) {
+        const s0 = sIn[k], s1 = k + 1 < sIn.length ? sIn[k + 1] : sIn[0] + L;
+        if (s1 - s0 < 12) continue;
+        for (const off of [0, L]) {
+          const m = (s0 + s1) / 2 + off;
+          if (m > a + 4 && m < b - 4 && !nearGate(m, 6)) all.push({ s: m, p: at(m), scale: 0.85, tower: true });
+        }
+      }
+      all.sort((x, y) => x.s - y.s);
     }
     for (let k = 0; k < all.length; k++) {
       const st = all[k];

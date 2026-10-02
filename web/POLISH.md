@@ -8,7 +8,7 @@ Status: [ ] open · [~] in progress · [x] done
 - [x] Too many churches, and every church sits in a garden. Lower the density. Many parish churches stand attached to the fabric with houses against their walls and only a small parvis; a churchyard is only for some of them.
 - [x] Bridges: a city crossed by a river has too few bridges.
 - [x] Inaccessible buildings in dense cores.
-- [~] Seams where two quarters touch without a street. (Done for built-over old wall lines, which now keep a lane. Remaining: unwalled enclosure / faubourg edges and lot backs.)
+- [x] Seams where two quarters touch without a street. (Built-over old wall lines keep a lane; at unwalled edges, quarter boundaries and lot backs, a strip of back land under ~7 m per side is given to the lots, which meet back to back.)
 - [x] Castle count option; walls none / single / double.
 
 ## Cultures: next polish agent

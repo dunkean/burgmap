@@ -23,10 +23,11 @@ import { isoRegions, dilate } from '../phases';
 import { distanceField } from '../../core/field';
 import { rasterizePolys } from '../../geo/raster';
 import { MultiPoly, differenceS, intersectionS, mpArea } from '../../geo/bool';
-import { area, orientPos, pointInRing, distToRing, bboxOf, cleanRing, inscribed } from '../../geo/poly';
+import { area, orientPos, pointInRing, distToRing, bboxOf, cleanRing, inscribed, obb, isSimple } from '../../geo/poly';
+import { stitchUnion } from '../../geo/stitch';
 import { ribbon } from '../../geo/offset';
 import { insetConvex } from '../../geo/offset';
-import { isConvex, segCrossesRing, polyInside } from '../../geo/split';
+import { isConvex, segCrossesRing, polyInside, clipHalfPlaneConvex } from '../../geo/split';
 import { shapeOf, clipPlot } from '../buildings';
 import { Noise2D } from '../../core/noise';
 import { Mask } from './site';
@@ -347,6 +348,9 @@ export function buildShanty(B: Polygon, cx: CompoundCtx): Out {
         h = r.filter((ph) => !ph.holes.length).map((ph) => ph.outer).sort((x, y) => area(y) - area(x))[0] ?? [];
       }
       if (h.length < 3) return;
+      // no pebbles: a hut is a rectangle (the oriented box of the cell's inset, of the same area, trimmed by the
+      // inset where it pokes out: square corners, now and then a cut one)
+      if (!(h.length === 4 && shapeOf(h).w >= 4.5)) { const r = rectFit(h); if (r) h = r; }
       let A = area(h);
       if (A > 40) {
         // keep huts to 15–40 m²: scale about a point inside (the centroid of a convex inset, else its inscribed centre)
@@ -362,6 +366,34 @@ export function buildShanty(B: Polygon, cx: CompoundCtx): Out {
     });
     return { list, cov: built / BA };
   };
+  /**
+   * The oriented box of a polygon, as large as possible with at most one corner cut by the polygon (a rectangle,
+   * now and then with one chamfer), ≥ 4.5 m wide; null when none fits (convex polygons only).
+   */
+  function rectFit(p: Polygon): Polygon | null {
+    if (!isConvex(p, 1e-3)) return null;
+    const o = obb(p);
+    const q = orientPos(p);
+    const s0 = Math.min(1, Math.sqrt(area(p) / Math.max(1, 4 * o.hu * o.hv)));
+    for (const maxV of [4, 5]) for (let s = s0 * 1.04; s >= s0 * 0.72; s *= 0.95) {
+      const hu = o.hu * s, hv = o.hv * s;
+      if (2 * hv < 4.5) break;
+      let r: Polygon = orientPos([
+        { x: o.c.x - o.u.x * hu - o.v.x * hv, y: o.c.y - o.u.y * hu - o.v.y * hv }, { x: o.c.x + o.u.x * hu - o.v.x * hv, y: o.c.y + o.u.y * hu - o.v.y * hv },
+        { x: o.c.x + o.u.x * hu + o.v.x * hv, y: o.c.y + o.u.y * hu + o.v.y * hv }, { x: o.c.x - o.u.x * hu + o.v.x * hv, y: o.c.y - o.u.y * hu + o.v.y * hv },
+      ]);
+      for (let i = 0; i < q.length && r.length >= 3; i++) {
+        const a2 = q[i], b2 = q[(i + 1) % q.length];
+        const l = dist(a2, b2);
+        if (l < 1e-6) continue;
+        r = clipHalfPlaneConvex(r, a2, { x: -(b2.y - a2.y) / l, y: (b2.x - a2.x) / l });
+      }
+      if (r.length < 3) continue;
+      r = cleanRing(r, 0.15, 3, 0.002, false);
+      if (r.length >= 3 && r.length <= maxV && area(r) >= 15 && shapeOf(r).w >= 4.5 && shapeOf(r).asp <= 3) return r;
+    }
+    return null;
+  }
   let huts = hutsFor(1, [30, 40], rng.fork('huts'));
   // under 52 %: a tighter packing (narrower gaps), then huts filling their whole cell
   if (huts.cov < 0.52) { const h2 = hutsFor(0.55, [36, 40], rng.fork('huts2')); if (h2.cov > huts.cov) huts = h2; }
@@ -374,6 +406,21 @@ export function buildShanty(B: Polygon, cx: CompoundCtx): Out {
       const g = polygonCentroid(poly);
       const q = poly.map((p) => ({ x: g.x + (p.x - g.x) * kk, y: g.y + (p.y - g.y) * kk }));
       if (area(q) >= 15 && shapeOf(q).w >= 4.5 && polyInside(poly, q)) poly = q;
+    }
+    // a lean-to against one long side (a shed roof on posts, 1.8–2.4 m deep), inside the hut's cell
+    const lt = rng.fork('lean:' + h.parcel);
+    if (lt.chance(0.45)) {
+      const cell = cs[h.parcel];
+      const o = obb(poly);
+      const side = lt.chance(0.5) ? 1 : -1, dd = lt.range(1.8, 2.4), ext = o.hu * lt.range(0.5, 0.9);
+      const off = lt.range(-1, 1) * (o.hu - ext);
+      const at = (s: number, t: number) => ({ x: o.c.x + o.u.x * s + o.v.x * t, y: o.c.y + o.u.y * s + o.v.y * t });
+      const t0 = side * o.hv, t1 = side * (o.hv + dd);
+      const leanTo = orientPos([at(off - ext, t0), at(off + ext, t0), at(off + ext, t1), at(off - ext, t1)]);
+      if (polyInside(cell, leanTo) && leanTo.every((q) => distToRing(cell, q) >= 0.9)) {
+        const u = stitchUnion(poly, leanTo);
+        if (u && isSimple(u) && shapeOf(u).asp <= 3) poly = u;
+      }
     }
     out.buildings.push({ poly, kind: 'hut', parcel: h.parcel, arch: 'shack', roof: 'flat', material: 'timber', storeys: 1 });
   }

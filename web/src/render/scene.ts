@@ -194,10 +194,25 @@ export function buildScene(world: World, tileSize = TILE_SIZE): Scene {
       addPoly('u-bldg', bs.map((b) => b.poly), bs.map((b) => { const h = (b.courtyards ?? []).filter((c) => inside(b, c)); return h.length ? h : undefined; }));
     }
     addPoly('u-plots', parcelsOf(['plot']));
-    addPoly('u-church', ur.buildings.filter((b) => b.kind === 'church').map((b) => b.poly));
+    addPoly('u-church', ur.buildings.filter((b) => b.kind === 'church' || b.kind === 'cathedral').map((b) => b.poly));
+    // landmark buildings (keeps, halls, temples, minarets...), urban water (moats, tanks, mill races) and the plan
+    // lines (compound and ward walls, moats, quay edges, terraces, hedges, footpaths)
+    addPoly('u-lmb', ur.buildings.filter((b) => b.kind === 'landmark' && b.poly.length >= 3).map((b) => b.poly));
+    addPoly('u-water', (ur.water ?? []).map((w) => w.outer));
+    {
+      const byLine = new Map<string, Polyline[]>();
+      for (const l of ur.lines ?? []) {
+        if (l.path.length < 2) continue;
+        const k = l.kind + '|' + Math.round((l.width ?? 1) * 4) / 4;
+        let list = byLine.get(k);
+        if (!list) byLine.set(k, (list = []));
+        list.push(l.closed ? [...l.path, l.path[0]] : l.path);
+      }
+      for (const [k, list] of byLine) { const [kind, w] = k.split('|'); addLines('ul-' + k, 'uline', kind, Number(w), list); }
+    }
     const crosses: Polyline[] = [];
     for (const b of ur.buildings) {
-      if (b.kind !== 'church' || b.poly.length < 3) continue;
+      if ((b.kind !== 'church' && b.kind !== 'cathedral') || b.poly.length < 3) continue;
       let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
       for (const q of b.poly) { x0 = Math.min(x0, q.x); x1 = Math.max(x1, q.x); y0 = Math.min(y0, q.y); y1 = Math.max(y1, q.y); }
       const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, r = Math.max(2.5, (x1 - x0) * 0.08);
