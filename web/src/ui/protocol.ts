@@ -1,0 +1,55 @@
+/**
+ * Messages between the main thread (M), the generation worker (G) and the render worker (R).
+ *
+ *   M -> G  run / export            G -> M  stage / done / error / exported
+ *   G -> R  world snapshots (over a MessageChannel port that M hands to both)   R -> M  content / frame
+ *   M -> R  init / attach / display / view
+ *
+ * The World never reaches the main thread in 'offscreen' mode: G generates, R builds the scene and draws.
+ */
+import type { Options } from '../gen/options';
+import type { World, Vec2 } from '../gen/types';
+import type { View } from '../render/view';
+import type { MapStyle } from '../render/styles';
+
+/** Display-only options (changing them never regenerates the world). */
+export interface DisplayOpts { style: MapStyle; contours?: boolean; landuse?: boolean; labels?: boolean; legend?: boolean }
+
+// ---- M -> G ----
+export interface GRun { type: 'run'; id: number; options: Options; /** snapshot channel to the render worker */ port: MessagePort }
+export interface GExport { type: 'export'; id: number; kind: 'svg' | 'json'; display: DisplayOpts }
+export type GRequest = GRun | GExport;
+
+// ---- G -> M ----
+export interface GStage { type: 'stage'; id: number; stage: string }
+export interface GDone {
+  type: 'done'; id: number; ms: number; stats: Record<string, number | string>;
+  /** Small summary for the page (title, debug hooks); the World itself stays in the workers. */
+  meta: { center: Vec2; anchors: Record<string, Vec2[]>; mapSize: number };
+}
+export interface GError { type: 'error'; id: number; error: string }
+export interface GExported { type: 'exported'; id: number; kind: 'svg' | 'json'; blob?: Blob; error?: string; ms: number }
+export type GResponse = GStage | GDone | GError | GExported;
+
+// ---- G -> R (snapshot port) ----
+export interface WorldMsg { type: 'world'; gen: number; world: World; final: boolean; stage: string }
+
+// ---- M -> R ----
+export interface RInit { type: 'init'; dpr: number }
+export interface RAttach { type: 'attach'; gen: number; port: MessagePort }
+export interface RDisplay { type: 'display'; display: DisplayOpts }
+export interface RView { type: 'view'; seq: number; view: View; w: number; h: number; dpr: number; mini: number }
+export interface RPng { type: 'dispose' }
+export type RRequest = RInit | RAttach | RDisplay | RView | RPng;
+
+// ---- R -> M ----
+export interface RReady { type: 'ready'; ok: boolean; reason?: string }
+/** The drawn content changed (new snapshot / style): the viewer should re-request a frame (and fit if the map size changed). */
+export interface RContent { type: 'content'; gen: number; ver: number; mapSize: number; final: boolean; sceneMs: number; marker: string; paper: string }
+export interface RFrame {
+  type: 'frame'; seq: number; ver: number; view: View; w: number; h: number; dpr: number;
+  bitmap?: ImageBitmap; mini?: ImageBitmap;
+  ms: number; band: number; scale: number;
+  labels: { kind: string; text: string; size: number }[];
+}
+export type RResponse = RReady | RContent | RFrame | { type: 'error'; error: string };

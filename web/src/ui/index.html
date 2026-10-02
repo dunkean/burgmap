@@ -48,12 +48,15 @@
   #map { position:relative; flex:1; overflow:hidden; cursor:grab; touch-action:none; }
   #map.drag { cursor:grabbing; }
   /* CANVAS-VIEWER styles */
-  #view { position:absolute; left:0; top:0; display:block; }
+  #view { position:absolute; left:0; top:0; display:block; will-change:transform; transform-origin:50% 50%; }
   #minimap { position:absolute; right:12px; bottom:12px; width:140px; height:140px; border:1px solid var(--line); box-shadow:0 2px 10px rgba(0,0,0,.5); background:#eee2c3; cursor:pointer; }
   #hud { position:absolute; left:12px; bottom:10px; color:#f3ead2; font-size:11px; opacity:.75; pointer-events:none; }
   #fit { position:absolute; right:12px; top:36px; padding:4px 8px; font-size:12px; }
   #busy { position:absolute; right:14px; top:12px; color:#f3ead2; font-size:12px; opacity:0; transition:opacity .2s; pointer-events:none; }
   #busy.on { opacity:1; }
+  #loadbar { position:absolute; left:0; right:0; top:0; height:3px; z-index:4; pointer-events:none; opacity:0; transition:opacity .3s; background:rgba(0,0,0,.12); }
+  #loadbar.on { opacity:1; }
+  #loadbar > i { display:block; height:100%; width:0; background:var(--accent); box-shadow:0 0 6px var(--accent); transition:width .35s ease-out; }
   #menuBtn { display:none; position:absolute; left:10px; top:10px; z-index:6; padding:5px 10px; font-size:18px; line-height:1; }
   @media (max-width: 800px) {
     #panel { position:absolute; left:0; top:0; bottom:0; width:min(86vw, 330px); transform:translateX(-102%); transition:transform .2s; }
@@ -120,7 +123,7 @@
     <div id="gentime"></div>
     <div id="status"></div>
   </aside>
-  <main id="map"><canvas id="view"></canvas><canvas id="minimap"></canvas><div id="hud"></div><button id="fit" class="secondary" title="Fit map (0)">Fit</button><div id="busy">generating...</div></main>
+  <main id="map"><div id="loadbar"><i></i></div><canvas id="view"></canvas><canvas id="minimap"></canvas><div id="hud"></div><button id="fit" class="secondary" title="Fit map (0)">Fit</button><div id="busy">generating...</div></main>
 </div>
 <script type="module" src="./main.ts"></script>
 </body>
