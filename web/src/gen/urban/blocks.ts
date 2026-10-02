@@ -80,8 +80,8 @@ export function splitQuarter(ctx: UrbanCtx, q: Quarter, qi: number, streets: Str
   const gridAngle = P.orientation === 'cardinal' ? 0 : P.orientation === 'terrain' ? (o.terrainAngle ?? o.gridAngle) : o.gridAngle;
   const lanes = P.laneSpacing[0] > 0 || P.laneSpacing[1] > 0;
   const out: Piece[] = [];
-  const root: Piece = { lp: q.lp, phase: q.phase, zone: q.zone, age: q.age, quarter: qi, kind: q.kind === 'market' ? 'market' : 'block', level: 1, morph: P };
-  if (root.kind === 'market') return [root];
+  const root: Piece = { lp: q.lp, phase: q.phase, zone: q.zone, age: q.age, quarter: qi, kind: q.kind === 'market' ? 'market' : q.kind === 'place' ? 'place' : 'block', level: 1, morph: P };
+  if (root.kind === 'market' || root.kind === 'place') return [root];
   const queue: Piece[] = [root];
   const maxTurn = (P.curvature * 10 * Math.PI) / 180;
   let places = 0;
@@ -442,6 +442,7 @@ export function carveBlocks(q: Quarter, pieces: Piece[], ribbonIndex: RibbonInde
         let poly = truncateAcute(p0, (22 * Math.PI) / 180, 5);
         if (poly.length < 3 || area(poly) < 40 || (isConvex(poly, 1e-3) ? convexWidth(poly) / 2 : inscribed(poly, [], 0.5).r) < 2.2) continue;
         poly = cleanRing(poly, 0.05, 0.5, 0.002, false);
+        if (poly.length >= 3) poly = cleanRing(truncateAcute(poly, (22 * Math.PI) / 180, 5), 0.05, 0.5, 0.002, false);
         if (poly.length >= 3) blocks.push({ poly, kind: pc.kind, phase: pc.phase, zone: pc.zone, age: pc.age, quarter: pc.quarter, compound: pc.compound });
       }
       continue;
@@ -462,6 +463,9 @@ export function carveBlocks(q: Quarter, pieces: Piece[], ribbonIndex: RibbonInde
       const cl = intersectionS(poly, pc.lp.pts);
       if (!cl.length) continue;
       poly = cl.reduce((b, x) => (area(x.outer) > area(b.outer) ? x : b)).outer;
+      // (the clamp may leave a micro tip: truncated again, it can only shrink, so the block stays in its piece)
+      poly = cleanRing(truncateAcute(cleanRing(poly, 0.05, 0.5, 0.002, false), (22 * Math.PI) / 180, 5), 0.05, 0.5, 0.002, false);
+      if (poly.length < 3) continue;
       const a = area(poly);
       if (a < 40) continue;
       if (inscribed(poly, [], 0.5).r < 2.2) continue;

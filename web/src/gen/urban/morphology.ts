@@ -54,6 +54,9 @@ export interface MorphologyParams {
   ringSpacing: number;
   /** Regional roads stop at the gates (the interior is served by the town's own streets). */
   gatesOnly?: boolean;
+  /** Chance of an open place just inside each gate, and at each crossing of a radial with an old wall-line street. */
+  gatePlaces?: number;
+  crossPlaces?: number;
   /** Architecture of the ordinary buildings. */
   arch: ArchSpec;
   /**
@@ -135,6 +138,8 @@ const EO: MorphologyParams = {
   fieldTwist: 0,
   extraRadials: true,
   ringSpacing: 0,
+  gatePlaces: 0.7,
+  crossPlaces: 0.35,
   arch: { typology: 'gabled-row-house', roof: 'gable', storeys: [2, 4], material: 'timber' },
   growth: { road: 0.3, water: 0.18, noise: 0.26, wavelength: 300, elongation: 0.25, wet: 0.5, bipolar: 0.3 },
   curvature: 0.55,
@@ -153,16 +158,16 @@ const EO: MorphologyParams = {
   placeThreshold: 900,
   deadEndRatio: 0.35,
   slitDepth: 0.55,
-  frontage: { core: [5, 8], middle: [6, 10], edge: [8, 14], faubourg: [7, 13], village: [18, 40] },
+  frontage: { core: [5.5, 9], middle: [6.5, 11], edge: [8, 14], faubourg: [7, 13], village: [18, 40] },
   plotDepth: { core: [24, 42], middle: [30, 50], edge: [35, 65], faubourg: [30, 60], village: [40, 80] },
   plotTilt: 6,
-  wideLotChance: 0.08,
+  wideLotChance: 0.2,
   buildDepth: { core: [10, 14], middle: [9, 13], edge: [8, 12], faubourg: [8, 12], village: [8, 12] },
   setback: { core: [0, 0.3], middle: [0, 0.8], edge: [0.5, 3], faubourg: [0.5, 3], village: [3, 10] },
   sideGap: { core: [0, 0], middle: [0, 1.2], edge: [0.5, 2.5], faubourg: [0.8, 3], village: [3, 8] },
   infill: { core: 0.92, middle: 0.62, edge: 0.38, faubourg: 0.3, village: 0.12 },
-  coverage: { core: [0.86, 0.94], middle: [0.77, 0.86], edge: [0.53, 0.67], faubourg: [0.5, 0.62], village: [0.12, 0.3] },
-  bigCourtChance: 0.3,
+  coverage: { core: [0.86, 0.94], middle: [0.74, 0.83], edge: [0.53, 0.67], faubourg: [0.56, 0.68], village: [0.12, 0.3] },
+  bigCourtChance: 0.12,
   footprintConformity: { core: 0.92, middle: 0.75, edge: 0.6, faubourg: 0.4, village: 0.3 },
   ringGaps: 2.2,
   fieldRandom: 0.45,
@@ -194,6 +199,7 @@ const BASTIDE: MorphologyParams = {
   frontage: { core: [6, 9], middle: [6, 9], edge: [7, 11], faubourg: [7, 13], village: [18, 40] },
   plotDepth: { core: [20, 30], middle: [20, 32], edge: [22, 36], faubourg: [30, 60], village: [40, 80] },
   plotTilt: 1.5,
+  wideLotChance: 0.08,
   infill: { core: 0.72, middle: 0.6, edge: 0.45, faubourg: 0.3, village: 0.12 },
   coverage: { core: [0.85, 0.92], middle: [0.72, 0.83], edge: [0.55, 0.68], faubourg: [0.38, 0.52], village: [0.12, 0.3] },
   footprintConformity: { core: 0.3, middle: 0.3, edge: 0.3, faubourg: 0.3, village: 0.2 },

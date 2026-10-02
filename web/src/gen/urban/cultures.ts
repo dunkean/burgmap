@@ -13,6 +13,8 @@ const morph = (id: string, base: MorphologyParams, over: Record<string, unknown>
 const M: Record<string, MorphologyParams> = {};
 M['bastide'] = MORPHOLOGIES['bastide'];
 
+MORPHOLOGIES['bastide'].gatePlaces = 0.5;
+MORPHOLOGIES['bastide'].crossPlaces = 0;
 M['roman-castrum'] = morph('roman-castrum', MORPHOLOGIES['bastide'], {
   streets: ['axis', 'grid', 'closes'], closeOp: 'none', plotOp: 'courtyard', buildingOp: 'courtyardHouse',
   gridSpacing: [72, 72], gridSkew: 0.01, blockSize: { core: [3500, 6000], middle: [3500, 6000], edge: [3500, 6000] },
@@ -109,6 +111,8 @@ M['chinese-suburb'] = morph('chinese-suburb', EO, {
   coverage: { faubourg: [0.4, 0.55], village: [0.2, 0.35] }, arch: { typology: 'siheyuan-hall', roof: 'tiled-hip', storeys: [1, 1], material: 'brick' },
 });
 
+for (const [k, m] of Object.entries(M)) if (k !== 'bastide') { m.gatePlaces = 0; m.crossPlaces = 0; }
+M['roman-castrum'].gatePlaces = 0.4;
 Object.assign(MORPHOLOGIES, M);
 
 // ---------------------------------------------------------------- cultures
@@ -122,7 +126,11 @@ export const CULTURE_LIST: Culture[] = [
     ring: { morphology: 'european-organic', enclosure: { ...walledEO } },
     phaseCount: [[0, 2], [5000, 3], [20000, 4]],
     faubourg: 'european-organic', faubShare: [0.17, 0.1],
-    landmarks: [{ role: 'worship', kind: 'church', place: 'adjacent-nucleus', area: [700, 12000], minPop: 200 }],
+    landmarks: [
+      { role: 'worship', kind: 'church', place: 'adjacent-nucleus', area: [700, 12000], minPop: 200 },
+      // parish churches, one per ~2,200 inhabitants beyond the main church, spread across the quarters
+      { role: 'extra', kind: 'parish-church', place: 'spread', area: [900, 6000], minPop: 3500, perPop: 2200, sep: 220 },
+    ],
     village: { form: 'auto' }, hamlet: { form: 'auto' },
     render: { towerShape: 'round' },
   },
@@ -133,7 +141,10 @@ export const CULTURE_LIST: Culture[] = [
     ring: null,
     phaseCount: [[0, 1]],
     faubourg: 'european-organic', faubShare: [0.17, 0.1],
-    landmarks: [{ role: 'worship', kind: 'church', place: 'adjacent-nucleus', area: [700, 9000], minPop: 200 }],
+    landmarks: [
+      { role: 'worship', kind: 'church', place: 'adjacent-nucleus', area: [700, 9000], minPop: 200 },
+      { role: 'extra', kind: 'parish-church', place: 'spread', area: [900, 6000], minPop: 5000, perPop: 2800, sep: 200 },
+    ],
     village: { form: 'auto' }, hamlet: { form: 'auto' },
     render: { towerShape: 'round' },
   },

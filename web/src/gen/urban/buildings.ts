@@ -21,8 +21,8 @@ import type { Rng } from '../core/rng';
 import type { MorphologyParams } from './morphology';
 import type { Plot } from './plots';
 import { clipHalfPlaneConvex, isConvex, polyInside } from '../geo/split';
-import { intersection, intersectionS, difference, unionS } from '../geo/bool';
-import { area, cleanRing, isSimple, obb, orientPos } from '../geo/poly';
+import { intersection, intersectionS, difference, differenceS, unionS } from '../geo/bool';
+import { area, cleanRing, isSimple, obb, orientPos, bboxOf } from '../geo/poly';
 import { ribbon } from '../geo/offset';
 import { stitchUnion } from '../geo/stitch';
 import { truncateAcute } from './blocks';
@@ -31,9 +31,11 @@ export interface HalfPlane { p: Vec2; n: Vec2 }
 export type BldgKind = 'house' | 'rear' | 'back' | 'barn' | 'shed' | 'garden' | 'hall' | 'landmark' | 'church' | 'cathedral';
 export interface Bldg { poly: Polygon; kind: BldgKind }
 
+export const BLD_STATS = { on: false, plot: 0, raw: 0, norm: 0, fin: 0 };
+
 /** Min footprint width and max aspect (no matchsticks). */
 export const MIN_BW = 4.5;
-export const MAX_ASPECT = 4;
+export const MAX_ASPECT = 3;
 
 /** plot ∩ ⋂ half-planes (exact Sutherland–Hodgman when the plot is convex, polygon-clipping otherwise). */
 export function clipPlot(plot: Polygon, hps: HalfPlane[], convex: boolean): Polygon[] {
@@ -83,6 +85,33 @@ export function dropOverlaps(list: Bldg[]): Bldg[] {
   return kept;
 }
 
+/**
+ * Overlapping pieces are trimmed rather than dropped: each later piece loses what earlier pieces already cover
+ * (exact difference), and the remainders that are still proper footprints are kept (then checked by dropOverlaps).
+ */
+export function trimOverlaps(list: Bldg[]): Bldg[] {
+  const kept: Bldg[] = [];
+  for (const b of list) {
+    let pieces: Polygon[] = [b.poly];
+    for (const k of kept) {
+      const next: Polygon[] = [];
+      const kb = bboxOf(k.poly);
+      for (const p of pieces) {
+        const pb = bboxOf(p);
+        if (pb.x0 >= kb.x1 - 0.01 || pb.x1 <= kb.x0 + 0.01 || pb.y0 >= kb.y1 - 0.01 || pb.y1 <= kb.y0 + 0.01) { next.push(p); continue; }
+        if (isConvex(p, 1e-3) && isConvex(k.poly, 1e-3) && separated(p, k.poly)) { next.push(p); continue; }
+        const r = intersectionS(p, k.poly);
+        if (!r.length || r.reduce((s2, ph) => s2 + area(ph.outer), 0) <= 0.02) { next.push(p); continue; }
+        for (const ph of differenceS(p, k.poly)) if (!ph.holes.length && area(ph.outer) > 1) next.push(cleanRing(ph.outer, 0.005, 0.5, 0.002, false));
+      }
+      pieces = next.filter((p) => p.length >= 3);
+      if (!pieces.length) break;
+    }
+    for (const p of pieces) if (shapeOK(p)) kept.push({ poly: p, kind: b.kind });
+  }
+  return dropOverlaps(kept);
+}
+
 /** Footprint shape measures: width (short side of the minimum-area OBB) and aspect (long / short). */
 export function shapeOf(p: Polygon): { w: number; asp: number; hu: number } {
   const o = obb(p);
@@ -102,7 +131,7 @@ export function normalizeFootprints(list: Bldg[]): Bldg[] {
     const { b, depth } = queue.shift()!;
     const s = shapeOf(b.poly);
     // cut long pieces across their long axis (at most twice: an L-shaped piece may keep a long OBB)
-    if (s.asp > MAX_ASPECT && s.w >= MIN_BW * 0.8 && depth < 2) {
+    if (s.asp > MAX_ASPECT && s.w >= MIN_BW * 0.8 && depth < 3) {
       const o = obb(b.poly);
       const k = Math.ceil(s.asp / (MAX_ASPECT * 0.85));
       const conv = isConvex(b.poly, 1e-3);
@@ -251,7 +280,16 @@ export function buildPlot(pl: Plot, cov: number, P: MorphologyParams, rng: Rng, 
     if (built < (cov - 0.2) * area(pl.poly)) raw = buildPlotRaw(pl, 0.9, P, rng, { court: false, f: 0.5 });
   }
   const gardens = raw.filter((b) => b.kind === 'garden');
-  return dropOverlaps(normalizeFootprints(raw.filter((b) => b.kind !== 'garden'))).concat(gardens);
+  const rawB = raw.filter((b) => b.kind !== 'garden');
+  const norm = normalizeFootprints(rawB);
+  const fin = trimOverlaps(norm);
+  if (BLD_STATS.on && pl.zone === 'core') {
+    BLD_STATS.plot += area(pl.poly);
+    BLD_STATS.raw += rawB.reduce((s2, b) => s2 + area(b.poly), 0);
+    BLD_STATS.norm += norm.reduce((s2, b) => s2 + area(b.poly), 0);
+    BLD_STATS.fin += fin.reduce((s2, b) => s2 + area(b.poly), 0);
+  }
+  return fin.concat(gardens);
 }
 
 function buildPlotRaw(pl: Plot, cov: number, P: MorphologyParams, rng: Rng, hint?: CourtHint): Bldg[] {
@@ -363,12 +401,12 @@ function buildPlotRaw(pl: Plot, cov: number, P: MorphologyParams, rng: Rng, hint
     while (d < D - 6) { cuts.push(d); d += rng.range(8, 13); }
     cuts.push(D + 1);
     let courtAt = -1, courtD = 0;
-    if (hint?.court && cuts.length >= 3) {
-      const target = sb + hd + (D - sb - hd) * hint.f;
+    if ((hint?.court || rng.chance(0.1)) && cuts.length >= 3) {
+      const target = sb + hd + (D - sb - hd) * (hint?.f ?? 0.5);
       let bk = 1, bdv = Infinity;
       for (let k = 1; k < cuts.length - 1; k++) { const dv = Math.abs(cuts[k] - target); if (dv < bdv) { bdv = dv; bk = k; } }
       const segL = Math.min(cuts[bk + 1], D) - cuts[bk];
-      courtD = Math.min(rng.range(3.2, 5), segL);
+      courtD = Math.min(rng.range(3.5, 5.5), segL);
       if (segL - courtD < MIN_BW) courtD = segL;
       if (courtD >= 3) courtAt = bk;
     }
@@ -383,7 +421,7 @@ function buildPlotRaw(pl: Plot, cov: number, P: MorphologyParams, rng: Rng, hint
       }
       if (cuts[k + 1] - c1 >= 1) add(band(c1, cuts[k + 1]), kind);
     }
-    cornerRanges();
+    // (corner ranges would lie inside the full-depth ranges: the plot is built over its whole depth already)
     return out;
   }
   const gapW = zone === 'faubourg' ? Math.min(W - MIN_BW - 0.5, W * (fade * rng.range(0.25, 0.55) + (cov < 0.45 && rng.chance(0.35) ? 0.15 : 0))) : 0;

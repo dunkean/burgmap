@@ -5,7 +5,7 @@ import { coverage } from './coverage';
 
 // Burgage-cycle density (built area / block area, area-weighted per phase): oldest phase 85–95 %, second 70–85 %,
 // younger 50–70 %; faubourgs 35–60 % near the gate (≤ 150 m) and fading further out (rows → gaps → scattered
-// houses → fields). No matchsticks: every footprint ≥ 4.5 m wide and aspect ≤ 4.
+// houses → fields). No matchsticks: every footprint ≥ 4.5 m wide and aspect ≤ 3.
 describe('urban density per phase', () => {
   for (const size of ['town', 'city'] as SizeName[]) for (const seed of ['1', '2', '3', '4', '5', '6']) {
     it(`${size} seed ${seed}`, () => {
@@ -23,7 +23,7 @@ describe('urban density per phase', () => {
         if (!Number.isNaN(r.faubFar)) expect(r.faubFar, 'the faubourg fades out').toBeLessThan(r.faubNear);
       }
       expect(r.narrow, 'footprints narrower than 4.5 m').toBe(0);
-      expect(r.long, 'footprints with aspect > 4').toBe(0);
+      expect(r.long, 'footprints with aspect > 3').toBe(0);
     });
   }
 });

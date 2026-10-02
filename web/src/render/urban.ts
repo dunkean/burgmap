@@ -3,6 +3,7 @@ import type { World, PolyH, UrbanWall } from '../gen/types';
 import type { Polygon } from '../gen/core/geom';
 import type { Palette } from './styles';
 import { f1, pathD } from './util';
+import { area } from '../gen/geo/poly';
 
 const phD = (p: PolyH): string => pathD(p.outer, true) + p.holes.map((h) => pathD(h, true)).join('');
 
@@ -124,12 +125,13 @@ function buildingsSvg(ub: NonNullable<World['urban']>, U: Palette['urban'], lw: 
     const d = ch.map((b) => pathD(b.poly, true)).join('');
     s += `<defs><pattern id="p-lmhatch" patternUnits="userSpaceOnUse" width="1.6" height="1.6" patternTransform="rotate(45)"><path d="M0 0.8H1.6" stroke="${U.landmarkEdge}" stroke-width="0.35" stroke-opacity="0.55"/></pattern></defs>`;
     s += `<g class="u-landmarks"><path d="${d}" fill="${U.landmark}" stroke="${U.landmarkEdge}" stroke-width="${lw(0.8, 0.4)}"/><path d="${d}" fill="url(#p-lmhatch)"/>`;
-    // a cross on each church (Christian landmarks only)
-    const churches = ch.filter((b) => b.kind === 'church' || b.kind === 'cathedral');
-    if (churches.length) {
-      let cx = 0, cy = 0, n = 0, x0 = Infinity, x1 = -Infinity;
-      for (const b of churches) for (const q of b.poly) { cx += q.x; cy += q.y; n++; x0 = Math.min(x0, q.x); x1 = Math.max(x1, q.x); }
-      cx /= n; cy /= n;
+    // a cross on each church (Christian landmarks only), on its nave
+    for (const b of ch) {
+      if (b.kind !== 'church' && b.kind !== 'cathedral') continue;
+      if (area(b.poly) < 60) continue;
+      let cx = 0, cy = 0, x0 = Infinity, x1 = -Infinity;
+      for (const q of b.poly) { cx += q.x; cy += q.y; x0 = Math.min(x0, q.x); x1 = Math.max(x1, q.x); }
+      cx /= b.poly.length; cy /= b.poly.length;
       const r = Math.max(2.5, (x1 - x0) * 0.08);
       s += `<path d="M${f1(cx - r)} ${f1(cy)}H${f1(cx + r)}M${f1(cx)} ${f1(cy - r * 1.4)}V${f1(cy + r)}" stroke="${U.landmarkEdge}" stroke-width="${lw(0.9, 0.5)}"/>`;
     }

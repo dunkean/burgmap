@@ -116,23 +116,30 @@ export function buildField(ctx: UrbanCtx, rng: Rng, steepMax = 0.2, blocked?: Ui
   const slopeS = site.fields.slopeS;
   // local slope (~25 m): valley floors and benches in steep country are buildable although the 100 m-blurred
   // slope says otherwise (it averages in the valley walls)
-  const slopeL = blurGrid(terrain.slope, Math.max(1, Math.round(12 / cell)), 2).data;
+  const slopeL = GROWTH_CACHE.get(ctx)?.slopeL ?? blurGrid(terrain.slope, Math.max(1, Math.round(12 / cell)), 2).data;
   const S = ctx.mapSize;
   // growth dials (URBAN_MORPHOLOGY §1): towns stretch along the roads and the waterfront, avoid wet low ground,
   // and their outlines are irregular (land ownership, soil) — so even a flat site does not give a circle
   const G = ctx.params.growth ?? { road: 0, water: 0, noise: 0.14, wavelength: 380, elongation: 0, wet: 0 };
   const P0 = ctx.center;
-  let dRoad: Float32Array | null = null, dBank: Float32Array | null = null;
-  if (G.road > 0) {
-    const m = new Uint8Array(N);
-    for (const rd of ctx.world.roads ?? []) if (rd.kind !== 'track') forCellsNearPolyline(rd.path, n, n, cell, cell * 0.7, (i) => { m[i] = 1; });
-    dRoad = distanceField(m, n, n, cell).dist;
+  // the growth rasters depend only on the context: computed once per town (the planner re-plans several times)
+  let cache = GROWTH_CACHE.get(ctx);
+  if (!cache) {
+    let dRoad: Float32Array | null = null, dBank: Float32Array | null = null;
+    if (G.road > 0) {
+      const m = new Uint8Array(N);
+      for (const rd of ctx.world.roads ?? []) if (rd.kind !== 'track') forCellsNearPolyline(rd.path, n, n, cell, cell * 0.7, (i) => { m[i] = 1; });
+      dRoad = distanceField(m, n, n, cell).dist;
+    }
+    if (G.water > 0) {
+      const m = new Uint8Array(N);
+      for (let i = 0; i < N; i++) if (terrain.water[i]) m[i] = 1;
+      dBank = distanceField(m, n, n, cell).dist;
+    }
+    cache = { dRoad, dBank, slopeL };
+    GROWTH_CACHE.set(ctx, cache);
   }
-  if (G.water > 0) {
-    const m = new Uint8Array(N);
-    for (let i = 0; i < N; i++) if (terrain.water[i]) m[i] = 1;
-    dBank = distanceField(m, n, n, cell).dist;
-  }
+  const { dRoad, dBank } = cache;
   const hab = site.fields.hab;
   const wl = G.wavelength;
   const ang = mainRoadAngleCtx(ctx);
@@ -175,6 +182,9 @@ export function buildField(ctx: UrbanCtx, rng: Rng, steepMax = 0.2, blocked?: Ui
   }
   return f;
 }
+
+const FIELD_CACHE = new WeakMap<UrbanCtx, Map<string, PhaseField>>();
+const GROWTH_CACHE = new WeakMap<UrbanCtx, { dRoad: Float32Array | null; dBank: Float32Array | null; slopeL: Float32Array }>();
 
 /** Main road direction at the center (radians). */
 function mainRoadAngleCtx(ctx: UrbanCtx): number {
@@ -381,10 +391,20 @@ export function planTownPhases(ctx: UrbanCtx, pop: number, walled: boolean, main
   // enclosed area target; on scarce land (steep valleys) buildability is relaxed step by step (hillside towns)
   let total = 0;
   for (let k = 0; k < nPh; k++) total += ((encPop * shares[k]) / specs[k].density) * 1e4;
-  let fld = phaseField(ctx, buildField(ctx, rng, 0.2, ov.blocked));
+  // (memoized: the planner re-plans several times with the same field when no cells are blocked)
+  const fieldFor = (sm: number): PhaseField => {
+    if (ov.blocked) return phaseField(ctx, buildField(ctx, rng, sm, ov.blocked));
+    let m = FIELD_CACHE.get(ctx);
+    if (!m) { m = new Map(); FIELD_CACHE.set(ctx, m); }
+    const key = rng.seedKey + '|' + sm;
+    let v = m.get(key);
+    if (!v) { v = phaseField(ctx, buildField(ctx, rng, sm)); m.set(key, v); }
+    return v;
+  };
+  let fld = fieldFor(0.2);
   for (const sm of [0.3, 0.4]) {
     if (componentArea(fld, ctx.cell) >= 1.3 * total) break;
-    fld = phaseField(ctx, buildField(ctx, rng, sm, ov.blocked));
+    fld = fieldFor(sm);
   }
   // still scarce: hill towns are denser (taller, tighter houses) — up to 1.35× the planned gross density
   const densityScale = Math.min(1.35, Math.max(1, (1.3 * total) / Math.max(1, componentArea(fld, ctx.cell))));

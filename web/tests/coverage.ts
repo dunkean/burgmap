@@ -60,7 +60,7 @@ export function coverage(w: World, landmarkKinds = new Set(['church', 'cathedral
     const wdt = 2 * o.hv, asp = o.hu / Math.max(1e-6, o.hv);
     minWidth = Math.min(minWidth, wdt); maxAspect = Math.max(maxAspect, asp);
     if (wdt < 4.4) narrow++;
-    if (asp > 4.05) long++;
+    if (asp > 3.05) long++;
   }
   void inscribed;
   return { byPhase, minWidth, maxAspect, narrow, long, buildings: n, faubNear: na ? nb / na : NaN, faubFar: fa ? fb / fa : NaN };

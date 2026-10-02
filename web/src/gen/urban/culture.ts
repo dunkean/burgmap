@@ -38,7 +38,7 @@ export interface NucleusSpec {
   ring: number;
   orientation?: 'road' | 'cardinal' | 'qibla' | 'terrain';
 }
-export type LandmarkPlace = 'adjacent-nucleus' | 'near-nucleus' | 'edge' | 'axis-north' | 'east' | 'west' | 'any' | 'gate' | 'high';
+export type LandmarkPlace = 'adjacent-nucleus' | 'near-nucleus' | 'edge' | 'axis-north' | 'east' | 'west' | 'any' | 'gate' | 'high' | 'spread';
 export interface LandmarkSpec {
   role: 'worship' | 'power' | 'market' | 'civic' | 'extra';
   /** Footprint builder id (landmarks.ts). */
@@ -48,6 +48,10 @@ export interface LandmarkSpec {
   area: Range;
   minPop: number;
   count?: number;
+  /** One more per this many inhabitants (e.g. parish churches: one per ~2,200). */
+  perPop?: number;
+  /** Minimum distance between two landmarks of this kind (m). */
+  sep?: number;
   /** Claimed at level 1 as a region of its own (large compounds at the edge: kasbah, castle). */
   level1?: boolean;
 }

@@ -245,7 +245,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     let progress = false;
     prim.quarters.forEach((q, qi) => {
       if (done[qi]) return;
-      if (q.kind !== 'market' && !q.lp.lab.some((l) => l >= 0 && streets.connected.has(l))) return;
+      if (q.kind === 'quarter' && !q.lp.lab.some((l) => l >= 0 && streets.connected.has(l))) return;
       pieces[qi] = splitQuarter(ctx, q, qi, streets, field, { nucleus, gridAngle: mainAngle, terrainAngle }, rng.fork('q:' + qi));
       done[qi] = true;
       progress = true;
@@ -283,16 +283,21 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
       return front;
     };
     const cb: ClaimBlock[] = allPieces.map((pc) => ({ poly: pc.lp.pts, kind: pc.kind, phase: pc.phase, zone: pc.zone, quarter: pc.quarter, height: ctx.heightAt(interiorPoint(pc.lp.pts)) }));
+    const placed = new Map<string, Vec2[]>();
     for (const lm of plan.landmarks) {
       if (pop < lm.minPop) continue;
-      const count = lm.count ?? 1;
+      const count = Math.max(lm.count ?? 1, lm.perPop ? Math.floor((pop - (lm.minPop - lm.perPop)) / lm.perPop) : 0);
+      // separation from the other worship landmarks too (the main church counts for the parishes)
+      const kin = lm.kind === 'parish-church' ? ['church', 'parish-church'] : [lm.kind];
       for (let k = 0; k < count; k++) {
+        const others = kin.flatMap((kk) => placed.get(kk) ?? []);
         const pi = pickBlock(cb, lm.place, lm.area, nucleus, encR, {
-          frontsNucleus, edgeDist: (p) => Math.min(...encRings.map((r) => distToRing(r, p)), 1e9), gates, rng: rng.fork('lm:' + lm.kind + k), taken,
+          frontsNucleus, edgeDist: (p) => Math.min(...encRings.map((r) => distToRing(r, p)), 1e9), gates, rng: rng.fork('lm:' + lm.kind + k), taken, others, sep: lm.sep,
         });
         if (pi < 0) break;
+        placed.set(lm.kind, [...(placed.get(lm.kind) ?? []), interiorPoint(allPieces[pi].lp.pts)]);
         taken.add(pi);
-        allPieces[pi].kind = lm.kind === 'church' ? 'church' : 'compound';
+        allPieces[pi].kind = lm.kind === 'church' || lm.kind === 'parish-church' ? 'church' : 'compound';
         allPieces[pi].compound = lm.kind;
         cb[pi].kind = allPieces[pi].kind;
       }
@@ -336,7 +341,6 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   const cxFor = (bi: number, ang: number) => ({ angle: ang, pop, rng: rng.fork('cmp:' + bi), center: ctx.center });
   const claim = (bi: number, kind: string, ang: number): boolean => {
     const out = buildCompound(kind, carved[bi].poly, cxFor(bi, ang));
-    if (typeof process !== 'undefined' && process.env?.BURGMAP_DBG) console.log('claim', kind, bi, Math.round(areaOf(carved[bi].poly)), carved[bi].poly.length, 'parcels', out.parcels.length, 'bldgs', out.buildings.length, JSON.stringify(carved[bi].poly), ang);
     if (!out.parcels.length) return false;
     const first = parcels.length;
     for (const p of out.parcels) parcels.push({ poly: p.poly, use: p.use, block: bi, zone: carved[bi].zone });
@@ -346,7 +350,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     lines.push(...out.lines);
     for (const w of out.water) waterPieces.push({ outer: w, holes: [] });
     landmarks.push(...out.landmarks);
-    carved[bi].kind = kind === 'church' ? 'church' : out.parcels[0].use === 'place' ? 'place' : 'compound';
+    carved[bi].kind = kind === 'church' || kind === 'parish-church' ? 'church' : out.parcels[0].use === 'place' ? 'place' : 'compound';
     compoundOf[bi] = kind;
     return true;
   };
@@ -411,7 +415,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   const courtHint = (pl: Plot) => {
     const cr = rng.fork('court:' + pl.block + ':' + pl.run);
     const phase = cr.int(0, 8), f = cr.range(0.35, 0.65);
-    return { court: (pl.order + phase) % 9 < 2, f };
+    return { court: (pl.order + phase) % 9 < 3, f };
   };
   plots.forEach((pl, pi) => {
     const pr = rng.fork('pl:' + pi);

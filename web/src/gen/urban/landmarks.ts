@@ -7,7 +7,7 @@ import type { Vec2, Polygon } from '../core/geom';
 import { dist, polygonCentroid } from '../core/geom';
 import type { Rng } from '../core/rng';
 import type { Streets } from './streets';
-import { area, inscribed, pointInRing, distToRing, orientPos } from '../geo/poly';
+import { area, inscribed, pointInRing, distToRing, orientPos, obb } from '../geo/poly';
 import { unionS, MultiPoly } from '../geo/bool';
 
 export interface ChurchPick { block: number; footprint: Polygon[]; kind: 'church' | 'cathedral' }
@@ -40,21 +40,36 @@ export function pickChurchBlock(
 }
 
 /** East-oriented church footprint (nave + choir + west tower) scaled to fit inside the lot with a margin. */
-export function churchFootprint(lot: Polygon, pop: number, rng: Rng): { parts: Polygon[]; kind: 'church' | 'cathedral' } | null {
-  const cathedral = pop > 15000;
-  let L = cathedral ? rng.range(80, 110) : pop > 3000 ? rng.range(38, 55) : rng.range(22, 34);
+/**
+ * Orientation of a church on its lot: the choir points east; within ±20° the axis follows the lot's long side
+ * (churches adapt to their site, never randomly).
+ */
+export function churchAxis(lot: Polygon): number {
+  const o = obb(lot);
+  let a = Math.atan2(o.u.y, o.u.x);
+  // the lot direction closest to east (mod 90°: a square-ish lot may lie either way)
+  while (a > Math.PI / 4) a -= Math.PI / 2;
+  while (a < -Math.PI / 4) a += Math.PI / 2;
+  return Math.max(-0.35, Math.min(0.35, a));
+}
+
+export function churchFootprint(lot: Polygon, pop: number, rng: Rng, main = true): { parts: Polygon[]; kind: 'church' | 'cathedral' } | null {
+  const cathedral = main && pop > 15000;
+  let L = cathedral ? rng.range(80, 110) : pop > 3000 && main ? rng.range(38, 55) : rng.range(24, 38);
   const ins = inscribed(lot, [], 0.5);
   const c = ins.c;
+  const ax = churchAxis(lot), ca = Math.cos(ax), sa = Math.sin(ax);
+  const T = (x: number, y: number) => ({ x: c.x + x * ca - y * sa, y: c.y + x * sa + y * ca });
   const inside = (pts: Polygon, margin: number) => pts.every((p) => pointInRing(lot, p) && distToRing(lot, p) >= margin);
   for (let it = 0; it < 14; it++) {
     const W = L * (cathedral ? 0.3 : 0.32);
-    const rect = (x0: number, x1: number, h: number): Polygon => orientPos([{ x: c.x + x0, y: c.y - h / 2 }, { x: c.x + x1, y: c.y - h / 2 }, { x: c.x + x1, y: c.y + h / 2 }, { x: c.x + x0, y: c.y + h / 2 }]);
-    // x grows to the east (map right); nave centered, choir east, tower west
+    const rect = (x0: number, x1: number, h: number): Polygon => orientPos([T(x0, -h / 2), T(x1, -h / 2), T(x1, h / 2), T(x0, h / 2)]);
+    // local x points east (±20°): nave centered, choir east, tower (west front) west
     const nave = rect(-L * 0.42, L * 0.2, W);
     const choir = rect(L * 0.2, L * 0.42, W * 0.68);
     const apse: Polygon = orientPos(Array.from({ length: 7 }, (_, k) => {
       const a = -Math.PI / 2 + (k / 6) * Math.PI;
-      return { x: c.x + L * 0.42 + Math.cos(a) * W * 0.34, y: c.y + Math.sin(a) * W * 0.34 };
+      return T(L * 0.42 + Math.cos(a) * W * 0.34, Math.sin(a) * W * 0.34);
     }));
     const tower = rect(-L * 0.5, -L * 0.42, W * 0.62);
     const parts = [nave, choir, tower];

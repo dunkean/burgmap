@@ -20,7 +20,7 @@ import { disk } from '../geo/offset';
 import { openHoles } from './plots';
 
 export interface Quarter {
-  lp: LPoly; phase: number; zone: Zone; age: number; kind: 'quarter' | 'market';
+  lp: LPoly; phase: number; zone: Zone; age: number; kind: 'quarter' | 'market' | 'place';
   /** Morphology of the quarter (its phase's or sector's); the culture that built it. */
   morph?: MorphologyParams; culture?: string;
 }
@@ -519,9 +519,54 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
   }
   const cutMP: MultiPoly = cutters.length ? union(cutters[0], ...cutters.slice(1)) : [];
   const quarters: Quarter[] = [];
-  const bands: { mp: MultiPoly; phase: number; zone: Zone; age: number }[] = inp.phases.map((ph, k) => ({
+  const bands: { mp: MultiPoly; phase: number; zone: Zone; age: number; place?: boolean }[] = inp.phases.map((ph, k) => ({
     mp: k === 0 && market ? difference(ph.band, market) : ph.band, phase: ph.id, zone: ph.zone, age: ph.age,
   }));
+  // ---- open places (partition pieces): just inside the gates, and at crossings of radials with old wall lines
+  const places: Polygon[] = [];
+  const pr = rng.fork('places');
+  const gP = P.gatePlaces ?? 0, cP = P.crossPlaces ?? 0;
+  const quad = (c: Vec2, u: Vec2, a0: number, a1: number, w0: number, w1: number): Polygon => orientPos([
+    { x: c.x + u.x * a0 - u.y * w0, y: c.y + u.y * a0 + u.x * w0 }, { x: c.x + u.x * a1 - u.y * w1, y: c.y + u.y * a1 + u.x * w1 },
+    { x: c.x + u.x * a1 + u.y * w1, y: c.y + u.y * a1 - u.x * w1 }, { x: c.x + u.x * a0 + u.y * w0, y: c.y + u.y * a0 - u.x * w0 },
+  ]);
+  for (const w of walls) for (const g of w.gates) {
+    if (!pr.chance(gP)) continue;
+    const hw = g.width / 2;
+    // g.dir points into the town (the roads run from the map edge to the centre): a funnel widening inward
+    const D = pr.range(24, 40), w0 = hw + pr.range(4, 7), w1 = hw + pr.range(8, 15);
+    places.push(quad(g.p, g.dir, 4.5, 4.5 + D, w0, w1));
+  }
+  if (cP > 0) {
+    for (const st of streets.list) {
+      if (st.role !== 'ring' || st.id === marketStreet) continue;
+      for (const rid of radials) {
+        const r = streets.list[rid];
+        for (let i = 1; i < r.path.length; i++) for (let j = 1; j < st.path.length; j++) {
+          const x = segSegT(r.path[i - 1], r.path[i], st.path[j - 1], st.path[j]);
+          if (!x || !pr.chance(cP)) continue;
+          const p = { x: r.path[i - 1].x + (r.path[i].x - r.path[i - 1].x) * x.t, y: r.path[i - 1].y + (r.path[i].y - r.path[i - 1].y) * x.t };
+          const l = dist(r.path[i - 1], r.path[i]) || 1;
+          const u = { x: (r.path[i].x - r.path[i - 1].x) / l, y: (r.path[i].y - r.path[i - 1].y) / l };
+          const s2 = pr.range(11, 16);
+          places.push(quad(p, u, -s2 * pr.range(0.8, 1.3), s2 * pr.range(0.8, 1.3), s2 * pr.range(0.7, 1.1), s2 * pr.range(0.7, 1.1)));
+        }
+      }
+    }
+  }
+  if (places.length) {
+    let pl: MultiPoly = union(places[0], ...places.slice(1));
+    if (market) pl = difference(pl, market);
+    if (ctx.water.length) pl = difference(pl, ctx.water);
+    const enclosed = bands.slice();
+    for (const b of enclosed) {
+      const inter = intersection(b.mp, pl);
+      if (!inter.length) continue;
+      b.mp = difference(b.mp, pl);
+      const pieces = inter.filter((ph) => area(ph.outer) > 120);
+      if (pieces.length) bands.push({ mp: pieces, phase: b.phase, zone: b.zone, age: b.age, place: true });
+    }
+  }
   if (inp.faubourg.length) bands.push({ mp: inp.faubourg, phase: n + 1, zone: inp.faubZone ?? 'faubourg', age: 0.1 });
   // label sources
   const src = new GridIndex<{ a: Vec2; b: Vec2; lab: number }>(20);
@@ -562,7 +607,7 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
       if (area(pts) < 150) continue;
       const lab = pts.map((p, i) => labelOf(mid(p, pts[(i + 1) % pts.length])));
       if (!lab.some((l) => l >= 0)) continue; // no street access: not urbanized
-      quarters.push({ lp: { pts, lab }, phase: b.phase, zone: b.zone, age: b.age, kind: 'quarter' });
+      quarters.push({ lp: { pts, lab }, phase: b.phase, zone: b.zone, age: b.age, kind: b.place ? 'place' : 'quarter' });
     }
   }
   if (market) quarters.push({ lp: { pts: market, lab: market.map(() => marketStreet) }, phase: 1, zone: 'core', age: 1, kind: 'market' });

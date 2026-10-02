@@ -170,7 +170,7 @@ export function cutPlots(
   const territories: { run: Run; poly: MultiPoly; depth: number }[] = [];
   let taken: MultiPoly = [];
   // dense zones (coverage ≥ 0.68): plots run to the medial line and the block interior is divided among them
-  const deepFill = infill >= 0.68;
+  const deepFill = infill >= 0.68 && zone !== 'faubourg' && zone !== 'village';
   for (const run of good) {
     const pl = run.pts.slice();
     const dz = dmin + (dmax - dmin) * rng.float();
@@ -462,7 +462,7 @@ export function cutPlots(
   };
   const frontLen = (P: Polygon): number => {
     let L = 0;
-    for (let k = 0; k < P.length && L < 3.2; k++) {
+    for (let k = 0; k < P.length && L < 3.6; k++) {
       const a = P[k], b = P[(k + 1) % P.length];
       const le = dist(a, b), m = Math.max(1, Math.ceil(le / 0.5));
       for (let j = 0; j < m; j++) {
@@ -474,10 +474,10 @@ export function cutPlots(
   };
   for (let i = 0; i < merged.length; i++) {
     const p = merged[i];
-    if (!p || frontLen(p.poly) >= 3.2) continue;
+    if (!p || frontLen(p.poly) >= 3.6) continue;
     let best = -1, bl = 0;
     for (let j = 0; j < merged.length; j++) {
-      if (j === i || !merged[j] || frontLen(merged[j].poly) < 3.2) continue;
+      if (j === i || !merged[j] || frontLen(merged[j].poly) < 3.6) continue;
       const sh = shared(p.poly, merged[j].poly);
       if (sh > bl) { bl = sh; best = j; }
     }

@@ -445,8 +445,8 @@ function forge(lot: Polygon, cx: CompoundCtx): CompoundOut {
 }
 
 // ---------------------------------------------------------------- European church (existing builder)
-function church(lot: Polygon, cx: CompoundCtx): CompoundOut {
-  const fp = churchFootprint(lot, cx.pop, cx.rng);
+function church(lot: Polygon, cx: CompoundCtx, main = true): CompoundOut {
+  const fp = churchFootprint(lot, cx.pop, cx.rng, main);
   if (!fp) return emptyOut(lot, 'church');
   const out = emptyOut(lot, 'church');
   for (const p of fp.parts) out.buildings.push({ poly: p, kind: fp.kind, parcel: 0, arch: fp.kind === 'cathedral' ? 'gothic-cathedral' : 'parish-church', roof: 'gable', material: 'stone', storeys: 1 });
@@ -489,7 +489,7 @@ function mine(lot: Polygon, cx: CompoundCtx): CompoundOut {
 }
 
 export const COMPOUND_BUILDERS: Record<string, (lot: Polygon, cx: CompoundCtx) => CompoundOut> = {
-  church, 'great-mosque': greatMosque, kasbah, hammam, 'drum-tower': drumTower,
+  church, 'parish-church': (l, c) => church(l, c, false), 'great-mosque': greatMosque, kasbah, hammam, 'drum-tower': drumTower,
   yamen: (l, c) => axialCompound(l, c, 'yamen'), 'chinese-temple': (l, c) => axialCompound(l, c, 'chinese-temple'),
   'walled-market': walledMarket, castle: jpCastle, 'jp-temple': jpTemple, 'hindu-temple': hinduTemple, tank,
   basilica, 'roman-temple': romanTemple, grove, 'dwarf-gate': dwarfGate, forge, palace, mine,
@@ -519,7 +519,7 @@ export interface ClaimBlock { poly: Polygon; kind: string; phase: number; zone: 
  */
 export function pickBlock(
   blocks: ClaimBlock[], place: string, [amin, amax]: [number, number], nucleus: Vec2, R: number,
-  ctx: { frontsNucleus: (i: number) => number; edgeDist: (p: Vec2) => number; gates: Vec2[]; rng: Rng; taken: Set<number> },
+  ctx: { frontsNucleus: (i: number) => number; edgeDist: (p: Vec2) => number; gates: Vec2[]; rng: Rng; taken: Set<number>; others?: Vec2[]; sep?: number },
 ): number {
   let best = -1, bs = -Infinity;
   blocks.forEach((b, i) => {
@@ -540,6 +540,13 @@ export function pickBlock(
       case 'axis-north': { if (c.y > nucleus.y - 20) return; s += 2 - Math.abs(c.x - nucleus.x) / 40 - d / Math.max(150, R * 0.5); break; }
       case 'east': case 'west': { const sg = place === 'east' ? 1 : -1; if ((c.x - nucleus.x) * sg < R * 0.15) return; s += 1.5 - Math.abs(c.y - nucleus.y) / 80 - Math.abs(d - R * 0.45) / 150; break; }
       case 'high': { s += (b.height ?? 0) / 4; break; }
+      case 'spread': {
+        // parishes spread across the quarters: at least `sep` from the other landmarks of the kind
+        const dOther = Math.min(...(ctx.others ?? []).map((q) => dist(q, c)), 1e9);
+        if (dOther < (ctx.sep ?? 150)) return;
+        s += Math.min(2, dOther / (ctx.sep ?? 150)) - d / Math.max(300, R * 1.2) + (b.phase <= 2 ? 0.5 : 0);
+        break;
+      }
       case 'gate': { const g = Math.min(...ctx.gates.map((q) => dist(q, c)), 1e9); if (g > 200) return; s += 1.5 - g / 80; break; }
       default: break;
     }
