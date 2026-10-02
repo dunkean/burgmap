@@ -4,7 +4,7 @@ import { MinHeap } from '../core/pq';
 import { D8, D8_DIST, blurGrid } from '../core/grid';
 import { Vec2, Polyline, chaikin, simplify, polylineLength, dist, resample } from '../core/geom';
 import { smoothstep, forCellsNearPolyline } from '../core/field';
-import { bridgeRoad, attachEnd } from './junctions';
+import { bridgeRoad, attachEnd, clearRibbons } from './junctions';
 import { roadCount, Options, SizeName } from '../options';
 import { passability } from '../site/site';
 import type { TerrainLayer, SiteLayer, World } from '../types';
@@ -196,7 +196,7 @@ export function routeRoads(
   const cm = new Float32Array(N).fill(1);
   for (let i = 0; i < N; i++) {
     if (pass[i] === 2) cm[i] = 40;
-    else if (pass[i] === 3) cm[i] = 8;
+    else if (pass[i] === 3) cm[i] = 30;
     else if (pass[i] === 1) {
       let m = 1;
       if (f.dWater[i] < 60 && f.hab[i] < 2) m += 0.7 * (1 - smoothstep(f.hab[i], 0.3, 2));
@@ -214,7 +214,7 @@ export function routeRoads(
       forCellsNearPolyline([rv.path[i - 1], rv.path[i]], n, n, cell, hw + 1.3 * cell, (idx, d) => { if (d - hw < ribDist[idx]) ribDist[idx] = d - hw; });
     }
   }
-  for (let i = 0; i < N; i++) if (pass[i] === 1 && ribDist[i] < 0.75 * cell) cm[i] *= 3;
+  for (let i = 0; i < N; i++) if (pass[i] === 1 && ribDist[i] < 0.5 * cell + 3) cm[i] *= 5;
 
   // crossings are cheaper where the water is a single narrow channel (not at confluences, bends and shores)
   {
@@ -315,7 +315,7 @@ export function routeRoads(
   const isWaterPt = (p: Vec2): boolean => water[Math.min(n - 1, Math.max(0, Math.floor(p.y / cell))) * n + Math.min(n - 1, Math.max(0, Math.floor(p.x / cell)))] !== 0;
   const isBankPt = (p: Vec2): boolean => {
     const i = Math.min(n - 1, Math.max(0, Math.floor(p.y / cell))) * n + Math.min(n - 1, Math.max(0, Math.floor(p.x / cell)));
-    return water[i] !== 0 || ribDist[i] < 0.6 * cell;
+    return water[i] !== 0 || ribDist[i] < 0.5 * cell + 3;
   };
   const smoothPath = (cells: number[], startPt: Vec2 | null, endPt: Vec2 | null): Polyline => {
     const raw: Vec2[] = cells.map((i) => ({ x: ((i % n) + 0.5) * cell, y: (((i / n) | 0) + 0.5) * cell }));
@@ -502,6 +502,7 @@ export function routeRoads(
     roads.length = 0; roads.push(...keepRoads);
     roadBridges.length = 0; roadBridges.push(...keepBr);
   }
+  roads.forEach((rd, i) => { rd.path = clearRibbons(rd.path, terrain.rivers, roadBridges[i]); });
   const bridges: Bridge[] = roadBridges.flat();
   return { roads, bridges, stats: { roads: roads.length, bridges: bridges.length } };
 }

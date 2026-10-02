@@ -178,8 +178,8 @@ export function fromQuery(q: string | URLSearchParams): Options {
   o.language = lang !== null && (NAME_FAMILIES as string[]).includes(lang) ? (lang as NameFamily) : 'auto';
   o.labels = p.get('labels') !== '0' && p.get('labels') !== 'false';
   o.legend = p.get('legend') === '1' || p.get('legend') === 'true';
-  o.cultureMix = mixFromString(p.get('mix'));
-  o.plan = planFromString(p.get('plan'));
+  o.cultureMix = mixFromString(p.get('mix')) ?? undefined;
+  o.plan = planFromString(p.get('plan')) ?? undefined;
   const hs = Number(p.get('hscale')), hz = Number(p.get('hsea'));
   if (Number.isFinite(hs) && p.get('hscale') !== null) o.heightScale = Math.max(1, Math.min(9000, hs));
   if (Number.isFinite(hz) && p.get('hsea') !== null) o.importSea = Math.max(-1000, Math.min(9000, hz));

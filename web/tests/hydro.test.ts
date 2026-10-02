@@ -35,7 +35,7 @@ describe('hydrology and road junction invariants (town, river option, seeds 1-10
   for (const relief of ['flat', 'hills', 'valley', 'mountains'] as Relief[]) {
     it(`${relief}`, () => {
       const v = audit(relief, 'river', SEEDS, 'town', ['none', 'random']);
-      expect(v, v.slice(0, 12).join('\n')).toEqual([]);
+      expect(v, v.slice(0, 200).join('\n')).toEqual([]);
     }, 600000);
   }
 });
@@ -43,14 +43,14 @@ describe('hydrology and road junction invariants (town, river option, seeds 1-10
 describe('other river options and sizes', () => {
   it('major river, village', () => {
     const v = audit('hills', 'major', [1, 2, 3, 4], 'village', ['none', 'random']);
-    expect(v, v.slice(0, 12).join('\n')).toEqual([]);
+    expect(v, v.slice(0, 200).join('\n')).toEqual([]);
   }, 600000);
   it('stream, hamlet', () => {
     const v = audit('valley', 'stream', [1, 2, 3, 4], 'hamlet', ['none', 'random']);
-    expect(v, v.slice(0, 12).join('\n')).toEqual([]);
+    expect(v, v.slice(0, 200).join('\n')).toEqual([]);
   }, 600000);
   it('no river option: only brooks, all ending in something', () => {
     const v = audit('hills', 'none', [1, 2, 3], 'town', ['none', 'random']);
-    expect(v, v.slice(0, 12).join('\n')).toEqual([]);
+    expect(v, v.slice(0, 200).join('\n')).toEqual([]);
   }, 600000);
 });

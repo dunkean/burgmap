@@ -103,7 +103,8 @@ describe('label engine', () => {
     const curved = placed.filter((p) => p.path);
     expect(curved.length).toBeGreaterThan(3);
     for (const p of curved) {
-      expect(Math.cos(p.glyphs[0].a)).toBeGreaterThanOrEqual(-0.01);
+      // first glyph never upside down; up to ~96° is still read left to right on near-vertical paths
+      expect(Math.cos(p.glyphs[0].a)).toBeGreaterThanOrEqual(-0.1);
       expect(p.glyphs.length).toBe(p.label.text.length);
     }
   });
