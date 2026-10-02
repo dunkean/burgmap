@@ -142,10 +142,12 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     castle = siteCastle(ctx, { enclosure: ep.enclosure, phases: ep.phases, roads: nonTrack, nucleus: ctx.center, pop, variant: flags.castle, walled: ep.walled, citadelSpot: world.site!.citadelSpot }, rng.fork('castle'));
     if (!castle) return;
     if (castle.outside) {
+      // the last phase region becomes the extended enclosure (the same ring as the wall), its band follows
       const last = ep.phases[ep.phases.length - 1];
-      last.band = unionS(last.band, differenceS(castle.C, ep.enclosure));
-      last.region = unionS(last.region, castle.C).map((ph) => ({ outer: ph.outer, holes: [] }));
+      const prev = ep.phases.length > 1 ? ep.phases[ep.phases.length - 2].region : [];
       ep.enclosure = castle.enclosure;
+      last.region = castle.enclosure.map((ph) => ({ outer: ph.outer, holes: ph.holes }));
+      last.band = prev.length ? differenceS(last.region, prev) : last.region;
     }
   };
 

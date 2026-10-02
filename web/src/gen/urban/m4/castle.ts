@@ -93,7 +93,35 @@ function enceinte(ctx: UrbanCtx, p: Vec2, A: number, n: number, a0: number, rng:
   }
   let C = orientPos(convexHull(pts));
   C = scalePoly(C, p, Math.sqrt(A / Math.max(1, area(C))));
-  return C;
+  // curtains of at least 14 m (no stub between two towers)
+  return removeStubs(C, 14, () => false);
+}
+
+/**
+ * Removes the vertices that bound edges shorter than `min` (the one not protected by `keep`, else the one with the
+ * flatter turn), so every curtain between two towers is a real wall.
+ */
+export function removeStubs(ring: Polygon, min: number, keep: (p: Vec2) => boolean): Polygon {
+  let r = ring.slice();
+  const turnAt = (q: Polygon, i: number) => {
+    const n = q.length, p0 = q[(i - 1 + n) % n], p1 = q[i], p2 = q[(i + 1) % n];
+    const ux = p1.x - p0.x, uy = p1.y - p0.y, vx = p2.x - p1.x, vy = p2.y - p1.y;
+    return Math.abs(Math.atan2(ux * vy - uy * vx, ux * vx + uy * vy));
+  };
+  for (let guard = 0; guard < 400 && r.length > 3; guard++) {
+    const n = r.length;
+    let drop = -1;
+    for (let i = 0; i < n && drop < 0; i++) {
+      const a = i, b = (i + 1) % n;
+      if (dist(r[a], r[b]) >= min) continue;
+      const ka = keep(r[a]), kb = keep(r[b]);
+      if (ka && kb) continue;
+      drop = ka ? b : kb ? a : turnAt(r, a) < turnAt(r, b) ? a : b;
+    }
+    if (drop < 0) break;
+    r = r.filter((_, i) => i !== drop);
+  }
+  return r;
 }
 
 export interface CastleSiteIn {
@@ -185,7 +213,9 @@ export function siteCastle(ctx: UrbanCtx, inp: CastleSiteIn, rng: Rng): CastlePl
   if (!best) { why('nobest'); return null; }
   const C = orientPos(cleanRing(best.C, 0.5, 2));
   // extended enclosure; must stay one hole-free piece holding the nucleus
-  const encX = unionS(inp.enclosure, C).map((ph) => ({ outer: ph.outer, holes: [] as Polygon[] }));
+  // (the junctions of the town wall with the castle curtains leave no stub between two towers)
+  // (only near the castle: the rest of the town wall is left as it is)
+  const encX = unionS(inp.enclosure, C).map((ph) => ({ outer: orientPos(removeStubs(ph.outer, 9, (q) => C.some((c) => dist(c, q) < 0.05) || distToRing(C, q) > 70)), holes: [] as Polygon[] }));
   const mainX = encX.find((ph) => pointInRing(ph.outer, polygonCentroid(C)));
   if (!mainX) { why('mainX'); return null; }
   // the gate faces the town: the curtain whose outward normal points most to the nucleus, inside the enclosure
