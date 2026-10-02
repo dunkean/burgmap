@@ -140,7 +140,7 @@ function buildingsSvg(ub: NonNullable<World['urban']>, U: Palette['urban'], lw: 
   return s;
 }
 
-const GROUND_USES = new Set(['bailey', 'causeway', 'ghat', 'castle-honmaru', 'compound:castle-honmaru', 'bailey-gate']);
+const GROUND_USES = new Set(['bailey', 'causeway', 'ghat', 'castle-honmaru', 'compound:castle-honmaru', 'bailey-gate', 'esplanade']);
 const WALL_LINES: Record<string, number> = { 'compound-wall': 1, 'citadel-wall': 2.4, 'stone-wall': 1.8, prakara: 1.6, 'ward-wall': 1.8 };
 
 /** Compound grounds, water pieces (moats, tanks) and the moat outside the town wall (drawn under the buildings). */
@@ -153,6 +153,10 @@ function cultureUnderlay(ub: NonNullable<World['urban']>, pal: Palette, lw: (m: 
   if (grounds.length) s += `<path class="u-compounds" d="${grounds.map((p) => pathD(p.poly, true)).join('')}" fill="${U.place}"/>`;
   const sahn = ub.landmarks.filter((l) => l.kind === 'sahn');
   if (sahn.length) s += `<path d="${sahn.map((l) => pathD(l.poly, true)).join('')}" fill="${U.place}" stroke="${U.plotLine}" stroke-width="${lw(0.2, 0.1)}"/><path d="${sahn.map((l) => pathD(l.poly, true)).join('')}" fill="url(#p-upave)"/>`;
+  const garth = ub.landmarks.filter((l) => l.kind === 'garth');
+  if (garth.length) s += `<path d="${garth.map((l) => pathD(l.poly, true)).join('')}" fill="${U.garden}" stroke="${U.plotLine}" stroke-width="${lw(0.25, 0.1)}"/>`;
+  const ditch = ub.parcels.filter((p) => p.use === 'ditch');
+  if (ditch.length) s += `<path class="u-ditch" d="${ditch.map((p) => pathD(p.poly, true)).join('')}" fill="${U.garden}" stroke="${U.plotLine}" stroke-width="${lw(0.3, 0.12)}"/><path d="${ditch.map((p) => pathD(p.poly, true)).join('')}" fill="url(#p-ugarden)"/>`;
   const cem = ub.landmarks.filter((l) => l.kind === 'cemetery');
   if (cem.length) s += `<path d="${cem.map((l) => pathD(l.poly, true)).join('')}" fill="${U.garden}"/><path d="${cem.map((l) => pathD(l.poly, true)).join('')}" fill="url(#p-ugrave)"/>`;
   const water = (ub.water ?? []).map((w) => pathD(w.outer, true)).join('');
@@ -176,6 +180,7 @@ function cultureOverlay(ub: NonNullable<World['urban']>, pal: Palette, lw: (m: n
   for (const [k, ds] of byKind) {
     const d = ds.join('');
     if (k === 'hedge') s += `<path d="${d}" fill="none" stroke="${pal.treeInk ?? '#4a6a3a'}" stroke-width="${lw(2.6, 0.8)}" stroke-opacity="0.8" stroke-dasharray="3 1.5"/>`;
+    else if (k === 'parterre' || k === 'footpath') s += `<path d="${d}" fill="none" stroke="${k === 'footpath' ? U.street : U.plotLine}" stroke-width="${lw(k === 'footpath' ? 1.4 : 0.5, 0.15)}" stroke-linecap="round"/>`;
     else if (k === 'ghat-steps') s += `<path d="${d}" fill="none" stroke="${U.plotLine}" stroke-width="${lw(0.3, 0.12)}"/>`;
     else if (k === 'terrace') s += `<path d="${d}" fill="none" stroke="${U.wall}" stroke-width="${lw(1.6, 0.8)}"/>`;
     else if (k === 'hachure') s += `<path d="${d}" fill="none" stroke="${U.wall}" stroke-width="${lw(0.55, 0.3)}" stroke-opacity="0.85"/>`;

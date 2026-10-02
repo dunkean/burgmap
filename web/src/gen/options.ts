@@ -10,6 +10,10 @@ export type CoastOpt = 'none' | 'N' | 'E' | 'S' | 'W' | 'random';
 export type RiverOpt = 'none' | 'stream' | 'river' | 'major';
 export type StyleName = 'parchment' | 'atlas';
 export type Tri = 'auto' | 'yes' | 'no';
+/** Suburb growth (M4): none, the faubourg ribbons, or thick suburbs with their own churches (and an outer wall for cities). */
+export type SuburbOpt = 'auto' | 'none' | 'some' | 'many';
+/** Informal settlements on the least valued land (M4). */
+export type ShantyOpt = 'auto' | 'none' | 'some' | 'many';
 /** Historical site archetypes the settlement core can be placed in (site/site.ts). */
 export type SiteArchetype = 'bridge' | 'confluence' | 'meander' | 'harbor' | 'estuary' | 'valley' | 'hilltop' | 'plain';
 export const SITE_ARCHETYPES: SiteArchetype[] = ['bridge', 'confluence', 'meander', 'harbor', 'estuary', 'valley', 'hilltop', 'plain'];
@@ -49,7 +53,18 @@ export interface Options {
   seaLevel?: number;
   // Placeholders for later stages
   walls: Tri;
+  /** Castle / citadel on the most defensible spot at the town edge (auto: town and larger, sometimes a village motte). */
   castle: Tri;
+  // ---- landmarks and activities (M4, URBAN_LANDMARKS.md); 'auto' follows the size and the culture
+  cathedral?: Tri;
+  palace?: Tri;
+  monasteries?: Tri;
+  port?: Tri;
+  arena?: Tri;
+  /** Mills, windmills, nuisance trades, inns, hospitals, gallows, lazar house, cemeteries. */
+  activities?: Tri;
+  suburbs?: SuburbOpt;
+  shantytowns?: ShantyOpt;
   /** Number of regional road exits; 0 = automatic. */
   roads: number;
   style: StyleName;
@@ -96,6 +111,14 @@ export const DEFAULTS: Options = {
   siteType: 'auto',
   walls: 'auto',
   castle: 'auto',
+  cathedral: 'auto',
+  palace: 'auto',
+  monasteries: 'auto',
+  port: 'auto',
+  arena: 'auto',
+  activities: 'auto',
+  suburbs: 'auto',
+  shantytowns: 'auto',
   roads: 0,
   style: 'parchment',
   contours: true,
@@ -118,6 +141,12 @@ const COASTS: CoastOpt[] = ['none', 'N', 'E', 'S', 'W', 'random'];
 const RIVERS: RiverOpt[] = ['none', 'stream', 'river', 'major'];
 const STYLES: StyleName[] = ['parchment', 'atlas'];
 const TRIS: Tri[] = ['auto', 'yes', 'no'];
+const SUBURBS: SuburbOpt[] = ['auto', 'none', 'some', 'many'];
+const SHANTIES: ShantyOpt[] = ['auto', 'none', 'some', 'many'];
+/** M4 landmark toggles: option key → URL key. */
+export const LANDMARK_TOGGLES: [keyof Options & ('cathedral' | 'palace' | 'monasteries' | 'port' | 'arena' | 'activities'), string][] = [
+  ['cathedral', 'cathedral'], ['palace', 'palace'], ['monasteries', 'monasteries'], ['port', 'port'], ['arena', 'arena'], ['activities', 'activities'],
+];
 const SITE_TYPES: SiteType[] = ['auto', ...SITE_ARCHETYPES];
 const SIZES = Object.keys(SIZE_PRESETS) as SizeName[];
 
@@ -130,6 +159,9 @@ export function toQuery(o: Options): string {
   p.set('seed', o.seed);
   const keys = ['size', 'relief', 'coast', 'river', 'walls', 'castle', 'roads', 'style', 'culture', 'population'] as const;
   for (const k of keys) if (o[k] !== DEFAULTS[k]) p.set(k, String(o[k]));
+  for (const [k, q] of LANDMARK_TOGGLES) if (o[k] && o[k] !== 'auto') p.set(q, String(o[k]));
+  if (o.suburbs && o.suburbs !== 'auto') p.set('suburbs', o.suburbs);
+  if (o.shantytowns && o.shantytowns !== 'auto') p.set('shanty', o.shantytowns);
   if (o.siteType && o.siteType !== 'auto') p.set('site', o.siteType);
   if (o.seaLevel !== undefined) p.set('seaLevel', String(o.seaLevel));
   if (o.contours !== DEFAULTS.contours) p.set('contours', o.contours ? '1' : '0');
@@ -162,6 +194,9 @@ export function fromQuery(q: string | URLSearchParams): Options {
   o.siteType = oneOf(p.get('site'), SITE_TYPES, 'auto');
   o.walls = oneOf(p.get('walls'), TRIS, DEFAULTS.walls);
   o.castle = oneOf(p.get('castle'), TRIS, DEFAULTS.castle);
+  for (const [k, q] of LANDMARK_TOGGLES) o[k] = oneOf(p.get(q), TRIS, 'auto');
+  o.suburbs = oneOf(p.get('suburbs'), SUBURBS, 'auto');
+  o.shantytowns = oneOf(p.get('shanty'), SHANTIES, 'auto');
   o.style = oneOf(p.get('style'), STYLES, DEFAULTS.style);
   o.culture = oneOf(p.get('culture'), CULTURES, DEFAULTS.culture);
   const pop = Number(p.get('population'));

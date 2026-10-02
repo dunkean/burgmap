@@ -9,6 +9,7 @@ import type { MorphologyParams, MorphRef, Range, Zone } from './morphology';
 import { resolveMorph, blendParams } from './morphology';
 import { CULTURE_LIST } from './cultures';
 import type { SitePrefs } from '../options';
+import type { M4Catalogue } from './m4/index';
 
 export type EnclosureShape = 'organic' | 'rect' | 'rounded-rect' | 'square' | 'oval' | 'circle' | 'terraces';
 export interface EnclosureSpec {
@@ -93,6 +94,8 @@ export interface Culture {
   render: RenderHints;
   /** Site preferences (site/site.ts), used when the `sitePrefs` option is not set. */
   sitePrefs?: SitePrefs;
+  /** M4 landmark catalogue (castle variant, cathedral, palace, monasteries, port, shanty flavour). */
+  m4?: M4Catalogue;
 }
 export interface CultureMix { id: string; t: number; mode: 'phases' | 'sectors' | 'blend' }
 export interface PlanOverride {

@@ -26,8 +26,16 @@ export interface CompoundOut {
   lines: UrbanLine[];
   water: Polygon[];
   landmarks: { kind: string; poly: Polygon }[];
+  /** Fortified curtains drawn as walls with towers (castle enceinte, M4). */
+  walls?: { ring: Polygon; gates: { p: Vec2; dir: Vec2; width: number }[]; role: 'castle' | 'quarter'; skip?: (p: Vec2) => boolean }[];
+  /** Trees of orchards and gardens inside the compound (canopy layer). */
+  trees?: { x: number; y: number; r: number }[];
 }
-export interface CompoundCtx { angle: number; pop: number; rng: Rng; center: Vec2 }
+export interface CompoundCtx {
+  angle: number; pop: number; rng: Rng; center: Vec2;
+  /** Plan data of a level-1 landmark lot (M4: castle enceinte, close layout, quay...). */
+  data?: unknown;
+}
 
 const rectAt = (c: Vec2, ang: number, u0: number, u1: number, v0: number, v1: number): Polygon => {
   const ca = Math.cos(ang), sa = Math.sin(ang);
@@ -100,7 +108,7 @@ function greatMosque(lot: Polygon, cx: CompoundCtx): CompoundOut {
 }
 
 // ---------------------------------------------------------------- kasbah (walled citadel with palace)
-function kasbah(lot: Polygon, cx: CompoundCtx): CompoundOut {
+export function kasbah(lot: Polygon, cx: CompoundCtx): CompoundOut {
   const out = emptyOut(lot, 'compound:kasbah');
   out.lines.push({ kind: 'citadel-wall', path: lot, closed: true, width: 2.5 });
   const f = lotFrame(lot, cx.angle);
@@ -487,6 +495,9 @@ function mine(lot: Polygon, cx: CompoundCtx): CompoundOut {
   out.landmarks.push({ kind: 'spoil-heap', poly: rectAt(f.c, cx.angle, s * 0.2, s, -s * 0.95, -s * 0.25) });
   return out;
 }
+
+/** Registers more builders (M4 landmark plans). */
+export function registerBuilders(map: Record<string, (lot: Polygon, cx: CompoundCtx) => CompoundOut>): void { Object.assign(COMPOUND_BUILDERS, map); }
 
 export const COMPOUND_BUILDERS: Record<string, (lot: Polygon, cx: CompoundCtx) => CompoundOut> = {
   church, 'parish-church': (l, c) => church(l, c, false), 'great-mosque': greatMosque, kasbah, hammam, 'drum-tower': drumTower,

@@ -20,9 +20,26 @@ import { disk } from '../geo/offset';
 import { openHoles } from './plots';
 
 export interface Quarter {
-  lp: LPoly; phase: number; zone: Zone; age: number; kind: 'quarter' | 'market' | 'place';
+  lp: LPoly; phase: number; zone: Zone; age: number; kind: 'quarter' | 'market' | 'place' | 'lot';
   /** Morphology of the quarter (its phase's or sector's); the culture that built it. */
   morph?: MorphologyParams; culture?: string;
+  /** Landmark lots (M4): the lot id and the compound builder that fills it. */
+  lot?: string; compound?: string;
+}
+
+/** A landmark lot reserved at level 1 (M4): an exact piece of the partition, filled later by its builder. */
+export interface ReservedLot {
+  id: string; kind: string; poly: Polygon; phase: number; zone: Zone;
+  /** Streets registered for it that cut the partition (connectors to the network). */
+  cuts: Polyline[];
+  /** Kind of the piece: a compound lot (default) or an open place (quay apron, pier). */
+  piece?: 'lot' | 'place';
+}
+export interface ReserveApi {
+  streets: Streets; market: Polygon | null; marketStreet: number; radialLines: Polyline[];
+  enclosure: MultiPoly; footprint: MultiPoly; phases: PhasePlan[];
+  /** Points where the radials cross the enclosure (future gates). */
+  gates: Vec2[];
 }
 
 export interface WallLine { ring: Polygon; gates: { p: Vec2; dir: Vec2; width: number; street: number }[] }
@@ -202,11 +219,17 @@ export interface PrimaryInput {
   switchbacks?: { angle: number; pitch: number; width: number };
   /** Roads stop at the enclosure (gates only). */
   gatesOnly?: boolean;
+  /** Lots reserved before the primary streets (castle): rings and extra radials keep clear of them. */
+  preLots?: Polygon[];
+  /** Landmark lots reserved after the primary streets, before the quarters (M4). */
+  reserve?: (api: ReserveApi) => ReservedLot[];
 }
 
 export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets, rng: Rng): Primary {
   const P = ctx.params;
-  const footprint = inp.faubourg.length ? union(inp.enclosure, inp.faubourg) : inp.enclosure;
+  let footprint = inp.faubourg.length ? union(inp.enclosure, inp.faubourg) : inp.enclosure;
+  const preLots = inp.preLots ?? [];
+  const nearPre = (p: Vec2, d: number) => preLots.some((L) => pointInRing(L, p) || distToRing(L, p) < d);
   const nearFoot = (p: Vec2) => footprint.some((ph) => pointInRing(ph.outer, p) || distToRing(ph.outer, p) < 25);
   // ---- radial candidates from the roads
   const rawRadials: { pl: Polyline; major: boolean }[] = [];
@@ -374,6 +397,7 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
           const th = a + (gap * j) / (k + 1) + er.range(-0.2, 0.2);
           let pl = traceRadial(ctx, th, market, inp.enclosure, er);
           if (!pl) continue;
+          if (preLots.length && pl.some((q) => preLots.some((L) => pointInRing(L, q) || distToRing(L, q) < 12))) continue;
           if (inp.phases.length >= 2 && inp.phases[0].fossil) {
             pl = afterExit(pl, inp.phases[0].region);
             if (!pl || polylineLength(pl) < 60) continue;
@@ -388,7 +412,7 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
   // ---- fossilized rings (older enclosure lines inside the latest one)
   const n = inp.phases.length;
   const enc = inp.enclosure;
-  const encInnerOK = (p: Vec2) => inMP(enc, p) && enc.every((ph) => distToRing(ph.outer, p) > 4) && !nearWater(ctx, p, 4);
+  const encInnerOK = (p: Vec2) => inMP(enc, p) && enc.every((ph) => distToRing(ph.outer, p) > 4) && !nearWater(ctx, p, 4) && !nearPre(p, 6);
   for (let k = 0; k < n - 1; k++) {
     const ph = inp.phases[k];
     if (!ph.fossil) continue;
@@ -444,7 +468,7 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
   }
   // ---- concentric rings around the nucleus (pradakshina streets: Madurai's Chitrai, Avani Moola, Masi streets)
   if (inp.nucleusRings && market) {
-    const encOK = (p: Vec2) => inMP(enc, p) && enc.every((ph) => distToRing(ph.outer, p) > 6) && !nearWater(ctx, p, 5);
+    const encOK = (p: Vec2) => inMP(enc, p) && enc.every((ph) => distToRing(ph.outer, p) > 6) && !nearWater(ctx, p, 5) && !nearPre(p, 6);
     const nr = rng.fork('nrings');
     // at least two rings between the nucleus and the edge of a small town (40 m minimum spacing)
     const halfEnc = Math.sqrt(mpArea(enc)) / 2, halfNuc = Math.sqrt(area(market)) / 2;
@@ -483,6 +507,21 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
     }
     if (hit) streets.connected.add(st.id);
   }
+  // ---- landmark lots (M4): reserved as exact pieces before the quarters; their connectors cut the partition
+  const lots: ReservedLot[] = [];
+  if (inp.reserve) {
+    const gatePts: Vec2[] = [];
+    for (const id of radials) {
+      const st = streets.list[id];
+      for (const comp of enc) for (let i = 1; i < st.path.length; i++) for (let k = 0; k < comp.outer.length; k++) {
+        const r = segSegT(st.path[i - 1], st.path[i], comp.outer[k], comp.outer[(k + 1) % comp.outer.length]);
+        if (r) gatePts.push({ x: st.path[i - 1].x + (st.path[i].x - st.path[i - 1].x) * r.t, y: st.path[i - 1].y + (st.path[i].y - st.path[i - 1].y) * r.t });
+      }
+    }
+    for (const l of inp.reserve({ streets, market, marketStreet, radialLines, enclosure: enc, footprint, phases: inp.phases, gates: gatePts })) {
+      if (l.poly.length >= 3 && area(l.poly) > 20) lots.push(l);
+    }
+  }
   // ---- walls and gates
   const walls: WallLine[] = [];
   if (inp.walled) {
@@ -517,9 +556,13 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
     const rb = ribbon(streets.list[id].path, 0.04);
     if (rb.length >= 3) cutters.push(rb);
   }
+  for (const l of lots) for (const c of l.cuts) {
+    const rb = ribbon(c, 0.04);
+    if (rb.length >= 3) cutters.push(rb);
+  }
   const cutMP: MultiPoly = cutters.length ? union(cutters[0], ...cutters.slice(1)) : [];
   const quarters: Quarter[] = [];
-  const bands: { mp: MultiPoly; phase: number; zone: Zone; age: number; place?: boolean }[] = inp.phases.map((ph, k) => ({
+  const bands: { mp: MultiPoly; phase: number; zone: Zone; age: number; place?: boolean; lot?: ReservedLot }[] = inp.phases.map((ph, k) => ({
     mp: k === 0 && market ? difference(ph.band, market) : ph.band, phase: ph.id, zone: ph.zone, age: ph.age,
   }));
   // ---- open places (partition pieces): just inside the gates, and at crossings of radials with old wall lines
@@ -557,6 +600,7 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
   if (places.length) {
     let pl: MultiPoly = union(places[0], ...places.slice(1));
     if (market) pl = difference(pl, market);
+    if (lots.length) pl = difference(pl, ...lots.map((l) => l.poly));
     if (ctx.water.length) pl = difference(pl, ctx.water);
     const enclosed = bands.slice();
     for (const b of enclosed) {
@@ -568,6 +612,19 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
     }
   }
   if (inp.faubourg.length) bands.push({ mp: inp.faubourg, phase: n + 1, zone: inp.faubZone ?? 'faubourg', age: 0.1 });
+  if (lots.length) {
+    // the lots are exact pieces: removed from every band (and the earlier lots from the later ones), then added
+    // as bands of their own; lots outside the footprint (precincts in the fields, mills, quays) extend it
+    for (const b of bands) b.mp = difference(b.mp, ...lots.map((l) => l.poly));
+    const taken: Polygon[] = [];
+    for (const l of lots) {
+      const mp = taken.length ? difference(l.poly, ...taken) : difference(l.poly);
+      taken.push(l.poly);
+      const pcs = mp.filter((ph) => !ph.holes.length && area(ph.outer) > 20);
+      if (pcs.length) bands.push({ mp: pcs, phase: l.phase, zone: l.zone, age: 0.5, lot: l, place: l.piece === 'place' });
+    }
+    footprint = union(footprint, ...lots.map((l) => l.poly));
+  }
   // label sources
   const src = new GridIndex<{ a: Vec2; b: Vec2; lab: number }>(20);
   for (const st of streets.list) for (let i = 1; i < st.path.length; i++) src.insertSeg(st.path[i - 1], st.path[i], { a: st.path[i - 1], b: st.path[i], lab: st.id });
@@ -604,10 +661,12 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
     if (pieces.some((ph) => ph.holes.length)) pieces = pieces.flatMap((ph) => (ph.holes.length ? openHoles(ph) : [ph]));
     for (const ph of pieces) {
       const pts = ph.outer;
-      if (area(pts) < 150) continue;
+      if (area(pts) < (b.lot ? 20 : 150)) continue;
       const lab = pts.map((p, i) => labelOf(mid(p, pts[(i + 1) % pts.length])));
-      if (!lab.some((l) => l >= 0)) continue; // no street access: not urbanized
-      quarters.push({ lp: { pts, lab }, phase: b.phase, zone: b.zone, age: b.age, kind: b.place ? 'place' : 'quarter' });
+      if (!lab.some((l) => l >= 0) && !b.lot) continue; // no street access: not urbanized
+      if (b.lot && b.lot.piece !== 'place') quarters.push({ lp: { pts, lab }, phase: b.phase, zone: b.zone, age: b.age, kind: 'lot', lot: b.lot.id, compound: b.lot.kind });
+      else if (b.lot) quarters.push({ lp: { pts, lab }, phase: b.phase, zone: b.zone, age: b.age, kind: 'place', lot: b.lot.id, compound: b.lot.kind });
+      else quarters.push({ lp: { pts, lab }, phase: b.phase, zone: b.zone, age: b.age, kind: b.place ? 'place' : 'quarter' });
     }
   }
   if (market) quarters.push({ lp: { pts: market, lab: market.map(() => marketStreet) }, phase: 1, zone: 'core', age: 1, kind: 'market' });

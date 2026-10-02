@@ -53,6 +53,11 @@ export class Streets {
     return { s: bs, d: bd, hw, seg: bseg };
   }
 
+  /** Visits the street segments whose index cells meet the box (segment = path[i] → path[i + 1]; may repeat). */
+  forEachSeg(x0: number, y0: number, x1: number, y1: number, cb: (st: StreetRec, i: number) => void): void {
+    this.idx.forEachIn(x0, y0, x1, y1, (ref) => cb(this.list[ref.s], ref.i));
+  }
+
   /** Demotes a street that never joined the network: it stays a partition boundary but is no longer a street. */
   demote(id: number): void { this.list[id].ribbon = false; }
 

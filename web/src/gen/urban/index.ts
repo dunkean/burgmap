@@ -16,7 +16,7 @@ import { makeCtx } from './context';
 import { choosePopulation, chooseArchetype, planServedPhases, planFaubourgs, EnclosurePlan, zonesFor, PhaseInput } from './phases';
 import { buildPrimary, Quarter } from './primary';
 import { Streets, LAB_OPEN } from './streets';
-import { mpArea, MultiPoly } from '../geo/bool';
+import { mpArea, MultiPoly, differenceS } from '../geo/bool';
 import { GuidanceField } from './field';
 import { splitQuarter, addCloses, carveBlocks, buildRibbonIndex, Piece, CarvedBlock } from './blocks';
 import { culDeSacTree } from './culdesac';
@@ -31,7 +31,14 @@ import { distToRing, pointInRing, area as areaOf, inscribed, convexHull } from '
 import { unionMany } from '../geo/bool';
 import { StreetGraph } from '../geo/graph';
 import { polyInside } from '../geo/split';
-import type { UrbanBuilding, PolyH, UrbanParcel } from '../types';
+import type { UrbanBuilding, PolyH, UrbanParcel, UrbanSite, UrbanWall } from '../types';
+import { m4Flags, registerM4 } from './m4/index';
+import { siteCastle, type CastlePlan } from './m4/castle';
+import { reserveCastle, type M4State } from './m4/reserve';
+import { reserveCathedral, reservePalace, reserveMonasteries } from './m4/catalogue';
+import { LineIndex } from './m4/lots';
+import type { ReservedLot } from './primary';
+import { unionS } from '../geo/bool';
 
 export interface UrbanResult { layer: UrbanLayer; stats: Record<string, number | string>; debug: UrbanDebug }
 export interface UrbanDebug { quarters: { poly: Polygon; phase: number; lab: number[] }[] }
@@ -80,6 +87,8 @@ export function contourAngle(world: World, p: Vec2): number {
   return Math.atan2(gy, gx) + Math.PI / 2;
 }
 
+const castleTower = (cid: string): 'round' | 'square' => (cid === 'medina' || cid === 'chinese' || cid === 'indian-temple' ? 'square' : 'round');
+
 export function generateUrban(world: World, root: Rng): UrbanResult {
   const t0 = performance.now();
   const rng = root.fork('urban');
@@ -111,6 +120,24 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   TERRAIN_ANGLE = contourAngle(world, world.site!.center);
   const terrainAngle = TERRAIN_ANGLE;
   const streets = new Streets();
+  registerM4();
+  const flags = m4Flags(opts, culture, pop, archetype, rng.fork('m4'));
+  const sites: UrbanSite[] = [];
+  const lotData = new Map<string, unknown>();
+  let castle: CastlePlan | null = null;
+  // the castle is sited on the enclosure before the faubourgs and the streets; it may extend the enclosure
+  const siteCastleOn = (ep: EnclosurePlan): void => {
+    if (!flags.castle || !ep.enclosure.length) return;
+    const nonTrack = (world.roads ?? []).filter((r) => r.kind !== 'track').map((r) => r.path);
+    castle = siteCastle(ctx, { enclosure: ep.enclosure, phases: ep.phases, roads: nonTrack, nucleus: ctx.center, pop, variant: flags.castle, walled: ep.walled, citadelSpot: world.site!.citadelSpot }, rng.fork('castle'));
+    if (!castle) return;
+    if (castle.outside) {
+      const last = ep.phases[ep.phases.length - 1];
+      last.band = unionS(last.band, differenceS(castle.C, ep.enclosure));
+      last.region = unionS(last.region, castle.C).map((ph) => ({ outer: ph.outer, holes: [] }));
+      ep.enclosure = castle.enclosure;
+    }
+  };
 
   let eplan: EnclosurePlan | null = null;
   let faub: { region: MultiPoly } = { region: [] };
@@ -139,6 +166,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
       angle: orientAngle(enc.orientation, mainAngle), aspect: 1.2, closing: params.streetOp === 'organic', fossil: false,
     };
     eplan = planServedPhases(ctx, pop, walled, mainAngle, rng.fork('phases'), roads, { nPh: 1, zones: ['village'], faubShare: 0.3, specs: settlement && settlement.form !== 'auto' ? [spec] : undefined, organicOutline: enc.wall === 'hedge' || enc.wall === 'none' });
+    siteCastleOn(eplan);
     faub = planFaubourgs(ctx, eplan.enclosure, roads, ((pop * 0.3) / params.density.village) * 1e4, 0, rng.fork('faubourg'));
     const nu = { ...plan.nucleus, ...(settlement?.nucleus ?? {}) };
     marketArea = nu.kind === 'market' ? 500 + pop * 0.8 : 0;
@@ -153,6 +181,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     // lines that never were walls (hedges, unwalled cultures) stay curved; wall lines become straight curtains
     const organicOutline = plan.phases.every((p) => p.enc.wall === 'hedge' || p.enc.wall === 'none');
     eplan = planServedPhases(ctx, pop, walled, mainAngle, rng.fork('phases'), roads, { specs: phaseInputs(n, zones), faubShare, organicOutline });
+    siteCastleOn(eplan);
     const faubPop = pop * faubShare;
     // scarce land: what the enclosure could not hold grows along the roads instead
     const encTarget = eplan.phases.reduce((s2, ph, k) => s2 + (ph.pop / (plan.phases[k].morph.density[ph.zone] * (eplan!.densityScale ?? 1))) * 1e4, 0);
@@ -208,6 +237,21 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     nucleusRings: coreM.ringSpacing > 0 ? { spacing: coreM.ringSpacing, width: coreM.widthByRank[1] * coreM.widthScale } : undefined,
     switchbacks: allStreetOps.has('switchbacks') ? { angle: terrainAngle, pitch: coreM.gridSpacing[0] * 2, width: coreM.widthByRank[0] * coreM.widthScale } : undefined,
     gatesOnly: !!coreM.gatesOnly,
+    preLots: castle ? [(castle as CastlePlan).lot] : [],
+    reserve: (api) => {
+      const st: M4State = { ctx, rng: rng.fork('m4lots'), pop, P: coreM, lotData, sites, culture: culture.id };
+      const out: ReservedLot[] = [];
+      if (castle) { const l = reserveCastle(st, api, castle); if (l) out.push(l); else castle = null; }
+      const nonTrack = (world.roads ?? []).filter((r) => r.kind !== 'track').map((r) => r.path);
+      const ci = { avoid: [] as Polygon[], nucleus: api.market ? polygonCentroid(api.market) : ctx.center, castle: castle ? (castle as CastlePlan).lot : null, roads: nonTrack };
+      const push = (l: ReservedLot | null) => { if (l) { out.push(l); ci.avoid.push(l.poly); } };
+      if (castle) ci.avoid.push((castle as CastlePlan).lot);
+      const tm = (k: string, f: () => void) => { const t = performance.now(); f(); stats['ms.lot.' + k] = Math.round(performance.now() - t); };
+      if (flags.cathedral) tm('cathedral', () => push(reserveCathedral(st, api, ci)));
+      if (flags.palace) tm('palace', () => push(reservePalace(st, api, ci)));
+      if (flags.monasteries && flags.monastery) tm('monastery', () => { for (const l of reserveMonasteries(st, api, ci, flags.monasteries, flags.monastery!)) push(l); });
+      return out;
+    },
   }, streets, rng.fork('primary'));
   const t2 = performance.now();
   stats['ms.phases'] = Math.round(t1 - t0);
@@ -286,6 +330,8 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     const placed = new Map<string, Vec2[]>();
     for (const lm of plan.landmarks) {
       if (pop < lm.minPop) continue;
+      // the kasbah is the culture's castle: sited at level 1 by the castle rule (or switched off)
+      if (lm.kind === 'kasbah' && (castle || opts.castle === 'no')) continue;
       const count = Math.max(lm.count ?? 1, lm.perPop ? Math.floor((pop - (lm.minPop - lm.perPop)) / lm.perPop) : 0);
       // separation from the other worship landmarks too (the main church counts for the parishes)
       const kin = lm.kind === 'parish-church' ? ['church', 'parish-church'] : [lm.kind];
@@ -338,9 +384,13 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   const waterPieces: PolyH[] = [];
   const compoundOf: (string | undefined)[] = carved.map(() => undefined);
   const perBlock: Polygon[][] = carved.map(() => []);
-  const cxFor = (bi: number, ang: number) => ({ angle: ang, pop, rng: rng.fork('cmp:' + bi), center: ctx.center });
+  const cxFor = (bi: number, ang: number) => ({ angle: ang, pop, rng: rng.fork('cmp:' + bi), center: ctx.center, data: carved[bi].lot ? lotData.get(carved[bi].lot!) : undefined });
+  const extraWalls: NonNullable<ReturnType<typeof buildCompound>['walls']> = [];
+  const compoundTrees: UrbanTree[] = [];
   const claim = (bi: number, kind: string, ang: number): boolean => {
     const out = buildCompound(kind, carved[bi].poly, cxFor(bi, ang));
+    if (out.walls) extraWalls.push(...out.walls);
+    if (out.trees) compoundTrees.push(...out.trees);
     if (!out.parcels.length) return false;
     const first = parcels.length;
     for (const p of out.parcels) parcels.push({ poly: p.poly, use: p.use, block: bi, zone: carved[bi].zone });
@@ -402,6 +452,13 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   // blocks that received no plot (no street frontage: along water, behind a wall) stay kitchen gardens / orchards
   const plotted = new Set(parcels.filter((p) => p.use === 'plot').map((p) => p.block));
   carved.forEach((b, bi) => { if (b.kind === 'block' && !compoundOf[bi] && !plotted.has(bi)) b.kind = 'green'; });
+  // a large piece that splitting could not open up (little street frontage) is plotted along its few streets only:
+  // the rest is intramural gardens and orchards, so the block counts as green land (URBAN_GEOMETRY §2.2)
+  {
+    const plotA = new Float64Array(carved.length);
+    for (const p of parcels) if (p.use === 'plot') plotA[p.block] += areaOf(p.poly);
+    carved.forEach((b, bi) => { if (b.kind === 'block' && !compoundOf[bi]) { const A = areaOf(b.poly); if (A > 12000 && plotA[bi] < 0.3 * A) b.kind = 'green'; } });
+  }
   const t5 = performance.now();
   stats['ms.plots'] = Math.round(t5 - t4);
   stats['plots'] = plots.length;
@@ -488,7 +545,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     }
   }
   // ---- elven canopy: trees over the town, clear of the houses
-  const trees: UrbanTree[] = [];
+  const trees: UrbanTree[] = [...compoundTrees];
   if (hints.canopy) {
     const tr = rng.fork('trees');
     const houses = buildings.map((b) => ({ c: polygonCentroid(b.poly), r: Math.sqrt(areaOf(b.poly) / Math.PI) }));
@@ -522,7 +579,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     footprintH: toPH(prim.footprint),
     streets: layerStreets,
     blocks: carved.map((b) => b.poly), parcels, buildings,
-    walls: prim.walls.map((w, wi) => {
+    walls: prim.walls.map((w, wi): UrbanWall | null => {
       const nearW = (q: Vec2) => ctx.water.some((ph) => distToRing(ph.outer, q) < 4 || pointInRing(ph.outer, q));
       const wf = wallFeatures(w.ring, w.gates, rng.fork('wall:' + wi), ctx.isWater, nearW);
       if (wallKind === 'hedge') {
@@ -530,8 +587,14 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
         lines.push({ kind: 'hedge', path: w.ring, closed: true, width: 2.6 });
         return null;
       }
-      return { path: w.ring, closed: true, towers: wf.towers, gates: w.gates.map((g) => g.p), thickness: wallKind === 'palisade' ? 1.6 : pop > 12000 ? 3.2 : 2.6, gateInfo: w.gates.map((g) => ({ p: g.p, dir: g.dir, width: g.width })), pieces: wf.pieces, gateTowers: wf.gateTowers, towerScale: wf.towerScale, curtains: wf.curtains, towerShape };
-    }).filter((w): w is NonNullable<typeof w> => !!w),
+      return { path: w.ring, closed: true, towers: wf.towers, gates: w.gates.map((g) => g.p), thickness: wallKind === 'palisade' ? 1.6 : pop > 12000 ? 3.2 : 2.6, gateInfo: w.gates.map((g) => ({ p: g.p, dir: g.dir, width: g.width })), pieces: wf.pieces, gateTowers: wf.gateTowers, towerScale: wf.towerScale, curtains: wf.curtains, towerShape, role: 'town' as const };
+    }).filter((w): w is UrbanWall => !!w).concat(extraWalls.map((w, wi): UrbanWall => {
+      // castle curtains: the stretches lying on the town wall are drawn by the town wall
+      const townIdx = new LineIndex(prim.walls.map((tw) => ({ path: tw.ring.concat([tw.ring[0]]), hw: 0 })));
+      const skip = (q: Vec2) => townIdx.dist(q, 3) < 1.5 || ctx.isWater(q);
+      const wf = wallFeatures(w.ring, w.gates, rng.fork('xwall:' + wi), ctx.isWater, skip, 40);
+      return { path: w.ring, closed: true, towers: wf.towers, gates: w.gates.map((g) => g.p), thickness: 3.2, gateInfo: w.gates, pieces: wf.pieces, gateTowers: wf.gateTowers, towerScale: wf.towerScale.map((x) => x * 1.15), curtains: wf.curtains, towerShape: castleTower(culture.id), role: w.role === 'castle' ? 'castle' : 'quarter' };
+    })),
     landmarks, squares: prim.market && !compoundOf[carved.findIndex((b) => b.kind === 'market')] ? [prim.market] : [],
     archetype, population: pop, morphology: params.id,
     phases: eplan.phases.map((p) => ({ id: p.id, kind: p.kind, zone: p.zone, region: toPH(p.region), walled: p.walled, fossil: p.fossil })),
@@ -540,6 +603,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     backLand: parcels.filter((p) => p.use === 'garden').map((p) => p.poly).concat(plotGardens).map((p) => ({ outer: p, holes: [] })),
     culture: culture.id, cultures: plan.cultures.map((c) => c.id), renderHints: { ...hints, towerShape },
     lines, trees, water: waterPieces,
+    sites,
   };
   const debug: UrbanDebug = { quarters: prim.quarters.map((q) => ({ poly: q.lp.pts, phase: q.phase, lab: q.lp.lab })) };
   stats['ms.urban'] = Math.round(performance.now() - t0);

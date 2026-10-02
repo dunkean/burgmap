@@ -113,7 +113,7 @@ export interface UrbanStreet {
   phase: number;
 }
 export interface UrbanBlockInfo {
-  quarter: number; phase: number; zone: UrbanZone; kind: 'block' | 'place' | 'market' | 'church' | 'green' | 'compound';
+  quarter: number; phase: number; zone: UrbanZone; kind: 'block' | 'place' | 'market' | 'church' | 'green' | 'compound' | 'shanty';
   /** Compound lots: the landmark kind (mosque, temple, castle, yamen, …). */
   compound?: string;
   /** Culture that built the block (mixed plans). */
@@ -158,6 +158,28 @@ export interface UrbanWall {
   curtains?: [Vec2, Vec2][];
   /** Tower plan shape (culture / era dependent). */
   towerShape?: 'round' | 'square';
+  /** What the wall encloses (M4): the town (default), a later outer enclosure, a castle curtain, a walled quarter. */
+  role?: 'town' | 'outer' | 'castle' | 'quarter';
+}
+/**
+ * A landmark site (M4): the lot claimed in the partition, its entrance on the street network and a name hook.
+ * `name` is left empty by the generator unless the names stage fills it (users may plug their own generator).
+ */
+export interface UrbanSite {
+  id: string;
+  /** Landmark kind (castle, cathedral-close, monastery, port, watermill, shanty, ...). */
+  kind: string;
+  role: 'power' | 'worship' | 'market' | 'civic' | 'port' | 'activity' | 'suburb' | 'shanty';
+  /** The lot (or region) claimed in the partition. */
+  lot: Polygon;
+  /** Entrance on the street network (gate, west door, quay head...). */
+  entrance?: Vec2;
+  /** Label anchor. */
+  anchor: Vec2;
+  culture?: string;
+  name?: string;
+  /** Free-form tags for name generators (order, dedication, trade...). */
+  tags?: Record<string, string>;
 }
 export interface UrbanPhase { id: number; kind: 'core' | 'ring' | 'faubourg' | 'village'; zone: UrbanZone; region: PolyH[]; walled: boolean; fossil: boolean }
 export interface UrbanQuarter { poly: PolyH; phase: number; zone: UrbanZone; streetSpace: PolyH[] }
@@ -193,6 +215,10 @@ export interface UrbanLayer {
   trees?: UrbanTree[];
   /** Water pieces of the plan (moats, tanks, ponds) — parcels of use 'moat' / 'tank' are also listed here. */
   water?: PolyH[];
+  // ---- landmarks, activities, port, suburbs (M4), additive
+  sites?: UrbanSite[];
+  /** Stone quay edges (straight segments on the shoreline). */
+  quays?: Polyline[];
 }
 
 export interface World {
