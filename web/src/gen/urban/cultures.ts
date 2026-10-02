@@ -37,15 +37,16 @@ M['medina'] = morph('medina', EO, {
   arch: { typology: 'courtyard-house', roof: 'flat', storeys: [1, 3], material: 'mud' },
 });
 M['medina-souk'] = morph('medina-souk', M['medina'], {
-  closeOp: 'none', plotOp: 'burgage', buildingOp: 'streetFrontRow',
-  blockSize: { core: [900, 2600], middle: [900, 2600] }, minBlock: 350, minWidth: 14, widthByRank: [5, 3.8, 3, 2.4, 2.2], fieldRandom: 0.3,
-  frontage: { core: [2.8, 4.5], middle: [3, 5] }, plotDepth: { core: [5, 8], middle: [5, 9] }, buildDepth: { core: [5, 8], middle: [5, 8] },
+  // the souk: narrow blocks between lanes, shop cells back to back (qaysariyya)
+  closeOp: 'none', plotOp: 'burgage', buildingOp: 'shopRow',
+  blockSize: { core: [380, 1100], middle: [380, 1100] }, minBlock: 220, minWidth: 9, widthByRank: [5, 3.8, 2.8, 2.4, 2.2], fieldRandom: 0.3,
+  frontage: { core: [4.6, 6], middle: [4.6, 6.5] }, plotDepth: { core: [5, 8], middle: [5, 9] }, buildDepth: { core: [5, 8], middle: [5, 8] },
   coverage: { core: [0.93, 0.98], middle: [0.9, 0.97] }, bigCourtChance: 0.6,
   arch: { typology: 'souk-shop', roof: 'flat', storeys: [1, 1], material: 'mud' },
 });
 
 M['chinese'] = morph('chinese', MORPHOLOGIES['bastide'], {
-  streets: ['axis', 'grid', 'wardWalls'], closeOp: 'none', plotOp: 'siheyuan', buildingOp: 'pavilionCompound', orientation: 'cardinal',
+  streets: ['axis', 'grid', 'wardWalls'], closeOp: 'none', plotOp: 'siheyuan', buildingOp: 'pavilionCompound', orientation: 'cardinal', deepFill: true,
   gridSpacing: [240, 240], laneSpacing: [58, 125], wardArea: 26000, gridSkew: 0, fieldNoise: 0,
   blockSize: { core: [9000, 16000], middle: [9000, 16000], edge: [9000, 16000], faubourg: [4500, 14000] },
   minBlock: 1500, minWidth: 22, widthByRank: [14, 10, 7, 4.5, 3],
@@ -99,7 +100,7 @@ M['dwarven'] = morph('dwarven', MORPHOLOGIES['bastide'], {
   streets: ['switchbacks', 'grid'], closeOp: 'none', plotOp: 'burgage', buildingOp: 'hall', orientation: 'terrain', gatesOnly: true,
   gridSpacing: [46, 150], gridSkew: 0, fieldNoise: 0, blockSize: { core: [1200, 3500], middle: [1200, 3500], edge: [1200, 3500], faubourg: [3000, 9000] },
   minBlock: 400, minWidth: 14, widthByRank: [9, 7, 4, 3, 2.5],
-  frontage: { core: [14, 24], middle: [14, 24], edge: [14, 24] }, plotDepth: { core: [16, 30], middle: [16, 30], edge: [16, 30] },
+  frontage: { core: [9, 17], middle: [9, 17], edge: [10, 18] }, plotDepth: { core: [18, 30], middle: [18, 30], edge: [18, 30] },
   coverage: { core: [0.78, 0.88], middle: [0.75, 0.85], edge: [0.7, 0.8] }, footprintConformity: { core: 0, middle: 0, edge: 0 }, cornerFill: { core: 0, middle: 0, edge: 0 },
   density: { core: 170, middle: 170, edge: 170 },
   arch: { typology: 'stone-hall', roof: 'flat', storeys: [1, 2], material: 'rock' },

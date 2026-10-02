@@ -12,10 +12,10 @@ Status: [ ] open · [~] in progress · [x] done
 - [x] Castle count option; walls none / single / double.
 
 ## Cultures: next polish agent
-- [ ] Japanese (jōkamachi): the overall plan is nice, but some quarters are piles of rectangles. Merchant blocks need machiya rows along the street with gardens and storehouses (kura) behind. Samurai lots: walled yashiki with a garden.
-- [ ] Dwarven: towns are empty. Fill the terraces with halls, workshops, forges, dwellings cut into the slope, and real density. Use a mountain flank when available.
-- [ ] Medina: hard to read. Houses must show inner courtyards (patio holes) systematically, blank outer walls, and entrances from derbs. Souk lanes need small shop cells. Coverage stays high, but the courtyards must be visible.
-- [ ] Chinese: the interior of the walled city is too empty.
+- [x] Japanese (jōkamachi): the overall plan is nice, but some quarters are piles of rectangles. Merchant blocks need machiya rows along the street with gardens and storehouses (kura) behind. Samurai lots: walled yashiki with a garden.
+- [x] Dwarven: towns are empty. Fill the terraces with halls, workshops, forges, dwellings cut into the slope, and real density. Use a mountain flank when available.
+- [x] Medina: hard to read. Houses must show inner courtyards (patio holes) systematically, blank outer walls, and entrances from derbs. Souk lanes need small shop cells. Coverage stays high, but the courtyards must be visible.
+- [x] Chinese: the interior of the walled city is too empty.
 - [ ] General: cultures are uneven in quality. Each preset must reach the European preset's level.
 
 ## New cultures (next culture agent)

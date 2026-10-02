@@ -669,7 +669,8 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
       plotBld[pi].push(b);
     }
     // no matchsticks among dwellings: long footprints are cut into rooms, the remaining slivers dropped
-    plotBld[pi] = splitLong(plotBld[pi]).filter((b) => b.kind === 'landmark' || shapeOkObb(b.poly));
+    // (ranges of courtyard rings and souk cells are judged on their room depth by their builder)
+    plotBld[pi] = splitLong(plotBld[pi].filter((b) => !b.ring)).filter((b) => b.kind === 'landmark' || shapeOkObb(b.poly)).concat(plotBld[pi].filter((b) => b.ring));
   });
   // ---- access: every building touches the street or open ground reached from it (passages shared by two plots)
   stats['ms.buildOn'] = Math.round(performance.now() - tBo);
@@ -765,6 +766,21 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   for (const q of quays) lines.push({ kind: 'quay-edge', path: q, width: 1.1 });
   // ---- plan lines: ward walls (fang), compound walls of courtyard / yashiki lots, moat outside the town wall
   const hints = plan.render;
+  // walled compound lots (samurai yashiki, siheyuan): the wall along the lot line, open where the gate stands
+  if (hints.compoundWalls) {
+    plots.forEach((pl, pi) => {
+      const op = plotMorph[pi].buildingOp;
+      if ((op !== 'yashiki' && op !== 'pavilionCompound') || !plotBld[pi].length) return;
+      const p = pl.poly;
+      const fm = { x: (pl.front[0].x + pl.front[1].x) / 2, y: (pl.front[0].y + pl.front[1].y) / 2 };
+      for (let k = 0; k < p.length; k++) {
+        const a = p[k], c = p[(k + 1) % p.length];
+        // the street front: walls between the gate ranges only (the ranges stand on the wall line)
+        if (distToSeg(fm, a, c) < 0.3) continue;
+        if (dist(a, c) > 1) lines.push({ kind: 'compound-wall', path: [a, c], width: 0.8 });
+      }
+    });
+  }
   if (hints.wardWalls) {
     carved.forEach((b, bi) => {
       if (b.kind !== 'block' || !blockMorph[bi].streets.includes('wardWalls')) return;

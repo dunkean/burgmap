@@ -484,7 +484,47 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
           for (const q of dense) { if (ctx.isWater(q)) { if (cur.length >= 2) dryRuns.push({ pts: cur }); cur = []; } else cur.push(q); }
           if (cur.length >= 2) dryRuns.push({ pts: cur });
         }
-        const pc0 = dryRuns.sort((a2, b2) => polylineLength(b2.pts) - polylineLength(a2.pts))[0];
+        dryRuns.sort((a2, b2) => polylineLength(b2.pts) - polylineLength(a2.pts));
+        // the ramp must hang off the network: the dry stretch leaving the lower gate when it is long enough, else the
+        // longest one led back to the gate by a dry straight link (a stretch floating inside the hold would leave the
+        // quarter without a connected street, and the quarter would never be split)
+        const gateP = ends.length ? ends[0] : null;
+        const touches = (r: { pts: Vec2[] }) => !!gateP && (dist(r.pts[0], gateP) < 15 || dist(r.pts[r.pts.length - 1], gateP) < 15);
+        let pc0 = dryRuns.find((r) => touches(r) && polylineLength(r.pts) > 80) ?? dryRuns[0];
+        if (pc0 && gateP && !touches(pc0)) {
+          const e0 = pc0.pts[0], e1 = pc0.pts[pc0.pts.length - 1];
+          const near = dist(e0, gateP) <= dist(e1, gateP) ? e0 : e1;
+          const n = Math.max(2, Math.ceil(dist(near, gateP) / 3));
+          let dry = true;
+          for (let k = 1; k < n && dry; k++) { const q = { x: gateP.x + ((near.x - gateP.x) * k) / n, y: gateP.y + ((near.y - gateP.y) * k) / n }; if (ctx.isWater(q) || !pointInRing(big.outer, q)) dry = false; }
+          if (dry) pc0 = { pts: near === e0 ? [gateP, ...pc0.pts] : [...pc0.pts, gateP] };
+        }
+        // ... and it must cut the hold through: a ramp ending inside the hold (its upper stretch lost to a stream)
+        // is a dangling slit no lattice street can cross, and the hold would stay one block: its free end is led
+        // to the nearest dry point of the wall
+        if (pc0) {
+          const pts0 = pc0.pts;
+          const ring = big.outer;
+          for (const atEnd of [true, false]) {
+            const e = atEnd ? pts0[pts0.length - 1] : pts0[0];
+            if (distToRing(ring, e) < 0.05) continue;
+            let best: Vec2 | null = null, bd = Infinity;
+            for (let i = 0; i < ring.length; i++) {
+              const a2 = ring[i], b2 = ring[(i + 1) % ring.length];
+              const m = Math.max(1, Math.ceil(dist(a2, b2) / 4));
+              for (let j = 0; j <= m; j++) {
+                const q = { x: a2.x + ((b2.x - a2.x) * j) / m, y: a2.y + ((b2.y - a2.y) * j) / m };
+                const d = dist(q, e);
+                if (d >= bd || d > 400) continue;
+                const n = Math.max(2, Math.ceil(d / 3));
+                let dry = true;
+                for (let k = 1; k < n && dry; k++) if (ctx.isWater({ x: e.x + ((q.x - e.x) * k) / n, y: e.y + ((q.y - e.y) * k) / n })) dry = false;
+                if (dry) { bd = d; best = q; }
+              }
+            }
+            if (best) { if (atEnd) pts0.push(best); else pts0.unshift(best); }
+          }
+        }
         const pc = pc0 ? { pts: simplify(pc0.pts, 0.3) } : undefined;
         if (pc && polylineLength(pc.pts) > 80) {
           const id = streets.add(pc.pts, sw.width, 1, 'radial', 1);
@@ -580,8 +620,15 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
   }
   // ---- quarters: phase bands minus the market, cut by the radials
   const cutters: Polygon[] = [];
+  // (each cutter overshoots its ends by 0.5 m: a radial ending exactly on the band boundary must still cut it
+  // through, not leave a slit joined by a hairline)
+  const overshoot = (pl: Polyline): Polyline => {
+    if (pl.length < 2) return pl;
+    const ext = (a: Vec2, b: Vec2): Vec2 => { const l = dist(a, b) || 1; return { x: a.x + ((a.x - b.x) / l) * 0.5, y: a.y + ((a.y - b.y) / l) * 0.5 }; };
+    return [ext(pl[0], pl[1]), ...pl, ext(pl[pl.length - 1], pl[pl.length - 2])];
+  };
   for (const id of radials) {
-    const rb = ribbon(streets.list[id].path, 0.04);
+    const rb = ribbon(overshoot(streets.list[id].path), 0.04);
     if (rb.length >= 3) cutters.push(rb);
   }
   for (const c of extraCuts) { const rb = ribbon(c, 0.04); if (rb.length >= 3) cutters.push(rb); }

@@ -6,7 +6,8 @@
 import type { World, LandKind, Polygon, Polyline, Vec2, PolyH } from '../gen/types';
 import { contourSet } from './contours';
 import { seaWithIslands } from './util';
-import { offsetRibbon } from '../gen/core/geom';
+import { offsetRibbon, polygonCentroid } from '../gen/core/geom';
+import { pointInRing } from '../gen/geo/poly';
 import { TileIndex, boxesOf, chunkPolyline } from './tileindex';
 
 export const TILE_SIZE = 250;
@@ -187,7 +188,10 @@ export function buildScene(world: World, tileSize = TILE_SIZE): Scene {
     {
       // individual roofs (landmarks are drawn by u-church / landmarks); courtyards are holes
       const bs = ur.buildings.filter((b) => b.kind !== 'church' && b.kind !== 'cathedral' && b.kind !== 'landmark' && b.poly.length >= 3);
-      addPoly('u-bldg', bs.map((b) => b.poly), bs.map((b) => (b.courtyards?.length ? b.courtyards : undefined)));
+      // (a courtyard is a hole only when it lies inside the footprint: the patio of a courtyard house drawn as one C
+      // around it, or split in ranges, stays open ground)
+      const inside = (b: { poly: Polygon }, c: Polygon) => c.length >= 3 && pointInRing(b.poly, polygonCentroid(c));
+      addPoly('u-bldg', bs.map((b) => b.poly), bs.map((b) => { const h = (b.courtyards ?? []).filter((c) => inside(b, c)); return h.length ? h : undefined; }));
     }
     addPoly('u-plots', parcelsOf(['plot']));
     addPoly('u-church', ur.buildings.filter((b) => b.kind === 'church').map((b) => b.poly));

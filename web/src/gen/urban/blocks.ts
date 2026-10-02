@@ -154,17 +154,28 @@ export function splitQuarter(ctx: UrbanCtx, q: Quarter, qi: number, streets: Str
     // access seeds: streamlines entering from the middle of street edges (needed when a piece touches
     // streets only along a short part of its boundary)
     const access: { p: Vec2; h: number }[] = [];
-    if (P.streetOp === 'organic') {
+    // (grids too: a piece whose connected streets are only short stretches of its boundary, e.g. the gate ends of
+    // roads that stop at the wall, would get no lattice line hanging off the network and never be split; a lattice
+    // street is grown from them along the family closest to the inward normal)
+    const gridAccess = P.streetOp === 'grid' && !pc.lp.lab.some((l, i) => l >= 0 && streets.connected.has(l) && dist(pts[i], pts[(i + 1) % pts.length]) > 40);
+    if (P.streetOp === 'organic' || gridAccess) {
       const n = pts.length;
       for (let i = 0; i < n; i++) {
         if (pc.lp.lab[i] < 0 || !streets.connected.has(pc.lp.lab[i])) continue;
         const a = pts[i], b = pts[(i + 1) % n];
         const l = dist(a, b);
-        if (l < 12) continue;
+        if (l < (gridAccess ? 3 : 12)) continue;
         const nx = -(b.y - a.y) / l, ny = (b.x - a.x) / l;
         const m = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
         const p0 = { x: m.x + nx * 0.05, y: m.y + ny * 0.05 };
-        access.push({ p: m, h: field.follow(p0, Math.atan2(ny, nx)) });
+        let h = Math.atan2(ny, nx);
+        if (gridAccess) {
+          // the lattice direction closest to the inward normal
+          let bh = h, bd = Infinity;
+          for (const f0 of fams) for (const f of [f0, f0 + Math.PI]) { const d = Math.abs(Math.atan2(Math.sin(f - h), Math.cos(f - h))); if (d < bd) { bd = d; bh = f; } }
+          h = bh;
+        } else h = field.follow(p0, h);
+        access.push({ p: m, h });
       }
       access.sort((x, y) => dist(y.p, ob.c) - dist(x.p, ob.c));
     }
