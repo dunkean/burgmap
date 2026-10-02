@@ -512,5 +512,51 @@ export function cutPlots(
     }
     p.sideFronts = out.filter(([a, b]) => dist(a, b) >= 3.5);
   }
-  return { plots: merged.filter((p) => p.poly.length >= 3), back: keepBack };
+  // exactness guard: a merge that fell back to a snapped union may overlap a neighbour; the later cell loses the
+  // overlap (the partition stays exact)
+  const cellsF: { poly: Polygon; plot: Plot | null }[] = merged.filter((p) => p.poly.length >= 3).map((p) => ({ poly: p.poly, plot: p as Plot | null }))
+    .concat(keepBack.map((g) => ({ poly: g, plot: null })));
+  const bbF = cellsF.map((c) => bboxOf(c.poly));
+  for (let i = 0; i < cellsF.length; i++) for (let j = i + 1; j < cellsF.length; j++) {
+    const a = bbF[i], b = bbF[j];
+    if (b.x0 >= a.x1 || b.x1 <= a.x0 || b.y0 >= a.y1 || b.y1 <= a.y0) continue;
+    const ov = intersectionS(cellsF[i].poly, cellsF[j].poly);
+    if (!ov.length || mpArea(ov) <= 0.02) continue;
+    const d = differenceS(cellsF[j].poly, cellsF[i].poly).filter((ph) => !ph.holes.length);
+    if (!d.length) continue;
+    const big = d.reduce((x, y) => (area(y.outer) > area(x.outer) ? y : x));
+    cellsF[j].poly = big.outer;
+    bbF[j] = bboxOf(big.outer);
+    // smaller leftovers (rare) become back land
+    for (const ph of d) if (ph !== big && area(ph.outer) > 0.5) { cellsF.push({ poly: ph.outer, plot: null }); bbF.push(bboxOf(ph.outer)); }
+  }
+  // last sliver pass: tiny or degenerate cells (a few m², spikes) join the neighbour sharing the longest edge
+  const degenerate = (c: { poly: Polygon; plot: Plot | null }) => {
+    const a = area(c.poly);
+    if (a < (c.plot ? 35 : 20)) return true;
+    if (minAng(c.poly) < (12 * Math.PI) / 180) return true;
+    return a < 600 && inscribed(c.poly, [], 0.2).r < 1.05;
+  };
+  for (let i = 0; i < cellsF.length; i++) {
+    const c = cellsF[i];
+    if (!c || !degenerate(c)) continue;
+    let best = -1, bl = 0;
+    for (let j = 0; j < cellsF.length; j++) {
+      if (j === i || !cellsF[j]) continue;
+      const sh = shared(c.poly, cellsF[j].poly) * (cellsF[j].plot ? 1.2 : 1);
+      if (sh > bl) { bl = sh; best = j; }
+    }
+    if (best < 0) continue;
+    let u: Polygon | null = stitchUnion(cellsF[best].poly, c.poly);
+    if (!u) { const r = unionS(cellsF[best].poly, c.poly); if (r.length === 1 && !r[0].holes.length) u = r[0].outer; }
+    if (!u || !isSimple(u)) continue;
+    cellsF[best].poly = u;
+    if (c.plot && !cellsF[best].plot) cellsF[best].plot = c.plot;
+    (cellsF as ({ poly: Polygon; plot: Plot | null } | null)[])[i] = null;
+  }
+  for (let i = cellsF.length - 1; i >= 0; i--) if (!cellsF[i]) cellsF.splice(i, 1);
+  const plotsF: Plot[] = [];
+  const backF: Polygon[] = [];
+  for (const c of cellsF) { if (c.plot) { c.plot.poly = c.poly; plotsF.push(c.plot); } else backF.push(c.poly); }
+  return { plots: plotsF, back: backF };
 }
