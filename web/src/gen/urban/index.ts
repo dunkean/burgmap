@@ -10,7 +10,8 @@ import type { Rng } from '../core/rng';
 import type { World, UrbanLayer, UrbanStreet, PolyH as PolyHT, UrbanLine, UrbanTree } from '../types';
 import type { MorphologyParams, Zone } from './morphology';
 import { resolveMorph } from './morphology';
-import { resolvePlan, getCulture, ResolvedPlan, EnclosureSpec, NucleusSpec } from './culture';
+import { resolvePlan, getCulture, ResolvedPlan, EnclosureSpec, NucleusSpec, scaleMinPop, scaleMaxPop } from './culture';
+import { generateCamp } from './camps/index';
 import { planRibbonVillage } from './villages';
 import { makeCtx } from './context';
 import { choosePopulation, chooseArchetype, planServedPhases, planFaubourgs, EnclosurePlan, zonesFor, PhaseInput, dilate } from './phases';
@@ -113,7 +114,14 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   const rng = root.fork('urban');
   const opts = world.options;
   const culture = getCulture(opts.culture);
-  const pop = choosePopulation(opts.size, opts.population, rng.fork('pop'));
+  let pop = choosePopulation(opts.size, opts.population, rng.fork('pop'));
+  // settlements planned without streets (camps, kraals, barbarian and native villages, pueblos)
+  if (culture.camp) {
+    const cr = generateCamp(world, rng, culture, pop);
+    return { layer: cr.layer, stats: cr.stats, debug: { quarters: [] } };
+  }
+  // the culture's settlement classes: below its minimum it is raised to it, above its maximum capped (1.5 ×)
+  if (culture.scale) pop = Math.round(Math.max(scaleMinPop(culture.scale.min), Math.min(pop, scaleMaxPop(culture.scale.max) * 1.5)));
   let roads = (world.roads ?? []).filter((r) => r.kind !== 'track').map((r) => ({ path: r.path, major: r.kind === 'major' }));
   const reaching = roads.filter((r) => dist(r.path[r.path.length - 1], world.site!.center) < 10).length;
   let archetype = chooseArchetype(pop, reaching, rng.fork('arch'));

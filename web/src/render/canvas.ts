@@ -463,6 +463,9 @@ export function createCanvasRenderer(canvas: CanvasLike, world: World, style: Ma
       paved('u-greens', U.garden, gardenPat, 0.6);
       paved('u-yards', U.garden, gravePat);
       fillPolys('u-blocks', U.yard);
+      paved('u-meadows', U.garden, gardenPat, 0.45);
+      const cornPat = near ? getPattern(ctx, 'corn', 3, 3, 12, (c, k) => { c.globalAlpha = 0.6; c.fillStyle = U.gardenInk; c.beginPath(); c.arc(1.5 * k, 1.5 * k, 0.45 * k, 0, TAU); c.fill(); }) : null;
+      paved('u-cornfields', pal.land.field, cornPat);
       // urban water (moats, tanks, mill races) and the moat line outside a planned town's wall
       strokeLines(linesOf((l) => l.role === 'uline' && l.kind === 'moat'), pal.riverFill, (l) => lw(l.width, 1));
       if (polyL('u-water')) { fillPolys('u-water', pal.riverFill); strokePolys('u-water', pal.riverEdge, lw(0.5, 0.4)); }
@@ -531,6 +534,12 @@ export function createCanvasRenderer(canvas: CanvasLike, world: World, style: Ma
         strokeLines(ul(['terrace']), U.massEdge, (l) => lw(l.width * 0.6, 0.7));
         if (near) strokeLines(ul(['hachure']), U.massEdge, (l) => lw(l.width, 0.4), 0.7);
         strokeLines(ul(['hedge']), '#5f7a3a', (l) => lw(l.width, 1));
+        // camps and villages: thorn fences, byre / yard / pen fences, earthen ramparts and ditches
+        strokeLines(ul(['rampart']), U.garden, (l) => lw(l.width, 1.4), 0.9);
+        strokeLines(ul(['ditch']), U.wall, (l) => lw(l.width, 0.9), 0.35);
+        strokeLines(ul(['thorn-fence']), '#5f6a3a', (l) => lw(l.width, 0.8), 0.85, near ? [1.3, 0.9] : []);
+        strokeLines(ul(['kraal-fence', 'palisade', 'rampart']), U.wall, (l) => lw(l.kind === 'rampart' ? 0.6 : l.width, 0.4));
+        if (near) strokeLines(ul(['yard-fence', 'pen-fence', 'orda-fence']), U.wall, (l) => lw(l.width, 0.3), 0.9, [1.6, 0.8]);
         if (near) strokeLines(ul(['footpath']), U.street, (l) => lw(l.width, 0.6));
       }
       // churches: distinct outlined mass with a cross

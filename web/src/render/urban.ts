@@ -141,6 +141,8 @@ function buildingsSvg(ub: NonNullable<World['urban']>, U: Palette['urban'], lw: 
 }
 
 const GROUND_USES = new Set(['bailey', 'causeway', 'ghat', 'castle-honmaru', 'compound:castle-honmaru', 'bailey-gate', 'esplanade']);
+/** Fences of camps and villages (width m): byre, yard, pen and orda fences, palisade lines inside a village. */
+const CAMP_FENCES: Record<string, number> = { 'kraal-fence': 1.1, 'yard-fence': 0.45, 'pen-fence': 0.5, 'orda-fence': 0.8, palisade: 1.2 };
 const WALL_LINES: Record<string, number> = { 'compound-wall': 1, 'citadel-wall': 2.4, 'stone-wall': 1.8, prakara: 1.6, 'ward-wall': 1.8 };
 
 /** Compound grounds, water pieces (moats, tanks) and the moat outside the town wall (drawn under the buildings). */
@@ -157,6 +159,13 @@ function cultureUnderlay(ub: NonNullable<World['urban']>, pal: Palette, lw: (m: 
   if (garth.length) s += `<path d="${garth.map((l) => pathD(l.poly, true)).join('')}" fill="${U.garden}" stroke="${U.plotLine}" stroke-width="${lw(0.25, 0.1)}"/>`;
   const ditch = ub.parcels.filter((p) => p.use === 'ditch');
   if (ditch.length) s += `<path class="u-ditch" d="${ditch.map((p) => pathD(p.poly, true)).join('')}" fill="${U.garden}" stroke="${U.plotLine}" stroke-width="${lw(0.3, 0.12)}"/><path d="${ditch.map((p) => pathD(p.poly, true)).join('')}" fill="url(#p-ugarden)"/>`;
+  // cornfields round a native village: corn hills in rows
+  const corn = ub.landmarks.filter((l) => l.kind === 'cornfield');
+  if (corn.length) {
+    const d = corn.map((l) => pathD(l.poly, true)).join('');
+    s += `<defs><pattern id="p-ucorn" patternUnits="userSpaceOnUse" width="3" height="3" patternTransform="rotate(12)"><circle cx="1.5" cy="1.5" r="0.45" fill="${U.gardenInk}" opacity="0.6"/></pattern></defs>`;
+    s += `<g class="u-cornfields"><path d="${d}" fill="${pal.land.field}" stroke="${U.gardenInk}" stroke-opacity="0.5" stroke-width="${lw(0.4, 0.2)}"/><path d="${d}" fill="url(#p-ucorn)"/></g>`;
+  }
   const cem = ub.landmarks.filter((l) => l.kind === 'cemetery');
   if (cem.length) s += `<path d="${cem.map((l) => pathD(l.poly, true)).join('')}" fill="${U.garden}"/><path d="${cem.map((l) => pathD(l.poly, true)).join('')}" fill="url(#p-ugrave)"/>`;
   const water = (ub.water ?? []).map((w) => pathD(w.outer, true)).join('');
@@ -185,6 +194,10 @@ function cultureOverlay(ub: NonNullable<World['urban']>, pal: Palette, lw: (m: n
     else if (k === 'parterre' || k === 'footpath') s += `<path d="${d}" fill="none" stroke="${k === 'footpath' ? U.street : U.plotLine}" stroke-width="${lw(k === 'footpath' ? 1.4 : 0.5, 0.15)}" stroke-linecap="round"/>`;
     else if (k === 'ghat-steps') s += `<path d="${d}" fill="none" stroke="${U.plotLine}" stroke-width="${lw(0.3, 0.12)}"/>`;
     else if (k === 'terrace') s += `<path d="${d}" fill="none" stroke="${U.wall}" stroke-width="${lw(1.6, 0.8)}"/>`;
+    else if (k === 'thorn-fence') s += `<path d="${d}" fill="none" stroke="${pal.treeInk ?? '#4a6a3a'}" stroke-width="${lw(2.2, 0.8)}" stroke-opacity="0.85" stroke-dasharray="1.3 0.9" stroke-linecap="round"/>`;
+    else if (CAMP_FENCES[k]) s += `<path d="${d}" fill="none" stroke="${U.wall}" stroke-width="${lw(CAMP_FENCES[k], 0.25)}" stroke-opacity="0.9"${k === 'kraal-fence' || k === 'palisade' ? '' : ' stroke-dasharray="1.6 0.8"'}/>`;
+    else if (k === 'rampart') s += `<path d="${d}" fill="none" stroke="${U.garden}" stroke-width="${lw(7, 1.4)}" stroke-opacity="0.9"/><path d="${d}" fill="none" stroke="${U.wall}" stroke-width="${lw(0.6, 0.3)}"/>`;
+    else if (k === 'ditch') s += `<path d="${d}" fill="none" stroke="${U.wall}" stroke-width="${lw(4, 0.9)}" stroke-opacity="0.35"/>`;
     else if (k === 'hachure') s += `<path d="${d}" fill="none" stroke="${U.wall}" stroke-width="${lw(0.55, 0.3)}" stroke-opacity="0.85"/>`;
     else s += `<path class="u-line-${k}" d="${d}" fill="none" stroke="${U.wall}" stroke-width="${lw(WALL_LINES[k] ?? 1, 0.4)}" stroke-linejoin="miter" stroke-linecap="square"/>`;
   }
@@ -222,13 +235,16 @@ export function urbanLayer(world: World, pal: Palette, u: number, debug: boolean
   }
   const blockD = ub.blocks.filter((_, i) => ub.blockInfo[i]?.kind === 'block').map((b) => pathD(b, true)).concat(ub.parcels.filter((p) => p.use === 'arena-plot' || p.use === 'inn').map((p) => pathD(p.poly, true))).join('');
   s += `<path class="u-blocks" d="${blockD}" fill="${U.yard}"/>`;
+  // meadows inside a block (village greens, thing places, open camp ground): over the yard colour
+  const meadows = ub.parcels.filter((p) => p.use === 'meadow');
+  if (meadows.length) { const d = meadows.map((p) => pathD(p.poly, true)).join(''); s += `<g class="u-meadows"><path d="${d}" fill="${U.garden}"/><path d="${d}" fill="url(#p-ugarden)" opacity="0.45"/></g>`; }
   if (ub.backLand.length) {
     const d = ub.backLand.map(phD).join('');
     s += `<g class="u-gardens"><path d="${d}" fill="${U.garden}"/><path d="${d}" fill="url(#p-ugarden)"/></g>`;
   }
   // plot hairlines first: the buildings cover them, so they read on yards and gardens only (cadastre style)
-  const plotD = ub.parcels.filter((p) => p.use === 'plot').map((p) => pathD(p.poly, true)).join('');
-  s += `<path class="u-plots" d="${plotD}" fill="none" stroke="${U.plotLine}" stroke-opacity="${f1(U.plotAlpha * 0.75)}" stroke-width="${lw(U.plotW, 0.05)}"/>`;
+  const plotD = ub.renderHints?.plotLines === false ? '' : ub.parcels.filter((p) => p.use === 'plot').map((p) => pathD(p.poly, true)).join('');
+  if (plotD) s += `<path class="u-plots" d="${plotD}" fill="none" stroke="${U.plotLine}" stroke-opacity="${f1(U.plotAlpha * 0.75)}" stroke-width="${lw(U.plotW, 0.05)}"/>`;
   s += cultureUnderlay(ub, pal, lw);
   s += buildingsSvg(ub, U, lw);
   s += cultureOverlay(ub, pal, lw);

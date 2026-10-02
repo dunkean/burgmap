@@ -182,6 +182,8 @@ export function buildScene(world: World, tileSize = TILE_SIZE): Scene {
     addPoly('u-greens', parcelsOf(['green']));
     addPoly('u-yards', parcelsOf(['church']));
     addPoly('u-blocks', ur.blocks.filter((_, i) => ur.blockInfo[i]?.kind === 'block'));
+    addPoly('u-meadows', parcelsOf(['meadow']));
+    addPoly('u-cornfields', ur.landmarks.filter((l) => l.kind === 'cornfield').map((l) => l.poly));
     addPoly('block-edges', ur.blocks);
     addH('u-backland', ur.backLand);
     addH('u-masses', ur.masses);
@@ -193,7 +195,7 @@ export function buildScene(world: World, tileSize = TILE_SIZE): Scene {
       const inside = (b: { poly: Polygon }, c: Polygon) => c.length >= 3 && pointInRing(b.poly, polygonCentroid(c));
       addPoly('u-bldg', bs.map((b) => b.poly), bs.map((b) => { const h = (b.courtyards ?? []).filter((c) => inside(b, c)); return h.length ? h : undefined; }));
     }
-    addPoly('u-plots', parcelsOf(['plot']));
+    addPoly('u-plots', ur.renderHints?.plotLines === false ? [] : parcelsOf(['plot']));
     addPoly('u-church', ur.buildings.filter((b) => b.kind === 'church' || b.kind === 'cathedral').map((b) => b.poly));
     // landmark buildings (keeps, halls, temples, minarets...), urban water (moats, tanks, mill races) and the plan
     // lines (compound and ward walls, moats, quay edges, terraces, hedges, footpaths)

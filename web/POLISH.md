@@ -20,22 +20,22 @@ Status: [ ] open · [~] in progress · [x] done
 
 ## New cultures (next culture agent)
 
-Each culture gets a `scale` range: the settlement classes it can produce.
+Each culture gets a `scale` range: the settlement classes it can produce. [x] `scale: { min, max }` on the ladder hamlet … megacity (culture.ts); village-only cultures become one large village up to 1.5 × their cap, beyond that a cluster of villages linked by tracks (camps/index.ts); the plan selector notes the cap.
 
 - **Village/hamlet-only cultures.** Above their maximum population they degrade to a large village or a confederation of villages, or the UI caps the population with a note.
-  - [ ] **Barbarian / Germanic–Celtic–Norse village**:
+  - [x] **Barbarian / Germanic–Celtic–Norse village** (`barbarian`, `barbarian-celtic`, `barbarian-norse`; camps/yards.ts):
     - longhouses and byre-houses in a palisaded or ditched enclosure, with a chieftain's hall at the center;
     - sunken huts (Grubenhäuser), granaries on posts, cattle pens;
     - irregular yards, no streets, only trampled paths.
     - Variants: Viking farmstead cluster; Celtic roundhouse village in a ringfort.
-  - [ ] **Native North American**, three variants:
+  - [~] **Native North American**, three variants (`native-iroquoian`: camps/longhouses.ts, `native-plains`: camps/ring.ts, `native-pueblo`):
     - *Iroquoian palisaded longhouse village*: parallel bark longhouses of 20–60 m inside a double palisade, cornfields around;
     - *Plains tipi camp*: a circle of tipis with the opening facing east, council lodge, horse herds;
     - *Pueblo*: terraced, agglutinated stone/adobe room blocks around plazas, kivas (round sunken chambers).
     
     The pueblo can scale up to a town (Taos, Chaco great houses).
-  - [ ] **Bantu kraal / African village**: a ring of round huts around a central cattle kraal, granaries, a thorn fence.
-  - [ ] **Nomad camp** (from the spec): tents in concentric circles around the chief's tent.
+  - [x] **Bantu kraal / African village** (`kraal`, camps/ring.ts): a ring of round huts around a central cattle kraal, granaries, a thorn fence.
+  - [x] **Nomad camp** (`nomad-camp`, camps/ring.ts): tents in concentric circles around the chief's tent.
 - **City cultures**
   - [ ] **Inca**:
     - kancha blocks (rectangular walled compounds with houses around a courtyard) on an orthogonal grid adapted to the terrain;

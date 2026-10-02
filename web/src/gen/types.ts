@@ -137,7 +137,7 @@ export interface UrbanBuilding {
   // ---- architecture metadata (M3b; drives later rendering / 3D)
   /** Typology id (gabled-row-house, courtyard-house, siheyuan-hall, machiya, longhouse, …). */
   arch?: string;
-  roof?: 'gable' | 'hip' | 'flat' | 'dome' | 'pyramidal' | 'pagoda' | 'thatch-round' | 'none' | 'tiled-hip';
+  roof?: 'gable' | 'hip' | 'flat' | 'dome' | 'pyramidal' | 'pagoda' | 'thatch-round' | 'none' | 'tiled-hip' | 'conical' | 'barrel' | 'terraced';
   storeys?: number;
   material?: string;
   /** Inner courtyards of the building (inside its footprint envelope, not part of `poly`). */
@@ -210,7 +210,7 @@ export interface UrbanLayer {
   /** Culture preset id, the cultures present (mixes) and render hints. */
   culture?: string;
   cultures?: string[];
-  renderHints?: { towerShape: 'round' | 'square'; compoundWalls?: boolean; wardWalls?: boolean; canopy?: boolean; terraces?: boolean; moat?: boolean };
+  renderHints?: { towerShape: 'round' | 'square'; compoundWalls?: boolean; wardWalls?: boolean; canopy?: boolean; terraces?: boolean; moat?: boolean; plotLines?: boolean };
   lines?: UrbanLine[];
   trees?: UrbanTree[];
   /** Water pieces of the plan (moats, tanks, ponds) — parcels of use 'moat' / 'tank' are also listed here. */

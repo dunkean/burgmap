@@ -5,6 +5,7 @@
 import type { Culture } from './culture';
 import type { MorphologyParams } from './morphology';
 import { MORPHOLOGIES, EO_BASE, deepMerge } from './morphology';
+import { CAMP_CULTURES } from './cultures_camps';
 
 const EO = EO_BASE;
 const morph = (id: string, base: MorphologyParams, over: Record<string, unknown>): MorphologyParams => deepMerge(base, { ...over, id });
@@ -119,7 +120,7 @@ Object.assign(MORPHOLOGIES, M);
 // ---------------------------------------------------------------- cultures
 const walledEO = { shape: 'organic', wall: 'auto', fossil: 'street', towers: 'round' } as const;
 
-export const CULTURE_LIST: Culture[] = [
+const BASE_CULTURES: Culture[] = [
   {
     id: 'european-organic', label: 'Medieval organic (Europe)',
     nucleus: { kind: 'market', shape: 'hull', area: 'market', compound: false, ring: 4.6 },
@@ -292,3 +293,5 @@ export const CULTURE_LIST: Culture[] = [
     sitePrefs: { mountainFace: 1, weights: { valley: 2, hilltop: 1.5, plain: 0.3 } },
   },
 ];
+
+export const CULTURE_LIST: Culture[] = [...BASE_CULTURES, ...CAMP_CULTURES];

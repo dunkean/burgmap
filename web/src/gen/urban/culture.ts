@@ -10,6 +10,21 @@ import { resolveMorph, blendParams } from './morphology';
 import { CULTURE_LIST } from './cultures';
 import type { SitePrefs } from '../options';
 import type { M4Catalogue } from './m4/index';
+import type { CampSpec } from './camps/index';
+
+/**
+ * Settlement classes on the scale ladder (URBAN_MORPHOLOGY.md §3d), by population. The archetype thresholds of
+ * the urban stage (hamlet < 200, village < 1 200) bound the first two; a market town is a small town.
+ */
+export type ScaleClass = 'hamlet' | 'village' | 'town' | 'city' | 'metropolis' | 'megacity';
+export const SCALE_CLASSES: ScaleClass[] = ['hamlet', 'village', 'town', 'city', 'metropolis', 'megacity'];
+const SCALE_BOUND: Record<ScaleClass, number> = { hamlet: 200, village: 1200, town: 20000, city: 100000, metropolis: 1000000, megacity: Infinity };
+/** Upper population bound of a class (exclusive). */
+export const scaleMaxPop = (c: ScaleClass): number => SCALE_BOUND[c];
+/** Lower population bound of a class. */
+export const scaleMinPop = (c: ScaleClass): number => { const i = SCALE_CLASSES.indexOf(c); return i <= 0 ? 0 : SCALE_BOUND[SCALE_CLASSES[i - 1]]; };
+export const scaleOf = (pop: number): ScaleClass => SCALE_CLASSES.find((c) => pop < SCALE_BOUND[c]) ?? 'megacity';
+export interface ScaleRange { min: ScaleClass; max: ScaleClass }
 
 export type EnclosureShape = 'organic' | 'rect' | 'rounded-rect' | 'square' | 'oval' | 'circle' | 'terraces';
 export interface EnclosureSpec {
@@ -68,6 +83,8 @@ export interface RenderHints {
   terraces?: boolean;
   /** Moat outside the town wall. */
   moat?: boolean;
+  /** Plot hairlines (false: camps and villages without property lines). */
+  plotLines?: boolean;
 }
 export interface SettlementForm {
   /** Village / hamlet layout: EO rule (street or nucleated village), a walled compact block, a grove, terraces. */
@@ -96,6 +113,12 @@ export interface Culture {
   sitePrefs?: SitePrefs;
   /** M4 landmark catalogue (castle variant, cathedral, palace, monasteries, port, shanty flavour). */
   m4?: M4Catalogue;
+  /** Settlement classes the culture produces (default hamlet … megacity). Above `max` it degrades gracefully. */
+  scale?: ScaleRange;
+  /** Planned without streets (camps, kraals, barbarian and native villages, pueblos): camps/index.ts. */
+  camp?: CampSpec;
+  /** Family of variants shown together in the plan selector (barbarian, native-american). */
+  family?: string;
 }
 export interface CultureMix { id: string; t: number; mode: 'phases' | 'sectors' | 'blend' }
 export interface PlanOverride {
