@@ -184,6 +184,11 @@ export function buildScene(world: World, tileSize = TILE_SIZE): Scene {
     addPoly('block-edges', ur.blocks);
     addH('u-backland', ur.backLand);
     addH('u-masses', ur.masses);
+    {
+      // individual roofs (landmarks are drawn by u-church / landmarks); courtyards are holes
+      const bs = ur.buildings.filter((b) => b.kind !== 'church' && b.kind !== 'cathedral' && b.kind !== 'landmark' && b.poly.length >= 3);
+      addPoly('u-bldg', bs.map((b) => b.poly), bs.map((b) => (b.courtyards?.length ? b.courtyards : undefined)));
+    }
     addPoly('u-plots', parcelsOf(['plot']));
     addPoly('u-church', ur.buildings.filter((b) => b.kind === 'church').map((b) => b.poly));
     const crosses: Polyline[] = [];

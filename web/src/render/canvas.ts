@@ -62,6 +62,16 @@ export interface CanvasRenderer {
 
 const BUILDING_BUDGET_FULL = 120_000;
 const BUILDING_BUDGET_MAX = 450_000;
+/** Individually outlined buildings in view above which we fall back to merged masses. */
+const BUILDING_BUDGET_INDIV = 160_000;
+
+const hexRgb = (h: string): number[] | null => { const m = /^#([0-9a-f]{6})$/i.exec(h); if (!m) return null; const v = parseInt(m[1], 16); return [(v >> 16) & 255, (v >> 8) & 255, v & 255]; };
+const mixHex = (a: string, b: string, t: number): string => {
+  const A = hexRgb(a), B = hexRgb(b);
+  if (!A || !B) return a;
+  return '#' + A.map((x, i) => Math.round(x + (B[i] - x) * t).toString(16).padStart(2, '0')).join('');
+};
+const lumHex = (h: string): number => { const c = hexRgb(h); return c ? (0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]) / 255 : 0.5; };
 const CACHE_MAX = 8000;
 const TAU = Math.PI * 2;
 
@@ -480,11 +490,30 @@ export function createCanvasRenderer(canvas: CanvasLike, world: World, style: Ma
             for (const p of paths) ctx.fill(p, 'evenodd');
             ctx.restore();
           }
-          ctx.fillStyle = U.mass;
-          for (const p of paths) ctx.fill(p, 'evenodd');
-          if (cand <= BUILDING_BUDGET_FULL) {
-            ctx.strokeStyle = U.massEdge; ctx.lineWidth = lw(U.massEdgeW, 0.3);
-            for (const p of paths) ctx.stroke(p);
+          const bl = polyL('u-bldg');
+          let indiv = 0;
+          if (lod.individual && bl) {
+            for (const t of bl.index.tilesInRect(rect)) indiv += bl.index.tileStart[t + 1] - bl.index.tileStart[t];
+            indiv += bl.index.bigInRect(rect).length;
+          }
+          if (lod.individual && bl && indiv <= BUILDING_BUDGET_INDIV) {
+            // one building at a time (as in the SVG): roof fill, then a thin outline so party walls show as lines
+            const lm = lumHex(U.mass);
+            const roof = lm < 0.3 ? mixHex(U.mass, U.yard, 0.42) : U.mass;
+            const ink = lm < 0.3 ? mixHex(U.mass, '#000000', 0.25) : lumHex(U.massEdge) < lm ? U.massEdge : mixHex(U.mass, '#000000', 0.6);
+            const bp = polyPaths(bl);
+            ctx.fillStyle = roof;
+            for (const p of bp) ctx.fill(p, 'evenodd');
+            ctx.strokeStyle = ink; ctx.lineWidth = lw(Math.max(0.28, U.massEdgeW * 0.9), 0.45); ctx.lineJoin = 'miter';
+            for (const p of bp) ctx.stroke(p);
+            ctx.lineJoin = 'round';
+          } else {
+            ctx.fillStyle = U.mass;
+            for (const p of paths) ctx.fill(p, 'evenodd');
+            if (cand <= BUILDING_BUDGET_FULL) {
+              ctx.strokeStyle = U.massEdge; ctx.lineWidth = lw(U.massEdgeW, 0.3);
+              for (const p of paths) ctx.stroke(p);
+            }
           }
           if (U.lit && lod.band >= 2) drawLit(ctx, rect, sc, U.lit.color, U.lit.density);
         }
@@ -497,8 +526,8 @@ export function createCanvasRenderer(canvas: CanvasLike, world: World, style: Ma
       }
       // plot hairlines: a dark pass (reads on yards) and a light pass (reads on roofs)
       if (lod.parcels) {
-        strokePolys('u-plots', U.plotLine, lw(U.plotW, 0.4), U.plotAlpha);
-        if (U.plotLightAlpha > 0) strokePolys('u-plots', U.massEdge, lw(U.plotW, 0.4), U.plotLightAlpha);
+        strokePolys('u-plots', U.plotLine, lw(U.plotW, 0.4), U.plotAlpha * 0.7);
+        if (U.plotLightAlpha > 0) strokePolys('u-plots', U.massEdge, lw(U.plotW, 0.4), U.plotLightAlpha * 0.7);
       }
       // hierarchy: arterial / primary streets keep a legible minimum width in street colour
       const minPx = (l: LineLayer): number => (l.kind.startsWith('r0') ? 2.6 : l.kind.startsWith('r1') ? 1.8 : 1.0);
