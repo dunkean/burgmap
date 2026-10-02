@@ -18,6 +18,7 @@ import { buildScene } from '../render/scene';
 import { saveFile } from './download';
 import { worldToJson } from './exportWorld';
 import type { ImportedHeight } from '../gen/terrain/import';
+import { CULTURE_LIST } from '../gen/urban/cultures';
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 
@@ -59,7 +60,7 @@ fillSelect(coastEl, [['none', 'None'], ['random', 'Random side'], ['N', 'North']
 fillSelect(riverEl, [['none', 'None'], ['stream', 'Stream'], ['river', 'River'], ['major', 'Major river']], opts.river);
 fillSelect(roadsEl, [['0', `Auto (${DEFAULT_ROADS[opts.size]})`], ...[1, 2, 3, 4, 5, 6, 7, 8].map((k) => [String(k), String(k)] as [string, string])], String(opts.roads));
 fillSelect(styleEl, STYLE_LIST.map((s) => [s.id, s.label] as [string, string]), opts.style);
-fillSelect(cultureEl, [['european-organic', 'Medieval organic'], ['bastide', 'Bastide (planned grid)']], opts.culture);
+fillSelect(cultureEl, CULTURE_LIST.map((c) => [c.id, c.fantasy ? `${c.label} (fantasy)` : c.label] as [string, string]), opts.culture);
 fillSelect(languageEl, [['auto', 'Automatic (from the plan)'], ...NAME_FAMILIES.map((f) => [f, f[0].toUpperCase() + f.slice(1)] as [string, string])], opts.language ?? 'auto');
 
 const seedControl = {
