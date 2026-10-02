@@ -55,7 +55,8 @@ export interface CanvasRenderer {
   setOverlays(o: Partial<Overlays>): void;
   /** Labels placed in the last frame (debug / tests). */
   lastPlaced(): PlacedMapLabel[];
-  drawMinimap(target: CanvasLike, view: View, viewW: number, viewH: number): void;
+  /** `withRect = false` draws the static base only (the page overlays the view rectangle itself). */
+  drawMinimap(target: CanvasLike, view: View, viewW: number, viewH: number, withRect?: boolean): void;
   lastStats(): FrameStats;
   dispose(): void;
 }
@@ -689,7 +690,7 @@ export function createCanvasRenderer(canvas: CanvasLike, world: World, style: Ma
     return tiles.length;
   }
 
-  function drawMinimap(target: CanvasLike, view: View, viewW: number, viewH: number): void {
+  function drawMinimap(target: CanvasLike, view: View, viewW: number, viewH: number, withRect = true): void {
     const ctx = target.getContext('2d');
     if (!ctx) return;
     const k = target.width / S;
@@ -716,9 +717,11 @@ export function createCanvasRenderer(canvas: CanvasLike, world: World, style: Ma
     water('sea', pal.seaFill, 'evenodd'); water('lakes', pal.lakeFill); water('rivers', pal.riverFill);
     const d = getDensity();
     if (d) ctx.drawImage(d, 0, 0, S, S);
-    const r = viewRect(view, viewW, viewH, 0);
-    ctx.strokeStyle = pal.marker; ctx.lineWidth = 1.5 / k;
-    ctx.strokeRect(r.minX, r.minY, r.maxX - r.minX, r.maxY - r.minY);
+    if (withRect) {
+      const r = viewRect(view, viewW, viewH, 0);
+      ctx.strokeStyle = pal.marker; ctx.lineWidth = 1.5 / k;
+      ctx.strokeRect(r.minX, r.minY, r.maxX - r.minX, r.maxY - r.minY);
+    }
     ctx.setTransform(1, 0, 0, 1, 0, 0);
   }
 

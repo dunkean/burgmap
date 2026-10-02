@@ -19,6 +19,9 @@ import { saveFile } from './download';
 import { worldToJson } from './exportWorld';
 import type { ImportedHeight } from '../gen/terrain/import';
 import { CULTURE_LIST } from '../gen/urban/cultures';
+import { perf, rec, now as pnow } from './perf';
+import { OffscreenBackend, BackendEvents } from './backend';
+import type { DisplayOpts, GDone } from './protocol';
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 
@@ -151,8 +154,15 @@ function updateHeightmapUI(): void {
     : missingCustom ? '<span class="chip warn" id="customChip">this link used a custom heightmap: import it again to reproduce the map</span>' : '';
 }
 
-// ---------- generation (worker with main-thread fallback) ----------
+// ---------- generation: workers + OffscreenCanvas when possible, else the original main-thread path ----------
+// 'offscreen' mode (default): a generation worker (G) streams World snapshots to a render worker (R) that owns the
+// scene and draws on an OffscreenCanvas; the page only moves bitmaps (see backend.ts, viewer.ts). The World never
+// reaches the main thread. 'main' mode (fallback, or `?render=main`): generate in a worker (or inline) and draw here.
+let backend: OffscreenBackend | null = null;
+let backendSettled = false;
+const forceMain = new URLSearchParams(location.search).get('render') === 'main';
 let worker: Worker | null = null;
+let legacyWorkerRefused = false;
 let workerBusy = false;
 let reqId = 0;
 let timer: number | undefined;
@@ -162,7 +172,12 @@ let lastGenKey = '';
 let currentWorld: World | null = null;
 let currentRenderer: CanvasRenderer | null = null;
 let sceneCache: { world: World; contours: boolean; scene: Scene } | null = null;
+/** Offscreen mode: tiny summary of the world (center, name anchors) and the labels of the last frame, for the debug hooks. */
+let meta: GDone['meta'] | null = null;
+let lastLabels: { kind: string; text: string; size: number }[] = [];
+let doneFor = 0, finalFor = 0;
 
+const display = (): DisplayOpts => ({ style: mapStyle(), contours: opts.contours, landuse: opts.landuse, labels: opts.labels, legend: opts.legend });
 const measureCtx = document.createElement('canvas').getContext('2d');
 const svgMeasure = (t: string, s: number, st: Parameters<typeof fontString>[0]): number => {
   if (!measureCtx) return t.length * s * 0.5;
@@ -173,37 +188,121 @@ const currentSvg = (): string => (currentWorld
   ? renderSvg(currentWorld, { style: mapStyle(), contours: opts.contours, landuse: opts.landuse, labels: opts.labels !== false, legend: !!opts.legend, measure: svgMeasure })
   : '');
 
-/** (Re)build the canvas renderer from the current world and the display options. */
+/** (Re)build the renderer from the current world and the display options. */
 function rerender(keepView = true): void {
+  if (backend) { backend.setDisplay(display()); return; }
   if (!currentWorld) return;
   const w: World = { ...currentWorld, options: { ...currentWorld.options, style: opts.style, contours: opts.contours, landuse: opts.landuse, labels: opts.labels, legend: opts.legend } };
   // a style switch only re-renders: the scene (flattened world) is reused unless the contour layer changes
   if (!sceneCache || sceneCache.world !== currentWorld || sceneCache.contours !== !!opts.contours) {
+    const t = pnow();
     sceneCache = { world: currentWorld, contours: !!opts.contours, scene: buildScene(w) };
+    rec('buildScene', pnow() - t);
   }
+  const t1 = pnow();
   currentRenderer = createCanvasRenderer(canvasEl, w, mapStyle(), { scene: sceneCache.scene });
+  rec('createRenderer', pnow() - t1);
   viewer.setRenderer(currentRenderer, w.mapSize, keepView);
 }
 
+/** Main-thread mode: the finished World arrived (structured clone) - draw it. */
 function show(world: World, stats: Record<string, number | string>, ms: number): void {
+  rec('genWorker', ms); rec('roundTrip', pnow() - genStart); rec('transfer', pnow() - genStart - ms);
+  const tShow = pnow();
   currentWorld = world;
   rerender(true);
+  rec('showSync', pnow() - tShow);
+  perf.extra.stats = stats;
+  requestAnimationFrame(() => requestAnimationFrame(() => { rec('startToFrame', pnow() - genStart); perf.extra.doneAt = pnow(); }));
 // CANVAS-VIEWER (end show)
   setBusy(false);
-  document.title = world.names ? `${world.names.town} - Burgmap` : 'Burgmap';
+  showStats(stats, ms);
+}
+
+function showStats(stats: Record<string, number | string>, ms: number): void {
+  const town = stats['names.town'];
+  document.title = town ? `${town} - Burgmap` : 'Burgmap';
   genTimeEl.textContent = `Generated in ${(ms / 1000).toFixed(2)} s`;
   const seaPct = Math.round(Number(stats.seaFraction ?? 0) * 100);
   statusEl.textContent = `terrain ${stats['ms.terrain']} ms, urban ${stats['ms.urban'] ?? 0} ms - ${stats.rivers} rivers, ${stats.lakes} lakes, sea ${seaPct}% - ${stats.roads ?? 0} roads, ${stats.bridges ?? 0} bridges - ${stats['urban.archetype'] ?? ''} pop ${stats['urban.pop'] ?? 0}: ${stats['urban.blocks'] ?? 0} blocks, ${stats['urban.buildings'] ?? 0} buildings`;
 }
 
+// Thin determinate bar at the top of the map: jumps to each pipeline stage and creeps inside the long ones.
+// The current map stays visible and interactive underneath; nothing is blanked or blocked.
+const loadEl = $('loadbar');
+const loadFill = loadEl.firstElementChild as HTMLElement;
+const STAGE_FRAC: Record<string, [number, number]> = {
+  starting: [0.01, 0.03], terrain: [0.03, 0.09], 'site & roads': [0.09, 0.2], town: [0.2, 0.84],
+  'fields & woods': [0.85, 0.94], names: [0.94, 0.97],
+};
+let loadPos = 0, loadCeil = 0, loadTick: number | undefined, loadHide: number | undefined;
+function setLoad(on: boolean, stage = ''): void {
+  window.clearTimeout(loadHide);
+  if (!on) {
+    window.clearInterval(loadTick); loadTick = undefined;
+    loadFill.style.width = '100%';
+    loadHide = window.setTimeout(() => { loadEl.classList.remove('on'); loadPos = 0; loadFill.style.transition = 'none'; loadFill.style.width = '0'; void loadFill.offsetWidth; loadFill.style.transition = ''; }, 350);
+    return;
+  }
+  const [lo, hi] = STAGE_FRAC[stage] ?? [0.01, 0.03];
+  if (stage === 'starting' || !loadEl.classList.contains('on')) loadPos = 0;
+  loadEl.classList.add('on');
+  loadPos = Math.max(loadPos, lo); loadCeil = hi;
+  loadFill.style.width = (loadPos * 100).toFixed(1) + '%';
+  loadTick ??= window.setInterval(() => {
+    loadPos += (loadCeil - loadPos) * 0.08;
+    loadFill.style.width = (loadPos * 100).toFixed(1) + '%';
+  }, 250);
+}
+
 function setBusy(on: boolean, stage = ''): void {
+  setLoad(on, stage);
   busyEl.classList.toggle('on', on);
   progressEl.classList.toggle('on', on);
   if (on) { busyEl.textContent = stage ? `generating: ${stage}...` : 'generating...'; genTimeEl.textContent = stage ? `Generating: ${stage}...` : 'Generating...'; }
 }
 
+// ---- offscreen mode events
+let firstContentGen = 0, firstFrameGen = 0, awaitVer = 0;
+const backendEvents: BackendEvents = {
+  onStage(id, stage) { if (id === reqId) setBusy(true, stage); },
+  onDone(d) {
+    if (d.id !== reqId) return;
+    meta = d.meta; doneFor = d.id;
+    rec('genWorker', d.ms); perf.extra.stats = d.stats;
+    showStats(d.stats, d.ms);
+    if (finalFor === d.id) setBusy(false);
+  },
+  onError(id, error) {
+    if (id !== reqId) return;
+    setBusy(false); genTimeEl.textContent = 'Generation failed'; statusEl.textContent = 'Error: ' + error.split('\n')[0]; console.error(error);
+  },
+  onContent(c) {
+    // new snapshot (terrain, then roads, then the town...) or a style change: redraw, keeping the view unless the map size changed
+    viewer.contentChanged(c.mapSize, true, c.marker);
+    map.style.background = c.paper;
+    awaitVer = c.ver;
+    if (c.gen !== reqId) return;
+    if (firstContentGen !== c.gen) { firstContentGen = c.gen; rec('firstContent', pnow() - genStart); }
+    rec(c.final ? 'sceneFinal' : 'scenePartial', c.sceneMs);
+    if (c.final) { finalFor = c.gen; if (doneFor === c.gen) setBusy(false); }
+  },
+  onFrame(f) {
+    lastLabels = f.labels; if (f.bitmap) perf.extra.lastFrameView = f.view;
+    viewer.present(f);
+    if (awaitVer && f.ver >= awaitVer && f.bitmap) {
+      awaitVer = 0;
+      if (firstFrameGen !== reqId) { firstFrameGen = reqId; rec('firstFrame', pnow() - genStart); }
+      if (finalFor === reqId && doneFor === reqId) { rec('startToFrame', pnow() - genStart); perf.extra.doneAt = pnow(); }
+    }
+  },
+  onFatal(msg) {
+    setBusy(false); genTimeEl.textContent = 'Renderer stopped'; statusEl.textContent = 'A worker failed (' + msg + '): reload the page, or add ?render=main to the address.';
+  },
+};
+
 function spawnWorker(): void {
-  try { worker = new GenWorker(); } catch { worker = null; return; }
+  try { worker = new GenWorker(); } catch { worker = null; legacyWorkerRefused = true; return; }
   worker.onmessage = (e: MessageEvent<WorkerResponse>) => {
     const r = e.data;
     if (r.id !== reqId) return;
@@ -213,19 +312,21 @@ function spawnWorker(): void {
     show(r.world!, r.stats!, r.ms!);
   };
   // e.g. blob workers are refused on file:// - fall back to generating on the main thread
-  worker.onerror = () => { console.info('Generation worker unavailable (file:// ?), generating on the main thread'); worker = null; workerBusy = false; run(); };
+  worker.onerror = () => { console.info('Generation worker unavailable (file:// ?), generating on the main thread'); worker = null; legacyWorkerRefused = true; workerBusy = false; run(); };
 }
-spawnWorker();
 
 function genKey(): string {
   return toQuery({ ...opts, style: DEFAULTS.style, contours: DEFAULTS.contours, landuse: DEFAULTS.landuse, labels: true, legend: false }) + '|' + heightId;
 }
 
 function run(): void {
+  if (!backendSettled) return; // the first run starts when the backend probe has answered
   const id = ++reqId;
   lastGenKey = genKey();
   genStart = performance.now();
   setBusy(true, 'starting');
+  if (backend) { backend.run(id, opts); return; }
+  if (!worker && !legacyWorkerRefused) spawnWorker();
   if (worker) {
     // a newer request supersedes a running one: restart the worker instead of queueing behind it
     if (workerBusy) { worker.terminate(); worker = null; spawnWorker(); }
@@ -320,7 +421,7 @@ const canvasEl = $<HTMLCanvasElement>('view');
 const hudEl = $('hud');
 const viewer = createViewer({
   container: map, canvas: canvasEl, minimap: $<HTMLCanvasElement>('minimap'),
-  onFrame: (ms, band, scale) => { hudEl.textContent = `${['far', 'mid', 'near'][band]} - ${scale.toFixed(3)} px/m - ${ms.toFixed(1)} ms`; },
+  onFrame: (ms, band, scale) => { perf.frames.push(ms); if (perf.frames.length > 5000) perf.frames.shift(); hudEl.textContent = `${['far', 'mid', 'near'][band]} - ${scale.toFixed(3)} px/m - ${ms.toFixed(1)} ms`; },
 });
 $('fit').addEventListener('click', () => viewer.fit());
 $('menuBtn').addEventListener('click', () => $('app').classList.toggle('open'));
@@ -330,14 +431,16 @@ map.addEventListener('pointerdown', () => $('app').classList.remove('open'));
   setView: (v: { cx: number; cy: number; scale: number }) => viewer.setView(v),
   getView: () => viewer.getView(),
   fit: () => viewer.fit(),
+  /** The World (main-thread mode only: in offscreen mode it lives in the workers; open the page with ?render=main to inspect it). */
   world: () => currentWorld,
   options: () => opts,
+  mode: () => (backend ? 'offscreen' : 'main'),
   /** Labels placed in the last frame (kind, text, size). */
-  labels: () => (currentRenderer?.lastPlaced() ?? []).map((p) => ({ kind: p.label.kind, text: p.label.text, size: p.size })),
+  labels: () => (backend ? lastLabels : (currentRenderer?.lastPlaced() ?? []).map((p) => ({ kind: p.label.kind, text: p.label.text, size: p.size }))),
   /** Center of the settlement (site center / urban footprint centroid). */
-  center: () => currentWorld?.site?.center ?? { x: (currentWorld?.mapSize ?? 0) / 2, y: (currentWorld?.mapSize ?? 0) / 2 },
+  center: () => meta?.center ?? currentWorld?.site?.center ?? { x: (currentWorld?.mapSize ?? meta?.mapSize ?? 0) / 2, y: (currentWorld?.mapSize ?? meta?.mapSize ?? 0) / 2 },
   /** Anchor of a named feature (for scripted zooms). */
-  find: (kind: string, n = 0) => currentWorld?.names?.entries.filter((e) => e.kind === kind)[n]?.anchor ?? null,
+  find: (kind: string, n = 0) => meta?.anchors[kind]?.[n] ?? currentWorld?.names?.entries.filter((e) => e.kind === kind)[n]?.anchor ?? null,
 };
 // CANVAS-VIEWER (end viewer)
 
@@ -352,37 +455,85 @@ async function exportFile(name: string, data: Blob | string, mime: string): Prom
     statusEl.textContent = 'Export failed: ' + (e as Error).message;
   }
 }
-$('exportSvg').addEventListener('click', () => {
-  if (currentWorld) void exportFile(fname() + '.svg', new Blob([currentSvg()], { type: 'image/svg+xml' }), 'image/svg+xml');
+/** SVG / JSON of the current world as a Blob: built in the generation worker (offscreen mode) so the page never blocks, or here. */
+async function buildExport(kind: 'svg' | 'json'): Promise<Blob> {
+  const t = pnow();
+  let blob: Blob;
+  if (backend) blob = await backend.export(kind, display());
+  else {
+    if (!currentWorld) throw new Error('nothing to export yet');
+    await new Promise((r) => setTimeout(r, 30)); // let the progress message paint before the synchronous build
+    blob = kind === 'svg'
+      ? new Blob([currentSvg()], { type: 'image/svg+xml' })
+      : new Blob([worldToJson(currentWorld)], { type: 'application/json' });
+  }
+  rec(kind === 'svg' ? 'exportSvg' : 'exportJson', pnow() - t);
+  perf.extra.svgBytes = blob.size;
+  return blob;
+}
+/** Run an export job with visible progress (button label, progress bar, status line) and report failures. */
+async function withProgress(btn: HTMLButtonElement, label: string, job: () => Promise<void>): Promise<void> {
+  const text = btn.textContent;
+  btn.disabled = true; btn.textContent = label;
+  progressEl.classList.add('on'); statusEl.textContent = label.replace(/\.\.\.$/, '') + ' in the background...';
+  try { await job(); } catch (e) { statusEl.textContent = 'Export failed: ' + (e as Error).message; } finally {
+    btn.disabled = false; btn.textContent = text;
+    if (!busyEl.classList.contains('on')) progressEl.classList.remove('on');
+  }
+}
+const exportSvgBtn = $<HTMLButtonElement>('exportSvg');
+const exportPngBtn = $<HTMLButtonElement>('exportPng');
+const exportJsonBtn = $<HTMLButtonElement>('exportJson');
+exportSvgBtn.addEventListener('click', () => {
+  void withProgress(exportSvgBtn, 'Building SVG...', async () => {
+    await exportFile(fname() + '.svg', await buildExport('svg'), 'image/svg+xml');
+  });
 });
-$('exportJson').addEventListener('click', () => {
-  if (currentWorld) void exportFile(fname() + '.json', new Blob([worldToJson(currentWorld)], { type: 'application/json' }), 'application/json');
+exportJsonBtn.addEventListener('click', () => {
+  void withProgress(exportJsonBtn, 'Building JSON...', async () => {
+    await exportFile(fname() + '.json', await buildExport('json'), 'application/json');
+  });
 });
-$('exportPng').addEventListener('click', () => {
-  if (!currentWorld) return;
-  const svg = currentSvg();
-  const load = (src: string, revoke?: () => void): void => {
-    const img = new Image();
-    img.onload = () => {
-      const S = 3000;
-      const c = document.createElement('canvas');
-      c.width = S; c.height = S;
-      c.getContext('2d')!.drawImage(img, 0, 0, S, S);
-      revoke?.();
-      c.toBlob((b) => { if (b) void exportFile(fname() + '.png', b, 'image/png'); else statusEl.textContent = 'PNG export failed'; }, 'image/png');
-    };
-    img.onerror = () => {
-      revoke?.();
-      // some hosts refuse blob: images: retry once with a data: URL
-      if (src.startsWith('blob:')) load('data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg));
-      else statusEl.textContent = 'PNG export failed';
-    };
-    img.src = src;
-  };
-  const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
-  load(url, () => URL.revokeObjectURL(url));
+exportPngBtn.addEventListener('click', () => {
+  void withProgress(exportPngBtn, 'Rendering PNG...', async () => {
+    const tP = pnow();
+    const svgBlob = await buildExport('svg');
+    rec('pngSvg', pnow() - tP);
+    // rasterize through an <img> (the browser decodes the SVG off the UI path as far as it can)
+    const png = await new Promise<Blob | null>((resolve) => {
+      const load = (src: string, revoke?: () => void): void => {
+        const img = new Image();
+        img.onload = () => {
+          const S = 3000;
+          const c = document.createElement('canvas');
+          c.width = S; c.height = S;
+          c.getContext('2d')!.drawImage(img, 0, 0, S, S);
+          revoke?.();
+          c.toBlob((b) => resolve(b), 'image/png');
+        };
+        img.onerror = () => {
+          revoke?.();
+          // some hosts refuse blob: images: retry once with a data: URL
+          if (src.startsWith('blob:')) void svgBlob.text().then((svg) => load('data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg)));
+          else resolve(null);
+        };
+        img.src = src;
+      };
+      const url = URL.createObjectURL(svgBlob);
+      load(url, () => URL.revokeObjectURL(url));
+    });
+    rec('exportPng', pnow() - tP);
+    if (png) await exportFile(fname() + '.png', png, 'image/png'); else statusEl.textContent = 'PNG export failed';
+  });
 });
 
 history.replaceState(null, '', '?' + toQuery(opts));
 updateHeightmapUI();
-run();
+// Probe the offscreen pipeline first (a few ms), then start the first run on whichever path works.
+const backendReady: Promise<OffscreenBackend | null> = forceMain ? Promise.resolve(null) : OffscreenBackend.create(backendEvents, window.devicePixelRatio || 1);
+void backendReady.then((b) => {
+  backend = b;
+  if (b) { viewer.setSource({ request: (r) => b.request(r) }); b.setDisplay(display()); }
+  backendSettled = true;
+  run();
+});
