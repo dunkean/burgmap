@@ -63,21 +63,78 @@ export function offsetLeft(pl: Polyline, d: number): Polyline {
   return out;
 }
 
-/** Straight-segment quay line: RDP with growing tolerance until every segment is ≥ minSeg (or tol hits maxTol). */
-export function straighten(run: Polyline, minSeg: number, tol0 = 3, maxTol = 7): { q: Polyline; tol: number } {
-  let tol = tol0, q = simplify(run, tol);
+/** Ramer–Douglas–Peucker returning the kept indices. */
+function rdpIdx(pl: Polyline, tol: number): number[] {
+  const keep = new Uint8Array(pl.length);
+  keep[0] = keep[pl.length - 1] = 1;
+  const stack: [number, number][] = [[0, pl.length - 1]];
+  while (stack.length) {
+    const [a, b] = stack.pop()!;
+    let md = 0, mi = -1;
+    for (let i = a + 1; i < b; i++) {
+      const p = pl[i], A = pl[a], B = pl[b];
+      const dx = B.x - A.x, dy = B.y - A.y, l2 = dx * dx + dy * dy;
+      const t = l2 ? Math.max(0, Math.min(1, ((p.x - A.x) * dx + (p.y - A.y) * dy) / l2)) : 0;
+      const d = Math.hypot(p.x - A.x - t * dx, p.y - A.y - t * dy);
+      if (d > md) { md = d; mi = i; }
+    }
+    if (mi >= 0 && md > tol) { keep[mi] = 1; stack.push([a, mi], [mi, b]); }
+  }
+  const out: number[] = [];
+  keep.forEach((k, i) => { if (k) out.push(i); });
+  return out;
+}
+
+/**
+ * Straight-segment quay line: RDP with growing tolerance until every segment is ≥ minSeg (or tol hits maxTol).
+ * Returns the vertices, the tolerance and, per segment, the index range of the shore points it stands for.
+ */
+export function straighten(run: Polyline, minSeg: number, tol0 = 2.5, maxTol = 5): { q: Polyline; tol: number; spans: [number, number][] } {
+  let tol = tol0, idx = rdpIdx(run, tol);
   while (tol < maxTol) {
     let ok = true;
-    for (let i = 1; i < q.length; i++) if (dist(q[i - 1], q[i]) < minSeg) { ok = false; break; }
+    for (let i = 1; i < idx.length; i++) if (dist(run[idx[i - 1]], run[idx[i]]) < minSeg) { ok = false; break; }
     if (ok) break;
-    tol += 1;
-    q = simplify(run, tol);
+    tol += 0.75;
+    idx = rdpIdx(run, tol);
   }
   // drop remaining short interior segments by merging their vertices
-  const out = [q[0]];
-  for (let i = 1; i < q.length - 1; i++) if (dist(out[out.length - 1], q[i]) >= minSeg * 0.6) out.push(q[i]);
-  out.push(q[q.length - 1]);
-  return { q: out, tol };
+  const keep = [idx[0]];
+  for (let i = 1; i < idx.length - 1; i++) if (dist(run[keep[keep.length - 1]], run[idx[i]]) >= minSeg * 0.6) keep.push(idx[i]);
+  keep.push(idx[idx.length - 1]);
+  return { q: keep.map((i) => run[i]), tol, spans: keep.slice(1).map((b, i) => [keep[i], b]) };
+}
+
+/**
+ * The stone edge: each straight segment shifted toward the water just enough for every shore point it stands for
+ * to lie on its land side (+ 0.3 m), consecutive segment lines intersected (mitred joints).
+ */
+export function stoneEdge(run: Polyline, st: { q: Polyline; spans: [number, number][] }, side: number): Polyline {
+  const Q = st.q;
+  const lines = st.spans.map(([i0, i1], k) => {
+    const a = Q[k], b = Q[k + 1], l = dist(a, b) || 1;
+    const u = { x: (b.x - a.x) / l, y: (b.y - a.y) / l };
+    const nw = { x: -u.y * side, y: u.x * side }; // toward the water
+    let s = 0;
+    for (let j = i0; j <= i1; j++) s = Math.max(s, (run[j].x - a.x) * nw.x + (run[j].y - a.y) * nw.y);
+    const d = s + 0.3;
+    return { p: { x: a.x + nw.x * d, y: a.y + nw.y * d }, u };
+  });
+  const out: Vec2[] = [];
+  const hit = (A: { p: Vec2; u: Vec2 }, B: { p: Vec2; u: Vec2 }): Vec2 | null => {
+    const den = A.u.x * B.u.y - A.u.y * B.u.x;
+    if (Math.abs(den) < 1e-6) return null;
+    const t = ((B.p.x - A.p.x) * B.u.y - (B.p.y - A.p.y) * B.u.x) / den;
+    return { x: A.p.x + A.u.x * t, y: A.p.y + A.u.y * t };
+  };
+  const proj = (L: { p: Vec2; u: Vec2 }, q: Vec2): Vec2 => { const t = (q.x - L.p.x) * L.u.x + (q.y - L.p.y) * L.u.y; return { x: L.p.x + L.u.x * t, y: L.p.y + L.u.y * t }; };
+  out.push(proj(lines[0], Q[0]));
+  for (let k = 1; k < lines.length; k++) {
+    const h = hit(lines[k - 1], lines[k]);
+    out.push(h && dist(h, Q[k]) < 25 ? h : proj(lines[k], Q[k]));
+  }
+  out.push(proj(lines[lines.length - 1], Q[Q.length - 1]));
+  return out;
 }
 
 const ringPoly = (a: Polyline, b: Polyline): Polygon => {
@@ -156,7 +213,9 @@ export function reservePort(s: M4State, api: ReserveApi, pin: PortIn): ReservedL
     out.push(plAt(run0, b).p);
     return out;
   };
-  const { q: Q, tol } = straighten(slice(s0, s1), 22);
+  const runW = slice(s0, s1);
+  const stq = straighten(runW, 22);
+  const { q: Q, tol } = stq;
   if (Q.length < 2) return [];
   // water side: majority of the segment probes
   let left = 0;
@@ -166,7 +225,7 @@ export function reservePort(s: M4State, api: ReserveApi, pin: PortIn): ReservedL
     if (ctx.isWater({ x: m2.x - ((b.y - a.y) / l) * (tol + 4), y: m2.y + ((b.x - a.x) / l) * (tol + 4) })) left++; else left--;
   }
   const side = left >= 0 ? 1 : -1; // +1: water on the left of the traversal
-  const Qs = offsetLeft(Q, side * (tol + 0.5)); // the stone edge, on the water side of every shore point
+  const Qs = stoneEdge(runW, stq, side); // the stone edge, on the water side of every shore point
   const K = offsetLeft(Qs, -side * W); // quay street centre line
   const K2 = offsetLeft(Qs, -side * (W + Dh));
   let apron = ringPoly(Qs, K);
@@ -298,12 +357,14 @@ export function reservePort(s: M4State, api: ReserveApi, pin: PortIn): ReservedL
     const endA = dist(Qs[0], pin.nucleus) > dist(Qs[Qs.length - 1], pin.nucleus) ? 0 : 1;
     const sa = endA === 0 ? s0 - 100 : s1 + 8, sb = endA === 0 ? s0 - 8 : s1 + 100;
     if (sa >= 0 && sb <= Ltot) {
-      const seg = straighten(slice(sa, sb), 80, 3, 8);
+      const runY = slice(sa, sb);
+      const seg = straighten(runY, 80, 3, 8);
       if (seg.q.length === 2) {
-        const Ys = offsetLeft(seg.q, side * (seg.tol + 0.5));
+        const Ys = stoneEdge(runY, seg, side);
         const Yb = offsetLeft(Ys, -side * r.range(42, 55));
         let yard = ringPoly(Ys, Yb);
-        const ys = yard.length >= 3 ? clipOut(yard, [{ outer: apron, holes: [] }, ...strips.map((x) => ({ outer: x, holes: [] as Polygon[] }))]) : [];
+        // the yard stands on dry land; its slipways run from the shore into the water
+        const ys = yard.length >= 3 ? clipOut(yard, [{ outer: apron, holes: [] }, ...strips.map((x) => ({ outer: x, holes: [] as Polygon[] })), ...ctx.water]) : [];
         yard = ys.length ? ys.reduce((x, y) => (area(y) > area(x) ? y : x)) : [];
         if (yard.length >= 3 && area(yard) > 1500 && mpArea(intersectionS(yard, ctx.water)) < 0.12 * area(yard)) {
           const u = { x: (Ys[1].x - Ys[0].x) / dist(Ys[0], Ys[1]), y: (Ys[1].y - Ys[0].y) / dist(Ys[0], Ys[1]) };
@@ -320,11 +381,14 @@ export function reservePort(s: M4State, api: ReserveApi, pin: PortIn): ReservedL
             const LY = dist(Ys[0], Ys[1]);
             const nS = Math.max(1, Math.min(4, Math.floor((LY - 20) / 16)));
             for (let k = 0; k < nS; k++) {
-              const p = { x: Ys[0].x + u.x * (14 + k * 16), y: Ys[0].y + u.y * (14 + k * 16) };
-              const Ls = Math.min(r.range(26, 40), 999);
+              const q0 = { x: Ys[0].x + u.x * (14 + k * 16), y: Ys[0].y + u.y * (14 + k * 16) };
+              // the slip starts a little inland (the yard, reserved first, cuts it at the shore)
+              const back = seg.tol + 3;
+              const p = { x: q0.x - wdir.x * back, y: q0.y - wdir.y * back };
+              const Ls = r.range(26, 40) + back;
               const poly = rectAt(p, angY, 0, Ls, -4.5, 4.5);
               let wet = true;
-              for (let d2 = 2; d2 <= Ls && wet; d2 += 3) if (!ctx.isWater({ x: p.x + wdir.x * d2, y: p.y + wdir.y * d2 })) wet = false;
+              for (let d2 = back + 2; d2 <= Ls && wet; d2 += 3) if (!ctx.isWater({ x: p.x + wdir.x * d2, y: p.y + wdir.y * d2 })) wet = false;
               if (!wet || piers.some((pp) => distToRing(pp, p) < 12)) continue;
               const id = `slipway:${k}`;
               s.lotData.set(id, { kind: 'slipway', base: [p, p], out: wdir } as PierData);

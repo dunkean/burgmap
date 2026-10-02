@@ -44,11 +44,12 @@ function ringRects(c: Vec2, ang: number, u0: number, u1: number, v0: number, v1:
 
 /** Cruciform cathedral of length Lc starting at u0 (west front) on the axis v = vc. */
 function cathedralParts(c: Vec2, ang: number, u0: number, vc: number, Lc: number): Polygon[] {
-  const W = 0.26 * Lc, R = (u: number, uu: number, a: number, b: number) => rectAt(c, ang, u0 + u * Lc, u0 + uu * Lc, vc + a, vc + b);
+  // (the parts overlap by 10 cm so that their union is one polygon whatever the rounding)
+  const W = 0.26 * Lc, R = (u: number, uu: number, a: number, b: number) => rectAt(c, ang, u0 + u * Lc - (u > 0 ? 0.1 : 0), u0 + uu * Lc + (uu < 0.87 ? 0.1 : 0), vc + a, vc + b);
   const tw = 0.03 * Lc;
   const apse: Polygon = orientPos(Array.from({ length: 11 }, (_, k) => {
     const a = -Math.PI / 2 + (k / 10) * Math.PI;
-    return frameAt(c, ang, u0 + 0.87 * Lc + Math.cos(a) * W * 0.5, vc + Math.sin(a) * W * 0.5);
+    return frameAt(c, ang, u0 + 0.87 * Lc - 0.1 + Math.cos(a) * (W * 0.5 + 0.1), vc + Math.sin(a) * W * 0.5);
   }));
   return [
     R(0, 0.12, -W / 2 - tw, W / 2 + tw), // west front with its two towers
@@ -246,9 +247,9 @@ export function buildMonastery(Bk: Polygon, cx: CompoundCtx): Out & { trees?: Ur
   for (let it = 0; it < 8; it++, Lch *= 0.9) {
     const W = 0.3 * Lch;
     const u0 = cu0 + 6, vc = cv0 + 5 + W / 2;
-    const nave = rectAt(c0, ang, u0, u0 + 0.72 * Lch, vc - W / 2, vc + W / 2);
-    const choir = rectAt(c0, ang, u0 + 0.72 * Lch, u0 + 0.92 * Lch, vc - W * 0.36, vc + W * 0.36);
-    const apse = orientPos(Array.from({ length: 9 }, (_, k) => { const a = -Math.PI / 2 + (k / 8) * Math.PI; return frameAt(c0, ang, u0 + 0.92 * Lch + Math.cos(a) * W * 0.36, vc + Math.sin(a) * W * 0.36); }));
+    const nave = rectAt(c0, ang, u0, u0 + 0.72 * Lch + 0.1, vc - W / 2, vc + W / 2);
+    const choir = rectAt(c0, ang, u0 + 0.72 * Lch - 0.1, u0 + 0.92 * Lch + 0.1, vc - W * 0.36, vc + W * 0.36);
+    const apse = orientPos(Array.from({ length: 9 }, (_, k) => { const a = -Math.PI / 2 + (k / 8) * Math.PI; return frameAt(c0, ang, u0 + 0.92 * Lch - 0.1 + Math.cos(a) * (W * 0.36 + 0.1), vc + Math.sin(a) * W * 0.36); }));
     const tr = rectAt(c0, ang, u0 + 0.6 * Lch, u0 + 0.72 * Lch, vc - W * 0.85, vc + W * 0.85);
     const parts = [nave, choir, apse, tr];
     if (!parts.every((p) => fits(core, p, 1))) continue;

@@ -33,7 +33,7 @@ export interface CatalogueIn {
 /** Cathedral close: in the oldest phase, by the market (west front on the parvis) or on the highest ground. */
 export function reserveCathedral(s: M4State, api: ReserveApi, ci: CatalogueIn): ReservedLot | null {
   const r = s.rng.fork('cathedral');
-  const Lc = Math.max(82, Math.min(140, 70 + s.pop * 0.0011)) * r.range(0.95, 1.05);
+  const Lc = Math.max(90, Math.min(140, 72 + s.pop * 0.0012)) * r.range(0.97, 1.05);
   const uL = 1.45 * Lc, vW = 1.0 * Lc;
   const encR = Math.sqrt(mpArea(api.enclosure) / Math.PI);
   const market = api.market;
@@ -45,7 +45,7 @@ export function reserveCathedral(s: M4State, api: ReserveApi, ci: CatalogueIn): 
     shape: (c, ang, k) => rectAt(c, ang, (-uL / 2) * k, (uL / 2) * k, (-vW / 2) * k, (vW / 2) * k),
     centers: gridAround(s.ctx, mc, Math.max(180, 0.55 * encR), 24),
     angles: [0, -0.2, 0.2, -0.35, 0.35],
-    scales: [1, 0.9, 0.8], refine: 10,
+    scales: [1, 0.93], refine: 10,
     within: encMask(s, api, ci), margin: 8, ignore, avoid: ci.avoid, gap: 30,
     score: (poly, c, ang) => {
       let sc = 0;

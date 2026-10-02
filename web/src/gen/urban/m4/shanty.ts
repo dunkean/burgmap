@@ -21,10 +21,10 @@ import type { ReserveApi, ReservedLot } from '../primary';
 import type { CompoundCtx } from '../compounds';
 import { isoRegions, dilate } from '../phases';
 import { MultiPoly, differenceS, intersectionS, mpArea } from '../../geo/bool';
-import { area, orientPos, pointInRing, distToRing, bboxOf, cleanRing } from '../../geo/poly';
+import { area, orientPos, pointInRing, distToRing, bboxOf, cleanRing, inscribed } from '../../geo/poly';
 import { ribbon } from '../../geo/offset';
 import { insetConvex } from '../../geo/offset';
-import { isConvex, segCrossesRing } from '../../geo/split';
+import { isConvex, segCrossesRing, polyInside } from '../../geo/split';
 import { shapeOf } from '../buildings';
 import { LineIndex } from './lots';
 import { Mask } from './site';
@@ -172,7 +172,7 @@ const key = (p: Vec2) => `${Math.round(p.x * 20)},${Math.round(p.y * 20)}`;
 export function buildShanty(B: Polygon, cx: CompoundCtx): Out {
   const out = emptyOut();
   const rng = cx.rng;
-  const cs = cells(B, rng.range(6.6, 7.4), rng);
+  const cs = cells(B, rng.range(7.3, 7.9), rng);
   // ---- edge graph: cell edges keyed by their end points; boundary edges belong to one cell only
   const edges = new Map<string, { a: Vec2; b: Vec2; cells: number[] }>();
   const ek = (a: Vec2, b: Vec2) => { const ka = key(a), kb = key(b); return ka < kb ? ka + '|' + kb : kb + '|' + ka; };
@@ -235,34 +235,61 @@ export function buildShanty(B: Polygon, cx: CompoundCtx): Out {
       }
     }
   }
-  // ---- huts: the cell inset by half a path on path edges, a hand's breadth elsewhere
+  // ---- huts: the cell inset by half a path on path edges, a hand's breadth elsewhere; a second, tighter pass
+  // when the packing came out under 52 %
   const pathHalf = rng.range(0.55, 0.85);
-  let built = 0;
-  cs.forEach((c, ci) => {
-    out.parcels.push({ poly: c, use: 'hut-lot' });
-    const d = c.map((q, k) => {
-      const b = c[(k + 1) % c.length];
-      const e = edges.get(ek(q, b));
-      if (!e) return 0.2;
-      if (e.cells.length === 1) return onBoundary(e) ? 0.8 : 0.2;
-      return inTree.has(ek(q, b)) ? pathHalf : 0.18;
+  for (const c of cs) out.parcels.push({ poly: c, use: 'hut-lot' });
+  const BA = Math.max(1, area(B));
+  const hutsFor = (k: number, cap: [number, number], hr: Rng) => {
+    const list: { poly: Polygon; parcel: number }[] = [];
+    let built = 0;
+    cs.forEach((c, ci) => {
+      if (c.length < 3) return;
+      const d = c.map((q, j) => {
+        const b = c[(j + 1) % c.length];
+        const e = edges.get(ek(q, b));
+        if (!e) return 0.2 * k;
+        if (e.cells.length === 1) return (onBoundary(e) ? 0.5 : 0.15) * k;
+        return inTree.has(ek(q, b)) ? Math.max(0.5, pathHalf * Math.sqrt(k)) : 0.15 * k;
+      });
+      const convex = isConvex(c, 1e-3);
+      let h: Polygon = [];
+      if (convex) h = insetConvex(c, d);
+      else {
+        // clipped boundary cells: a uniform inset by boolean, the largest piece
+        const rb = ribbon(c.concat([c[0]]), 2 * 0.45 * k);
+        const r = rb.length >= 3 ? differenceS(c, rb) : [];
+        h = r.filter((ph) => !ph.holes.length).map((ph) => ph.outer).sort((x, y) => area(y) - area(x))[0] ?? [];
+      }
+      if (h.length < 3) return;
+      let A = area(h);
+      if (A > 40) {
+        // keep huts to 15–40 m²: scale about a point inside (the centroid of a convex inset, else its inscribed centre)
+        const g = convex ? polygonCentroid(h) : inscribed(h, [], 0.3).c, f = Math.sqrt(hr.range(cap[0], cap[1]) / A);
+        const q = h.map((p) => ({ x: g.x + (p.x - g.x) * f, y: g.y + (p.y - g.y) * f }));
+        if (convex || polyInside(h, q)) { h = q; A = area(h); } else return;
+      }
+      if (A < 15) return;
+      const sh = shapeOf(h);
+      if (sh.w < 4.5 || sh.asp > 3) return;
+      list.push({ poly: h, parcel: ci });
+      built += A;
     });
-    if (!isConvex(c, 1e-3) || c.length < 3) return;
-    let h = insetConvex(c, d);
-    if (h.length < 3) return;
-    let A = area(h);
-    if (A > 40) {
-      // keep huts to 15–40 m²: scale about the centroid (stays inside the convex inset)
-      const g = polygonCentroid(h), k = Math.sqrt(rng.range(30, 40) / A);
-      h = h.map((q) => ({ x: g.x + (q.x - g.x) * k, y: g.y + (q.y - g.y) * k }));
-      A = area(h);
+    return { list, cov: built / BA };
+  };
+  let huts = hutsFor(1, [30, 40], rng.fork('huts'));
+  if (huts.cov < 0.52) { const h2 = hutsFor(0.55, [36, 40], rng.fork('huts2')); if (h2.cov > huts.cov) huts = h2; }
+  // too dense: huts are shrunk about their centroid
+  const kk = huts.cov > 0.66 ? Math.sqrt(0.62 / huts.cov) : 1;
+  for (const h of huts.list) {
+    let poly = h.poly;
+    if (kk < 1) {
+      const g = polygonCentroid(poly);
+      const q = poly.map((p) => ({ x: g.x + (p.x - g.x) * kk, y: g.y + (p.y - g.y) * kk }));
+      if (area(q) >= 15 && shapeOf(q).w >= 4.5 && polyInside(poly, q)) poly = q;
     }
-    if (A < 15) return;
-    const sh = shapeOf(h);
-    if (sh.w < 4.5 || sh.asp > 3) return;
-    out.buildings.push({ poly: h, kind: 'hut', parcel: out.parcels.length - 1, arch: 'shack', roof: 'flat', material: 'timber', storeys: 1 });
-    built += A;
-  });
+    out.buildings.push({ poly, kind: 'hut', parcel: h.parcel, arch: 'shack', roof: 'flat', material: 'timber', storeys: 1 });
+  }
   for (const id of inTree) { const e = edges.get(id)!; out.lines.push({ kind: 'footpath', path: [e.a, e.b], width: 2 * pathHalf }); }
   // a few water points at path junctions
   let wells = 0;
@@ -271,6 +298,6 @@ export function buildShanty(B: Polygon, cx: CompoundCtx): Out {
     out.landmarks.push({ kind: 'well', poly: orientPos([{ x: x - 0.8, y: y - 0.8 }, { x: x + 0.8, y: y - 0.8 }, { x: x + 0.8, y: y + 0.8 }, { x: x - 0.8, y: y + 0.8 }]) });
     wells++;
   }
-  void built; void mpArea;
+  void mpArea;
   return out;
 }

@@ -489,7 +489,9 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     else landmarks.push({ kind: nucleusKind === 'forum' ? 'forum' : archetype === 'town' ? 'market' : 'green', poly: prim.market });
   }
   // landmark lots claimed at level 2 (see above) are filled here
-  carved.forEach((b, bi) => { if (b.compound && !compoundOf[bi]) claim(bi, b.compound, b.compound === 'great-mosque' ? QIBLA : blockMorph[bi].orientation === 'cardinal' ? 0 : blockMorph[bi].orientation === 'terrain' ? terrainAngle : mainAngle); });
+  // with a cathedral close the market church is a parish church (one cathedral per town)
+  const hasClose = sites.some((x) => x.kind === 'cathedral-close');
+  carved.forEach((b, bi) => { if (b.compound && !compoundOf[bi]) claim(bi, hasClose && b.compound === 'church' ? 'parish-church' : b.compound, b.compound === 'great-mosque' ? QIBLA : blockMorph[bi].orientation === 'cardinal' ? 0 : blockMorph[bi].orientation === 'terrain' ? terrainAngle : mainAngle); });
 
   // ---- level 3: plots (by the block's plot operator)
   const encRingsF = eplan.enclosure.map((ph) => ph.outer);
