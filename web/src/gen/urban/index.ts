@@ -39,6 +39,8 @@ import { reserveCathedral, reservePalace, reserveMonasteries } from './m4/catalo
 import { LineIndex } from './m4/lots';
 import { marketHall } from './m4/market';
 import { reservePort, portPieceBuildings } from './m4/port';
+import { pickInns, innBuildings } from './m4/inns';
+import { reserveMills, reserveWindmills, reserveTanneries, reserveRoadside, reserveArena } from './m4/activities';
 import type { ReservedLot } from './primary';
 import { unionS } from '../geo/bool';
 
@@ -131,6 +133,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   const lotData = new Map<string, unknown>();
   const lotKind = new Map<string, string>();
   const quays: Polyline[] = [];
+  const siteLines: UrbanLine[] = [];
   let castle: CastlePlan | null = null;
   // the castle is sited on the enclosure before the faubourgs and the streets; it may extend the enclosure
   const siteCastleOn = (ep: EnclosurePlan): void => {
@@ -259,6 +262,19 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
       if (flags.cathedral) tm('cathedral', () => push(reserveCathedral(st, api, ci)));
       if (flags.palace) tm('palace', () => push(reservePalace(st, api, ci)));
       if (flags.monasteries && flags.monastery) tm('monastery', () => { for (const l of reserveMonasteries(st, api, ci, flags.monasteries, flags.monastery!)) push(l); });
+      const ai = { avoid: ci.avoid, nucleus: ci.nucleus, roads: nonTrack, bridges: world.bridges ?? [], lines: siteLines };
+      if (flags.arena) tm('arena', () => push(reserveArena(st, api, ai)));
+      if (flags.activities && archetype === 'town') {
+        tm('activities', () => {
+          for (const l of reserveTanneries(st, api, ai)) push(l);
+          for (const l of reserveMills(st, api, ai, pop < 6000 ? 1 : pop < 25000 ? 2 : 3)) push(l);
+          for (const l of reserveWindmills(st, api, ai, pop < 6000 ? 1 : pop < 25000 ? 3 : 4)) push(l);
+          const rs: Parameters<typeof reserveRoadside>[3] = [{ kind: 'gallows', size: [16, 16], dmin: 140, dmax: 520 }];
+          if (pop >= 4000) rs.push({ kind: 'lazar-house', size: [52, 38], dmin: 300, dmax: 900 });
+          if (pop >= 9000) rs.push({ kind: 'cemetery', size: [80, 55], dmin: 40, dmax: 260 });
+          for (const l of reserveRoadside(st, api, ai, rs)) push(l);
+        });
+      }
       return out;
     },
   }, streets, rng.fork('primary'));
@@ -341,6 +357,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
       if (pop < lm.minPop) continue;
       // the kasbah is the culture's castle: sited at level 1 by the castle rule (or switched off)
       if (lm.kind === 'kasbah' && (castle || opts.castle === 'no')) continue;
+      if (lm.kind === 'hospital' && (!flags.activities || archetype !== 'town')) continue;
       const count = Math.max(lm.count ?? 1, lm.perPop ? Math.floor((pop - (lm.minPop - lm.perPop)) / lm.perPop) : 0);
       // separation from the other worship landmarks too (the main church counts for the parishes)
       const kin = lm.kind === 'parish-church' ? ['church', 'parish-church'] : [lm.kind];
@@ -434,6 +451,9 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   carved.forEach((b, bi) => { if (b.lot && lotKind.get(b.lot) === 'm4-quay' && (firstQuay < 0 || dist(interiorPoint(b.poly), nucleus) < dist(interiorPoint(carved[firstQuay].poly), nucleus))) firstQuay = bi; });
   const plots: Plot[] = [];
   const plotMorph: MorphologyParams[] = [];
+  const innGates = flags.activities && archetype === 'town' ? prim.walls.flatMap((w) => w.gates.filter((g) => g.street >= 0).map((g) => ({ p: g.p, street: g.street }))) : [];
+  const innServed = new Set<{ p: Vec2; street: number }>();
+  const smithies = new Set<Plot>();
   const blockInfill: number[] = [];
   const slowest = { ms: 0, bi: -1, n: 0 };
   carved.forEach((b, bi) => {
@@ -461,7 +481,22 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     if (fade > 0) for (const p of r.plots) p.fade = faubFade({ x: (p.front[0].x + p.front[1].x) / 2, y: (p.front[0].y + p.front[1].y) / 2 });
     const tb1 = performance.now() - tb0;
     if (tb1 > slowest.ms) { slowest.ms = tb1; slowest.bi = bi; slowest.n = b.poly.length; }
-    for (const p of r.plots) { plots.push(p); plotMorph.push(P); parcels.push({ poly: p.poly, use: 'plot', block: bi, front: p.front, zone: b.zone }); }
+    // inns at the gates: a few plots along the entrance road merged into one courtyard inn lot
+    let rplots = r.plots;
+    if (innGates.length && P.plotOp === 'burgage' && rplots.length > 3) {
+      const free = innGates.filter((g) => !innServed.has(g));
+      const picks = free.length ? pickInns(rplots, free, (pl) => streets.nearest({ x: (pl.front[0].x + pl.front[1].x) / 2, y: (pl.front[0].y + pl.front[1].y) / 2 }, 10)?.s ?? -1, br) : [];
+      for (const pk of picks) {
+        const g = free.find((q) => dist(q.p, pk.front[0]) < 200);
+        if (g) innServed.add(g);
+        rplots = rplots.filter((pl) => !pk.plots.includes(pl));
+        const pi = parcels.length;
+        parcels.push({ poly: pk.poly, use: 'inn', block: bi, front: pk.front, zone: b.zone });
+        for (const ib of innBuildings(pk.poly, pk.front, pk.plots[0].nrm, rng.fork('inn:' + bi))) buildings.push({ poly: ib.poly, kind: 'house', parcel: pi, arch: ib.arch, roof: 'gable', material: 'timber', storeys: 2 });
+        if (pk.smithy) smithies.add(pk.smithy);
+      }
+    }
+    for (const p of rplots) { plots.push(p); plotMorph.push(P); parcels.push({ poly: p.poly, use: 'plot', block: bi, front: p.front, zone: b.zone }); }
     for (const g of r.back) parcels.push({ poly: g, use: 'garden', block: bi, zone: b.zone });
   });
   // ---- the market hall (or town hall with its belfry) standing on the grand-place
@@ -500,8 +535,10 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   plots.forEach((pl, pi) => {
     const pr = rng.fork('pl:' + pi);
     const cov = Math.max(0, Math.min(1, (blockInfill[pl.block] + pr.range(-0.03, 0.03)) * (1 - 0.4 * (pl.fade ?? 0))));
+    let first = smithies.has(pl);
     for (const b of buildOn(pl, cov, plotMorph[pi], pr, courtHint(pl))) {
       if (b.kind === 'garden') { plotGardens.push(b.poly); continue; }
+      if (first && b.kind === 'house') { b.arch = 'smithy'; first = false; }
       buildings.push({ poly: b.poly, kind: b.kind, parcel: parcelIndexOfPlot[pi], arch: b.arch, roof: b.roof, storeys: b.storeys, material: b.material, courtyards: b.courtyards, orientation: b.orientation });
     }
   });
@@ -520,6 +557,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   stats['buildings'] = buildings.length;
   stats['closes'] = closes + derbs;
 
+  lines.push(...siteLines);
   // ---- the stone quay edges
   for (const q of quays) lines.push({ kind: 'quay-edge', path: q, width: 1.1 });
   // ---- plan lines: ward walls (fang), compound walls of courtyard / yashiki lots, moat outside the town wall

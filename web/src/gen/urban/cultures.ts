@@ -130,6 +130,8 @@ export const CULTURE_LIST: Culture[] = [
       { role: 'worship', kind: 'church', place: 'adjacent-nucleus', area: [700, 12000], minPop: 200 },
       // parish churches, one per ~2,200 inhabitants beyond the main church, spread across the quarters
       { role: 'extra', kind: 'parish-church', place: 'spread', area: [900, 6000], minPop: 3500, perPop: 2200, sep: 220 },
+      // hospital (hôtel-Dieu) by a gate (M4 activity)
+      { role: 'civic', kind: 'hospital', place: 'gate', area: [1500, 6000], minPop: 2500 },
     ],
     village: { form: 'auto' }, hamlet: { form: 'auto' },
     render: { towerShape: 'round' },

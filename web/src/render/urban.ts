@@ -180,6 +180,8 @@ function cultureOverlay(ub: NonNullable<World['urban']>, pal: Palette, lw: (m: n
   for (const [k, ds] of byKind) {
     const d = ds.join('');
     if (k === 'hedge') s += `<path d="${d}" fill="none" stroke="${pal.treeInk ?? '#4a6a3a'}" stroke-width="${lw(2.6, 0.8)}" stroke-opacity="0.8" stroke-dasharray="3 1.5"/>`;
+    else if (k === 'track') s += `<path d="${d}" fill="none" stroke="${U.street}" stroke-width="${lw(3, 0.6)}" stroke-linecap="round"/>`;
+    else if (k === 'weir') s += `<path d="${d}" fill="none" stroke="${U.wall}" stroke-width="${lw(1.4, 0.5)}" stroke-dasharray="1.2 0.6"/>`;
     else if (k === 'parterre' || k === 'footpath') s += `<path d="${d}" fill="none" stroke="${k === 'footpath' ? U.street : U.plotLine}" stroke-width="${lw(k === 'footpath' ? 1.4 : 0.5, 0.15)}" stroke-linecap="round"/>`;
     else if (k === 'ghat-steps') s += `<path d="${d}" fill="none" stroke="${U.plotLine}" stroke-width="${lw(0.3, 0.12)}"/>`;
     else if (k === 'terrace') s += `<path d="${d}" fill="none" stroke="${U.wall}" stroke-width="${lw(1.6, 0.8)}"/>`;
@@ -203,12 +205,12 @@ export function urbanLayer(world: World, pal: Palette, u: number, debug: boolean
   let s = `<g class="layer-urban" stroke-linejoin="round">` + patterns(pal);
   // street space: the quarters (blocks are drawn on top, so what remains visible is exactly quarter \ blocks)
   s += `<path class="u-streets" d="${ub.quarters.map((q) => pathD(q.poly.outer, true)).join('')}" fill="${U.street}" stroke="${U.street}" stroke-width="0.4"/>`;
-  const places = ub.parcels.filter((p) => p.use === 'place' || p.use === 'market' || p.use === 'quay' || p.use === 'pier' || p.use === 'slipway' || p.use === 'timber-yard' || p.use === 'ropewalk-yard');
+  const places = ub.parcels.filter((p) => p.use === 'place' || p.use === 'market' || p.use === 'quay' || p.use === 'pier' || p.use === 'slipway' || p.use === 'timber-yard' || p.use === 'mill-yard' || p.use === 'mill' || p.use === 'tannery-yard');
   if (places.length) {
     const d = places.map((p) => pathD(p.poly, true)).join('');
     s += `<g class="u-places"><path d="${d}" fill="${U.place}"/><path d="${d}" fill="url(#p-upave)"/></g>`;
   }
-  const greens = ub.parcels.filter((p) => p.use === 'green');
+  const greens = ub.parcels.filter((p) => p.use === 'green' || p.use === 'mill-island' || p.use === 'windmill-mound' || p.use === 'gallows-hill' || p.use === 'ropewalk-yard');
   if (greens.length) {
     const d = greens.map((p) => pathD(p.poly, true)).join('');
     s += `<g class="u-greens"><path d="${d}" fill="${U.garden}"/><path d="${d}" fill="url(#p-ugarden)" opacity="0.6"/></g>`;

@@ -299,3 +299,27 @@ export function buildMadrasa(Bk: Polygon, cx: CompoundCtx): Out {
 }
 
 export { disk, minus, inter, placeRect, splitLine };
+
+/** Hospital (hôtel-Dieu) by a gate: the great infirmary hall along the street, its chapel at the east end, a
+ * range round the yard and a garden. */
+export function buildHospital(Bk: Polygon, cx: CompoundCtx): Out {
+  const out = emptyOut();
+  out.parcels.push({ poly: Bk, use: 'compound:hospital' });
+  const P = orientPos(Bk);
+  // the longest edge carries the hall (street side)
+  let bi = 0, bl = 0;
+  for (let i = 0; i < P.length; i++) { const l = dist(P[i], P[(i + 1) % P.length]); if (l > bl) { bl = l; bi = i; } }
+  const hall = alongEdge(P, bi, cx.rng.range(11, 14), Math.min(48, bl * 0.7), 1.5);
+  if (hall) out.buildings.push({ poly: hall, kind: 'landmark', parcel: 0, arch: 'infirmary-hall', roof: 'gable', material: 'stone', storeys: 2 });
+  const a = P[bi], b = P[(bi + 1) % P.length];
+  const ang = Math.atan2(b.y - a.y, b.x - a.x);
+  let east = ang;
+  while (east > Math.PI / 4) east -= Math.PI / 2;
+  while (east < -Math.PI / 4) east += Math.PI / 2;
+  const c = inscribed(Bk, [], 1).c;
+  const ch = placeRect(Bk, c, east, 7.5, 4, 1.5);
+  if (ch && !(hall && intersectionS(ch, hall).some((ph) => area(ph.outer) > 0.05))) out.buildings.push({ poly: ch, kind: 'church', parcel: 0, arch: 'hospital-chapel', roof: 'gable', material: 'stone', storeys: 1, orientation: east });
+  out.lines.push({ kind: 'compound-wall', path: P, closed: true, width: 0.9 });
+  out.landmarks.push({ kind: 'hospital', poly: Bk });
+  return out;
+}
