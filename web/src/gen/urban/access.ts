@@ -21,17 +21,22 @@ import { clipPlot, shapeOf, MIN_BW, MAX_ASPECT, type HalfPlane } from './buildin
 import { isConvex } from '../geo/split';
 
 export const ACCESS_CELL = 0.5;
+export const ACC_STATS = { calls: 0, cells: 0, ms: 0, msRaster: 0, msStreet: 0 };
 
 /**
  * Reachable flags of the buildings of a block. `streetAt(p)` tells whether a point of the block boundary lies on a
  * street (or place) edge.
  */
-export function blockReach(block: Polygon, blds: Polygon[], streetAt: (p: Vec2) => boolean, cell = ACCESS_CELL): boolean[] {
+export function blockReach(block: Polygon, blds: Polygon[], streetAt0: StreetAt | ((p: Vec2) => boolean), cell = ACCESS_CELL): boolean[] {
   if (!blds.length) return [];
   const bb = bboxOf(block);
+  const sa = streetAt0 as StreetAt;
+  const streetAt = sa.local ? sa.local(bb.x0, bb.y0, bb.x1, bb.y1) : streetAt0;
   const x0 = bb.x0 - cell, y0 = bb.y0 - cell;
   const w = Math.ceil((bb.x1 - x0) / cell) + 2, h = Math.ceil((bb.y1 - y0) / cell) + 2;
   const shift = (p: Polygon) => p.map((q) => ({ x: q.x - x0, y: q.y - y0 }));
+  ACC_STATS.calls++; ACC_STATS.cells += w * h;
+  const tA = performance.now();
   const inB = rasterizePolys([shift(block)], w, h, cell);
   // building ids per cell (0 = none): scanlines over each footprint's own rows
   const bid = new Int32Array(w * h);
@@ -55,53 +60,74 @@ export function blockReach(block: Polygon, blds: Polygon[], streetAt: (p: Vec2) 
       }
     }
   });
-  const free = (i: number) => inB[i] === 1 && bid[i] === 0;
+  const N = w * h;
+  const freeA = new Uint8Array(N);
+  for (let i = 0; i < N; i++) freeA[i] = inB[i] === 1 && bid[i] === 0 ? 1 : 0;
+  ACC_STATS.msRaster += performance.now() - tA;
+  const tS = performance.now();
   // street side: block-boundary cells whose outside neighbour is on a street
-  const streetCell = new Uint8Array(w * h);
+  const streetCell = new Uint8Array(N);
   const at = (i: number): Vec2 => ({ x: x0 + ((i % w) + 0.5) * cell, y: y0 + (Math.floor(i / w) + 0.5) * cell });
-  for (let i = 0; i < w * h; i++) {
-    if (inB[i]) continue;
-    const x = i % w, y = Math.floor(i / w);
-    if (!((x > 0 && inB[i - 1]) || (x < w - 1 && inB[i + 1]) || (y > 0 && inB[i - w]) || (y < h - 1 && inB[i + w]))) continue;
-    if (streetAt(at(i))) streetCell[i] = 1;
-  }
-  const passable = (i: number): boolean => {
-    if (!free(i)) return false;
-    const x = i % w, y = Math.floor(i / w);
-    for (const j of [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, y > 0 ? i - w : -1, y < h - 1 ? i + w : -1]) {
-      if (j < 0) return false;
-      if (!free(j) && !(inB[j] === 0 && streetCell[j])) return false;
+  const boundaryOut = (x: number, y: number, i: number) => !inB[i] && ((x > 0 && inB[i - 1]) || (x < w - 1 && inB[i + 1]) || (y > 0 && inB[i - w]) || (y < h - 1 && inB[i + w]));
+  if (sa.parts) {
+    // street ribbons (with the slack) stamped on the raster: only the cells near each segment are visited
+    const { segs, places } = sa.parts(bb.x0, bb.y0, bb.x1, bb.y1);
+    for (const sg of segs) {
+      const r = sg.hw * 1.15 + 1.2;
+      const cx0 = Math.max(0, Math.floor((Math.min(sg.a.x, sg.b.x) - r - x0) / cell)), cx1 = Math.min(w - 1, Math.ceil((Math.max(sg.a.x, sg.b.x) + r - x0) / cell));
+      const cy0 = Math.max(0, Math.floor((Math.min(sg.a.y, sg.b.y) - r - y0) / cell)), cy1 = Math.min(h - 1, Math.ceil((Math.max(sg.a.y, sg.b.y) + r - y0) / cell));
+      for (let y = cy0; y <= cy1; y++) for (let x = cx0; x <= cx1; x++) {
+        const i = y * w + x;
+        if (streetCell[i] || !boundaryOut(x, y, i)) continue;
+        if (distToSeg(at(i), sg.a, sg.b) <= r) streetCell[i] = 1;
+      }
     }
-    return true;
-  };
-  const seen = new Uint8Array(w * h);
-  const queue: number[] = [];
-  for (let i = 0; i < w * h; i++) {
+    if (places.length) for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      if (streetCell[i] || !boundaryOut(x, y, i)) continue;
+      const p = at(i);
+      if (places.some((q) => pointInRing(q, p) || distToRing(q, p) < 0.8)) streetCell[i] = 1;
+    }
+  } else {
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const i = y * w + x; if (boundaryOut(x, y, i) && streetAt(at(i))) streetCell[i] = 1; }
+  }
+  ACC_STATS.msStreet += performance.now() - tS;
+  // passable: free with its four neighbours free (or the street outside)
+  const pass = new Uint8Array(N);
+  const okN = (j: number) => freeA[j] === 1 || (inB[j] === 0 && streetCell[j] === 1);
+  for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+    const i = y * w + x;
+    if (freeA[i] && okN(i - 1) && okN(i + 1) && okN(i - w) && okN(i + w)) pass[i] = 1;
+  }
+  const seen = new Uint8Array(N);
+  const queue = new Int32Array(N);
+  let qh = 0, qt = 0;
+  const visit = (j: number) => { if (pass[j] && !seen[j]) { seen[j] = 1; queue[qt++] = j; } };
+  for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+    const i = y * w + x;
     if (!streetCell[i]) continue;
-    const x = i % w, y = Math.floor(i / w);
-    for (const j of [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, y > 0 ? i - w : -1, y < h - 1 ? i + w : -1]) if (j >= 0 && !seen[j] && passable(j)) { seen[j] = 1; queue.push(j); }
+    visit(i - 1); visit(i + 1); visit(i - w); visit(i + w);
   }
-  while (queue.length) {
-    const i = queue.pop()!;
-    const x = i % w, y = Math.floor(i / w);
-    for (const j of [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, y > 0 ? i - w : -1, y < h - 1 ? i + w : -1]) if (j >= 0 && !seen[j] && passable(j)) { seen[j] = 1; queue.push(j); }
+  while (qh < qt) {
+    const i = queue[qh++];
+    const x = i % w;
+    if (x > 0) visit(i - 1);
+    if (x < w - 1) visit(i + 1);
+    if (i >= w) visit(i - w);
+    if (i + w < N) visit(i + w);
   }
-  // a building is reached when one of its cells borders a reached cell (8-neighbourhood) or stands within ~1 m of
-  // the street edge (a front set back by a narrow apron still opens on the street)
-  const ok = blds.map(() => false);
+  // reach masks: next to a reached cell (8-neighbourhood) or within ~1 m of the street edge
+  const near = new Uint8Array(N);
   const R = Math.max(1, Math.round(1 / cell));
-  for (let i = 0; i < w * h; i++) {
-    const k = bid[i];
-    if (!k || ok[k - 1]) continue;
-    const x = i % w, y = Math.floor(i / w);
-    for (let dy = -R; dy <= R && !ok[k - 1]; dy++) for (let dx = -R; dx <= R; dx++) {
-      const xx = x + dx, yy = y + dy;
-      if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
-      const j = yy * w + xx;
-      if ((Math.abs(dx) <= 1 && Math.abs(dy) <= 1 && seen[j]) || streetCell[j]) { ok[k - 1] = true; break; }
-    }
+  for (let i = 0; i < N; i++) {
+    if (!seen[i] && !streetCell[i]) continue;
+    const x = i % w, y = (i / w) | 0, r = streetCell[i] ? R : 1;
+    for (let yy = Math.max(0, y - r); yy <= Math.min(h - 1, y + r); yy++) for (let xx = Math.max(0, x - r); xx <= Math.min(w - 1, x + r); xx++) near[yy * w + xx] = 1;
   }
+  const ok = blds.map(() => false);
+  for (let i = 0; i < N; i++) { const k = bid[i]; if (k && near[i]) ok[k - 1] = true; }
   void pointInRing;
+  ACC_STATS.ms += performance.now() - tA;
   return ok;
 }
 
@@ -166,7 +192,7 @@ export function frontRangeDepth(pl: Plot, blds: { poly: Polygon }[]): number {
 }
 
 /** Street-edge predicate shared by the generator and the tests: within the (jittered) half width of a street + slack, or on a place. */
-export function makeStreetAt(streets: { path: Vec2[]; widths?: number[]; width: number }[], places: Polygon[]): (p: Vec2) => boolean {
+export function makeStreetAt(streets: { path: Vec2[]; widths?: number[]; width: number }[], places: Polygon[]): StreetAt {
   const sidx = new GridIndex<{ a: Vec2; b: Vec2; hw: number }>(30);
   for (const s of streets) for (let i = 1; i < s.path.length; i++) {
     const hw = ((s.widths?.[i - 1] ?? s.width) + (s.widths?.[i] ?? s.width)) / 4;
@@ -174,11 +200,21 @@ export function makeStreetAt(streets: { path: Vec2[]; widths?: number[]; width: 
   }
   const pidx = new GridIndex<Polygon>(60);
   for (const q of places) pidx.insertPts(q, q);
-  return (p: Vec2) => {
-    for (const sg of sidx.queryPt(p, 14)) if (distToSeg(p, sg.a, sg.b) <= sg.hw * 1.15 + 1.2) return true;
-    return pidx.queryPt(p, 1).some((q) => pointInRing(q, p) || distToRing(q, p) < 0.8);
+  const test = (segs: { a: Vec2; b: Vec2; hw: number }[], pls: Polygon[]) => (p: Vec2): boolean => {
+    for (const sg of segs) if (distToSeg(p, sg.a, sg.b) <= sg.hw * 1.15 + 1.2) return true;
+    for (const q of pls) if (pointInRing(q, p) || distToRing(q, p) < 0.8) return true;
+    return false;
   };
+  const f = ((p: Vec2) => test(sidx.queryPt(p, 14), pidx.queryPt(p, 1))(p)) as StreetAt;
+  // the street segments and places near a box, queried once (a block's raster asks thousands of points)
+  f.local = (x0, y0, x1, y1) => test(sidx.query(x0 - 14, y0 - 14, x1 + 14, y1 + 14), pidx.query(x0 - 1, y0 - 1, x1 + 1, y1 + 1));
+  f.parts = (x0, y0, x1, y1) => ({ segs: sidx.query(x0 - 14, y0 - 14, x1 + 14, y1 + 14), places: pidx.query(x0 - 1, y0 - 1, x1 + 1, y1 + 1) });
+  return f;
 }
+export type StreetAt = ((p: Vec2) => boolean) & {
+  local?: (x0: number, y0: number, x1: number, y1: number) => (p: Vec2) => boolean;
+  parts?: (x0: number, y0: number, x1: number, y1: number) => { segs: { a: Vec2; b: Vec2; hw: number }[]; places: Polygon[] };
+};
 
 /**
  * No matchsticks: a dwelling footprint longer than 3 × its width (ranges of courtyard houses, side halls) is cut

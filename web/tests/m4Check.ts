@@ -110,7 +110,8 @@ export function checkM4(w: World): M4Report {
     }
     const town = (u.walls ?? []).filter((x) => x.role === 'town' || x.role === 'outer');
     const enc = u.phases.filter((p) => p.zone !== 'faubourg').flatMap((p) => p.region.map((r) => r.outer));
-    const rings = town.length ? town.map((t) => t.path) : enc;
+    // (the enclosure line it was built on: a later outer enclosure may have taken the castle in)
+    const rings = [...town.map((t) => t.path), ...enc];
     const gapToWall = rings.length ? Math.min(...P.map((q) => Math.min(...rings.map((r) => distToRing(r, q))))) : 0;
     castle = { verts: P.length, convex, minEdge, gapToWall };
   }

@@ -26,6 +26,7 @@ import { dilate } from '../phases';
 import { rectAt, frameAt, ellipseAt, LineIndex, nearestOnPl, TAU, inMP } from './lots';
 import { Mask, siteLot, gridAround } from './site';
 import { giveAccess, phaseAt, type M4State } from './reserve';
+import { shapeOkObb } from '../access';
 import { emptyOut, pieces, largest, fits, placeRect, minus, inter, splitLine, type Out } from './kit';
 
 export interface ActIn {
@@ -258,7 +259,7 @@ export function reserveArena(s: M4State, api: ReserveApi, ai: ActIn): ReservedLo
   const coreR = Math.sqrt(mpArea(core) / Math.PI);
   const res = siteLot(s.ctx, api.streets, {
     shape: (c, ang) => ellipseAt(c, ang, a, b, 36),
-    centers: gridAround(s.ctx, ai.nucleus, coreR + 2.6 * a, 22).filter((p) => !coreM.has(p)),
+    centers: gridAround(s.ctx, ai.nucleus, coreR + 2.6 * a, 28).filter((p) => !coreM.has(p)),
     angles: [0, Math.PI / 4, Math.PI / 2, -Math.PI / 4], scales: [1], refine: 8,
     outside: coreM, margin: 9, avoid: ai.avoid, gap: 30,
     score: (poly, c) => -Math.abs(dist(c, ai.nucleus) - coreR - a - 12) / 40 + (encM.has(c) ? 2 : 0),
@@ -422,7 +423,7 @@ export function buildArena(B: Polygon, cx: CompoundCtx): Out {
       const dep = cx.rng.range(12, 15);
       const band = differenceS(q, ellipseAt(c, ang, Math.max(a * k + 1, a - dep), Math.max(b * k + 1, b - dep), 48));
       const h = largest(pieces(band));
-      if (h && area(h) > 25) out.buildings.push({ poly: h, kind: 'house', parcel: pi, arch: 'arena-house', roof: 'gable', material: 'stone', storeys: 3, orientation: Math.atan2(f1.y - f0.y, f1.x - f0.x) });
+      if (h && area(h) > 25 && shapeOkObb(h)) out.buildings.push({ poly: h, kind: 'house', parcel: pi, arch: 'arena-house', roof: 'gable', material: 'stone', storeys: 3, orientation: Math.atan2(f1.y - f0.y, f1.x - f0.x) });
     }
   }
   out.landmarks.push({ kind: 'arena', poly: ellipseAt(c, ang, a, b, 36) });

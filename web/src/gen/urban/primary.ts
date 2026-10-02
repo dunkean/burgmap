@@ -421,10 +421,27 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
     for (const comp of ph.region) {
       for (const run of ringRuns(comp.outer, encInnerOK, 40)) {
         // the old wall line survives as partial arcs: stretches were built over (blocks straddle the line)
-        for (const pl0 of breakRing(simplify(run, 0.2), radialLines, P.ringGaps ?? 0, wr)) {
+        const full = simplify(run, 0.2);
+        const arcs = breakRing(full, radialLines, P.ringGaps ?? 0, wr);
+        for (const pl0 of arcs) {
           const pl = pl0;
           const w = P.widthByRank[1] * P.widthScale * 0.95;
           streets.add(pl, jitterWidths(pl, w, P.widthJitter, () => wr.float()), 1, 'ring', k + 1);
+        }
+        // the stretches of the old line that were built over keep a narrow lane (no seam between two quarters
+        // meeting without a street: their plots front the lane)
+        if (arcs.length && arcs[0] !== full) {
+          const cum = [0];
+          for (let i = 1; i < full.length; i++) cum.push(cum[i - 1] + dist(full[i - 1], full[i]));
+          const at = (q: Vec2) => { let bs = 0, bd = Infinity; for (let i = 1; i < full.length; i++) { const a2 = full[i - 1], b2 = full[i]; const dx = b2.x - a2.x, dy = b2.y - a2.y, l2 = dx * dx + dy * dy || 1; const t = Math.max(0, Math.min(1, ((q.x - a2.x) * dx + (q.y - a2.y) * dy) / l2)); const d = Math.hypot(q.x - a2.x - t * dx, q.y - a2.y - t * dy); if (d < bd) { bd = d; bs = cum[i - 1] + t * Math.sqrt(l2); } } return bs; };
+          const spans = arcs.map((a2) => [at(a2[0]), at(a2[a2.length - 1])].sort((x, y) => x - y) as [number, number]).sort((x, y) => x[0] - y[0]);
+          let s0 = 0;
+          const L = cum[cum.length - 1];
+          const lw = P.widthByRank[3] * P.widthScale;
+          for (const [a2, b2] of [...spans, [L, L] as [number, number]]) {
+            if (a2 - s0 > 12) { const lane = slicePl(full, cum, s0, a2); if (lane.length >= 2) streets.add(lane, lw, 3, 'lane', k + 1); }
+            s0 = Math.max(s0, b2);
+          }
         }
       }
     }

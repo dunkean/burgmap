@@ -4,6 +4,7 @@ import { makeOptions, toQuery, fromQuery, Options } from '../src/gen/options';
 import { checkWorld } from './urbanCheck';
 import { checkM4 } from './m4Check';
 import { renderSvg } from '../src/render/svg';
+import { distToRing } from '../src/gen/geo/poly';
 
 // M4 invariants (URBAN_LANDMARKS.md §4) on cases that exercise every landmark: a walled city on a river (castle,
 // cathedral close, palace, monasteries, river port, mills, trades, shanty towns), a harbour town, a city with many
@@ -88,8 +89,28 @@ describe('M4 landmarks, port, suburbs, shanty towns', () => {
     for (const k of ['castle', 'cathedral-close', 'palace', 'monastery', 'river-port', 'harbour', 'watermill', 'shanty']) expect(kinds.has(k), k).toBe(false);
     expect(w.urban!.phases.some((p) => p.zone === 'faubourg'), 'no suburbs').toBe(false);
   });
+  it('walls: none, single, double; castle count', () => {
+    for (const walls of ['none', 'single', 'double'] as const) {
+      const w = generate(makeOptions({ seed: '1', size: 'town', walls, castles: walls === 'double' ? '2' : 'auto' }));
+      const ws = w.urban!.walls ?? [];
+      const town = ws.filter((x) => x.role === 'town'), outer = ws.filter((x) => x.role === 'outer');
+      if (walls === 'none') { expect(town.length + outer.length, 'open town: no enceinte').toBe(0); continue; }
+      expect(town.length, walls + ': a curtain').toBeGreaterThan(0);
+      expect(outer.length, walls + ': outer wall only for double').toBe(walls === 'double' ? town.length : 0);
+      for (const o of outer) {
+        // the lists: the outer wall runs 10–25 m outside the curtain, along straight curtains
+        const gaps = o.path.map((q) => Math.min(...town.map((t) => distToRing(t.path, q))));
+        expect(Math.min(...gaps), 'lists at least ~10 m').toBeGreaterThan(8);
+        expect(Math.max(...gaps), 'lists at most ~25 m (corners mitred)').toBeLessThan(60);
+        for (const [a, b] of o.curtains ?? []) expect(Math.hypot(a.x - b.x, a.y - b.y), 'outer curtains ≤ 60 m').toBeLessThanOrEqual(60);
+      }
+      if (walls === 'double') expect((w.urban!.sites ?? []).filter((x) => x.kind === 'castle').length, 'two castles on distinct sites').toBe(2);
+      const r = checkWorld(w);
+      expect(r.overlapsBlocks + r.overlapsPlots, walls + ': partition').toBe(0);
+    }
+  });
   it('options round-trip through the URL', () => {
-    const o = makeOptions({ seed: 'm4', castle: 'no', cathedral: 'yes', palace: 'no', monasteries: 'yes', port: 'no', arena: 'yes', activities: 'no', suburbs: 'many', shantytowns: 'some' });
+    const o = makeOptions({ seed: 'm4', castle: 'no', castles: '2', walls: 'double', cathedral: 'yes', palace: 'no', monasteries: 'yes', port: 'no', arena: 'yes', activities: 'no', suburbs: 'many', shantytowns: 'some' });
     expect(fromQuery(toQuery(o))).toEqual({ ...o, roads: 0 });
   });
 });

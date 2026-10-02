@@ -13,7 +13,7 @@ import { resolveMorph } from './morphology';
 import { resolvePlan, getCulture, ResolvedPlan, EnclosureSpec, NucleusSpec } from './culture';
 import { planRibbonVillage } from './villages';
 import { makeCtx } from './context';
-import { choosePopulation, chooseArchetype, planServedPhases, planFaubourgs, EnclosurePlan, zonesFor, PhaseInput } from './phases';
+import { choosePopulation, chooseArchetype, planServedPhases, planFaubourgs, EnclosurePlan, zonesFor, PhaseInput, dilate } from './phases';
 import { buildPrimary, Quarter } from './primary';
 import { Streets, LAB_OPEN, LAB_WALL } from './streets';
 import { mpArea, MultiPoly, differenceS, intersectionS } from '../geo/bool';
@@ -24,7 +24,7 @@ import { polygonCentroid } from '../core/geom';
 import { cutPlots, Plot } from './plots';
 import { cutCourtyards } from './courtyards';
 import { buildOn, type ArchBldg } from './bops';
-import { blockReach, carvePassage, makeStreetAt, splitLong, frontRangeDepth } from './access';
+import { blockReach, carvePassage, makeStreetAt, splitLong, frontRangeDepth, shapeOkObb } from './access';
 import { GridIndex } from '../geo/spatial';
 import { wallFeatures } from './walls';
 import { buildCompound, pickBlock, ClaimBlock } from './compounds';
@@ -228,6 +228,15 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     const faubArea = (faubPop / plan.faubourg.density.faubourg) * 1e4 + short;
     const sub = flags.suburbs;
     faub = sub === 'none' ? { region: [] } : planFaubourgs(ctx, eplan.enclosure, roads, faubArea * (sub === 'many' ? 2.4 : 1), walled ? 22 + (listsW ? listsW + 8 : 0) : 0, rng.fork('faubourg'), 'faubourg', sub === 'many' ? 1.6 : 1);
+    if (sub === 'many' && faub.region.length) {
+      // suburbs spread between the roads: a belt of 150–220 m round the walls (beyond the glacis) joins the ribbons;
+      // its quarters, bounded by the radial roads, are split by their own secondary streets and lanes
+      const gl = walled ? 22 + (listsW ? listsW + 8 : 0) : 6;
+      let belt = differenceS(dilate(eplan.enclosure, gl + rng.fork('belt').range(150, 220)), dilate(eplan.enclosure, gl));
+      if (ctx.water.length) belt = differenceS(belt, ctx.water);
+      belt = belt.filter((ph) => areaOf(ph.outer) > 5000);
+      faub = { region: unionS(faub.region, belt).filter((ph) => areaOf(ph.outer) > 1500) };
+    }
     if (sub === 'many') {
       if (walled && pop >= 9000 && outerEnclosure(ctx, eplan, faub.region, pop)) {
         outerPhase = true;
@@ -638,6 +647,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   };
   const accessPlaces = (): Polygon[] => parcels.filter((p) => ['place', 'market', 'quay', 'green'].includes(String(p.use))).map((p) => p.poly);
   const plotBld: ArchBldg[][] = plots.map(() => []);
+  const tBo = performance.now();
   plots.forEach((pl, pi) => {
     const pr = rng.fork('pl:' + pi);
     const cov = Math.max(0, Math.min(1, (blockInfill[pl.block] + pr.range(-0.03, 0.03)) * (1 - 0.4 * (pl.fade ?? 0))));
@@ -653,9 +663,12 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
       else if (craft && b.kind === 'house') b.arch = 'craft-workshop';
       plotBld[pi].push(b);
     }
-    plotBld[pi] = splitLong(plotBld[pi]);
+    // no matchsticks among dwellings: long footprints are cut into rooms, the remaining slivers dropped
+    plotBld[pi] = splitLong(plotBld[pi]).filter((b) => b.kind === 'landmark' || shapeOkObb(b.poly));
   });
   // ---- access: every building touches the street or open ground reached from it (passages shared by two plots)
+  stats['ms.buildOn'] = Math.round(performance.now() - tBo);
+  const tAcc = performance.now();
   {
     const streetAt = makeStreetAt(streets.list.filter((st) => st.ribbon).map((st) => ({ path: st.path, widths: st.widths, width: st.widths[0] })), accessPlaces());
     const byBlock = new Map<number, number[]>();
@@ -684,17 +697,15 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
         extra.forEach((i, j) => { if (!ok[list.length + j] && parcels[buildings[i].parcel!].use === 'inn') dropInn.add(i); else dropInn.delete(i); });
         return res;
       };
-      let r = reach();
-      let need = pis.filter((_, j) => r[j].some((v) => !v));
-      if (need.length) {
-        // first a gateway through the front range into the court or yard behind it (1.6 m, along a side line)
-        for (const pi of need) {
-          const dF = frontRangeDepth(plots[pi], plotBld[pi]);
-          if (dF > 0) plotBld[pi] = carvePassage(plots[pi], plotBld[pi], 'A', 1.6, dF + 0.05);
-        }
-        r = reach();
-        need = pis.filter((_, j) => r[j].some((v) => !v));
+      // first a gateway through the front range into the court or yard behind it (1.6 m, along a side line) for
+      // every plot with a building off the street front (no flood fill needed to know that), then one check
+      for (const pi of pis) {
+        if (plotBld[pi].every((b) => touchesFront(plots[pi], b.poly))) continue;
+        const dF = frontRangeDepth(plots[pi], plotBld[pi]);
+        if (dF > 0) plotBld[pi] = carvePassage(plots[pi], plotBld[pi], 'A', 1.6, dF + 0.05);
       }
+      let r = reach();
+      const need = pis.filter((_, j) => r[j].some((v) => !v));
       if ((globalThis as Record<string, unknown>).__acc === bk) console.log('[acc] block', bk, 'unreach', r.flat().filter((v) => !v).length, '/', r.flat().length, 'need', need.length);
       if (!need.length) continue;
       // passages along a side line shared with the neighbour of the same run: half each when both plots are wide
@@ -723,6 +734,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     }
     if (dropInn.size) { const kept = buildings.filter((_, i) => !dropInn.has(i)); buildings.length = 0; buildings.push(...kept); }
     stats['access.passages'] = carvedN;
+    stats['ms.access'] = Math.round(performance.now() - tAcc);
     stats['access.dropped'] = dropped;
   }
   plots.forEach((pl, pi) => {

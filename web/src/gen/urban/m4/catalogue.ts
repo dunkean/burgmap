@@ -43,7 +43,7 @@ export function reserveCathedral(s: M4State, api: ReserveApi, ci: CatalogueIn): 
   const ignore = new Set<number>(api.marketStreet >= 0 ? [api.marketStreet] : []);
   const res = siteLot(s.ctx, api.streets, {
     shape: (c, ang, k) => rectAt(c, ang, (-uL / 2) * k, (uL / 2) * k, (-vW / 2) * k, (vW / 2) * k),
-    centers: gridAround(s.ctx, mc, Math.max(180, 0.55 * encR), 24),
+    centers: gridAround(s.ctx, mc, Math.max(180, 0.55 * encR), 30),
     angles: [0, -0.2, 0.2, -0.35, 0.35],
     scales: [1, 0.93], refine: 10,
     within: encMask(s, api, ci), margin: 8, ignore, avoid: ci.avoid, gap: 30,
@@ -110,8 +110,8 @@ export function reservePalace(s: M4State, api: ReserveApi, ci: CatalogueIn): Res
   const facing = (c: Vec2) => Math.atan2(ci.nucleus.y - c.y, ci.nucleus.x - c.x);
   const h0 = s.ctx.heightAt(ci.nucleus);
   const cc = ci.castle ? polygonCentroid(ci.castle) : null;
-  const centers = gridAround(s.ctx, ci.nucleus, Math.max(160, 0.6 * encR), 26);
-  if (cc) centers.push(...gridAround(s.ctx, cc, 260, 26));
+  const centers = gridAround(s.ctx, ci.nucleus, Math.max(160, 0.6 * encR), 32);
+  if (cc) centers.push(...gridAround(s.ctx, cc, 260, 32));
   const res = siteLot(s.ctx, api.streets, {
     // the forecourt side (+u) faces the nucleus
     shape: (c, a, k) => rectAt(c, facing(c) + a, (-L / 2) * k, (L / 2) * k, (-W / 2) * k, (W / 2) * k),
@@ -170,7 +170,7 @@ export function reserveMonasteries(s: M4State, api: ReserveApi, ci: CatalogueIn,
     const avoid = [...ci.avoid, ...out.map((o) => o.poly)];
     const centers = outside
       ? api.gates.flatMap((g) => gridAround(s.ctx, g, 280, 40)).filter((p) => !outM.has(p) && roadIdx.dist(p, 30) > 22)
-      : gridAround(s.ctx, ci.nucleus, encR * 1.05, 32).filter((p) => inM.has(p) && ringIdx.dist(p, Math.max(140, 0.35 * encR)) < Math.max(140, 0.35 * encR));
+      : gridAround(s.ctx, ci.nucleus, encR * 1.05, 40).filter((p) => inM.has(p) && ringIdx.dist(p, Math.max(140, 0.35 * encR)) < Math.max(140, 0.35 * encR));
     const res = siteLot(s.ctx, api.streets, {
       shape: (c, a, kk) => rectAt(c, a, (-L / 2) * kk, (L / 2) * kk, (-W / 2) * kk, (W / 2) * kk),
       centers, angles: outside ? [0, Math.PI / 2] : [0, -0.22, 0.22, Math.PI / 2], scales: [1, 0.8], refine: 12,

@@ -27,11 +27,13 @@ import { area, orientPos, pointInRing, distToRing, bboxOf, cleanRing, inscribed 
 import { ribbon } from '../../geo/offset';
 import { insetConvex } from '../../geo/offset';
 import { isConvex, segCrossesRing, polyInside } from '../../geo/split';
-import { shapeOf } from '../buildings';
+import { shapeOf, clipPlot } from '../buildings';
+import { Noise2D } from '../../core/noise';
 import { Mask } from './site';
 import { giveAccess, phaseAt, type M4State } from './reserve';
 import { emptyOut, type Out } from './kit';
 
+export const RECT = { ok: 0, fail: 0 };
 export type ShantyKind = 'zone' | 'bidonville' | 'gecekondu' | 'riverbank';
 
 export interface ShantyIn {
@@ -72,7 +74,12 @@ export function reserveShanty(s: M4State, api: ReserveApi, si: ShantyIn, amount:
   // value field (lower = less valued); NaN where not allowed
   const v = new Float32Array(n * n).fill(-1e6);
   let ok = 0;
-  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+  // only the cells within 330 m of the footprint
+  let fx0 = Infinity, fy0 = Infinity, fx1 = -Infinity, fy1 = -Infinity;
+  for (const ph of api.footprint) for (const q of ph.outer) { fx0 = Math.min(fx0, q.x); fy0 = Math.min(fy0, q.y); fx1 = Math.max(fx1, q.x); fy1 = Math.max(fy1, q.y); }
+  const gx0 = Math.max(0, Math.floor((fx0 - 330) / cell)), gx1 = Math.min(n - 1, Math.ceil((fx1 + 330) / cell));
+  const gy0 = Math.max(0, Math.floor((fy0 - 330) / cell)), gy1 = Math.min(n - 1, Math.ceil((fy1 + 330) / cell));
+  for (let y = gy0; y <= gy1; y++) for (let x = gx0; x <= gx1; x++) {
     const i = y * n + x;
     const p = { x: (x + 0.5) * cell, y: (y + 0.5) * cell };
     if (t.water[i] || dFoot[i] > 320 || dFoot[i] < 12 + (s.listsW ? s.listsW + 8 : 0) || (dAvoid && dAvoid[i] < 25)) continue;
@@ -121,7 +128,7 @@ export function reserveShanty(s: M4State, api: ReserveApi, si: ShantyIn, amount:
   const roadRb = si.roads.map((pl) => ribbon(pl, 18)).filter((rb) => rb.length >= 3).map((rb) => [{ outer: rb, holes: [] }] as MultiPoly);
   if (roadRb.length) m = differenceS(m, ...roadRb);
   if (si.avoid.length) m = differenceS(m, ...si.avoid.map((p) => [{ outer: p, holes: [] }] as MultiPoly));
-  const pcs = m.filter((ph) => !ph.holes.length && area(ph.outer) > 2500).sort((a, b) => area(b.outer) - area(a.outer));
+  const pcs = m.filter((ph) => !ph.holes.length && area(ph.outer) > 4000).sort((a, b) => area(b.outer) - area(a.outer));
   dbg('pieces', m.length, m.map((ph) => [Math.round(area(ph.outer)), ph.holes.length]));
   const out: ReservedLot[] = [];
   let total = 0;
@@ -148,18 +155,21 @@ export function reserveShanty(s: M4State, api: ReserveApi, si: ShantyIn, amount:
 function cells(B: Polygon, spacing: number, rng: Rng): Polygon[] {
   const bb = bboxOf(B);
   let seeds: Vec2[] = [];
+  // clusters: the seed density follows a low-frequency noise (dense knots of huts, sparser patches with yards)
+  const nz = new Noise2D(rng.fork('cluster'));
   for (let y = bb.y0 + spacing / 2; y < bb.y1; y += spacing * 0.87) {
     const off = (Math.round((y - bb.y0) / (spacing * 0.87)) % 2) * spacing / 2;
     for (let x = bb.x0 + off; x < bb.x1; x += spacing) {
-      const p = { x: x + rng.range(-0.3, 0.3) * spacing, y: y + rng.range(-0.3, 0.3) * spacing };
-      if (pointInRing(B, p)) seeds.push(p);
+      const p = { x: x + rng.range(-0.35, 0.35) * spacing, y: y + rng.range(-0.35, 0.35) * spacing };
+      const dens = 0.5 + 0.5 * nz.noise(p.x / 45, p.y / 45);
+      if (pointInRing(B, p) && rng.float() < 0.68 + 0.32 * dens) seeds.push(p);
     }
   }
   if (seeds.length < 3) return [B];
   const box: [number, number, number, number] = [bb.x0 - 1, bb.y0 - 1, bb.x1 + 1, bb.y1 + 1];
   const conv = (c: Polygon): Polygon => (c as unknown as [number, number][]).slice(0, -1).map(([x, y]) => ({ x, y }));
   // Lloyd relaxation (two steps), the centroids taken in the lot
-  for (let it = 0; it < 2; it++) {
+  for (let it = 0; it < 1; it++) {
     const vor = Delaunay.from(seeds, (p) => p.x, (p) => p.y).voronoi(box);
     seeds = seeds.map((p, i) => {
       const poly = vor.cellPolygon(i);
@@ -211,6 +221,44 @@ export function buildShanty(B: Polygon, cx: CompoundCtx): Out {
   for (const e of edges.values()) if (e.cells.length === 1 && onBoundary(e)) served[e.cells[0]] = 1;
   const inTree = new Set<string>();
   const visited = new Set<string>();
+  // the main winding paths: from the boundary point nearest the town across the settlement (Dijkstra on the cell
+  // edges with jittered weights), then to the far side; the other paths branch off them
+  const mainE = new Set<string>();
+  const bverts: Vec2[] = [];
+  for (const e of edges.values()) if (e.cells.length === 1) bverts.push(e.a, e.b);
+  if (bverts.length) {
+    const entry = bverts.reduce((b, q) => (dist(q, cx.center) < dist(b, cx.center) ? q : b));
+    const far = bverts.reduce((b, q) => (dist(q, entry) > dist(b, entry) ? q : b));
+    const side = bverts.reduce((b, q) => (Math.min(dist(q, entry), dist(q, far)) > Math.min(dist(b, entry), dist(b, far)) ? q : b));
+    const vpos = new Map<string, Vec2>();
+    for (const e of edges.values()) { vpos.set(key(e.a), e.a); vpos.set(key(e.b), e.b); }
+    const wgt = new Map<string, number>();
+    for (const id of interior) wgt.set(id, 0.6 + rng.float() * 0.9);
+    const route = (from: Vec2, to: Vec2) => {
+      const src = key(from), dst = key(to);
+      const dd = new Map<string, number>([[src, 0]]), prev = new Map<string, string>();
+      const q: [number, string][] = [[0, src]];
+      // also start from boundary vertices next to the entry (they connect through the interior)
+      while (q.length) {
+        let bi = 0;
+        for (let i = 1; i < q.length; i++) if (q[i][0] < q[bi][0]) bi = i;
+        const [d0, u] = q.splice(bi, 1)[0];
+        if (u === dst) break;
+        if (d0 > (dd.get(u) ?? Infinity)) continue;
+        for (const nb of adj.get(u) ?? []) {
+          const e = edges.get(nb.id)!;
+          const nd = d0 + dist(e.a, e.b) * (wgt.get(nb.id) ?? 1);
+          if (nd < (dd.get(nb.to) ?? Infinity)) { dd.set(nb.to, nd); prev.set(nb.to, nb.id); q.push([nd, nb.to]); }
+        }
+      }
+      let v = dst;
+      while (prev.has(v)) { const id = prev.get(v)!; mainE.add(id); const e = edges.get(id)!; v = key(e.a) === v ? key(e.b) : key(e.a); }
+    };
+    // (boundary vertices may not be in the interior graph: route from their nearest interior vertex)
+    const nearIn = (p: Vec2): Vec2 => { let b = p, bd = Infinity; for (const k of adj.keys()) { const q = vpos.get(k)!; const d2 = dist(q, p); if (d2 < bd) { bd = d2; b = q; } } return b; };
+    if (adj.size) { const e0 = nearIn(entry); route(e0, nearIn(far)); route(e0, nearIn(side)); }
+  }
+  for (const id of mainE) { inTree.add(id); const e = edges.get(id)!; visited.add(key(e.a)); visited.add(key(e.b)); }
   // start at the vertices on the lot boundary
   const frontier: { w: number; id: string; to: string }[] = [];
   for (const [id, e] of edges) if (e.cells.length === 1) for (const q of [e.a, e.b]) {
@@ -241,7 +289,7 @@ export function buildShanty(B: Polygon, cx: CompoundCtx): Out {
       const e = edges.get(id)!;
       // only leaves (one end free), so the paths stay a connected tree hanging off the boundary
       const leaf = (deg.get(key(e.a)) ?? 0) === 1 || (deg.get(key(e.b)) ?? 0) === 1;
-      if (!leaf) continue;
+      if (!leaf || mainE.has(id)) continue;
       if (e.cells.every((c) => served[c] || touch[c] > 1)) {
         inTree.delete(id);
         for (const c of e.cells) touch[c]--;
@@ -255,7 +303,7 @@ export function buildShanty(B: Polygon, cx: CompoundCtx): Out {
   const pathHalf = rng.range(0.55, 0.85);
   for (const c of cs) out.parcels.push({ poly: c, use: 'hut-lot' });
   const BA = Math.max(1, area(B));
-  const hutsFor = (k: number, cap: [number, number], hr: Rng) => {
+  const hutsFor = (k: number, cap: [number, number], hr: Rng, rect = true) => {
     const list: { poly: Polygon; parcel: number }[] = [];
     let built = 0;
     cs.forEach((c, ci) => {
@@ -264,13 +312,35 @@ export function buildShanty(B: Polygon, cx: CompoundCtx): Out {
         const b = c[(j + 1) % c.length];
         const e = edges.get(ek(q, b));
         if (!e) return 0.2 * k;
-        if (e.cells.length === 1) return (onBoundary(e) ? 0.5 : 0.15) * k;
-        return inTree.has(ek(q, b)) ? Math.max(0.5, pathHalf * Math.sqrt(k)) : 0.15 * k;
+        if (e.cells.length === 1) return (onBoundary(e) ? 0.3 : 0.15) * k;
+        const id = ek(q, b);
+        return mainE.has(id) ? 0.95 : inTree.has(id) ? Math.max(0.5, pathHalf * Math.sqrt(k)) : 0.15 * k;
       });
       const convex = isConvex(c, 1e-3);
       let h: Polygon = [];
-      if (convex) h = insetConvex(c, d);
-      else {
+      if (convex) {
+        h = insetConvex(c, d);
+        // a rectangular hut facing its path (the cell's longest path edge), the rest of the cell a tiny yard
+        let fe = -1, fl = 0;
+        c.forEach((q, j) => { const b2 = c[(j + 1) % c.length]; const id = ek(q, b2); if (inTree.has(id) && dist(q, b2) > fl) { fl = dist(q, b2); fe = j; } });
+        if (rect && fe >= 0 && h.length >= 3 && area(h) > 22) {
+          const a2 = c[fe], b2 = c[(fe + 1) % c.length];
+          const u = { x: (b2.x - a2.x) / fl, y: (b2.y - a2.y) / fl };
+          let nIn = { x: -u.y, y: u.x };
+          const cc = polygonCentroid(c);
+          if ((cc.x - a2.x) * nIn.x + (cc.y - a2.y) * nIn.y < 0) nIn = { x: -nIn.x, y: -nIn.y };
+          const want = hr.range(cap[0] - 4, cap[1]);
+          const wd = Math.min(fl - 0.4, Math.max(5.2, Math.sqrt(want) * hr.range(0.95, 1.3)));
+          const dep = Math.max(5.2, want / wd);
+          const t0 = hr.range(0, Math.max(0, fl - wd));
+          const hp = [
+            { p: { x: a2.x + u.x * t0, y: a2.y + u.y * t0 }, n: u }, { p: { x: a2.x + u.x * (t0 + wd), y: a2.y + u.y * (t0 + wd) }, n: { x: -u.x, y: -u.y } },
+            { p: { x: a2.x + nIn.x * (dep + d[fe]), y: a2.y + nIn.y * (dep + d[fe]) }, n: { x: -nIn.x, y: -nIn.y } },
+          ];
+          const r = clipPlot(h, hp, true)[0];
+          if (r && r.length >= 3 && area(r) >= 15 && shapeOf(r).w >= 4.5 && shapeOf(r).asp <= 3) { h = r; RECT.ok++; } else RECT.fail++;
+        }
+      } else {
         // clipped boundary cells: a uniform inset by boolean, the largest piece
         const rb = ribbon(c.concat([c[0]]), 2 * 0.45 * k);
         const r = rb.length >= 3 ? differenceS(c, rb) : [];
@@ -293,7 +363,9 @@ export function buildShanty(B: Polygon, cx: CompoundCtx): Out {
     return { list, cov: built / BA };
   };
   let huts = hutsFor(1, [30, 40], rng.fork('huts'));
+  // under 52 %: a tighter packing (narrower gaps), then huts filling their whole cell
   if (huts.cov < 0.52) { const h2 = hutsFor(0.55, [36, 40], rng.fork('huts2')); if (h2.cov > huts.cov) huts = h2; }
+  if (huts.cov < 0.52) { const h3 = hutsFor(0.55, [36, 40], rng.fork('huts3'), false); if (h3.cov > huts.cov) huts = h3; }
   // too dense: huts are shrunk about their centroid
   const kk = huts.cov > 0.66 ? Math.sqrt(0.62 / huts.cov) : 1;
   for (const h of huts.list) {

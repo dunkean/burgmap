@@ -94,7 +94,8 @@ registry.add(checkControl($<HTMLInputElement>('legend'), 'legend', true));
   slot.textContent = '';
   const tri: [string, string][] = [['auto', 'Auto'], ['yes', 'On'], ['no', 'Off']];
   const rows: [keyof Options, string, [string, string][]][] = [
-    ['castle', 'Castle / citadel', tri],
+    ['walls', 'Town wall', [['auto', 'Auto'], ['none', 'None (open town)'], ['single', 'Single curtain'], ['double', 'Double enceinte']]],
+    ['castles', 'Castles', [['auto', 'Auto'], ['0', 'None'], ['1', '1'], ['2', '2'], ['3', '3']]],
     ['cathedral', 'Cathedral close', tri],
     ['palace', 'Palace', tri],
     ['monasteries', 'Monasteries', tri],
