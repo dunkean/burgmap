@@ -96,6 +96,95 @@ export interface Options {
   heightScale?: number;
   /** Imported heightmap: sea level in meters (pixels below become sea; default 0 = no sea). */
   importSea?: number;
+  // ---- settlement system (M3c, REGION_SETTLEMENTS.md), additive
+  /** Custom map extent in meters (600 – 40 000); undefined = the size preset's extent. */
+  mapSize?: number;
+  /** Secondary settlements: automatic, none, counts per class, or an explicit list. Default 'auto'. */
+  settlements?: SettlementsOpt;
+}
+
+/** Settlement classes of the planner (farmstead → megacity), derived continuously from the population. */
+export type SettlementClass = 'farmstead' | 'hamlet' | 'village' | 'town' | 'city' | 'metropolis' | 'megacity';
+/** Classes that can be requested by count (secondary settlements). */
+export type CountClass = 'city' | 'town' | 'village' | 'hamlet' | 'farmstead';
+export const COUNT_CLASSES: CountClass[] = ['city', 'town', 'village', 'hamlet', 'farmstead'];
+export type SettlementCounts = Record<CountClass, number>;
+/** One explicitly listed secondary settlement. */
+export interface SettlementSpec {
+  population: number;
+  /** Culture preset id (default: the main culture). */
+  culture?: string;
+  siteType?: SiteArchetype;
+  /** Fixed position (meters); otherwise placed by site scoring. */
+  position?: { x: number; y: number };
+}
+export type SettlementsOpt = 'auto' | 'none' | { counts: SettlementCounts } | { list: SettlementSpec[] };
+
+export const MAP_SIZE_MIN = 600, MAP_SIZE_MAX = 40000;
+export const POP_MIN = 10, POP_MAX = 5000000;
+
+/** Population thresholds of the classes (lower bounds). */
+export const CLASS_FLOOR: [SettlementClass, number][] = [
+  ['megacity', 1000000], ['metropolis', 100000], ['city', 20000], ['town', 1000], ['village', 150], ['hamlet', 15], ['farmstead', 0],
+];
+export function classOfPop(pop: number): SettlementClass {
+  for (const [c, lo] of CLASS_FLOOR) if (pop >= lo) return c;
+  return 'farmstead';
+}
+/** Legacy size class used by the stages that are tuned per preset (site reserve, road count, tracks...). */
+export function sizeForPop(pop: number): SizeName {
+  return pop < 200 ? 'hamlet' : pop < 1200 ? 'village' : pop < 8000 ? 'town' : pop < 30000 ? 'city' : 'capital';
+}
+/** Map extent (m): the custom `mapSize` when set, else the preset's. */
+export function mapSizeOf(o: Pick<Options, 'size' | 'mapSize'>): number {
+  return o.mapSize !== undefined && Number.isFinite(o.mapSize) ? Math.max(MAP_SIZE_MIN, Math.min(MAP_SIZE_MAX, Math.round(o.mapSize))) : SIZE_PRESETS[o.size].mapSize;
+}
+/**
+ * The size class the main settlement is generated with. Legacy maps (no custom extent) keep their preset, so old
+ * links reproduce exactly; with a custom extent the class follows the population when one is given.
+ */
+export function effectiveSize(o: Pick<Options, 'size' | 'mapSize' | 'population'>): SizeName {
+  return o.mapSize !== undefined && o.population > 0 ? sizeForPop(o.population) : o.size;
+}
+
+const CLS_KEYS: Record<CountClass, string> = { city: 'c', town: 't', village: 'v', hamlet: 'h', farmstead: 'f' };
+/** URL form: 'auto' | 'none' | 'c0.t1.v8.h10.f20' | 'L' + items joined by '_' (pop~culture~site~x~y). */
+export function settlementsToString(s: SettlementsOpt | undefined): string {
+  if (!s || s === 'auto') return 'auto';
+  if (s === 'none') return 'none';
+  if ('counts' in s) return COUNT_CLASSES.map((c) => CLS_KEYS[c] + Math.max(0, Math.round(s.counts[c] ?? 0))).join('.');
+  return 'L' + s.list.map((it) => {
+    const f = [String(Math.round(it.population)), it.culture ?? '', it.siteType ?? '', it.position ? String(Math.round(it.position.x)) : '', it.position ? String(Math.round(it.position.y)) : ''];
+    while (f.length > 1 && f[f.length - 1] === '') f.pop();
+    return f.join('~');
+  }).join('_');
+}
+export function settlementsFromString(v: string | null): SettlementsOpt {
+  if (!v || v === 'auto') return 'auto';
+  if (v === 'none') return 'none';
+  if (v[0] === 'L') {
+    const list: SettlementSpec[] = [];
+    for (const item of v.slice(1).split('_')) {
+      if (!item) continue;
+      const [p, cu, st, x, y] = item.split('~');
+      const pop = Number(p);
+      if (!Number.isFinite(pop) || pop <= 0) continue;
+      const spec: SettlementSpec = { population: Math.max(POP_MIN, Math.min(POP_MAX, Math.round(pop))) };
+      if (cu && (CULTURE_IDS as string[]).includes(cu)) spec.culture = cu;
+      if (st && (SITE_ARCHETYPES as string[]).includes(st)) spec.siteType = st as SiteArchetype;
+      if (x !== undefined && y !== undefined && x !== '' && y !== '' && Number.isFinite(Number(x)) && Number.isFinite(Number(y))) spec.position = { x: Number(x), y: Number(y) };
+      list.push(spec);
+    }
+    return { list };
+  }
+  const counts: SettlementCounts = { city: 0, town: 0, village: 0, hamlet: 0, farmstead: 0 };
+  let any = false;
+  for (const part of v.split('.')) {
+    const cls = COUNT_CLASSES.find((c) => CLS_KEYS[c] === part[0]);
+    const n = Number(part.slice(1));
+    if (cls && Number.isFinite(n)) { counts[cls] = Math.max(0, Math.min(2000, Math.round(n))); any = true; }
+  }
+  return any ? { counts } : 'auto';
 }
 
 export interface SizePreset { mapSize: number; grid: number; label: string }
@@ -181,6 +270,8 @@ export function toQuery(o: Options): string {
   if (o.legend) p.set('legend', '1');
   if (o.cultureMix) p.set('mix', mixToString(o.cultureMix));
   if (o.plan) p.set('plan', planToString(o.plan));
+  if (o.mapSize !== undefined) p.set('map', String(mapSizeOf(o)));
+  if (o.settlements && o.settlements !== 'auto') p.set('settl', settlementsToString(o.settlements));
   // the image itself is never put in the URL: only a marker plus its two scalars
   if (o.importedHeight) {
     p.set('hm', 'custom');
@@ -211,7 +302,11 @@ export function fromQuery(q: string | URLSearchParams): Options {
   o.style = oneOf(p.get('style'), STYLES, DEFAULTS.style);
   o.culture = oneOf(p.get('culture'), CULTURES, DEFAULTS.culture);
   const pop = Number(p.get('population'));
-  o.population = Number.isFinite(pop) && pop > 0 ? Math.min(200000, Math.round(pop)) : 0;
+  o.population = Number.isFinite(pop) && pop > 0 ? Math.max(POP_MIN, Math.min(POP_MAX, Math.round(pop))) : 0;
+  const ms = Number(p.get('map'));
+  if (p.get('map') !== null && Number.isFinite(ms) && ms > 0) o.mapSize = Math.max(MAP_SIZE_MIN, Math.min(MAP_SIZE_MAX, Math.round(ms)));
+  const st = settlementsFromString(p.get('settl'));
+  if (st !== 'auto') o.settlements = st;
   const roads = Number(p.get('roads'));
   o.roads = Number.isFinite(roads) && p.get('roads') !== null ? Math.max(0, Math.min(8, Math.round(roads))) : 0;
   const sl = p.get('seaLevel');
@@ -239,7 +334,8 @@ export const wantsCustomHeight = (q: string | URLSearchParams): boolean =>
 /** Parse "k=v" overrides (used by the preview script). */
 export function applyOverride(o: Options, k: string, v: string): void {
   const rec = o as unknown as Record<string, unknown>;
-  if (k === 'roads' || k === 'seaLevel' || k === 'population' || k === 'heightScale' || k === 'importSea') rec[k] = Number(v);
+  if (k === 'roads' || k === 'seaLevel' || k === 'population' || k === 'heightScale' || k === 'importSea' || k === 'mapSize') rec[k] = Number(v);
+  else if (k === 'settlements' || k === 'settl') o.settlements = settlementsFromString(v);
   else if (k === 'contours' || k === 'landuse' || k === 'labels' || k === 'legend') rec[k] = v === '1' || v === 'true';
   else if (k === 'mix' || k === 'cultureMix') o.cultureMix = mixFromString(v);
   else if (k === 'plan') o.plan = planFromString(v) ?? (() => { try { return JSON.parse(v); } catch { return null; } })();

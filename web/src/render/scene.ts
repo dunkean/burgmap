@@ -5,6 +5,7 @@
  */
 import type { World, LandKind, Polygon, Polyline, Vec2, PolyH } from '../gen/types';
 import { contourSet } from './contours';
+import { renderView } from '../gen/settlements/merge';
 import { seaWithIslands } from './util';
 import { offsetRibbon, polygonCentroid } from '../gen/core/geom';
 import { pointInRing } from '../gen/geo/poly';
@@ -91,7 +92,8 @@ export function buildDensity(world: World, cell = 60): DensityMap | null {
   return { w, h: w, cell, cov, max };
 }
 
-export function buildScene(world: World, tileSize = TILE_SIZE): Scene {
+export function buildScene(world0: World, tileSize = TILE_SIZE): Scene {
+  const world = renderView(world0);
   const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
   const S = world.mapSize;
   const poly = new Map<string, PolyLayer>();

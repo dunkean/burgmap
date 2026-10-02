@@ -419,3 +419,34 @@ export const SETTLEMENT_CLASS = (family: NameFamily, pop: number): string => {
   const c = VOCAB[family].class;
   return pop < 100 ? c[0] : pop < 1000 ? c[1] : pop < 5000 ? c[2] : pop < 30000 ? c[3] : c[4];
 };
+
+/**
+ * Names of the secondary settlements (M3c): each from its own culture's language and its own stream, so adding a
+ * settlement never renames the others; appended to `names.entries` as 'village' labels (rank 0 towns, 1 villages,
+ * 2 hamlets) and 'farm' labels.
+ */
+export function settlementNames(world: World, root: Rng): void {
+  const names = world.names;
+  if (!names || !world.settlements) return;
+  const used = new Set(names.entries.map((e) => e.text));
+  used.add(names.town);
+  let idn = names.entries.length;
+  for (const s of world.settlements) {
+    if (s.main) { s.name = names.town; continue; }
+    const family = familyFor(s.culture, world.options.language, world.seed);
+    const V = VOCAB[family];
+    const tier: 0 | 1 | 2 = s.population >= 1000 ? 0 : s.population >= 150 ? 1 : 2;
+    const r = root.fork('names').fork('settlement:' + s.key);
+    let text = '';
+    for (let a = 0; a < 12 && (!text || used.has(text)); a++) text = V.place(r.fork('a' + a), tier);
+    if (s.detail === 'farmstead') text = V.farm(text);
+    if (used.has(text)) text += ' ' + (s.index + 1);
+    used.add(text);
+    s.name = text;
+    const isFarm = s.detail === 'farmstead';
+    names.entries.push({
+      id: `n${idn++}`, kind: isFarm ? 'farm' : 'village', text, rank: isFarm ? 6 : tier, anchor: s.center,
+      sub: 'settlement:' + s.key,
+    });
+  }
+}

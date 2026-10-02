@@ -7,7 +7,7 @@ import { smoothstep, forCellsNearPolyline } from '../core/field';
 import { bridgeRoad, attachEnd, clearRibbons } from './junctions';
 import { roadCount, Options, SizeName } from '../options';
 import { passability } from '../site/site';
-import type { TerrainLayer, SiteLayer, World } from '../types';
+import type { TerrainLayer, SiteLayer, SiteFields, World } from '../types';
 
 type Road = NonNullable<World['roads']>[number];
 type Bridge = NonNullable<World['bridges']>[number];
@@ -176,21 +176,32 @@ function pointAtLength(pl: Polyline, s: number): Vec2 {
 
 const TRACKS: Record<SizeName, number> = { hamlet: 1, village: 1, town: 2, city: 3, capital: 3 };
 
-export function routeRoads(
-  terrain: TerrainLayer, site: SiteLayer, opts: Options, mapSize: number, rng: Rng,
-): { roads: Road[]; bridges: Bridge[]; stats: Record<string, number> } {
-  const r = rng.fork('roads');
+export interface RoadContext {
+  n: number; cell: number; N: number;
+  /** Smoothed heights (grade). */
+  H: Float32Array;
+  pass: Uint8Array; water: Uint8Array;
+  sIds: Int16Array; mainIds: Set<number>;
+  /** Per-cell cost multiplier (wet ground, banks, crossings, wobble). */
+  cm: Float32Array;
+  ribDist: Float32Array;
+  isWaterPt: (p: Vec2) => boolean;
+  isBankPt: (p: Vec2) => boolean;
+  /** Land-preserving smoothing of a cell path (ends pinned to `startPt` / `endPt` when given). */
+  smoothPath: (cells: number[], startPt: Vec2 | null, endPt: Vec2 | null) => Polyline;
+}
+
+/** Cost grid and path smoother shared by the regional roads and the settlement network (`r` = the stage's rng). */
+export function roadContext(terrain: TerrainLayer, f: SiteFields, r: Rng, mapSize: number, passOverride?: Uint8Array): RoadContext {
   const { w: n, cell } = terrain.height;
   const N = n * n;
   const H = blurGrid(terrain.height, 1, 2).data; // smoothed heights: grade from raw noise makes zigzag roads
-  const f = site.fields;
-  const pass = passability(terrain, f);
+  const pass = passOverride ?? passability(terrain, f);
   const water = terrain.water;
   const sIds = streamIds(terrain);
   const mainIds = new Set<number>();
   terrain.rivers.forEach((rv, ri) => { if (rv.main) mainIds.add(ri); });
-  const centerIdx = Math.min(n - 1, Math.floor(site.center.y / cell)) * n + Math.min(n - 1, Math.floor(site.center.x / cell));
-  const costC = site.cost.data;
+  void mapSize;
 
   // per-cell multiplier: wet ground is avoided, brooks need a ford/bridge, bridges cost extra
   const cm = new Float32Array(N).fill(1);
@@ -229,62 +240,6 @@ export function routeRoads(
     const wob = new Noise2D(r.fork('wobble'));
     for (let i = 0; i < N; i++) if (pass[i] === 1) cm[i] *= Math.max(0.6, 1 + 0.55 * wob.fbm(((i % n) + 0.5) * cell / 220, (((i / n) | 0) + 0.5) * cell / 220, 2));
   }
-
-  // ---- exits on the border
-  const cands: Exit[] = [];
-  const step = Math.max(2, Math.round(30 / cell));
-  const push = (x: number, y: number) => {
-    const idx = y * n + x;
-    if (pass[idx] !== 1 || !isFinite(costC[idx]) || f.dWater[idx] < 25) return;
-    const p = { x: (x + 0.5) * cell, y: (y + 0.5) * cell };
-    const eff = dist(p, site.center) / Math.max(1, costC[idx]);
-    cands.push({ idx, p, ang: Math.atan2(p.y - site.center.y, p.x - site.center.x), q: eff });
-  };
-  for (let t = 1; t < n - 1; t += step) { push(t, 0); push(t, n - 1); push(0, t); push(n - 1, t); }
-  let qmin = Infinity, qmax = -Infinity;
-  for (const c of cands) { qmin = Math.min(qmin, c.q); qmax = Math.max(qmax, c.q); }
-  const mainRiver = terrain.rivers.find((rv) => rv.main);
-  const bonus = (c: Exit): number => {
-    let b = 0;
-    if (mainRiver) {
-      const ends = [mainRiver.path[0], mainRiver.path[mainRiver.path.length - 1]];
-      for (const e of ends) if (dist(e, c.p) < 220) b = Math.max(b, 0.25); // valley routes follow the river
-    }
-    if (terrain.seaFraction > 0.02 && f.dSea[c.idx] < 260) b = Math.max(b, 0.2); // coast road
-    return b;
-  };
-  const want = roadCount(opts);
-  const chosen: Exit[] = [];
-  const angDiff = (a: number, b: number) => { let d = Math.abs(a - b) % (2 * Math.PI); if (d > Math.PI) d = 2 * Math.PI - d; return d; };
-  const sector = (2 * Math.PI) / want;
-  const jit = cands.map(() => r.float());
-  while (chosen.length < want && cands.length) {
-    let bi = -1, bs = -Infinity;
-    for (let i = 0; i < cands.length; i++) {
-      const c = cands[i];
-      const qn = (c.q - qmin) / (qmax - qmin + 1e-9);
-      let s: number;
-      if (!chosen.length) s = qn + bonus(c) + 0.35 * jit[i];
-      else {
-        let sep = Infinity;
-        for (const o of chosen) sep = Math.min(sep, angDiff(c.ang, o.ang));
-        if (sep < 0.5 * sector) continue;
-        s = 0.5 * qn + bonus(c) + Math.min(sep, sector) / sector + 0.12 * jit[i];
-      }
-      if (s > bs) { bs = s; bi = i; }
-    }
-    if (bi < 0) break;
-    chosen.push(cands[bi]);
-  }
-
-  // ---- route exits -> center (tree-like: later roads are drawn towards earlier ones)
-  const used = new Uint8Array(N);
-  const owner = new Int16Array(N).fill(-1);
-  const hCenter = (idx: number) => 0.8 * costC[idx];
-  const roads: Road[] = [];
-  const smoothed: Polyline[] = [];
-  const rawCells: number[][] = [];
-  const reached: boolean[] = [];
 
   const plannedWater = (cells: number[]): Uint8Array => {
     const pw = new Uint8Array(N);
@@ -349,6 +304,75 @@ export function routeRoads(
     }
     return resample(chaikin(raw, 2), 4);
   };
+
+  return { n, cell, N, H, pass, water, sIds, mainIds, cm, ribDist, isWaterPt, isBankPt, smoothPath };
+}
+
+export function routeRoads(
+  terrain: TerrainLayer, site: SiteLayer, opts: Options, mapSize: number, rng: Rng,
+): { roads: Road[]; bridges: Bridge[]; stats: Record<string, number> } {
+  const r = rng.fork('roads');
+  const rc = roadContext(terrain, site.fields, r, mapSize);
+  const { n, cell, N, H, pass, sIds, mainIds, cm, isWaterPt, smoothPath } = rc;
+  const f = site.fields;
+  const centerIdx = Math.min(n - 1, Math.floor(site.center.y / cell)) * n + Math.min(n - 1, Math.floor(site.center.x / cell));
+  const costC = site.cost.data;
+
+  // ---- exits on the border
+  const cands: Exit[] = [];
+  const step = Math.max(2, Math.round(30 / cell));
+  const push = (x: number, y: number) => {
+    const idx = y * n + x;
+    if (pass[idx] !== 1 || !isFinite(costC[idx]) || f.dWater[idx] < 25) return;
+    const p = { x: (x + 0.5) * cell, y: (y + 0.5) * cell };
+    const eff = dist(p, site.center) / Math.max(1, costC[idx]);
+    cands.push({ idx, p, ang: Math.atan2(p.y - site.center.y, p.x - site.center.x), q: eff });
+  };
+  for (let t = 1; t < n - 1; t += step) { push(t, 0); push(t, n - 1); push(0, t); push(n - 1, t); }
+  let qmin = Infinity, qmax = -Infinity;
+  for (const c of cands) { qmin = Math.min(qmin, c.q); qmax = Math.max(qmax, c.q); }
+  const mainRiver = terrain.rivers.find((rv) => rv.main);
+  const bonus = (c: Exit): number => {
+    let b = 0;
+    if (mainRiver) {
+      const ends = [mainRiver.path[0], mainRiver.path[mainRiver.path.length - 1]];
+      for (const e of ends) if (dist(e, c.p) < 220) b = Math.max(b, 0.25); // valley routes follow the river
+    }
+    if (terrain.seaFraction > 0.02 && f.dSea[c.idx] < 260) b = Math.max(b, 0.2); // coast road
+    return b;
+  };
+  const want = roadCount(opts);
+  const chosen: Exit[] = [];
+  const angDiff = (a: number, b: number) => { let d = Math.abs(a - b) % (2 * Math.PI); if (d > Math.PI) d = 2 * Math.PI - d; return d; };
+  const sector = (2 * Math.PI) / want;
+  const jit = cands.map(() => r.float());
+  while (chosen.length < want && cands.length) {
+    let bi = -1, bs = -Infinity;
+    for (let i = 0; i < cands.length; i++) {
+      const c = cands[i];
+      const qn = (c.q - qmin) / (qmax - qmin + 1e-9);
+      let s: number;
+      if (!chosen.length) s = qn + bonus(c) + 0.35 * jit[i];
+      else {
+        let sep = Infinity;
+        for (const o of chosen) sep = Math.min(sep, angDiff(c.ang, o.ang));
+        if (sep < 0.5 * sector) continue;
+        s = 0.5 * qn + bonus(c) + Math.min(sep, sector) / sector + 0.12 * jit[i];
+      }
+      if (s > bs) { bs = s; bi = i; }
+    }
+    if (bi < 0) break;
+    chosen.push(cands[bi]);
+  }
+
+  // ---- route exits -> center (tree-like: later roads are drawn towards earlier ones)
+  const used = new Uint8Array(N);
+  const owner = new Int16Array(N).fill(-1);
+  const hCenter = (idx: number) => 0.8 * costC[idx];
+  const roads: Road[] = [];
+  const smoothed: Polyline[] = [];
+  const rawCells: number[][] = [];
+  const reached: boolean[] = [];
 
   const baseCfg = { w: n, h: n, cell, H, pass, cm, discount: 0.45 };
   const usedNear = new Uint8Array(N);
