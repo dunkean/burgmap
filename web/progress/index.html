@@ -91,7 +91,7 @@ a:focus-visible { outline: 2px solid var(--water); outline-offset: 2px; }
 const DATA = {
   updated: "2026-09-30",
   budget: "sans limite · arrêt sur demande",
-  demo: "https://claude.ai/artifact/Fo7zTzCgxysLYrGKjoZCHQ",
+  demo: "https://dunkean.github.io/burgmap/",
   milestones: [
     { s: "done",  t: "M0 · Architecture", d: "Contrat de données, pipeline en 6 étapes, TypeScript + Vite en un seul fichier HTML, graines déterministes par étape." },
     { s: "done",  t: "M1 · Relief et eaux", d: "Relief paramétrable (plaine, collines, vallée, montagne), côte, écoulement (priority-flood, D8), rivière principale creusée avec méandres, lacs. Rendu SVG, estompage, courbes de niveau, interface minimale." },
@@ -99,11 +99,12 @@ const DATA = {
     { s: "done",  t: "M3 · Tissu urbain", d: "Rues principales et secondaires, îlots, parcelles en lanières (burgage plots), maisons alignées sur rue, cours et jardins." },
     { s: "done",  t: "M3b · Cultures urbaines (Opus)", d: "Plans configurables et mélangeables. Historiques : européenne organique (défaut), bastide, noyau romain, médina, chinoise, jōkamachi, ville-temple indienne, nordique, oppidum celte, byzantine, kremlin russe, hanséatique, lagune vénitienne, persane, ottomane, sahélienne, swahilie, aztèque, maya, inca, khmère, coréenne, camp nomade. Imaginaires : elfes, nains, semi-hommes, orques, gnomes, cité sur pilotis, cité des mages, nécropole. Un plan = une suite de phases de croissance, chacune avec sa morphologie." },
     { s: "todo",  t: "M3c · De 10 habitants à 5 millions", d: "La forme change avec l'échelle : ferme isolée, hameau, village-rue, village-tas ou circulade, bourg, ville, métropole polycentrique, mégapole. Au-delà d'environ 50 000 habitants, génération à deux niveaux : trame globale, puis quartiers détaillés à la demande au zoom. Rendu Canvas avec niveaux de détail." },
-    { s: "doing", t: "M4 · Remparts et activités", d: "Banlieues et bidonvilles (optionnels). Sites marquants intégrés au plan : château, palais, cathédrale et temples, grand-place et places, arènes, port avec quais et chantier naval, halles, moulins. "+"Enceinte avec tours et portes, château, églises, cathédrale, place du marché, monastère, quais et chantier naval, moulins, tanneries, faubourgs." },
+    { s: "done",  t: "M4 · Remparts et activités", d: "Banlieues et bidonvilles (optionnels). Sites marquants intégrés au plan : château, palais, cathédrale et temples, grand-place et places, arènes, port avec quais et chantier naval, halles, moulins. "+"Enceinte avec tours et portes, château, églises, cathédrale, place du marché, monastère, quais et chantier naval, moulins, tanneries, faubourgs." },
     { s: "todo",  t: "M5 · Rendu et interface", d: "Styles de carte (parchemin, atlas), légende, toponymes, export SVG/PNG, partage par URL, import d'une carte de relief." },
     { s: "todo",  t: "M6 · Contrôle qualité", d: "Revue sur 50 graines, invariants (rien dans l'eau, pas de chevauchement), performances, démo publiée." }
   ],
   plates: [
+    { src: "m4_sites.png", cap: "M4 · port et quais, château sur un éperon de méandre, enclos de cathédrale, faubourgs et bidonvilles, médina avec kasbah et mellah, ville chinoise avec port." },
     { src: "m3b_cultures.png", cap: "M3b · même terrain, même population (4 640 hab.), douze plans : européen, bastide, noyau romain, médina, chinois, jōkamachi, ville-temple indienne, elfique, nain, et trois mélanges (romain + européen, médina + bastide, médina ~ européen)." },
     { src: "m5_ui.png", cap: "Interface · Sauville, bourg de 4 300 habitants : toponymes générés, étiquettes le long des routes et rivières, cartouche, légende, relief sous la végétation." },
     { src: "m3_coeur.png", cap: "M3 · graine 4, ville · cœur dense : radiales courbes, marché en fuseau, église et cimetière au pont, parcelles en lanières, masses bâties percées de cours." },
@@ -115,6 +116,11 @@ const DATA = {
     { src: "m1_vallee.png", cap: "M1 · graine 2 · vallée et grande rivière, affluents, estompage et courbes de niveau." }
   ],
   log: [
+    { d: "3 oct.", h: "M4 : sites marquants, port, banlieues · dépôt public", b: [
+      "Les sites sont réservés dans la partition avant le découpage. On y trouve : château polygonal sur le site défendable (fossé, esplanade, basses-cours, donjon), enclos de cathédrale, palais, monastères, halle sur la grand-place, paroisses intégrées au bâti, port avec quais rectilignes, rue de quai, jetées, chantier naval et corderie, ponts tous les 250 à 500 m, moulins, métiers polluants en aval, banlieues avec villages absorbés et bidonvilles. Options : nombre de châteaux, enceinte aucune, simple ou double.",
+      "Chaque bâtiment est accessible depuis la rue (passage, cour, porche), et un test le vérifie. Interface : rendu dans un worker, fluidité à 60 images par seconde, barre de progression, affichage progressif.",
+      "Code public sur github.com/dunkean/burgmap (GPL-3.0), site sur dunkean.github.io/burgmap. Retouches en cours : empreintes au sol, Japon, nains, médina, Chine, performances."
+    ]},
     { d: "2 oct.", h: "M3b terminé : les cultures se lisent dans le plan", b: [
       "Moteur de cultures : une culture est une donnée (phases, morphologies, opérateurs de rues, de parcelles et de bâti, catalogue de monuments). Mélanges par phase, par secteur ou par interpolation continue. Neuf cultures abouties, chacune reconnaissable à son seul plan.",
       "Corrections issues des retours : remparts en courtines droites entre tours, villes moins rondes (croissance le long des routes et des berges, villes à deux noyaux, bruit foncier), faubourgs dégressifs collés à la route, plus d'allumettes (rapport longueur/largeur ≤ 3, maisons sur rue de 10 à 14 m puis bâtiments arrière séparés), cœur ancien bâti à 93 %, églises orientées à l'est, une paroisse pour environ 2 200 habitants, une dizaine de places dans une ville de 15 000 habitants.",
