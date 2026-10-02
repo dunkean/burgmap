@@ -18,6 +18,23 @@ Status: [ ] open · [~] in progress · [x] done
 - [ ] Chinese: the interior of the walled city is too empty.
 - [ ] General: cultures are uneven in quality. Each preset must reach the European preset's level.
 
+## Building footprints: realism, proportions, variety (all cultures)
+- [ ] Proportions:
+  - dwellings mostly 1:1 to 1:2.2, with depth tied to the number of bays;
+  - outbuildings (barns, sheds, workshops) clearly smaller and simpler;
+  - landmark buildings at their true scale.
+- [ ] Size distribution: a long-tailed spread, from small cottages and lean-tos (25–40 m²) through standard houses (50–120 m²) to large houses and inns (150–400 m²). Use a log-normal by zone and wealth (rich near the market and main streets, poor at the edges and back lanes).
+- [ ] Shape variety, driven by plot and culture, never random noise:
+  - L-, T- and U-plans;
+  - rear wings and annexes;
+  - stepped façades (jettied fronts read as small offsets);
+  - chamfered or rounded corners at acute street corners;
+  - gable-end vs eaves-side to the street (narrow deep vs wide shallow);
+  - occasional towers or turrets on rich houses;
+  - passages and carriage gates through the front range.
+- [ ] Façade line: mostly continuous, with small irregular jogs (±0.5–1.5 m) and occasional setbacks. Never a perfectly ruled line.
+- [ ] Measure it: per culture and per phase, record the histograms of area, aspect ratio and number of vertices. Compare them with target ranges taken from real cadastral samples, e.g. the Napoleonic cadastre of a French town core (median about 60–90 m², aspect about 1.3–2).
+
 ## Hydrology / site / roads
 - [x] Too many brooks rising inside the map (max 1–2 springs now).
 
