@@ -133,7 +133,10 @@ export function cutCourtyards(block: Polygon, bi: number, zone: Zone, P: Morphol
     const [fa, fb] = fl.best;
     const W = dist(fa, fb);
     const t = { x: (fb.x - fa.x) / W, y: (fb.y - fa.y) / W };
-    const nrm = { x: -t.y, y: t.x }; // interior on the left of a positive ring
+    // inward normal (split pieces do not keep the block's orientation: test it)
+    let nrm = { x: -t.y, y: t.x };
+    const probe = { x: (fa.x + fb.x) / 2 + nrm.x * 0.3, y: (fa.y + fb.y) / 2 + nrm.y * 0.3 };
+    if (!pointInRing(Q, probe)) nrm = { x: -nrm.x, y: -nrm.y };
     let D = 0;
     for (const q of Q) D = Math.max(D, (q.x - fa.x) * nrm.x + (q.y - fa.y) * nrm.y);
     plots.push({

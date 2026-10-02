@@ -553,6 +553,10 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   const smithies = new Set<Plot>();
   const blockInfill: number[] = [];
   const slowest = { ms: 0, bi: -1, n: 0 };
+  // wealth of a frontage: near the market and on the main streets → rich; back lanes and the edge → poor
+  const wealthR = Math.max(150, Math.sqrt(mpArea(eplan.enclosure) / Math.PI));
+  const RANK_W = [0.26, 0.18, 0.02, -0.12, -0.2];
+  const wealthAt = (p: Vec2, rank: number): number => Math.max(0, Math.min(1, 0.66 * (1 - dist(p, nucleus) / (1.25 * wealthR)) + (RANK_W[Math.min(4, Math.max(0, rank))] ?? -0.2) + 0.08));
   carved.forEach((b, bi) => {
     const P = blockMorph[bi];
     const br = rng.fork('blk:' + bi);
@@ -575,7 +579,8 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     const Pb = fade > 0 ? { ...P, frontage: { ...P.frontage, faubourg: [P.frontage.faubourg[0] * (1 + 0.9 * fade), P.frontage.faubourg[1] * (1 + 1.3 * fade)] as [number, number] } } : P;
     const r = Pb.plotOp === 'courtyard' || P.plotOp === 'compound' ? cutCourtyards(b.poly, bi, b.zone, P, streets, br)
       : P.plotOp === 'garden' ? { plots: [], back: [b.poly] }
-      : cutPlots(b.poly, bi, b.zone, infill, Pb, streets, br);
+      : cutPlots(b.poly, bi, b.zone, infill, Pb, streets, br, wealthAt);
+    for (const p of r.plots) p.wealth = wealthAt({ x: (p.front[0].x + p.front[1].x) / 2, y: (p.front[0].y + p.front[1].y) / 2 }, p.rank);
     if (fade > 0) for (const p of r.plots) p.fade = faubFade({ x: (p.front[0].x + p.front[1].x) / 2, y: (p.front[0].y + p.front[1].y) / 2 });
     const tb1 = performance.now() - tb0;
     if (tb1 > slowest.ms) { slowest.ms = tb1; slowest.bi = bi; slowest.n = b.poly.length; }
@@ -700,7 +705,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
       // first a gateway through the front range into the court or yard behind it (1.6 m, along a side line) for
       // every plot with a building off the street front (no flood fill needed to know that), then one check
       for (const pi of pis) {
-        if (plotBld[pi].every((b) => touchesFront(plots[pi], b.poly))) continue;
+        if (plots[pi].gated || plotBld[pi].every((b) => touchesFront(plots[pi], b.poly))) continue;
         const dF = frontRangeDepth(plots[pi], plotBld[pi]);
         if (dF > 0) plotBld[pi] = carvePassage(plots[pi], plotBld[pi], 'A', 1.6, dF + 0.05);
       }

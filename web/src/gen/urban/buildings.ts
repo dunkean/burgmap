@@ -26,12 +26,13 @@ import { area, cleanRing, isSimple, obb, orientPos, bboxOf } from '../geo/poly';
 import { ribbon } from '../geo/offset';
 import { stitchUnion } from '../geo/stitch';
 import { truncateAcute } from './blocks';
+import { burgageHouse } from './houses';
 
 export interface HalfPlane { p: Vec2; n: Vec2 }
 export type BldgKind = 'house' | 'rear' | 'back' | 'barn' | 'shed' | 'garden' | 'hall' | 'landmark' | 'church' | 'cathedral' | 'hut';
 export interface Bldg { poly: Polygon; kind: BldgKind }
 
-export const BLD_STATS = { on: false, plot: 0, raw: 0, norm: 0, fin: 0 };
+export const BLD_STATS = { on: false, zone: 'core', plot: 0, raw: 0, norm: 0, fin: 0 };
 
 /** Min footprint width and max aspect (no matchsticks). */
 export const MIN_BW = 4.5;
@@ -189,8 +190,11 @@ export function courtyardRing(Q: Polygon, rd: number, axis: Vec2): { pieces: Pol
   const pieces: Polygon[] = [];
   for (const nrm of [m, { x: -m.x, y: -m.y }]) {
     const half = clipPlot(q, [{ p: c, n: nrm }], isConvex(q, 1e-3));
-    const ch = clipHalfPlaneConvex(court, c, nrm);
+    const ch = isConvex(court, 1e-3) ? clipHalfPlaneConvex(court, c, nrm) : (clipPlot(court, [{ p: c, n: nrm }], false)[0] ?? []);
     for (const h of half) {
+      // convex lot: the U is built exactly (outer chain of the half, then the court chain backwards)
+      const u = ch.length >= 3 && isConvex(q, 1e-3) ? uPiece(h, ch, c, nrm) : null;
+      if (u && area(u) > 4 && polyInside(q, u)) { pieces.push(u); continue; }
       const d = ch.length >= 3 ? difference(h, ch) : [{ outer: h, holes: [] }];
       // (a boolean that fell back to coarse snapping may leave cm slivers outside the lot: keep exact pieces only)
       for (const ph of d) if (!ph.holes.length && area(ph.outer) > 4 && polyInside(q, ph.outer)) pieces.push(ph.outer);
@@ -200,29 +204,40 @@ export function courtyardRing(Q: Polygon, rd: number, axis: Vec2): { pieces: Pol
   return { pieces, court };
 }
 
-/** Convex inset by d (edge lines shifted inward); [] when it collapses. */
-function insetConvexSafe(p: Polygon, d: number): Polygon {
-  const n = p.length;
-  const lines: { px: number; py: number; dx: number; dy: number }[] = [];
-  for (let i = 0; i < n; i++) {
-    const a = p[i], b = p[(i + 1) % n];
-    const l = dist(a, b) || 1;
-    const dx = (b.x - a.x) / l, dy = (b.y - a.y) / l;
-    lines.push({ px: a.x - dy * d, py: a.y + dx * d, dx, dy });
-  }
+/**
+ * Half of a courtyard ring, exactly: h (a convex half of the lot) minus ch (the court's half), both with an edge on
+ * the split line through p (normal n). Null when either has no edge on the line.
+ */
+function uPiece(h0: Polygon, ch0: Polygon, p: Vec2, n: Vec2): Polygon | null {
+  const H = orientPos(h0), C = orientPos(ch0);
+  const onL = (v: Vec2) => Math.abs((v.x - p.x) * n.x + (v.y - p.y) * n.y) < 1e-6;
+  const hi = H.findIndex((v, i) => onL(v) && onL(H[(i + 1) % H.length]));
+  const ci = C.findIndex((v, i) => onL(v) && onL(C[(i + 1) % C.length]));
+  if (hi < 0 || ci < 0) return null;
   const out: Vec2[] = [];
-  for (let i = 0; i < n; i++) {
-    const A = lines[(i - 1 + n) % n], B = lines[i];
-    const den = A.dx * B.dy - A.dy * B.dx;
-    if (Math.abs(den) < 1e-9) { out.push({ x: B.px, y: B.py }); continue; }
-    const t = ((B.px - A.px) * B.dy - (B.py - A.py) * B.dx) / den;
-    out.push({ x: A.px + A.dx * t, y: A.py + A.dy * t });
+  for (let k = 1; k <= H.length; k++) out.push(H[(hi + k) % H.length]); // b … a
+  for (let k = 0; k < C.length; k++) out.push(C[(ci - k + C.length) % C.length]); // c0, backwards … c1
+  const r = cleanRing(out, 0.005, 0.5, 0.002, false);
+  return r.length >= 3 && isSimple(r) ? r : null;
+}
+
+/**
+ * Convex inset by d: the lot clipped by every edge line shifted inward (exact; short edges that collapse simply
+ * drop out); [] when it vanishes.
+ */
+function insetConvexSafe(p: Polygon, d: number): Polygon {
+  const q = orientPos(p);
+  const n = q.length;
+  let cur: Polygon = q;
+  for (let i = 0; i < n && cur.length >= 3; i++) {
+    const a = q[i], b = q[(i + 1) % n];
+    const l = dist(a, b);
+    if (l < 1e-6) continue;
+    // inward normal of a positive ring: left of the edge
+    const nn = { x: -(b.y - a.y) / l, y: (b.x - a.x) / l };
+    cur = clipHalfPlaneConvex(cur, { x: a.x + nn.x * d, y: a.y + nn.y * d }, nn);
   }
-  for (let i = 0; i < n; i++) {
-    const a = out[i], b = out[(i + 1) % n];
-    if ((b.x - a.x) * lines[i].dx + (b.y - a.y) * lines[i].dy <= 0.05) return [];
-  }
-  return cleanRing(out, 0.05, 0.5, 0.002, false);
+  return cur.length >= 3 ? cleanRing(cur, 0.05, 0.5, 0.002, false) : [];
 }
 
 /**
@@ -283,7 +298,7 @@ export function buildPlot(pl: Plot, cov: number, P: MorphologyParams, rng: Rng, 
   const rawB = raw.filter((b) => b.kind !== 'garden');
   const norm = normalizeFootprints(rawB);
   const fin = trimOverlaps(norm);
-  if (BLD_STATS.on && pl.zone === 'core') {
+  if (BLD_STATS.on && pl.zone === BLD_STATS.zone) {
     BLD_STATS.plot += area(pl.poly);
     BLD_STATS.raw += rawB.reduce((s2, b) => s2 + area(b.poly), 0);
     BLD_STATS.norm += norm.reduce((s2, b) => s2 + area(b.poly), 0);
@@ -293,6 +308,8 @@ export function buildPlot(pl: Plot, cov: number, P: MorphologyParams, rng: Rng, 
 }
 
 function buildPlotRaw(pl: Plot, cov: number, P: MorphologyParams, rng: Rng, hint?: CourtHint): Bldg[] {
+  // town plots: houses.ts; village plots: farmsteads
+  if (pl.zone !== 'village') return burgageHouse(pl, cov, P, rng, hint);
   const poly = pl.poly;
   const convex = isConvex(poly, 1e-3);
   const [fa, fb] = pl.front;
@@ -305,15 +322,6 @@ function buildPlotRaw(pl: Plot, cov: number, P: MorphologyParams, rng: Rng, hint
   let D = 0;
   for (const q of poly) D = Math.max(D, (q.x - fa.x) * n.x + (q.y - fa.y) * n.y);
   if (D < 4) return [];
-  // side-line normals pointing into the plot
-  const sideN = (s: { p: Vec2; d: Vec2 }, towards: Vec2): HalfPlane => {
-    let m = { x: -s.d.y, y: s.d.x };
-    if (dot(m, towards) < 0) m = { x: -m.x, y: -m.y };
-    return { p: s.p, n: m };
-  };
-  const hA = sideN(pl.sideA, t), hB = sideN(pl.sideB, { x: -t.x, y: -t.y });
-  const shift = (h: HalfPlane, g: number): HalfPlane => ({ p: { x: h.p.x + h.n.x * g, y: h.p.y + h.n.y * g }, n: h.n });
-  const flip = (h: HalfPlane): HalfPlane => ({ p: h.p, n: { x: -h.n.x, y: -h.n.y } });
   const band = (d0: number, d1: number): HalfPlane[] => [
     { p: { x: fa.x + n.x * d0, y: fa.y + n.y * d0 }, n },
     { p: { x: fa.x + n.x * d1, y: fa.y + n.y * d1 }, n: { x: -n.x, y: -n.y } },
@@ -344,129 +352,7 @@ function buildPlotRaw(pl: Plot, cov: number, P: MorphologyParams, rng: Rng, hint
   };
   const [sb0, sb1] = P.setback[zone];
   const [bd0, bd1] = P.buildDepth[zone];
-  if (zone === 'village') { farmstead(pl, poly, convex, fa, t, n, W, D, band, add, addGarden, rng); return out; }
-  // faubourg fade: toward the end of the ribbon some plots stay gardens and houses stand free, set back
-  const fade = pl.fade ?? 0;
-  if (fade > 0 && rng.chance(0.5 * Math.pow(fade, 1.4))) { addGarden(0); return out; }
-  const sb = rng.range(sb0, sb1) + (fade > 0 ? rng.range(0, 3.5) * fade : 0);
-  // front depth varies plot by plot: the rear line of the street front is jagged
-  const hd = Math.min(D - sb, rng.range(bd0, bd1) * (pl.wide ? 1.15 : 1) * rng.range(0.85, 1.15));
-  const A = area(poly);
-  const sides = [hA, hB];
-  const s0 = rng.chance(0.5) ? 0 : 1;
-  const wingOn = (k: number, ww: number): HalfPlane[] => [sides[k], flip(shift(sides[k], ww))];
-  // wing width: at least half the plot, or the full width when the yard beside it would be < 3 m
-  const wingW = (want: number) => { const ww = Math.max(MIN_BW, want, W / 2); return W - ww < 3 ? W : ww; };
-  // corner plots: the front house wraps the corner (an L along the side street)
-  const cornerRanges = () => {
-    for (const [a, b] of pl.sideFronts) {
-      const l = dist(a, b);
-      const u = { x: (b.x - a.x) / l, y: (b.y - a.y) / l };
-      let m = { x: -u.y, y: u.x };
-      let cx = 0, cy = 0;
-      for (const q of poly) { cx += q.x; cy += q.y; }
-      cx /= poly.length; cy /= poly.length;
-      if ((cx - a.x) * m.x + (cy - a.y) * m.y < 0) m = { x: -m.x, y: -m.y };
-      const d2 = Math.max(MIN_BW + 1, Math.min(hd, rng.range(bd0, bd1)));
-      const before = out.length;
-      add([{ p: a, n: m }, { p: { x: a.x + m.x * d2, y: a.y + m.y * d2 }, n: { x: -m.x, y: -m.y } }, ...band(sb + hd, D + 1)], 'house');
-      // join it to the front house: one L-shaped footprint
-      if (out.length > before && out[0]?.kind === 'house') {
-        const u2 = stitchUnion(out[0].poly, out[before].poly);
-        if (u2) { out[0] = { poly: u2, kind: 'house' }; out.splice(before, 1); }
-      }
-    }
-  };
-
-  // large courtyard building on wide plots of dense zones (inn, hall, hôtel)
-  if (cov >= 0.66 && W >= 11 && D >= 20 && A > 320 && rng.chance(P.bigCourtChance ?? 0.3)) {
-    const Lc = Math.min(D - sb, rng.range(18, 26));
-    const Q = clipPlot(poly, band(sb, sb + Lc), convex);
-    const ring = Q.length === 1 ? courtyardRing(Q[0], rng.range(4.5, 6), n) : null;
-    if (ring) {
-      for (const pc of ring.pieces) out.push({ poly: pc, kind: 'hall' });
-      const rest = D - sb - Lc;
-      if (rest >= MIN_BW) {
-        if (cov >= 0.84) add(band(sb + Lc, D + 1), 'back');
-        else if (rest > 9) { add(band(sb + Lc + 3, sb + Lc + 3 + Math.min(rest - 3, rng.range(6, 9))), 'back'); addGarden(sb + Lc + 3 + rng.range(6, 9) + 1); }
-      }
-      return out;
-    }
-  }
-
-  if (cov >= 0.84) {
-    // FULL: consecutive ranges over the whole depth
-    const cuts = [sb, sb + hd];
-    let d = sb + hd + rng.range(8, 13);
-    while (d < D - 6) { cuts.push(d); d += rng.range(8, 13); }
-    cuts.push(D + 1);
-    let courtAt = -1, courtD = 0;
-    if ((hint?.court || rng.chance(0.1)) && cuts.length >= 3) {
-      const target = sb + hd + (D - sb - hd) * (hint?.f ?? 0.5);
-      let bk = 1, bdv = Infinity;
-      for (let k = 1; k < cuts.length - 1; k++) { const dv = Math.abs(cuts[k] - target); if (dv < bdv) { bdv = dv; bk = k; } }
-      const segL = Math.min(cuts[bk + 1], D) - cuts[bk];
-      courtD = Math.min(rng.range(3.5, 5.5), segL);
-      if (segL - courtD < MIN_BW) courtD = segL;
-      if (courtD >= 3) courtAt = bk;
-    }
-    for (let k = 0; k + 1 < cuts.length; k++) {
-      const kind = k === 0 ? 'house' : k === cuts.length - 2 ? 'back' : 'rear';
-      if (k !== courtAt) { add(band(cuts[k], cuts[k + 1]), kind); continue; }
-      const c1 = cuts[k] + courtD;
-      if (W >= 9) {
-        // partial court against one side; the other side of the band stays built (a wing ≥ half the width)
-        const ww = wingW(W - Math.max(3.2, W * 0.45));
-        if (ww < W) add([...band(cuts[k], c1), ...wingOn(1 - s0, ww)], 'rear');
-      }
-      if (cuts[k + 1] - c1 >= 1) add(band(c1, cuts[k + 1]), kind);
-    }
-    // (corner ranges would lie inside the full-depth ranges: the plot is built over its whole depth already)
-    return out;
-  }
-  const gapW = zone === 'faubourg' ? Math.min(W - MIN_BW - 0.5, W * (fade * rng.range(0.25, 0.55) + (cov < 0.45 && rng.chance(0.35) ? 0.15 : 0))) : 0;
-  add([...band(sb, sb + hd), ...(gapW > 1 ? [shift(sides[s0], gapW)] : [])], 'house');
-  cornerRanges();
-  const rest = D - sb - hd;
-  if (rest < 3) return out;
-  const frontA = Math.min(A, W * hd);
-  if (cov >= 0.66) {
-    // YARD: back building + a wing, the yard beside the wing ≥ 3 m wide
-    if (rest < MIN_BW + 3) { add(band(sb + hd, D + 1), 'rear'); return out; }
-    let rd = rest >= MIN_BW + 3 + MIN_BW ? Math.min(rest - 3 - MIN_BW, rng.range(6, 10)) : 0;
-    if (rd < MIN_BW) rd = 0;
-    const m0 = sb + hd, m1 = D - rd;
-    if (rd > 0) add(band(m1, D + 1), 'back');
-    const Lm = m1 - m0;
-    const unbuilt = Math.max(9, (1 - cov) * A);
-    const yardW = unbuilt / Math.max(1, Lm);
-    if (yardW >= 3 && W - yardW >= MIN_BW) add([...band(m0, m1), ...wingOn(s0, W - yardW)], 'rear');
-    else {
-      // yard across the plot: built part next to the front house, then the yard (≥ 3 m deep)
-      const yl = Math.max(3, Math.min(Lm, unbuilt / W));
-      if (Lm - yl >= MIN_BW) add(band(m0, m1 - yl), 'rear');
-    }
-    return out;
-  }
-  if (cov >= 0.45) {
-    // GARDEN: rear wing, then the garden
-    const need = cov * A - frontA;
-    const ww = wingW(W * rng.range(0.5, 0.65));
-    const lw = Math.min(rest - 3, need / ww);
-    let end = sb + hd;
-    if (lw >= MIN_BW) { add([...band(sb + hd, sb + hd + lw), ...(ww < W ? wingOn(s0, ww) : [])], 'rear'); end = sb + hd + lw; }
-    addGarden(end + (ww < W ? 0 : 0.01));
-    return out;
-  }
-  // OPEN: sometimes a shed behind a yard, then the garden
-  const need = cov * A - frontA;
-  let end = sb + hd;
-  if (need > 25 && rest > 3 + MIN_BW + 3) {
-    const y = rng.range(3, 6), sd = Math.min(rest - y - 3, rng.range(MIN_BW, 7));
-    const ww = wingW(Math.min(W, need / sd));
-    if (sd >= MIN_BW) { add([...band(sb + hd + y, sb + hd + y + sd), ...(ww < W ? wingOn(s0, ww) : [])], 'shed'); end = sb + hd + y + sd; }
-  }
-  addGarden(end + 1);
+  farmstead(pl, poly, convex, fa, t, n, W, D, band, add, addGarden, rng);
   return out;
 }
 

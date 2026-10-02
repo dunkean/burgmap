@@ -43,7 +43,13 @@ export interface Plot {
   order: number;
   /** Faubourgs: 0 at the gate … 1 at the far end of the ribbon (density fades). */
   fade?: number;
+  /** 0 poor … 1 rich: near the market and on the main streets, poor on back lanes and at the edge. */
+  wealth?: number;
+  /** The building operator left a way in to the back (gateway or carriage passage). */
+  gated?: boolean;
 }
+/** Wealth of a frontage at p on a street of the given rank (0 poor … 1 rich). */
+export type WealthAt = (p: Vec2, rank: number) => number;
 
 interface Run { pts: Vec2[]; edges: number[]; rank: number; street: number; len: number; prio: number }
 
@@ -94,7 +100,7 @@ export function openHoles(ph: PolyH, depth = 0): MultiPoly {
 }
 
 export function cutPlots(
-  block: Polygon, bi: number, zone: Zone, infill: number, P: MorphologyParams, streets: Streets, rng: Rng,
+  block: Polygon, bi: number, zone: Zone, infill: number, P: MorphologyParams, streets: Streets, rng: Rng, wealthAt?: WealthAt,
 ): PlotResult {
   const B = orientPos(block);
   const n = B.length;
@@ -170,7 +176,7 @@ export function cutPlots(
   const territories: { run: Run; poly: MultiPoly; depth: number }[] = [];
   let taken: MultiPoly = [];
   // dense zones (coverage ≥ 0.68): plots run to the medial line and the block interior is divided among them
-  const deepFill = infill >= 0.68 && zone !== 'faubourg' && zone !== 'village';
+  const deepFill = (infill >= 0.68 || !!P.deepFill) && zone !== 'faubourg' && zone !== 'village';
   for (const run of good) {
     const pl = run.pts.slice();
     const dz = dmin + (dmax - dmin) * rng.float();
@@ -269,11 +275,16 @@ export function cutPlots(
       s0 = Math.max(0, s0 - 0.25); s1 = Math.min(L, s1 + 0.25);
       const FL = s1 - s0;
       // plot widths
+      // plot widths: log-normal around a median set by the wealth of the frontage (rich runs: wider lots, more
+      // merchant double lots; back lanes: narrow cottages)
       const widths: number[] = [];
       let acc = 0;
+      const mid = pointAt(pl, cum, (s0 + s1) / 2).p;
+      const wl = wealthAt ? wealthAt(mid, run.rank) : 0.5;
+      const med = fwMin + (fwMax - fwMin) * (0.2 + 0.6 * wl);
       while (acc < FL) {
-        let w = fwMin + (fwMax - fwMin) * rng.float();
-        if (rng.chance(P.wideLotChance)) w *= rng.range(1.8, 2.8);
+        let w = Math.max(fwMin * 0.85, Math.min(fwMax * 1.25, med * Math.exp(0.2 * rng.gauss())));
+        if (rng.chance(P.wideLotChance * (0.4 + 1.2 * wl))) w *= rng.range(1.8, 2.8);
         widths.push(w); acc += w;
       }
       if (widths.length > 1 && acc - FL > 0.5 * widths[widths.length - 1]) { acc -= widths.pop()!; }
