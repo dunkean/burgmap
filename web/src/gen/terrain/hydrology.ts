@@ -720,7 +720,7 @@ export function terrainForExtent(opts: Options, mapSize: number, root?: Rng): { 
     else if (ownerCell[e] >= 0 && ownerCell[e] !== k) { end = 'host'; hostRaw = ownerCell[e]; }
     return { path, forced: !!r.forced, end, hostRaw, lakeSrc: r.lakeSrc, endLake, endAcc: acc[r.cells[r.cells.length - 1]] };
   });
-  const nEdge = !cls || cls.wMouth < 8 * widthK ? 0 : mapSize < 1400 ? (rng.fork('nedge').chance(0.5) ? 1 : 0) : mapSize < 2000 ? 1 : mapSize < 3000 ? 1 + (rng.fork('nedge').chance(0.5) ? 1 : 0) : mapSize < 4200 ? 2 : 2 + (rng.fork('nedge').chance(0.5) ? 1 : 0);
+  const nEdge = !cls || cls.wMouth < 8 * widthK ? 0 : mapSize < 1400 ? 1 : mapSize < 2000 ? 1 + (rng.fork('nedge').chance(0.5) ? 1 : 0) : mapSize < 3000 ? 2 : mapSize < 4200 ? 2 + (rng.fork('nedge').chance(0.5) ? 1 : 0) : 3;
   const mainMaxW = cls ? cls.wMouth * 1.2 : 0;
   const geo = assembleChannels({
     chans: rawChans, main: mainPoly, mapSize, cell, scale, rng: rng.fork('net'), nEdge,
@@ -738,7 +738,20 @@ export function terrainForExtent(opts: Options, mapSize: number, root?: Rng): { 
   if (mainPoly) {
     rivers.push({ path: mainPoly, width: mainPoly.map(() => 1), main: true, id: 0, edgeFed: true, source: 'edge', mouth: plan.seaSide ? 'sea' : 'edge' });
   }
-  rivers.push(...natRivers);
+  // Few channels may rise inside the map: keep the longest springs (and any spring another kept
+  // channel flows into); the rest of the visible network comes in from the map edge.
+  const maxSprings = mapSize < 2000 ? 1 : 2;
+  const pathLen = (p: Polyline) => { let s = 0; for (let i = 1; i < p.length; i++) s += Math.hypot(p[i].x - p[i - 1].x, p[i].y - p[i - 1].y); return s; };
+  let keptNat = natRivers.slice();
+  const springs = keptNat.filter((r) => r.source === 'spring').sort((a, b) => pathLen(a.path) - pathLen(b.path));
+  let excess = springs.length - maxSprings;
+  for (const s of springs) {
+    if (excess <= 0) break;
+    if (keptNat.some((r) => r !== s && r.host === s.id)) continue;
+    keptNat = keptNat.filter((r) => r !== s);
+    excess--;
+  }
+  rivers.push(...keptNat);
 
   // ---- polygons (sea and lakes): needed before the water mask so river ribbons can be clipped at the shore
   const seaField = new Float32Array(N);
