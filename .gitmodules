@@ -1,0 +1,3 @@
+[submodule "TownGeneratorOS"]
+	path = TownGeneratorOS
+	url = https://github.com/watabou/TownGeneratorOS
