@@ -32,6 +32,8 @@ export const DEFAULT_M4: Required<M4Catalogue> = {
 
 export interface M4Flags {
   castle: CastleVariant | null;
+  /** Number of castles to site (each on a distinct defensible site). */
+  castles: number;
   cathedral: string | null;
   palace: string | null;
   monasteries: number;
@@ -58,6 +60,15 @@ export function m4Flags(opts: Options, culture: Culture, pop: number, archetype:
     else if (archetype === 'nucleated-village' && cv === 'castle' && pop >= 350 && rng.fork('motte').chance(0.3)) castle = 'motte';
   }
   if (castle === 'castle' && !town) castle = 'motte';
+  // the castle count option: 0–3 castles (a citadel, a bridgehead castle, a palace-fortress...)
+  let castles = castle ? 1 : 0;
+  const co = opts.castles ?? 'auto';
+  if (co !== 'auto') {
+    castles = Number(co);
+    if (castles > 0 && !castle) castle = cv ?? (culture.id === 'japanese-jokamachi' ? null : town ? 'castle' : 'motte');
+    if (!castle) castles = 0;
+    if (!town) castles = Math.min(castles, 1);
+  }
   const city = town && pop >= 9000;
   const cathedral = cat.cathedral && tri(opts.cathedral, city) && town ? cat.cathedral : null;
   const palace = cat.palace && tri(opts.palace, town && pop >= 9000) && town ? cat.palace : null;
@@ -69,7 +80,7 @@ export function m4Flags(opts: Options, culture: Culture, pop: number, archetype:
   const sh = opts.shantytowns ?? 'auto';
   const shanty = sh === 'auto' ? (town && pop >= 9000 ? 'some' : 'none') : town ? sh : 'none';
   return {
-    castle, cathedral, palace, monasteries, monastery: cat.monastery, marketHall: cat.marketHall && town,
+    castle: castles ? castle : null, castles, cathedral, palace, monasteries, monastery: cat.monastery, marketHall: cat.marketHall && town,
     // fantasy cultures keep their own plan: no gallows, lazar houses or shanty belts unless asked for
     port: cat.port && opts.port !== 'no', arena,
     activities: opts.activities === 'yes' || (opts.activities !== 'no' && !culture.fantasy), suburbs,

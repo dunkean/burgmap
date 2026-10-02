@@ -11,6 +11,10 @@ export type RiverOpt = 'none' | 'stream' | 'river' | 'major';
 export type StyleName = 'parchment' | 'atlas';
 export type Tri = 'auto' | 'yes' | 'no';
 /** Suburb growth (M4): none, the faubourg ribbons, or thick suburbs with their own churches (and an outer wall for cities). */
+/** Town wall (M4): auto, none (open town), single curtain, double enceinte (inner curtain + outer wall, lists between). 'yes' / 'no' are the older spellings of single / none. */
+export type WallsOpt = Tri | 'none' | 'single' | 'double';
+/** Number of castles: auto (size and culture) or 0–3 on distinct defensible sites. */
+export type CastlesOpt = 'auto' | '0' | '1' | '2' | '3';
 export type SuburbOpt = 'auto' | 'none' | 'some' | 'many';
 /** Informal settlements on the least valued land (M4). */
 export type ShantyOpt = 'auto' | 'none' | 'some' | 'many';
@@ -52,7 +56,9 @@ export interface Options {
   /** Shifts the sea inland (+) or seaward (-), range about [-1, 1]. Only used when a coast exists. */
   seaLevel?: number;
   // Placeholders for later stages
-  walls: Tri;
+  walls: WallsOpt;
+  /** Castle count (M4): overrides `castle` when not 'auto'. */
+  castles?: CastlesOpt;
   /** Castle / citadel on the most defensible spot at the town edge (auto: town and larger, sometimes a village motte). */
   castle: Tri;
   // ---- landmarks and activities (M4, URBAN_LANDMARKS.md); 'auto' follows the size and the culture
@@ -111,6 +117,7 @@ export const DEFAULTS: Options = {
   siteType: 'auto',
   walls: 'auto',
   castle: 'auto',
+  castles: 'auto',
   cathedral: 'auto',
   palace: 'auto',
   monasteries: 'auto',
@@ -142,6 +149,8 @@ const RIVERS: RiverOpt[] = ['none', 'stream', 'river', 'major'];
 const STYLES: StyleName[] = ['parchment', 'atlas'];
 const TRIS: Tri[] = ['auto', 'yes', 'no'];
 const SUBURBS: SuburbOpt[] = ['auto', 'none', 'some', 'many'];
+const WALLS: WallsOpt[] = ['auto', 'yes', 'no', 'none', 'single', 'double'];
+const CASTLES: CastlesOpt[] = ['auto', '0', '1', '2', '3'];
 const SHANTIES: ShantyOpt[] = ['auto', 'none', 'some', 'many'];
 /** M4 landmark toggles: option key → URL key. */
 export const LANDMARK_TOGGLES: [keyof Options & ('cathedral' | 'palace' | 'monasteries' | 'port' | 'arena' | 'activities'), string][] = [
@@ -161,6 +170,7 @@ export function toQuery(o: Options): string {
   for (const k of keys) if (o[k] !== DEFAULTS[k]) p.set(k, String(o[k]));
   for (const [k, q] of LANDMARK_TOGGLES) if (o[k] && o[k] !== 'auto') p.set(q, String(o[k]));
   if (o.suburbs && o.suburbs !== 'auto') p.set('suburbs', o.suburbs);
+  if (o.castles && o.castles !== 'auto') p.set('castles', o.castles);
   if (o.shantytowns && o.shantytowns !== 'auto') p.set('shanty', o.shantytowns);
   if (o.siteType && o.siteType !== 'auto') p.set('site', o.siteType);
   if (o.seaLevel !== undefined) p.set('seaLevel', String(o.seaLevel));
@@ -192,7 +202,8 @@ export function fromQuery(q: string | URLSearchParams): Options {
   o.coast = oneOf(p.get('coast'), COASTS, DEFAULTS.coast);
   o.river = oneOf(p.get('river'), RIVERS, DEFAULTS.river);
   o.siteType = oneOf(p.get('site'), SITE_TYPES, 'auto');
-  o.walls = oneOf(p.get('walls'), TRIS, DEFAULTS.walls);
+  o.walls = oneOf(p.get('walls'), WALLS, DEFAULTS.walls);
+  o.castles = oneOf(p.get('castles'), CASTLES, 'auto');
   o.castle = oneOf(p.get('castle'), TRIS, DEFAULTS.castle);
   for (const [k, q] of LANDMARK_TOGGLES) o[k] = oneOf(p.get(q), TRIS, 'auto');
   o.suburbs = oneOf(p.get('suburbs'), SUBURBS, 'auto');

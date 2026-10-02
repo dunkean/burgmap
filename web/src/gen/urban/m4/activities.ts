@@ -23,7 +23,7 @@ import { mpArea, differenceS, intersectionS } from '../../geo/bool';
 import { area, orientPos, pointInRing, distToRing, inscribed, obb, segSegT } from '../../geo/poly';
 import { ribbon, disk } from '../../geo/offset';
 import { dilate } from '../phases';
-import { rectAt, frameAt, ellipseAt, LineIndex, nearestOnPl, TAU } from './lots';
+import { rectAt, frameAt, ellipseAt, LineIndex, nearestOnPl, TAU, inMP } from './lots';
 import { Mask, siteLot, gridAround } from './site';
 import { giveAccess, phaseAt, type M4State } from './reserve';
 import { emptyOut, pieces, largest, fits, placeRect, minus, inter, splitLine, type Out } from './kit';
@@ -98,7 +98,7 @@ export function reserveMills(s: M4State, api: ReserveApi, ai: ActIn, n: number):
     let wet = false;
     for (let u = -Lr / 2; u <= Lr / 2 && !wet; u += 8) for (let v = cd.w / 2 + 4; v <= d + 2 + yard - 1; v += 5) if (ctx.isWater(frameAt(cd.c, cd.ang, u, sgn * v))) { wet = true; break; }
     const rc = frameAt(cd.c, cd.ang, 0, sgn * (d + yard) / 2);
-    if (wet || !roadIdx.clear(rect, 3) || all().some((o) => distToRing(o, rc) < 40 || pointInRing(o, rc)) || !clearStreets(api, rect, 3)) continue;
+    if (wet || !roadIdx.clear(rect, 3) || all().some((o) => distToRing(o, rc) < 40 || pointInRing(o, rc)) || !clearStreets(api, rect, 3) || inLists(s, api, rect)) continue;
     const landM = differenceS(rect, ctx.water);
     const lot = landM.filter((ph) => !ph.holes.length).map((ph) => ph.outer).sort((x, y) => area(y) - area(x))[0];
     if (!lot || area(lot) < 0.55 * area(rect)) continue;
@@ -116,6 +116,13 @@ export function reserveMills(s: M4State, api: ReserveApi, ai: ActIn, n: number):
     placed.push(cd.c);
   }
   return out;
+}
+
+/** A lot outside the enclosure but within the lists of a double enceinte would sit on the outer wall. */
+export function inLists(s: M4State, api: ReserveApi, poly: Polygon): boolean {
+  if (!s.listsW) return false;
+  const rings = api.enclosure.map((ph) => ph.outer);
+  return poly.some((q) => !inMP(api.enclosure, q) && Math.min(...rings.map((r) => distToRing(r, q))) < s.listsW! + 8);
 }
 
 const clearStreets = (api: ReserveApi, poly: Polygon, m: number): boolean => {
@@ -136,7 +143,7 @@ export function reserveWindmills(s: M4State, api: ReserveApi, ai: ActIn, n: numb
   const out: ReservedLot[] = [];
   const encR = Math.sqrt(mpArea(api.enclosure) / Math.PI);
   const c0 = ai.nucleus;
-  const foot = new Mask(ctx.mapSize, dilate(api.footprint, 25), 5);
+  const foot = new Mask(ctx.mapSize, dilate(api.footprint, 25 + (s.listsW ?? 0)), 5);
   const roadIdx = new LineIndex(ai.roads.map((path) => ({ path, hw: 5 })));
   const ringH = (p: Vec2, R: number) => { let t = 0; for (let k = 0; k < 10; k++) t += ctx.heightAt({ x: p.x + Math.cos((k / 10) * TAU) * R, y: p.y + Math.sin((k / 10) * TAU) * R }); return t / 10; };
   const cands = gridAround(ctx, c0, encR + 650, 30).filter((p) => !foot.has(p) && dist(p, c0) > encR + 60 && ctx.slopeAt(p) < 0.22)
@@ -184,11 +191,13 @@ export function reserveTanneries(s: M4State, api: ReserveApi, ai: ActIn): Reserv
       const L = r.range(70, 110), D = r.range(30, 38);
       const v0 = wi / 2 - 1;
       const rect = rectAt(p, ang, -L / 2, L / 2, side > 0 ? 0 : -(v0 + D + 2), side > 0 ? v0 + D + 2 : 0);
-      const lot = differenceS(rect, ctx.water).filter((ph) => !ph.holes.length).map((ph) => ph.outer).sort((x, y) => area(y) - area(x))[0];
-      if (!lot || area(lot) < 0.5 * area(rect)) continue;
+      // cheap tests first, the boolean with the water last
       let wet = false;
       for (let u = -L / 2 + 4; u <= L / 2 - 4 && !wet; u += 8) if (ctx.isWater(frameAt(p, ang, u, side * (v0 + D)))) wet = true;
-      if (wet || !roadIdx.clear(lot, 3) || ai.avoid.some((o) => distToRing(o, polygonCentroid(lot)) < 30 || pointInRing(o, polygonCentroid(lot))) || !clearStreets(api, lot, 4)) continue;
+      const rc = frameAt(p, ang, 0, side * (v0 + D / 2));
+      if (wet || !roadIdx.clear(rect, 3) || ai.avoid.some((o) => distToRing(o, rc) < 30 || pointInRing(o, rc)) || !clearStreets(api, rect, 4) || inLists(s, api, rect)) continue;
+      const lot = differenceS(rect, ctx.water).filter((ph) => !ph.holes.length).map((ph) => ph.outer).sort((x, y) => area(y) - area(x))[0];
+      if (!lot || area(lot) < 0.5 * area(rect)) continue;
       const toward = frameAt(p, ang, 0, side * (v0 + D + 8));
       const acc = accessOrTrack(s, api, lot, toward, ai, roadIdx, ai.roads);
       if (!acc) continue;
@@ -206,7 +215,7 @@ export function reserveTanneries(s: M4State, api: ReserveApi, ai: ActIn): Reserv
 export function reserveRoadside(s: M4State, api: ReserveApi, ai: ActIn, which: { kind: 'gallows' | 'lazar-house' | 'cemetery'; size: [number, number]; dmin: number; dmax: number }[]): ReservedLot[] {
   const ctx = s.ctx, r = s.rng.fork('roadside');
   const out: ReservedLot[] = [];
-  const foot = new Mask(ctx.mapSize, dilate(api.footprint, 12), 5);
+  const foot = new Mask(ctx.mapSize, dilate(api.footprint, 12 + (s.listsW ? s.listsW + 6 : 0)), 5);
   const rings = new LineIndex(api.enclosure.map((ph) => ({ path: ph.outer.concat([ph.outer[0]]), hw: 0 })));
   const roadIdx = new LineIndex(ai.roads.map((path) => ({ path, hw: 5 })));
   for (const wch of which) {

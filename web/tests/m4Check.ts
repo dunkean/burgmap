@@ -24,7 +24,7 @@ export interface M4Report {
 
 /** Level-1 lot sites (their lots are exact pieces of the partition). */
 const LOT_KINDS = new Set(['castle', 'kasbah', 'motte', 'cathedral-close', 'palace', 'monastery', 'madrasa', 'shipyard', 'ropewalk', 'tannery', 'watermill', 'windmill', 'gallows', 'lazar-house', 'cemetery', 'arena', 'shanty']);
-const WATER_OK = new Set(['pier', 'slipway', 'quay', 'mill', 'mill-race']);
+const WATER_OK = new Set(['pier', 'slipway', 'quay', 'mill', 'mill-race', 'bridge']);
 
 const segDist = (p: Vec2, pl: Vec2[]) => { let d = Infinity; for (let i = 1; i < pl.length; i++) d = Math.min(d, distToSeg(p, pl[i - 1], pl[i])); return d; };
 

@@ -27,6 +27,8 @@ export interface M4State {
   lotData: Map<string, unknown>;
   sites: UrbanSite[];
   culture: string;
+  /** Width of the lists of a double enceinte (0 = none): outside lots keep clear of the outer wall. */
+  listsW?: number;
   /** Stone quay edges planned by the port. */
   quays?: Polyline[];
 }
@@ -117,7 +119,7 @@ export function giveAccess(s: M4State, api: ReserveApi, lot: Polygon, a: Access,
 /** True when p is on (within d of) one of the rings. */
 export const onRings = (rings: Polygon[], p: Vec2, d: number): boolean => rings.some((r) => distToRing(r, p) < d);
 
-export function reserveCastle(s: M4State, api: ReserveApi, plan: CastlePlan): ReservedLot | null {
+export function reserveCastle(s: M4State, api: ReserveApi, plan: CastlePlan, id = 'castle'): ReservedLot | null {
   const rings = api.enclosure.map((ph) => ph.outer);
   const g = plan.gate;
   const toward = { x: g.p.x + g.n.x * (plan.ditch + plan.espl + 2), y: g.p.y + g.n.y * (plan.ditch + plan.espl + 2) };
@@ -128,7 +130,6 @@ export function reserveCastle(s: M4State, api: ReserveApi, plan: CastlePlan): Re
     toward, width: w, rank: 2, cWidth: s.P.widthByRank[1] * s.P.widthScale * 0.9, cRank: 1, maxLen: 900, dirs: [g.n],
   }, []);
   if (!acc) return null;
-  const id = 'castle';
   s.lotData.set(id, plan);
   const c = polygonCentroid(plan.C);
   const ph = phaseAt(api, c);

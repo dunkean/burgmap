@@ -16,18 +16,21 @@ import { makeCtx } from './context';
 import { choosePopulation, chooseArchetype, planServedPhases, planFaubourgs, EnclosurePlan, zonesFor, PhaseInput } from './phases';
 import { buildPrimary, Quarter } from './primary';
 import { Streets, LAB_OPEN, LAB_WALL } from './streets';
-import { mpArea, MultiPoly, differenceS } from '../geo/bool';
+import { mpArea, MultiPoly, differenceS, intersectionS } from '../geo/bool';
 import { GuidanceField } from './field';
 import { splitQuarter, addCloses, carveBlocks, buildRibbonIndex, Piece, CarvedBlock } from './blocks';
 import { culDeSacTree } from './culdesac';
 import { polygonCentroid } from '../core/geom';
 import { cutPlots, Plot } from './plots';
 import { cutCourtyards } from './courtyards';
-import { buildOn } from './bops';
+import { buildOn, type ArchBldg } from './bops';
+import { blockReach, carvePassage, makeStreetAt, splitLong, frontRangeDepth } from './access';
+import { GridIndex } from '../geo/spatial';
 import { wallFeatures } from './walls';
 import { buildCompound, pickBlock, ClaimBlock } from './compounds';
 import { approachGates, axisLines, outsetConvex } from './streetops';
-import { distToRing, pointInRing, area as areaOf, inscribed, convexHull } from '../geo/poly';
+import { distToRing, pointInRing, area as areaOf, inscribed, convexHull, distToSeg, segSegT } from '../geo/poly';
+import { outerRing } from './m4/castle';
 import { unionMany } from '../geo/bool';
 import { StreetGraph } from '../geo/graph';
 import { polyInside } from '../geo/split';
@@ -42,6 +45,8 @@ import { reservePort, portPieceBuildings } from './m4/port';
 import { pickInns, innBuildings } from './m4/inns';
 import { reserveMills, reserveWindmills, reserveTanneries, reserveRoadside, reserveArena } from './m4/activities';
 import { reserveShanty } from './m4/shanty';
+import { embedChurch } from './m4/churches';
+import { reserveBridges, bridgeHouses, type BridgeHousesData } from './m4/bridges';
 import { outerEnclosure, absorbedVillages, joinVillages, reserveVillages, quarterWall, type Village } from './m4/suburbs';
 import type { ReservedLot } from './primary';
 import { unionS } from '../geo/bool';
@@ -100,7 +105,7 @@ const L2_SITES: Record<string, 'power' | 'worship' | 'market' | 'civic' | 'activ
   'jp-temple': 'worship', 'hindu-temple': 'worship', palace: 'power', basilica: 'civic', 'roman-temple': 'worship', castle: 'power', hammam: 'civic',
 };
 /** Parcel uses of the open port pieces. */
-const LOT_USE: Record<string, string> = { 'm4-quay': 'quay', 'm4-pier': 'pier', 'm4-slipway': 'slipway', 'm4-green': 'green' };
+const LOT_USE: Record<string, string> = { 'm4-quay': 'quay', 'm4-pier': 'pier', 'm4-slipway': 'slipway', 'm4-green': 'green', 'm4-bridge-houses': 'bridge' };
 const castleTower = (cid: string): 'round' | 'square' => (cid === 'medina' || cid === 'chinese' || cid === 'indian-temple' ? 'square' : 'round');
 
 export function generateUrban(world: World, root: Rng): UrbanResult {
@@ -126,8 +131,12 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   const wallKind = lastEnc.wall;
   const autoWalled = archetype === 'town' && (pop >= 2500 || rng.fork('walls').chance(0.6));
   const canWall = archetype === 'town' || archetype === 'nucleated-village';
-  const walled = opts.walls === 'no' ? false : opts.walls === 'yes' ? canWall
+  // walls: none (open town), single curtain, double enceinte (old spellings: yes / no)
+  const wallsOpt = opts.walls === 'no' ? 'none' : opts.walls === 'yes' ? 'single' : opts.walls;
+  const walled = wallsOpt === 'none' ? false : wallsOpt === 'single' || wallsOpt === 'double' ? canWall
     : wallKind === 'auto' ? autoWalled : wallKind === 'none' ? false : canWall;
+  // the double enceinte: an outer, lower wall 10–25 m outside the curtain (the lists between them)
+  const listsW = walled && wallsOpt === 'double' && archetype === 'town' && wallKind !== 'palisade' && wallKind !== 'hedge' ? rng.fork('lists').range(12, 22) : 0;
   const estArea = (pop / params.density.middle) * 1e4;
   const ctx = makeCtx(world, params, 2.6 * Math.sqrt(estArea / Math.PI) + 450);
   const mainAngle = mainRoadAngle(world);
@@ -141,23 +150,31 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   const lotKind = new Map<string, string>();
   const quays: Polyline[] = [];
   const siteLines: UrbanLine[] = [];
+  const townBridges: { a: Vec2; b: Vec2; width: number }[] = [];
   let castle: CastlePlan | null = null;
   let outerPhase = false;
   let villages: Village[] = [];
   // the castle is sited on the enclosure before the faubourgs and the streets; it may extend the enclosure
+  const castlesAll: CastlePlan[] = [];
   const siteCastleOn = (ep: EnclosurePlan): void => {
     if (!flags.castle || !ep.enclosure.length) return;
     const nonTrack = (world.roads ?? []).filter((r) => r.kind !== 'track').map((r) => r.path);
-    castle = siteCastle(ctx, { enclosure: ep.enclosure, phases: ep.phases, roads: nonTrack, nucleus: ctx.center, pop, variant: flags.castle, walled: ep.walled, citadelSpot: world.site!.citadelSpot }, rng.fork('castle'));
-    if (!castle) return;
-    if (castle.outside) {
-      // the last phase region becomes the extended enclosure (the same ring as the wall), its band follows
-      const last = ep.phases[ep.phases.length - 1];
-      const prev = ep.phases.length > 1 ? ep.phases[ep.phases.length - 2].region : [];
-      ep.enclosure = castle.enclosure;
-      last.region = castle.enclosure.map((ph) => ({ outer: ph.outer, holes: ph.holes }));
-      last.band = prev.length ? differenceS(last.region, prev) : last.region;
+    const crossings = (world.bridges ?? []).map((b) => ({ x: (b.a.x + b.b.x) / 2, y: (b.a.y + b.b.y) / 2 }));
+    for (let k = 0; k < flags.castles; k++) {
+      const c = siteCastle(ctx, { enclosure: ep.enclosure, phases: ep.phases, roads: nonTrack, nucleus: ctx.center, pop, variant: flags.castle, walled: ep.walled, citadelSpot: world.site!.citadelSpot, avoid: castlesAll.map((x) => polygonCentroid(x.C)), bridges: crossings }, rng.fork(k ? 'castle:' + k : 'castle'));
+      if (!c) break;
+      if (castlesAll.some((o) => intersectionS(o.lot, c.lot).length)) break;
+      castlesAll.push(c);
+      if (c.outside) {
+        // the last phase region becomes the extended enclosure (the same ring as the wall), its band follows
+        const last = ep.phases[ep.phases.length - 1];
+        const prev = ep.phases.length > 1 ? ep.phases[ep.phases.length - 2].region : [];
+        ep.enclosure = c.enclosure;
+        last.region = c.enclosure.map((ph) => ({ outer: ph.outer, holes: ph.holes }));
+        last.band = prev.length ? differenceS(last.region, prev) : last.region;
+      }
     }
+    castle = castlesAll[0] ?? null;
   };
 
   let eplan: EnclosurePlan | null = null;
@@ -210,11 +227,11 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     // suburbs (M4): none, the faubourg ribbons, or thick suburbs (an outer wall for a city, absorbed villages)
     const faubArea = (faubPop / plan.faubourg.density.faubourg) * 1e4 + short;
     const sub = flags.suburbs;
-    faub = sub === 'none' ? { region: [] } : planFaubourgs(ctx, eplan.enclosure, roads, faubArea * (sub === 'many' ? 2.4 : 1), walled ? 22 : 0, rng.fork('faubourg'), 'faubourg', sub === 'many' ? 1.6 : 1);
+    faub = sub === 'none' ? { region: [] } : planFaubourgs(ctx, eplan.enclosure, roads, faubArea * (sub === 'many' ? 2.4 : 1), walled ? 22 + (listsW ? listsW + 8 : 0) : 0, rng.fork('faubourg'), 'faubourg', sub === 'many' ? 1.6 : 1);
     if (sub === 'many') {
       if (walled && pop >= 9000 && outerEnclosure(ctx, eplan, faub.region, pop)) {
         outerPhase = true;
-        faub = planFaubourgs(ctx, eplan.enclosure, roads, faubArea * 0.6, 22, rng.fork('faubourg2'), 'faubourg', 1.2);
+        faub = planFaubourgs(ctx, eplan.enclosure, roads, faubArea * 0.6, 22 + (listsW ? listsW + 8 : 0), rng.fork('faubourg2'), 'faubourg', 1.2);
       }
       villages = absorbedVillages(ctx, eplan.enclosure, faub.region, roads, pop >= 40000 ? 3 : 2, rng.fork('villages'));
       faub = { region: joinVillages(faub.region, villages, eplan.enclosure, ctx) };
@@ -270,19 +287,29 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     nucleusRings: coreM.ringSpacing > 0 ? { spacing: coreM.ringSpacing, width: coreM.widthByRank[1] * coreM.widthScale } : undefined,
     switchbacks: allStreetOps.has('switchbacks') ? { angle: terrainAngle, pitch: coreM.gridSpacing[0] * 2, width: coreM.widthByRank[0] * coreM.widthScale } : undefined,
     gatesOnly: !!coreM.gatesOnly,
-    preLots: castle ? [(castle as CastlePlan).lot] : [],
+    preLots: castlesAll.map((c) => c.lot),
     reserve: (api) => {
-      const st: M4State = { ctx, rng: rng.fork('m4lots'), pop, P: coreM, lotData, sites, culture: culture.id };
+      const st: M4State = { ctx, rng: rng.fork('m4lots'), pop, P: coreM, lotData, sites, culture: culture.id, listsW };
       const out: ReservedLot[] = [];
-      if (castle) { const l = reserveCastle(st, api, castle); if (l) out.push(l); else castle = null; }
+      for (let k = 0; k < castlesAll.length; k++) {
+        const l = reserveCastle(st, api, castlesAll[k], k ? 'castle:' + k : 'castle');
+        if (l) { out.push(l); lotKind.set(l.id, l.kind); } else if (k === 0) castle = null;
+      }
       const nonTrack = (world.roads ?? []).filter((r) => r.kind !== 'track').map((r) => r.path);
       const ci = { avoid: [] as Polygon[], nucleus: api.market ? polygonCentroid(api.market) : ctx.center, castle: castle ? (castle as CastlePlan).lot : null, roads: nonTrack };
       const tm = (k: string, f: () => void) => { const t = performance.now(); f(); stats['ms.lot.' + k] = Math.round(performance.now() - t); };
       const push = (l: ReservedLot | null) => { if (l) { out.push(l); ci.avoid.push(l.poly); lotKind.set(l.id, l.kind); } };
-      if (castle) ci.avoid.push((castle as CastlePlan).lot);
+      for (const c of castlesAll) ci.avoid.push(c.lot);
       if (flags.port && archetype === 'town') tm('port', () => { for (const l of reservePort(st, api, { avoid: ci.avoid.slice(), nucleus: ci.nucleus, harbor: world.site!.harbor, roads: nonTrack, bridges: world.bridges ?? [] })) push(l); });
       quays.push(...(st.quays ?? []));
       if (villages.length) for (const l of reserveVillages(st, api, villages, ci.avoid)) push(l);
+      // town bridges every 250–500 m of river course, joined to the streets on both banks
+      if (archetype === 'town') tm('bridges', () => {
+        const br = reserveBridges(st, api, ci.avoid.slice(), world.bridges ?? []);
+        api.cuts.push(...br.cuts);
+        for (const l of br.lots) push(l);
+        townBridges.push(...br.bridges);
+      });
       if (flags.cathedral) tm('cathedral', () => push(reserveCathedral(st, api, ci)));
       if (flags.palace) tm('palace', () => push(reservePalace(st, api, ci)));
       if (flags.monasteries && flags.monastery) tm('monastery', () => { for (const l of reserveMonasteries(st, api, ci, flags.monasteries, flags.monastery!)) push(l); });
@@ -306,6 +333,8 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
       return out;
     },
   }, streets, rng.fork('primary'));
+  if (townBridges.length) world.bridges = [...(world.bridges ?? []), ...townBridges];
+  stats['townBridges'] = townBridges.length;
   const t2 = performance.now();
   stats['ms.phases'] = Math.round(t1 - t0);
   stats['ms.primary'] = Math.round(t2 - t1);
@@ -401,6 +430,12 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
         if (pi < 0) break;
         placed.set(lm.kind, [...(placed.get(lm.kind) ?? []), interiorPoint(allPieces[pi].lp.pts)]);
         taken.add(pi);
+        // most parish churches stand in the fabric (a lot taken from the street front, houses against them)
+        if (lm.kind === 'parish-church' && (allPieces[pi].morph ?? params).plotOp === 'burgage' && rng.fork('emb:' + k + lm.place).chance(0.65)) {
+          allPieces[pi].compound = 'embedded-church';
+          cb[pi].kind = 'church';
+          continue;
+        }
         allPieces[pi].kind = lm.kind === 'church' || lm.kind === 'parish-church' ? 'church' : 'compound';
         allPieces[pi].compound = lm.kind;
         cb[pi].kind = allPieces[pi].kind;
@@ -491,7 +526,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   // landmark lots claimed at level 2 (see above) are filled here
   // with a cathedral close the market church is a parish church (one cathedral per town)
   const hasClose = sites.some((x) => x.kind === 'cathedral-close');
-  carved.forEach((b, bi) => { if (b.compound && !compoundOf[bi]) claim(bi, hasClose && b.compound === 'church' ? 'parish-church' : b.compound, b.compound === 'great-mosque' ? QIBLA : blockMorph[bi].orientation === 'cardinal' ? 0 : blockMorph[bi].orientation === 'terrain' ? terrainAngle : mainAngle); });
+  carved.forEach((b, bi) => { if (b.compound && b.compound !== 'embedded-church' && !compoundOf[bi]) claim(bi, hasClose && b.compound === 'church' ? 'parish-church' : b.compound, b.compound === 'great-mosque' ? QIBLA : blockMorph[bi].orientation === 'cardinal' ? 0 : blockMorph[bi].orientation === 'terrain' ? terrainAngle : mainAngle); });
 
   // ---- level 3: plots (by the block's plot operator)
   const encRingsF = eplan.enclosure.map((ph) => ph.outer);
@@ -522,6 +557,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
       const pi = parcels.length;
       parcels.push({ poly: b.poly, use, block: bi, zone: b.zone });
       if (lk) for (const hb of portPieceBuildings(lk, b.poly, lotData.get(b.lot!), nucleus, bi === firstQuay)) buildings.push({ ...hb, parcel: pi });
+      if (lk === 'm4-bridge-houses') for (const hb of bridgeHouses(b.poly, lotData.get(b.lot!) as BridgeHousesData)) if (polyInside(b.poly, hb.poly)) buildings.push({ poly: hb.poly, kind: 'house', parcel: pi, arch: hb.arch, roof: 'gable', material: 'timber', storeys: 3 });
       return;
     }
     const tb0 = performance.now();
@@ -547,6 +583,16 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
         parcels.push({ poly: pk.poly, use: 'inn', block: bi, front: pk.front, zone: b.zone });
         for (const ib of innBuildings(pk.poly, pk.front, pk.plots[0].nrm, rng.fork('inn:' + bi))) buildings.push({ poly: ib.poly, kind: 'house', parcel: pi, arch: ib.arch, roof: 'gable', material: 'timber', storeys: 2 });
         if (pk.smithy) smithies.add(pk.smithy);
+      }
+    }
+    if (b.compound === 'embedded-church' && rplots.length > 3) {
+      const ec = embedChurch(rplots, pop, rng.fork('ech:' + bi));
+      if (ec) {
+        rplots = rplots.filter((pl) => !ec.plots.includes(pl));
+        const pi = parcels.length;
+        parcels.push({ poly: ec.lot, use: 'place', block: bi, front: ec.front, zone: b.zone });
+        for (const part of ec.parts) { buildings.push({ poly: part, kind: 'church', parcel: pi, arch: 'parish-church', roof: 'gable', material: 'stone', storeys: 1 }); landmarks.push({ kind: 'church', poly: part }); }
+        sites.push({ id: 'parish:' + bi, kind: 'parish-church', role: 'worship', lot: ec.lot, entrance: { x: (ec.front[0].x + ec.front[1].x) / 2, y: (ec.front[0].y + ec.front[1].y) / 2 }, anchor: interiorPoint(ec.lot), culture: blockCulture[bi] ?? culture.id });
       }
     }
     for (const p of rplots) { plots.push(p); plotMorph.push(P); parcels.push({ poly: p.poly, use: 'plot', block: bi, front: p.front, zone: b.zone }); }
@@ -587,8 +633,11 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   const courtHint = (pl: Plot) => {
     const cr = rng.fork('court:' + pl.block + ':' + pl.run);
     const phase = cr.int(0, 8), f = cr.range(0.35, 0.65);
-    return { court: (pl.order + phase) % 9 < 3, f };
+    // (with the shared passages giving light and access, light courts are rarer: about one plot in nine)
+    return { court: (pl.order + phase) % 9 < 1, f };
   };
+  const accessPlaces = (): Polygon[] => parcels.filter((p) => ['place', 'market', 'quay', 'green'].includes(String(p.use))).map((p) => p.poly);
+  const plotBld: ArchBldg[][] = plots.map(() => []);
   plots.forEach((pl, pi) => {
     const pr = rng.fork('pl:' + pi);
     const cov = Math.max(0, Math.min(1, (blockInfill[pl.block] + pr.range(-0.03, 0.03)) * (1 - 0.4 * (pl.fade ?? 0))));
@@ -602,8 +651,82 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
       // the warehouse row on the quay (merchant quarter) and the craftsmen's quarter by the tanneries
       if (onQuay && b.kind === 'house') { b.arch = 'warehouse'; b.storeys = 3; }
       else if (craft && b.kind === 'house') b.arch = 'craft-workshop';
-      buildings.push({ poly: b.poly, kind: b.kind, parcel: parcelIndexOfPlot[pi], arch: b.arch, roof: b.roof, storeys: b.storeys, material: b.material, courtyards: b.courtyards, orientation: b.orientation });
+      plotBld[pi].push(b);
     }
+    plotBld[pi] = splitLong(plotBld[pi]);
+  });
+  // ---- access: every building touches the street or open ground reached from it (passages shared by two plots)
+  {
+    const streetAt = makeStreetAt(streets.list.filter((st) => st.ribbon).map((st) => ({ path: st.path, widths: st.widths, width: st.widths[0] })), accessPlaces());
+    const byBlock = new Map<number, number[]>();
+    plots.forEach((pl, pi) => { if (!byBlock.has(pl.block)) byBlock.set(pl.block, []); byBlock.get(pl.block)!.push(pi); });
+    // footprints already placed in the blocks (inns, market hall...): obstacles; the inn ranges must be reached too
+    const others = new Map<number, number[]>();
+    buildings.forEach((b, i) => { if (b.parcel !== undefined) { const bk = parcels[b.parcel].block; if (!others.has(bk)) others.set(bk, []); others.get(bk)!.push(i); } });
+    const dropInn = new Set<number>();
+    let carvedN = 0, dropped = 0;
+    const touchesFront = (pl: Plot, poly: Polygon): boolean => {
+      const segs = [pl.front, ...pl.sideFronts];
+      return poly.some((q) => segs.some(([a, b]) => distToSeg(q, a, b) < 0.6));
+    };
+    for (const [bk, pis] of byBlock) {
+      if ((globalThis as Record<string, unknown>).__noaccess) break;
+      const block = carved[bk].poly;
+      // a block whose footprints all stand on their street front needs no flood fill (inn lots are checked too)
+      if (!others.has(bk) && pis.every((pi) => plotBld[pi].every((b) => touchesFront(plots[pi], b.poly)))) continue;
+      const reach = (): boolean[][] => {
+        const list: Polygon[] = [], own: [number, number][] = [];
+        pis.forEach((pi) => plotBld[pi].forEach((b, k) => { list.push(b.poly); own.push([pi, k]); }));
+        const extra = others.get(bk) ?? [];
+        const ok = blockReach(block, [...list, ...extra.map((i) => buildings[i].poly)], streetAt);
+        const res: boolean[][] = pis.map((pi) => plotBld[pi].map(() => true));
+        own.forEach(([pi, k], j) => { res[pis.indexOf(pi)][k] = ok[j]; });
+        extra.forEach((i, j) => { if (!ok[list.length + j] && parcels[buildings[i].parcel!].use === 'inn') dropInn.add(i); else dropInn.delete(i); });
+        return res;
+      };
+      let r = reach();
+      let need = pis.filter((_, j) => r[j].some((v) => !v));
+      if (need.length) {
+        // first a gateway through the front range into the court or yard behind it (1.6 m, along a side line)
+        for (const pi of need) {
+          const dF = frontRangeDepth(plots[pi], plotBld[pi]);
+          if (dF > 0) plotBld[pi] = carvePassage(plots[pi], plotBld[pi], 'A', 1.6, dF + 0.05);
+        }
+        r = reach();
+        need = pis.filter((_, j) => r[j].some((v) => !v));
+      }
+      if ((globalThis as Record<string, unknown>).__acc === bk) console.log('[acc] block', bk, 'unreach', r.flat().filter((v) => !v).length, '/', r.flat().length, 'need', need.length);
+      if (!need.length) continue;
+      // passages along a side line shared with the neighbour of the same run: half each when both plots are wide
+      // enough to keep proper houses, else the wider plot gives the whole passage (1.6 m)
+      const done = new Set<string>();
+      const key = (a: number, b: number) => Math.min(a, b) + ':' + Math.max(a, b);
+      const share = (a: number, sa: 'A' | 'B', b: number, sb: 'A' | 'B'): boolean => {
+        if (done.has(key(a, b))) return true;
+        plotBld[a] = carvePassage(plots[a], plotBld[a], sa, 0.8);
+        plotBld[b] = carvePassage(plots[b], plotBld[b], sb, 0.8);
+        done.add(key(a, b));
+        return true;
+      };
+      for (const pi of need) {
+        const pl = plots[pi];
+        const nb = pis.find((q) => q !== pi && plots[q].run === pl.run && dist(plots[q].sideA.p, pl.sideB.p) < 0.05);
+        const pv = pis.find((q) => q !== pi && plots[q].run === pl.run && dist(plots[q].sideB.p, pl.sideA.p) < 0.05);
+        let ok = false;
+        if (nb !== undefined) ok = share(pi, 'B', nb, 'A');
+        if (!ok && pv !== undefined) ok = share(pi, 'A', pv, 'B');
+        if (!ok) { plotBld[pi] = carvePassage(plots[pi], plotBld[pi], 'A', 1.6); ok = true; }
+        if (ok) carvedN++;
+      }
+      r = reach();
+      pis.forEach((pi, j) => { const before = plotBld[pi].length; plotBld[pi] = plotBld[pi].filter((_, k) => r[j][k]); dropped += before - plotBld[pi].length; });
+    }
+    if (dropInn.size) { const kept = buildings.filter((_, i) => !dropInn.has(i)); buildings.length = 0; buildings.push(...kept); }
+    stats['access.passages'] = carvedN;
+    stats['access.dropped'] = dropped;
+  }
+  plots.forEach((pl, pi) => {
+    for (const b of plotBld[pi]) buildings.push({ poly: b.poly, kind: b.kind, parcel: parcelIndexOfPlot[pi], arch: b.arch, roof: b.roof, storeys: b.storeys, material: b.material, courtyards: b.courtyards, orientation: b.orientation });
   });
   // final guard of the partition (level 4 ⊂ level 3): a footprint must lie inside its parcel
   for (let i = buildings.length - 1; i >= 0; i--) {
@@ -700,6 +823,39 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     kind: s.rank <= 1 ? 'main' : s.rank <= 2 ? 'street' : 'alley', rank: s.rank, role: s.role, phase: s.phase,
   }));
   const towerShape = hints.towerShape;
+  // the outer wall of a double enceinte: the curtain line offset by the lists, gates aligned on the inner gates,
+  // a barbican in front of each outer gate
+  const outerWalls = (): UrbanWall[] => {
+    const out: UrbanWall[] = [];
+    prim.walls.forEach((w, wi) => {
+      const ring = outerRing(w.ring, listsW);
+      if (!ring) return;
+      const gates: { p: Vec2; dir: Vec2; width: number }[] = [];
+      for (const g of w.gates) {
+        // the road leaves the inner gate outward (−dir): the outer gate is where that line meets the outer ring
+        let best: Vec2 | null = null, bd = Infinity;
+        for (let k = 0; k < ring.length; k++) {
+          const r = segSegT(g.p, { x: g.p.x - g.dir.x * (listsW * 4 + 40), y: g.p.y - g.dir.y * (listsW * 4 + 40) }, ring[k], ring[(k + 1) % ring.length]);
+          if (r) { const q = { x: g.p.x - g.dir.x * (listsW * 4 + 40) * r.t, y: g.p.y - g.dir.y * (listsW * 4 + 40) * r.t }; const d = dist(q, g.p); if (d < bd) { bd = d; best = q; } }
+        }
+        if (!best) continue;
+        gates.push({ p: best, dir: g.dir, width: g.width });
+        const t = { x: -g.dir.y, y: g.dir.x }, o = { x: -g.dir.x, y: -g.dir.y }, hw = g.width / 2 + 4.5, dp = 11;
+        lines.push({ kind: 'barbican', path: [
+          { x: best.x + t.x * hw, y: best.y + t.y * hw }, { x: best.x + t.x * hw + o.x * dp, y: best.y + t.y * hw + o.y * dp },
+          { x: best.x + t.x * (g.width / 2 + 1) + o.x * dp, y: best.y + t.y * (g.width / 2 + 1) + o.y * dp },
+        ], width: 1.6 });
+        lines.push({ kind: 'barbican', path: [
+          { x: best.x - t.x * hw, y: best.y - t.y * hw }, { x: best.x - t.x * hw + o.x * dp, y: best.y - t.y * hw + o.y * dp },
+          { x: best.x - t.x * (g.width / 2 + 1) + o.x * dp, y: best.y - t.y * (g.width / 2 + 1) + o.y * dp },
+        ], width: 1.6 });
+      }
+      const nearW = (q: Vec2) => ctx.water.some((ph) => distToRing(ph.outer, q) < 4 || pointInRing(ph.outer, q));
+      const wf = wallFeatures(ring, gates, rng.fork('owall:' + wi), ctx.isWater, nearW, 50);
+      out.push({ path: ring, closed: true, towers: wf.towers, gates: gates.map((g) => g.p), thickness: 1.8, gateInfo: gates, pieces: wf.pieces, gateTowers: wf.gateTowers, towerScale: wf.towerScale.map((x) => x * 0.8), curtains: wf.curtains, towerShape, role: 'outer' });
+    });
+    return out;
+  };
   const layer: UrbanLayer = {
     footprint: prim.footprint.map((p) => p.outer),
     footprintH: toPH(prim.footprint),
@@ -714,7 +870,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
         return null;
       }
       return { path: w.ring, closed: true, towers: wf.towers, gates: w.gates.map((g) => g.p), thickness: wallKind === 'palisade' ? 1.6 : pop > 12000 ? 3.2 : 2.6, gateInfo: w.gates.map((g) => ({ p: g.p, dir: g.dir, width: g.width })), pieces: wf.pieces, gateTowers: wf.gateTowers, towerScale: wf.towerScale, curtains: wf.curtains, towerShape, role: 'town' as const };
-    }).filter((w): w is UrbanWall => !!w).concat(extraWalls.map((w, wi): UrbanWall => {
+    }).filter((w): w is UrbanWall => !!w).concat(listsW ? outerWalls() : []).concat(extraWalls.map((w, wi): UrbanWall => {
       // castle curtains: the stretches lying on the town wall are drawn by the town wall
       const townIdx = new LineIndex(prim.walls.map((tw) => ({ path: tw.ring.concat([tw.ring[0]]), hw: 0 })));
       const skip = (q: Vec2) => townIdx.dist(q, 3) < 1.5 || ctx.isWater(q);

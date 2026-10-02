@@ -153,7 +153,7 @@ export function reserveMonasteries(s: M4State, api: ReserveApi, ci: CatalogueIn,
   const encR = Math.sqrt(mpArea(api.enclosure) / Math.PI);
   const ringIdx = new LineIndex(api.enclosure.map((ph) => ({ path: ph.outer.concat([ph.outer[0]]), hw: 0 })));
   const walled = api.gates.length > 0;
-  const outsideReg = dilate(api.enclosure, 14);
+  const outsideReg = dilate(api.enclosure, 14 + (s.listsW ? s.listsW + 6 : 0));
   if (!ci.outMask) ci.outMask = new Mask(s.ctx.mapSize, outsideReg);
   const inM = encMask(s, api, ci), outM = ci.outMask;
   const roadIdx = new LineIndex(ci.roads.map((path) => ({ path, hw: 5 })));

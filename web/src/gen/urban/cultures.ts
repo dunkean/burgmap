@@ -129,7 +129,7 @@ export const CULTURE_LIST: Culture[] = [
     landmarks: [
       { role: 'worship', kind: 'church', place: 'adjacent-nucleus', area: [700, 12000], minPop: 200 },
       // parish churches, one per ~2,200 inhabitants beyond the main church, spread across the quarters
-      { role: 'extra', kind: 'parish-church', place: 'spread', area: [900, 6000], minPop: 3500, perPop: 2200, sep: 220 },
+      { role: 'extra', kind: 'parish-church', place: 'spread', area: [900, 6000], minPop: 4500, perPop: 4000, sep: 300 },
       // hospital (hôtel-Dieu) by a gate (M4 activity)
       { role: 'civic', kind: 'hospital', place: 'gate', area: [1500, 6000], minPop: 2500 },
     ],
@@ -145,7 +145,7 @@ export const CULTURE_LIST: Culture[] = [
     faubourg: 'european-organic', faubShare: [0.17, 0.1],
     landmarks: [
       { role: 'worship', kind: 'church', place: 'adjacent-nucleus', area: [700, 9000], minPop: 200 },
-      { role: 'extra', kind: 'parish-church', place: 'spread', area: [900, 6000], minPop: 5000, perPop: 2800, sep: 200 },
+      { role: 'extra', kind: 'parish-church', place: 'spread', area: [900, 6000], minPop: 6000, perPop: 4500, sep: 300 },
     ],
     village: { form: 'auto' }, hamlet: { form: 'auto' },
     m4: { castle: 'castle', cathedral: null, palace: null, monastery: 'monastery', arena: 0 },

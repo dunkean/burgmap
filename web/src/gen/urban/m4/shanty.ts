@@ -75,7 +75,7 @@ export function reserveShanty(s: M4State, api: ReserveApi, si: ShantyIn, amount:
   for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
     const i = y * n + x;
     const p = { x: (x + 0.5) * cell, y: (y + 0.5) * cell };
-    if (t.water[i] || dFoot[i] > 320 || dFoot[i] < 12 || (dAvoid && dAvoid[i] < 25)) continue;
+    if (t.water[i] || dFoot[i] > 320 || dFoot[i] < 12 + (s.listsW ? s.listsW + 8 : 0) || (dAvoid && dAvoid[i] < 25)) continue;
     const sl = ctx.slopeAt(p);
     if (sl > 0.42) continue;
     const dr = dRoad[i];
@@ -115,7 +115,8 @@ export function reserveShanty(s: M4State, api: ReserveApi, si: ShantyIn, amount:
   const regions = isoRegions(v, n, cell, level, 2000);
   dbg('k', k, 'level', level, 'regions', regions.length, regions.map((r) => Math.round(area(r.outer))));
   let m: MultiPoly = regions.map((ph) => ({ outer: ph.outer, holes: [] as Polygon[] }));
-  m = differenceS(m, dilate(api.footprint, 10));
+  // (the cells were taken ≥ 12 m from the footprint: the footprint itself is enough to cut)
+  m = differenceS(m, s.listsW ? dilate(api.enclosure, s.listsW + 6).concat(api.footprint) : api.footprint);
   if (ctx.water.length) m = differenceS(m, ctx.water);
   const roadRb = si.roads.map((pl) => ribbon(pl, 18)).filter((rb) => rb.length >= 3).map((rb) => [{ outer: rb, holes: [] }] as MultiPoly);
   if (roadRb.length) m = differenceS(m, ...roadRb);

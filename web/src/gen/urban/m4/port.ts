@@ -405,7 +405,7 @@ export function reservePort(s: M4State, api: ReserveApi, pin: PortIn): ReservedL
     const ang0 = Math.atan2(b.y - a.y, b.x - a.x);
     const Lr = r.range(220, 260), Wr = 13;
     const roadIdx = new LineIndex(pin.roads.map((path) => ({ path, hw: 5 })));
-    const outM = new Mask(ctx.mapSize, dilate(api.footprint, 10), 5);
+    const outM = new Mask(ctx.mapSize, dilate(api.footprint, 10 + (s.listsW ? s.listsW + 6 : 0)), 5);
     const all = [...pin.avoid, ...out.map((o) => o.poly)];
     const centers = [...gridAround(ctx, a, 380, 30), ...gridAround(ctx, b, 380, 30)].filter((p) => !outM.has(p));
     const res = siteLot(ctx, api.streets, {

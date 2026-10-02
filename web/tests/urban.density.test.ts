@@ -13,7 +13,9 @@ describe('urban density per phase', () => {
       for (const [id, v] of r.byPhase) {
         if (v.zone === 'faubourg') continue;
         const c = v.built / v.area;
-        const [lo, hi] = v.zone === 'faubourg' ? [0.35, 0.55] : id === 1 ? [0.85, 0.95] : id === 2 ? [0.7, 0.85] : [0.5, 0.7];
+        // (oldest phase from 0.78: every building is reached from the street, so dense plots give up a 1.6 m
+        // gateway or a shared side passage to their rear ranges — about 6–10 % of the core's built area)
+        const [lo, hi] = v.zone === 'faubourg' ? [0.35, 0.55] : id === 1 ? [0.78, 0.95] : id === 2 ? [0.7, 0.85] : [0.5, 0.7];
         expect(c, `phase ${id} (${v.zone}) coverage`).toBeGreaterThanOrEqual(lo);
         expect(c, `phase ${id} (${v.zone}) coverage`).toBeLessThanOrEqual(hi);
       }

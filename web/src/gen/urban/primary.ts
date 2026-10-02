@@ -40,6 +40,8 @@ export interface ReserveApi {
   enclosure: MultiPoly; footprint: MultiPoly; phases: PhasePlan[];
   /** Points where the radials cross the enclosure (future gates). */
   gates: Vec2[];
+  /** Extra cuts of the partition registered by the callback (streets without a lot: town bridges). */
+  cuts: Polyline[];
 }
 
 export interface WallLine { ring: Polygon; gates: { p: Vec2; dir: Vec2; width: number; street: number }[] }
@@ -509,6 +511,7 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
   }
   // ---- landmark lots (M4): reserved as exact pieces before the quarters; their connectors cut the partition
   const lots: ReservedLot[] = [];
+  const extraCuts: Polyline[] = [];
   if (inp.reserve) {
     const gatePts: Vec2[] = [];
     for (const id of radials) {
@@ -518,7 +521,7 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
         if (r) gatePts.push({ x: st.path[i - 1].x + (st.path[i].x - st.path[i - 1].x) * r.t, y: st.path[i - 1].y + (st.path[i].y - st.path[i - 1].y) * r.t });
       }
     }
-    for (const l of inp.reserve({ streets, market, marketStreet, radialLines, enclosure: enc, footprint, phases: inp.phases, gates: gatePts })) {
+    for (const l of inp.reserve({ streets, market, marketStreet, radialLines, enclosure: enc, footprint, phases: inp.phases, gates: gatePts, cuts: extraCuts })) {
       if (l.poly.length >= 3 && area(l.poly) > 20) lots.push(l);
     }
   }
@@ -556,6 +559,7 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
     const rb = ribbon(streets.list[id].path, 0.04);
     if (rb.length >= 3) cutters.push(rb);
   }
+  for (const c of extraCuts) { const rb = ribbon(c, 0.04); if (rb.length >= 3) cutters.push(rb); }
   for (const l of lots) for (const c of l.cuts) {
     const rb = ribbon(c, 0.04);
     if (rb.length >= 3) cutters.push(rb);

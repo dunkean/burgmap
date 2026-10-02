@@ -133,6 +133,10 @@ export interface CastleSiteIn {
   variant: CastleVariant;
   walled: boolean;
   citadelSpot?: Vec2;
+  /** Centres of the castles already sited (a further castle takes a distinct site, ≥ 300 m away). */
+  avoid?: Vec2[];
+  /** River crossings: a further castle prefers to guard one (bridgehead castle). */
+  bridges?: Vec2[];
 }
 
 /** Sites the castle on the most defensible spot at the edge of the enclosure; null when nothing fits. */
@@ -177,6 +181,7 @@ export function siteCastle(ctx: UrbanCtx, inp: CastleSiteIn, rng: Rng): CastlePl
     if (ctx.isWater(p)) continue;
     const dN = dist(p, inp.nucleus);
     if (dN < Math.max(90, 0.32 * encR)) { why('near'); continue; }
+    if (inp.avoid?.some((q) => dist(q, p) < 300)) { why('other'); continue; }
     // a rectangle (kasbah) is aligned with the nearest wall edge so one curtain lies on it
     let rect: { ang: number; aspect: number } | undefined;
     if (inp.variant === 'kasbah') {
@@ -205,7 +210,8 @@ export function siteCastle(ctx: UrbanCtx, inp: CastleSiteIn, rng: Rng): CastlePl
     flank = nf ? flank / nf : 0;
     const wet = wetFraction(ctx, outsetConvex(C, ditch), 6);
     let s = prom + 4 * Math.min(0.25, flank) + 1.4 * Math.min(1, wrap / 7) - 3 * wet;
-    if (inp.citadelSpot) s += 1.0 * Math.exp(-dist(p, inp.citadelSpot) / 160);
+    if (inp.citadelSpot && !inp.avoid?.length) s += 1.0 * Math.exp(-dist(p, inp.citadelSpot) / 160);
+    if (inp.avoid?.length && inp.bridges?.length) s += 1.5 * Math.exp(-Math.min(...inp.bridges.map((b) => dist(b, p))) / 150);
     if (core.length) s -= 1.5 * fracInside(core, C, 10);
     s += 0.25 * Math.min(1, dN / encR) + 0.15 * sr.float();
     if (!best || s > best.s) best = { C, s };
@@ -379,3 +385,31 @@ function buildKasbah(B: Polygon, plan: CastlePlan, cx: CompoundCtx): Out {
 }
 
 export { minus, pieces, mpArea };
+
+/**
+ * The outer wall of a double enceinte: the curtain polygon offset outward by d (each straight curtain shifted, mitred
+ * corners, self-intersections resolved), with no stub curtain.
+ */
+export function outerRing(ring: Polygon, d: number): Polygon | null {
+  const P = orientPos(ring), n = P.length;
+  const lines = P.map((a, i) => {
+    const b = P[(i + 1) % n], l = dist(a, b) || 1, dx = (b.x - a.x) / l, dy = (b.y - a.y) / l;
+    return { px: a.x + dy * d, py: a.y - dx * d, dx, dy };
+  });
+  const out: Vec2[] = [];
+  for (let i = 0; i < n; i++) {
+    const A = lines[(i - 1 + n) % n], B = lines[i];
+    const den = A.dx * B.dy - A.dy * B.dx;
+    if (Math.abs(den) < 1e-6) { out.push({ x: B.px, y: B.py }); continue; }
+    const t = ((B.px - A.px) * B.dy - (B.py - A.py) * B.dx) / den;
+    const q = { x: A.px + A.dx * t, y: A.py + A.dy * t };
+    // very sharp corners: bevel instead of a long spike
+    if (dist(q, P[i]) > 3 * d) { out.push({ x: P[i].x + A.dy * d, y: P[i].y - A.dx * d }, { x: P[i].x + B.dy * d, y: P[i].y - B.dx * d }); continue; }
+    out.push(q);
+  }
+  const u = unionS(out);
+  if (!u.length) return null;
+  const big = u.reduce((x, y) => (area(y.outer) > area(x.outer) ? y : x));
+  if (!pointInRing(big.outer, polygonCentroid(P))) return null;
+  return orientPos(removeStubs(cleanRing(big.outer, 0.3, 1), 9, () => false));
+}

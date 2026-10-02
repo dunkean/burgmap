@@ -205,7 +205,7 @@ export function urbanLayer(world: World, pal: Palette, u: number, debug: boolean
   let s = `<g class="layer-urban" stroke-linejoin="round">` + patterns(pal);
   // street space: the quarters (blocks are drawn on top, so what remains visible is exactly quarter \ blocks)
   s += `<path class="u-streets" d="${ub.quarters.map((q) => pathD(q.poly.outer, true)).join('')}" fill="${U.street}" stroke="${U.street}" stroke-width="0.4"/>`;
-  const places = ub.parcels.filter((p) => p.use === 'place' || p.use === 'market' || p.use === 'quay' || p.use === 'pier' || p.use === 'slipway' || p.use === 'timber-yard' || p.use === 'mill-yard' || p.use === 'mill' || p.use === 'tannery-yard');
+  const places = ub.parcels.filter((p) => p.use === 'place' || p.use === 'market' || p.use === 'quay' || p.use === 'pier' || p.use === 'slipway' || p.use === 'timber-yard' || p.use === 'mill-yard' || p.use === 'mill' || p.use === 'tannery-yard' || p.use === 'bridge');
   if (places.length) {
     const d = places.map((p) => pathD(p.poly, true)).join('');
     s += `<g class="u-places"><path d="${d}" fill="${U.place}"/><path d="${d}" fill="url(#p-upave)"/></g>`;
