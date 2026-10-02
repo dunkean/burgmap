@@ -45,8 +45,12 @@ Design documents:
 - `web/URBAN_MORPHOLOGY.md`
 - `web/URBAN_LANDMARKS.md`
 
-The `town_generator/` folder holds the earlier Python prototype: a port of watabou's TownGeneratorOS, used as reference.
+The `town_generator/` folder holds the earlier Python prototype (reference only).
 
-## Credits and licence
+## Thanks
 
-The Python prototype is derived from [TownGeneratorOS](https://github.com/watabou/TownGeneratorOS) by watabou (GPL-3.0), included as a submodule. This repository is distributed under the GNU GPL v3; see `LICENSE`.
+Many thanks to **watabou** (Oleg Dolya). His [Medieval Fantasy City Generator](https://watabou.itch.io/medieval-fantasy-city-generator) and its open-source ancestor [TownGeneratorOS](https://github.com/watabou/TownGeneratorOS) are the inspiration for this project and the benchmark it tries to live up to. The Python prototype in `town_generator/` started as a port of TownGeneratorOS. The web generator is a new implementation.
+
+## Licence
+
+TownGeneratorOS is GPL-3.0, and the Python prototype derives from it. This repository is therefore distributed under the GNU GPL v3; see `LICENSE`.
