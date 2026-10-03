@@ -278,7 +278,7 @@ function openGroundSvg(ub: NonNullable<World['urban']>, pal: Palette, lw: (m: nu
   // footprint: without this the terrain shows through it as a bare patch)
   const ground = ub.quarters.map((q) => pathD(q.poly.outer, true)).join('');
   // (a walled city hides the regional roads under it: its ground is opaque, the meadow tint laid on the paper)
-  if (ground && ub.walls?.length) s += `<path class="u-ground-base" d="${ub.quarters.map((q) => pathD(q.poly.outer, true)).join('')}" fill="${openGroundBase(pal)}"/>`;
+  if (ground && (ub.walls?.length || ub.landmarks.some((l) => l.kind === 'mud'))) s += `<path class="u-ground-base" d="${ub.quarters.map((q) => pathD(q.poly.outer, true)).join('')}" fill="${openGroundBase(pal)}"/>`;
   if (ground) s += `<g class="u-ground"><path d="${ground}" fill="${pal.land.meadow}" fill-opacity="${f1(pal.landOpacity * 0.8)}" stroke="${pal.land.meadow}" stroke-opacity="${f1(pal.landOpacity * 0.8)}" stroke-width="${OPEN_HALO * 2}" stroke-linejoin="round"${mul}/><path d="${ground}" fill="url(#p-utuft)" stroke="url(#p-utuft)" stroke-width="${OPEN_HALO * 2}" stroke-linejoin="round"/></g>`;
   const grass = of(OPEN_GRASS_USES);
   if (grass) s += `<g class="u-yards-grass"><path d="${grass}" fill="${pal.land.pasture}" fill-opacity="${f1(pal.landOpacity * 0.85)}"${mul}/><path d="${grass}" fill="url(#p-utuft)"/></g>`;
@@ -290,6 +290,15 @@ function openGroundSvg(ub: NonNullable<World['urban']>, pal: Palette, lw: (m: nu
   if (fields) s += `<path class="u-fields" d="${fields}" fill="${pal.land.field}" fill-opacity="${f1(pal.landOpacity)}"${mul}/>`;
   const paved = of(['place', 'plaza', 'market']);
   if (paved) s += `<g class="u-places"><path d="${paved}" fill="${U.place}"/><path d="${paved}" fill="url(#p-upave)"/></g>`;
+  // churned mud (a war camp): the mud tone, specks and ruts, puddles
+  const mud = ub.landmarks.filter((l) => l.kind === 'mud').map((l) => pathD(l.poly, true)).join('');
+  if (mud) {
+    const dk = mixHex(pal.trackFill, '#000000', 0.25);
+    s += `<defs><pattern id="p-umud" patternUnits="userSpaceOnUse" width="9" height="7" patternTransform="rotate(17)"><path d="M1 1.5l1.6 0.4M5.5 4.8l1.2-0.5M2.4 5.6l0.9 0.6M7.2 1.2l0.5 1" stroke="${dk}" stroke-width="0.35" stroke-linecap="round" opacity="0.55"/><circle cx="4.2" cy="2.4" r="0.32" fill="${dk}" opacity="0.5"/><circle cx="7.8" cy="5.9" r="0.25" fill="${dk}" opacity="0.45"/></pattern></defs>`;
+    s += `<g class="u-mud"><path d="${mud}" fill="${mixHex(pal.trackFill, pal.farmYard, 0.62)}" fill-opacity="0.75"/><path d="${mud}" fill="url(#p-umud)"/></g>`;
+  }
+  const pud = ub.landmarks.filter((l) => l.kind === 'puddle').map((l) => pathD(l.poly, true)).join('');
+  if (pud) s += `<path class="u-puddles" d="${pud}" fill="${pal.riverFill}" fill-opacity="0.7" stroke="${mixHex(pal.trackFill, '#000000', 0.2)}" stroke-opacity="0.6" stroke-width="${lw(0.3, 0.1)}"/>`;
   // the trampled ground round the buildings
   const earth = ub.landmarks.filter((l) => l.kind === 'yard-earth' || l.kind === 'midden').map((l) => pathD(l.poly, true)).join('');
   if (earth) s += `<path class="u-yard-earth" d="${earth}" fill="${yardEarthTone(pal)}" fill-opacity="0.85"/>`;

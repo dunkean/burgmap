@@ -392,6 +392,17 @@ export function warCamp(cc: CampCtx, c: Vec2, pop: number, rng: Rng): CampOut {
       flush();
     }
   }
+  // the ground of the camp: churned mud under the huts and the pens (no grass survives a horde), puddles, ash
+  for (const p of out.parcels) if (p.use === 'plot' || p.use === 'pen' || p.use === 'garden') out.landmarks.push({ kind: 'mud', poly: p.poly });
+  const pr = rng.fork('puddles');
+  for (const p of out.parcels) {
+    if (p.use !== 'plot' || !pr.chance(0.35)) continue;
+    const ins = inscribed(p.poly, [], 1);
+    const q = { x: ins.c.x + pr.range(-0.5, 0.5) * ins.r, y: ins.c.y + pr.range(-0.5, 0.5) * ins.r };
+    const r0 = pr.range(1.4, 3.2), ph = pr.range(0, 6);
+    const pud = orientPos(Array.from({ length: 10 }, (_, i) => at(q, (i / 10) * 2 * Math.PI, r0 * (1 + 0.3 * Math.sin(i * 2.3 + ph)) * (i % 2 ? 0.7 : 1))));
+    if (pud.every((x) => pointInRing(p.poly, x)) && !out.buildings.some((bd) => bd.poly.some((x) => pointInRing(pud, x)) || pud.some((x) => pointInRing(bd.poly, x)))) out.landmarks.push({ kind: 'puddle', poly: pud });
+  }
   out.sites.push({ id: 'warcamp', kind: 'war-camp', role: 'power', lot: quarter, anchor: c, tags: { palisades: String(nRings) } });
   return out;
 }

@@ -529,7 +529,7 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
         {
           const gl = polyL('u-streets');
           // (a walled city hides the regional roads under it: its ground is opaque)
-          if (gl && world.urban?.walls?.length) fillPolys('u-streets', mixHex(pal.paper, pal.land.meadow, 0.35), 1, 'nonzero');
+          if (gl && (world.urban?.walls?.length || polyL('u-mud'))) fillPolys('u-streets', mixHex(pal.paper, pal.land.meadow, 0.35), 1, 'nonzero');
           if (gl) {
             if (pal.landBlend === 'multiply') ctx.globalCompositeOperation = 'multiply';
             ctx.globalAlpha = pal.landOpacity * 0.8; ctx.fillStyle = pal.land.meadow; ctx.strokeStyle = pal.land.meadow; ctx.lineWidth = 24; ctx.lineJoin = 'round';
@@ -545,6 +545,18 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
         tint('u-open-green', pal.land.meadow, pal.landOpacity, tuft);
         tint('u-open-garden', pal.land.garden, pal.landOpacity, null);
         tint('u-open-field', pal.land.field, pal.landOpacity, null);
+        // churned mud (a war camp), puddles
+        if (polyL('u-mud')) {
+          const dk = mixHex(pal.trackFill, '#000000', 0.25);
+          fillPolys('u-mud', mixHex(pal.trackFill, pal.farmYard, 0.62), 0.75);
+          const mudPat = near ? getPattern(ctx, 'mud', 9, 7, 17, (c, k) => {
+            c.globalAlpha = 0.55; c.strokeStyle = dk; c.lineWidth = 0.35 * k; c.lineCap = 'round'; c.beginPath();
+            for (const [x0, y0, x1, y1] of [[1, 1.5, 2.6, 1.9], [5.5, 4.8, 6.7, 4.3], [2.4, 5.6, 3.3, 6.2], [7.2, 1.2, 7.7, 2.2]]) { c.moveTo(x0 * k, y0 * k); c.lineTo(x1 * k, y1 * k); }
+            c.stroke(); c.fillStyle = dk; c.beginPath(); c.arc(4.2 * k, 2.4 * k, 0.32 * k, 0, TAU); c.arc(7.8 * k, 5.9 * k, 0.25 * k, 0, TAU); c.fill();
+          }) : null;
+          if (mudPat) { const l = polyL('u-mud')!; ctx.fillStyle = mudPat; for (const p of polyPaths(l)) ctx.fill(p, 'evenodd'); }
+        }
+        if (polyL('u-puddle')) { fillPolys('u-puddle', pal.riverFill, 0.7); strokePolys('u-puddle', mixHex(pal.trackFill, '#000000', 0.2), lw(0.3, 0.3), 0.6); }
         fillPolys('u-yard-earth', mixHex(pal.farmYard, pal.trackFill, 0.12), 0.85);
         // paths: trampled earth (wide causeways keep the street colour)
         strokeLines(uStreets.filter((l) => !(l.width >= 6.5 && Number(l.kind.slice(1, 2)) <= 1)), earth, (l) => Math.max(1.2, l.width * 0.92, 0.8 / sc), 0.8);

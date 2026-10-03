@@ -97,7 +97,7 @@ export const URBAN_PARCEL_USES = {
   openGarden: ['garden'],
   openField: ['field'],
 } as const;
-export const URBAN_LANDMARK_KINDS = ['sahn', 'garth', 'chinampa-canal', 'baray', 'pond', 'chinampa', 'cornfield', 'terrace-field', 'garden-bed', 'cemetery', 'tenshu-base', 'mebon', 'yard-earth', 'midden'] as const;
+export const URBAN_LANDMARK_KINDS = ['sahn', 'garth', 'chinampa-canal', 'baray', 'pond', 'chinampa', 'cornfield', 'terrace-field', 'garden-bed', 'cemetery', 'tenshu-base', 'mebon', 'yard-earth', 'midden', 'mud', 'puddle'] as const;
 /** Building kinds with a dedicated look (the rest are ordinary roofs). */
 export const URBAN_BUILDING_KINDS = ['church', 'cathedral', 'landmark', 'house'] as const;
 /** Plan-line widths (m) of the generic wall-like kinds, and of camp / village fences (same tables as urban.ts). */
@@ -290,6 +290,8 @@ export function buildScene(world0: World, tileSize = TILE_SIZE): Scene {
       addPoly('u-open-green', parcelsOf([...PU.openGreen]));
       addPoly('u-open-garden', parcelsOf([...PU.openGarden]));
       addPoly('u-open-field', parcelsOf([...PU.openField]));
+      addPoly('u-mud', ur.landmarks.filter((l) => l.kind === 'mud').map((l) => l.poly));
+      addPoly('u-puddle', ur.landmarks.filter((l) => l.kind === 'puddle').map((l) => l.poly));
       addPoly('u-yard-earth', ur.landmarks.filter((l) => l.kind === 'yard-earth' || l.kind === 'midden').map((l) => l.poly));
     }
     const lmOf = (...k: string[]): Polygon[] => ur.landmarks.filter((l) => k.includes(l.kind)).map((l) => l.poly);
@@ -339,7 +341,7 @@ export function buildScene(world0: World, tileSize = TILE_SIZE): Scene {
       crosses.push([{ x: cx - r, y: cy }, { x: cx + r, y: cy }], [{ x: cx, y: cy - r * 1.4 }, { x: cx, y: cy + r }]);
     }
     addLines('church-cross', 'cross', 'cross', 0.9, crosses);
-    addPoly('landmarks', ur.landmarks.filter((l) => l.kind !== 'yard-earth' && l.kind !== 'midden').map((l) => l.poly));
+    addPoly('landmarks', ur.landmarks.filter((l) => l.kind !== 'yard-earth' && l.kind !== 'midden' && l.kind !== 'mud' && l.kind !== 'puddle').map((l) => l.poly));
     // streets by rank and (rounded) width so each layer shares one stroke width; the streets of the secondary
     // settlements (villages, hamlets) are kept in their own layers ('vstreet-*'): the renderer never draws them as
     // far-zoom arterials

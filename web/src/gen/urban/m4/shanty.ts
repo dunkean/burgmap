@@ -403,6 +403,7 @@ export function buildShanty(B: Polygon, cx: CompoundCtx): Out {
   for (let t = 4; t < 8 && huts.cov < 0.5; t++) { const h = hutsFor(t % 2 ? 0.45 : 0.5, [36, 40], rng.fork('huts' + t), t % 2 === 0); if (h.cov > huts.cov) huts = h; }
   // too dense: huts are shrunk about their centroid
   const kk = huts.cov > 0.66 ? Math.sqrt(0.62 / huts.cov) : 1;
+  const finals: { poly: Polygon; parcel: number }[] = [];
   for (const h of huts.list) {
     let poly = h.poly;
     if (kk < 1) {
@@ -425,8 +426,28 @@ export function buildShanty(B: Polygon, cx: CompoundCtx): Out {
         if (u && isSimple(u) && shapeOf(u).asp <= 3 && area(u) <= 40) poly = u;
       }
     }
-    out.buildings.push({ poly, kind: 'hut', parcel: h.parcel, arch: 'shack', roof: 'flat', material: 'timber', storeys: 1 });
+    finals.push({ poly, parcel: h.parcel });
   }
+  // realistic huts: a plank shack (a rectangle, its ridge), an L-shaped shack with its annex, now and then a round
+  // tent; each of about the hut's area and inside its cell (else the hut as it was); kept only while the coverage
+  // stays above half the block
+  const rr = rng.fork('real');
+  const real = finals.map((h) => realHut(h.poly, cs[h.parcel], rr.fork('h' + h.parcel)));
+  // (the huts losing most area go back to their first shape until the block is half built again)
+  let built = finals.reduce((sum, h, i) => sum + area(real[i]?.poly ?? h.poly), 0);
+  const loss = finals.map((h, i) => ({ i, d: real[i] ? area(h.poly) - area(real[i]!.poly) : 0 })).filter((x) => x.d > 0).sort((x, y) => y.d - x.d);
+  for (const { i, d } of loss) { if (built / BA >= 0.512) break; real[i] = null; built += d; }
+  finals.forEach((h, i) => {
+    const r = real[i];
+    out.buildings.push({ poly: r?.poly ?? h.poly, kind: 'hut', parcel: h.parcel, arch: r?.arch ?? 'shack', roof: r?.arch === 'tent' ? 'conical' : 'gable', material: r?.arch === 'tent' ? 'canvas' : 'timber', storeys: 1 });
+    if (r?.ridge) out.lines.push({ kind: 'roof-line', path: r.ridge, width: 0.2 });
+    else if (!r) {
+      // (a hut left as it was still shows its ridge, along its long axis, where it stays under the roof)
+      const o = obb(h.poly), hl = Math.max(o.hu, o.hv), along = o.hu >= o.hv ? o.u : o.v;
+      const a2 = { x: o.c.x - along.x * hl * 0.7, y: o.c.y - along.y * hl * 0.7 }, b2 = { x: o.c.x + along.x * hl * 0.7, y: o.c.y + along.y * hl * 0.7 };
+      if (pointInRing(h.poly, a2) && pointInRing(h.poly, b2) && distToRing(h.poly, a2) > 0.6 && distToRing(h.poly, b2) > 0.6) out.lines.push({ kind: 'roof-line', path: [a2, b2], width: 0.2 });
+    }
+  });
   for (const id of inTree) { const e = edges.get(id)!; out.lines.push({ kind: 'footpath', path: [e.a, e.b], width: 2 * pathHalf }); }
   // a few water points at path junctions
   let wells = 0;
@@ -437,4 +458,44 @@ export function buildShanty(B: Polygon, cx: CompoundCtx): Out {
   }
   void mpArea;
   return out;
+}
+
+/** A plank shack, an L-shaped shack (a main room and an annex) or a round tent of about a hut's area, inside its cell. */
+function realHut(hut: Polygon, cell: Polygon, r: Rng): { poly: Polygon; arch: string; ridge?: Vec2[] } | null {
+  const A = area(hut);
+  const o = obb(hut);
+  const u = o.u, v = o.v;
+  const c = inscribed(hut, [], 0.3).c;
+  const ok = (p: Polygon | null): p is Polygon => !!p && p.length >= 3 && isSimple(p) && polyInside(cell, p) && p.every((q) => distToRing(cell, q) >= 0.25) && area(p) >= 15.2 && area(p) <= 40 && area(p) >= A * 0.7;
+  const box = (q: Vec2, L: number, W: number): Polygon => orientPos([-1, 1].flatMap((su) => (su < 0 ? [-1, 1] : [1, -1]).map((sv) => ({ x: q.x + u.x * su * L / 2 + v.x * sv * W / 2, y: q.y + u.y * su * L / 2 + v.y * sv * W / 2 }))));
+  const t = r.float();
+  if (t < 0.16) {
+    // a round tent
+    for (let rad = Math.min(3.6, Math.sqrt((A * 0.98) / Math.PI)); rad >= 2.25; rad -= 0.1) {
+      const p = orientPos(Array.from({ length: 14 }, (_, i) => ({ x: c.x + Math.cos((i / 14) * 2 * Math.PI) * rad, y: c.y + Math.sin((i / 14) * 2 * Math.PI) * rad })));
+      if (ok(p)) return { poly: p, arch: 'tent' };
+    }
+    return null;
+  }
+  const asp = r.range(1.2, 1.8);
+  for (let k = 1.02; k >= 0.7; k -= 0.04) {
+    const a2 = A * k;
+    if (t < 0.45) {
+      // an L: the main room along the hut, the annex at one end on one side
+      const W = Math.sqrt((a2 * 0.72) / asp), L = W * asp;
+      const La = L * r.range(0.38, 0.5), Wa = (a2 * 0.28) / La;
+      const su = r.chance(0.5) ? 1 : -1, sv = r.chance(0.5) ? 1 : -1;
+      const main = box(c, L, W);
+      const ac = { x: c.x + u.x * su * (L / 2 - La / 2) + v.x * sv * (W / 2 + Wa / 2), y: c.y + u.y * su * (L / 2 - La / 2) + v.y * sv * (W / 2 + Wa / 2) };
+      const annex = box(ac, La, Wa + 0.02);
+      const un = stitchUnion(main, annex);
+      // (the L shifted back so that it sits on the hut's centre)
+      if (un && ok(un)) return { poly: un, arch: 'shack', ridge: [{ x: c.x - u.x * (L / 2 - 0.7), y: c.y - u.y * (L / 2 - 0.7) }, { x: c.x + u.x * (L / 2 - 0.7), y: c.y + u.y * (L / 2 - 0.7) }] };
+    } else {
+      const W = Math.sqrt(a2 / asp), L = W * asp;
+      const p = box(c, L, W);
+      if (ok(p)) return { poly: p, arch: 'shack', ridge: [{ x: c.x - u.x * (L / 2 - 0.6), y: c.y - u.y * (L / 2 - 0.6) }, { x: c.x + u.x * (L / 2 - 0.6), y: c.y + u.y * (L / 2 - 0.6) }] };
+    }
+  }
+  return null;
 }
