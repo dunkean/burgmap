@@ -1,6 +1,6 @@
 # Burgmap completion roadmap
 
-This checklist reconciles the open work in `BUGS.md`, `HANDOFF.md` §7 and `web/POLISH.md`. A task is complete only after its implementation and relevant geometry, visual, UI and performance checks pass. Preserve user bug reports and append their fixing commits.
+This checklist reconciles the open work in `BUGS.md`, `HANDOFF.md` §7 and `web/POLISH.md`. A task is complete only after its implementation and relevant geometry, visual, UI and performance checks pass. Keep open user bug reports unchanged; remove resolved entries from BUGS.md after validation, as requested by the user. Record completed work here and in Git history.
 
 ## User bugs, in priority order
 
@@ -18,6 +18,8 @@ This checklist reconciles the open work in `BUGS.md`, `HANDOFF.md` §7 and `web/
 - [ ] Open-town ground: blend countryside texture into peripheral quarters instead of a uniform urban background (new user report in `BUGS.md`, after the primitive-city fix).
 - [ ] Estuary variety: generate several mouth shapes, including a river that simply widens instead of a round basin (new user report).
 - [ ] Water-aware town plans: audit every family and keep ordinary quarters and houses on dry land, with explicit exceptions for suitable water architecture (new user report).
+- [ ] Settlement placement: allow choosing the main city centre and centres of surrounding villages (new user report).
+- [ ] Large-map strokes: bound contour and field-interior strokes so they do not grow ugly with image/map extent (new user report).
 
 ## Scale, performance and test health
 
