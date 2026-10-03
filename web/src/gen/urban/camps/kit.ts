@@ -324,20 +324,35 @@ export function fits(lot: Polygon, fp: Polygon, others: Polygon[], margin: numbe
  * Fits a footprint family inside a lot: tries the shape built at scale 1 at candidate centres (inscribed centre
  * first, then a grid), shrinking down to `minScale`. Returns the first footprint that fits.
  */
+const FIT_CANDS = new WeakMap<Polygon, Map<number, Vec2[]>>();
 export function fitIn(lot: Polygon, build: (c: Vec2, s: number) => Polygon, others: Polygon[], o: { margin?: number; gap?: number; minScale?: number; cands?: Vec2[]; step?: number } = {}): Polygon | null {
   const margin = o.margin ?? 1, gap = o.gap ?? 1.5, minS = o.minScale ?? 0.7;
-  const ins = inscribed(lot, [], 0.5);
-  const cands: Vec2[] = o.cands ? o.cands.slice() : [ins.c];
-  if (!o.cands) {
-    const bb = bboxOf(lot), st = o.step ?? 3;
-    const grid: Vec2[] = [];
-    for (let y = bb.y0 + st / 2; y < bb.y1; y += st) for (let x = bb.x0 + st / 2; x < bb.x1; x += st) {
-      const p = { x, y };
-      if (pointInRing(lot, p)) grid.push(p);
+  let cands: Vec2[];
+  if (o.cands) cands = o.cands.slice();
+  else {
+    // the default candidates depend on the lot and the step only (a yard is filled by many calls): kept per lot
+    const st = o.step ?? 3;
+    let m = FIT_CANDS.get(lot);
+    if (!m) { m = new Map(); FIT_CANDS.set(lot, m); }
+    let cc = m.get(st);
+    if (!cc) {
+      const ins = inscribed(lot, [], 0.5);
+      cc = [ins.c];
+      const bb = bboxOf(lot);
+      const grid: Vec2[] = [];
+      for (let y = bb.y0 + st / 2; y < bb.y1; y += st) for (let x = bb.x0 + st / 2; x < bb.x1; x += st) {
+        const p = { x, y };
+        if (pointInRing(lot, p)) grid.push(p);
+      }
+      // deepest points first (most room); the depths are computed once (same comparisons as computing them in
+      // the comparator)
+      const depth = new Map<Vec2, number>();
+      for (const p of grid) depth.set(p, distToRing(lot, p));
+      grid.sort((a, b) => depth.get(b)! - depth.get(a)!);
+      cc.push(...grid.slice(0, 60));
+      m.set(st, cc);
     }
-    // deepest points first (most room)
-    grid.sort((a, b) => distToRing(lot, b) - distToRing(lot, a));
-    cands.push(...grid.slice(0, 60));
+    cands = cc;
   }
   for (let s = 1; s >= minS - 1e-9; s -= 0.1) {
     for (const c of cands) {
