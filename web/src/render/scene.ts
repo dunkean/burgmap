@@ -9,6 +9,7 @@ import { renderView } from '../gen/settlements/merge';
 import { seaWithIslands } from './util';
 import { farmPlots, farmRidges, treePolys } from './farms';
 import { fieldHedges } from './hedges';
+import { terraceMarks } from './terraces';
 import { offsetRibbon, polygonCentroid } from '../gen/core/geom';
 import { pointInRing, orientPos } from '../gen/geo/poly';
 import { TileIndex, boxesOf, chunkPolyline } from './tileindex';
@@ -315,6 +316,11 @@ export function buildScene(world0: World, tileSize = TILE_SIZE): Scene {
         list.push(l.closed ? [...l.path, l.path[0]] : l.path);
       }
       for (const [k, list] of byLine) { const [kind, w] = k.split('|'); addLines('ul-' + k, 'uline', kind, Number(w), list); }
+      for (const [kind, gap, length] of [['andene-riser', 6, 1.2], ['terrace-stair', 2.2, 1.5]] as const) {
+        const ticks = (ur.lines ?? []).filter((l) => l.kind === kind).flatMap((l) => terraceMarks(l.closed ? [...l.path, l.path[0]] : l.path, gap, length));
+        const markKind = kind === 'andene-riser' ? 'andene-hachure' : 'terrace-tread';
+        addLines('ul-' + markKind, 'uline', markKind, 0.25, ticks);
+      }
     }
     const crosses: Polyline[] = [];
     for (const b of ur.buildings) {

@@ -14,6 +14,7 @@ import type { World, LandKind, Vec2 } from '../gen/types';
 import { Palette, MapStyle, ruralInk } from './styles';
 import { biomePalette } from './biomes';
 import { fieldHedgeStyle } from './hedges';
+import { TERRACE_STROKES as TS, terraceDetailAlpha } from './terraces';
 import { renderTerrainRaster } from './raster';
 import { buildScene, Scene, PolyLayer, LineLayer, TextureLayer, textureMarks, LAND_ORDER, WALL_LINE_W, CAMP_FENCE_W, FENCE_STYLE } from './scene';
 import { renderView } from '../gen/settlements/merge';
@@ -682,7 +683,8 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
       {
         const treeInk = pal.treeInk ?? '#4a6a3a';
         const fine = lod.fine;
-        if (lod.fine) strokeLines(linesOf((x) => x.role === 'uline' && x.kind === 'andene-riser'), U.wall, () => 1.5, 0.45, [0.22, 0.85], 'butt');
+        const terraceDetail = terraceDetailAlpha(sc);
+        strokeLines(linesOf((x) => x.role === 'uline' && x.kind === 'andene-riser'), U.wallFill, () => TS.face.width, TS.face.alpha, [], 'butt');
         for (const l of linesOf((x) => x.role === 'uline')) {
           const k = l.kind, w = l.width;
           const one = (color: string, width: number, alpha = 1, dash: number[] = [], cap: CanvasLineCap = 'round'): void => strokeLines([l], color, () => width, alpha, dash, cap);
@@ -698,10 +700,11 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
           else if (k === 'turf-wall') { one(mixHex(pal.grass, U.wall, 0.35), lw(2.2, 0.8), 0.42); if (fine) one(U.wall, lw(0.16, 0.3), 0.45); }
           else if (k === 'albarrada') one(U.wall, lw(0.85, 0.4), 0.4, fine ? [0.9, 0.45] : []);
           else if (k === 'ghat-steps') { if (fine) one(U.plotLine, lw(0.3, 0.4)); }
-          else if (k === 'terrace') one(U.wall, lw(1.6, 0.8));
-          else if (k === 'andene') one(U.wall, lw(0.4, 0.4), 0.8);
+          else if (k === 'terrace') one(U.wall, lw(TS.wall.width, TS.wall.minPx), TS.wall.alpha);
+          else if (k === 'andene') one(U.wall, lw(TS.andene.width, TS.andene.minPx), TS.andene.alpha);
           else if (k === 'andene-riser') continue;
-          else if (k === 'terrace-stair') { one(U.wall, lw(1.6, 0.6), 0.85, fine ? [0.35, 0.55] : [], 'butt'); }
+          else if (k === 'andene-hachure' || k === 'terrace-tread') { if (terraceDetail > 0) one(U.wall, lw(TS.hatch.width, TS.hatch.minPx), TS.hatch.alpha * terraceDetail, [], 'butt'); }
+          else if (k === 'terrace-stair') one(U.wall, lw(TS.stair.width, TS.stair.minPx), TS.stair.alpha);
           else if (k === 'thorn-fence') one(treeInk, lw(2.2, 0.8), 0.85, near ? [1.3, 0.9] : []);
           else if (k === 'rampart') { one(U.garden, lw(7, 1.4), 0.9); one(U.wall, lw(0.6, 0.4)); }
           else if (k === 'ditch') one(U.wall, lw(4, 0.9), 0.35);
@@ -719,7 +722,7 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
           }
           else if (k === 'qanat') one(U.wall, lw(1, 0.6), 0.7, [4, 3], 'butt');
           else if (k === 'qanat-shaft') { ctx.fillStyle = U.garden; for (const p of linePaths(l)) ctx.fill(p, 'evenodd'); one(U.wall, lw(0.7, 0.5)); }
-          else if (k === 'hachure') { if (fine) one(U.wall, lw(0.55, 0.5), 0.85, [], 'butt'); }
+          else if (k === 'hachure') { if (terraceDetail > 0) one(U.wall, lw(TS.hatch.width, TS.hatch.minPx), TS.hatch.alpha * terraceDetail, [], 'butt'); }
           else if (CAMP_FENCE_W[k] !== undefined) {
             // a rail with its posts (stakes close together for a palisade); zoomed out, a thin line
             const st = FENCE_STYLE[k] ?? FENCE_STYLE['yard-fence'];

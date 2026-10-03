@@ -1,5 +1,6 @@
 /** SVG rendering of the urban layer (streets as space, blocks, plots, building masses, walls). */
 import { townBridgesSvg } from './townbridges';
+import { terraceMarks, TERRACE_STROKES as TS } from './terraces';
 import type { World, PolyH, UrbanWall } from '../gen/types';
 import type { Polygon } from '../gen/core/geom';
 import type { Palette } from './styles';
@@ -220,16 +221,21 @@ function cultureOverlay(ub: NonNullable<World['urban']>, pal: Palette, lw: (m: n
     else if (k === 'weir') s += `<path d="${d}" fill="none" stroke="${U.wall}" stroke-width="${lw(1.4, 0.5)}" stroke-dasharray="1.2 0.6"/>`;
     else if (k === 'parterre' || k === 'footpath') s += `<path d="${d}" fill="none" stroke="${k === 'footpath' ? (open ? pathEarth(pal) : U.street) : U.plotLine}" stroke-width="${lw(k === 'footpath' ? 1.4 : 0.5, 0.15)}" stroke-linecap="round"/>`;
     else if (k === 'ghat-steps') s += `<path d="${d}" fill="none" stroke="${U.plotLine}" stroke-width="${lw(0.3, 0.12)}"/>`;
-    else if (k === 'terrace') s += `<path d="${d}" fill="none" stroke="${U.wall}" stroke-width="${lw(1.6, 0.8)}"/>`;
+    else if (k === 'terrace') s += `<path d="${d}" fill="none" stroke="${U.wall}" stroke-width="${lw(TS.wall.width, TS.wall.minPx)}" stroke-opacity="${TS.wall.alpha}"/>`;
     else if (k === 'andene') {
-      // the riser faces first (shaded on the downhill side), then the retaining walls
+      const risers = (ub.lines ?? []).filter((l) => l.kind === 'andene-riser');
       const ris = (byKind.get('andene-riser') ?? []).join('');
-      // (the riser face as short hachures on the downhill side of a fine wall line: the engraver's terrace)
-      if (ris) s += `<path d="${ris}" fill="none" stroke="${U.wall}" stroke-opacity="0.45" stroke-width="${f1(1.5)}" stroke-dasharray="0.22 0.85" stroke-linecap="butt"/>`;
-      s += `<path d="${d}" fill="none" stroke="${U.wall}" stroke-width="${lw(0.4, 0.25)}" stroke-opacity="0.8"/>`;
+      const ticks = risers.flatMap((l) => terraceMarks(l.closed ? [...l.path, l.path[0]] : l.path, 6, 1.2)).map((p) => pathD(p, false)).join('');
+      if (ris) s += `<path d="${ris}" fill="none" stroke="${U.wallFill}" stroke-opacity="${TS.face.alpha}" stroke-width="${TS.face.width}" stroke-linecap="butt"/>`;
+      if (ticks) s += `<path class="u-terrace-hachures" d="${ticks}" fill="none" stroke="${U.wall}" stroke-opacity="${TS.hatch.alpha}" stroke-width="${TS.hatch.width}" stroke-linecap="butt"/>`;
+      s += `<path d="${d}" fill="none" stroke="${U.wall}" stroke-width="${lw(TS.andene.width, TS.andene.minPx)}" stroke-opacity="${TS.andene.alpha}"/>`;
     }
     else if (k === 'andene-riser') continue;
-    else if (k === 'terrace-stair') s += `<path d="${d}" fill="none" stroke="${U.wall}" stroke-width="${lw(1.6, 0.6)}" stroke-dasharray="0.35 0.55" stroke-opacity="0.85"/><path d="${d}" fill="none" stroke="${U.wall}" stroke-width="${lw(0.15, 0.1)}" stroke-opacity="0.6"/>`;
+    else if (k === 'terrace-stair') {
+      const ticks = (ub.lines ?? []).filter((l) => l.kind === k).flatMap((l) => terraceMarks(l.closed ? [...l.path, l.path[0]] : l.path, 2.2, 1.5)).map((p) => pathD(p, false)).join('');
+      s += `<path d="${d}" fill="none" stroke="${U.wall}" stroke-width="${lw(TS.stair.width, TS.stair.minPx)}" stroke-opacity="${TS.stair.alpha}"/>`;
+      if (ticks) s += `<path class="u-terrace-treads" d="${ticks}" fill="none" stroke="${U.wall}" stroke-width="${TS.hatch.width}" stroke-opacity="${TS.hatch.alpha}" stroke-linecap="butt"/>`;
+    }
     else if (k === 'thorn-fence') s += `<path d="${d}" fill="none" stroke="${pal.treeInk ?? '#4a6a3a'}" stroke-width="${lw(2.2, 0.8)}" stroke-opacity="0.85" stroke-dasharray="1.3 0.9" stroke-linecap="round"/>`;
     else if (CAMP_FENCES[k]) s += fenceSvg(k, d, pal, lw);
     else if (k === 'garden-hedge') s += `<path d="${d}" fill="none" stroke="${pal.treeInk ?? '#4a6a3a'}" stroke-width="${lw(1.2, 0.4)}" stroke-opacity="0.7" stroke-dasharray="1.6 0.7"/>`;
@@ -253,7 +259,7 @@ function cultureOverlay(ub: NonNullable<World['urban']>, pal: Palette, lw: (m: n
     }
     else if (k === 'qanat') s += `<path d="${d}" fill="none" stroke="${U.wall}" stroke-width="${lw(1, 0.5)}" stroke-dasharray="4 3" stroke-opacity="0.7"/>`;
     else if (k === 'qanat-shaft') s += `<path d="${d}" fill="${U.garden}" stroke="${U.wall}" stroke-width="${lw(0.7, 0.3)}"/>`;
-    else if (k === 'hachure') s += `<path d="${d}" fill="none" stroke="${U.wall}" stroke-width="${lw(0.55, 0.3)}" stroke-opacity="0.85"/>`;
+    else if (k === 'hachure') s += `<path d="${d}" fill="none" stroke="${U.wall}" stroke-width="${TS.hatch.width}" stroke-opacity="${TS.hatch.alpha}" stroke-linecap="butt"/>`;
     else s += `<path class="u-line-${k}" d="${d}" fill="none" stroke="${U.wall}" stroke-width="${lw(WALL_LINES[k] ?? 1, 0.4)}" stroke-linejoin="miter" stroke-linecap="square"/>`;
   }
   const trees = ub.trees ?? [];
