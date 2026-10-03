@@ -219,6 +219,11 @@ export interface UrbanLayer {
   sites?: UrbanSite[];
   /** Stone quay edges (straight segments on the shoreline). */
   quays?: Polyline[];
+  // ---- megacity scaling (URBAN_MORPHOLOGY §3d), additive: present only above the eager threshold
+  /** Macro plan: arterial graph and quarters whose detail is generated lazily (`megaQuarterDetail`). */
+  macro?: import('./urban/mega/types').MacroPlan;
+  /** Built-up fraction raster of the macro plan (far-zoom density tint before / without the detail). */
+  densityGrid?: { cell: number; w: number; cov: Float32Array; max: number };
 }
 
 import type { SettlementClass } from './options';
@@ -267,6 +272,8 @@ export interface World {
   names?: NamesLayer;
   /** Settlement system (M3c): index 0 = the main settlement. */
   settlements?: Settlement[];
+  /** Megacity: the quarters whose detail has been generated (by macro quarter id), merged by `renderView`. */
+  megaDetail?: Record<number, UrbanLayer>;
   /** Stage-internal data for debug rendering (not part of the contract). */
   debug?: Record<string, unknown>;
   stats: Record<string, number | string>;

@@ -103,6 +103,8 @@ export interface Options {
   mapSize?: number;
   /** Secondary settlements: automatic, none, counts per class, or an explicit list. Default 'auto'. */
   settlements?: SettlementsOpt;
+  /** Megacity scaling: main settlements above this population get a macro plan with lazily generated quarters (default 40 000). */
+  eagerPop?: number;
 }
 
 /** Settlement classes of the planner (farmstead → megacity), derived continuously from the population. */
@@ -275,6 +277,7 @@ export function toQuery(o: Options): string {
   if (o.plan) p.set('plan', planToString(o.plan));
   if (o.mapSize !== undefined) p.set('map', String(mapSizeOf(o)));
   if (o.settlements && o.settlements !== 'auto') p.set('settl', settlementsToString(o.settlements));
+  if (o.eagerPop !== undefined) p.set('eager', String(o.eagerPop));
   // the image itself is never put in the URL: only a marker plus its two scalars
   if (o.importedHeight) {
     p.set('hm', 'custom');
@@ -308,6 +311,8 @@ export function fromQuery(q: string | URLSearchParams): Options {
   o.population = Number.isFinite(pop) && pop > 0 ? Math.max(POP_MIN, Math.min(POP_MAX, Math.round(pop))) : 0;
   const ms = Number(p.get('map'));
   if (p.get('map') !== null && Number.isFinite(ms) && ms > 0) o.mapSize = Math.max(MAP_SIZE_MIN, Math.min(MAP_SIZE_MAX, Math.round(ms)));
+  const ep = Number(p.get('eager'));
+  if (p.get('eager') !== null && Number.isFinite(ep) && ep > 0) o.eagerPop = Math.max(1000, Math.min(POP_MAX, Math.round(ep)));
   const st = settlementsFromString(p.get('settl'));
   if (st !== 'auto') o.settlements = st;
   const roads = Number(p.get('roads'));
@@ -339,7 +344,7 @@ export const wantsCustomHeight = (q: string | URLSearchParams): boolean =>
 /** Parse "k=v" overrides (used by the preview script). */
 export function applyOverride(o: Options, k: string, v: string): void {
   const rec = o as unknown as Record<string, unknown>;
-  if (k === 'roads' || k === 'seaLevel' || k === 'population' || k === 'heightScale' || k === 'importSea' || k === 'mapSize' || k === 'sprawl') rec[k] = Number(v);
+  if (k === 'roads' || k === 'seaLevel' || k === 'population' || k === 'heightScale' || k === 'importSea' || k === 'mapSize' || k === 'sprawl' || k === 'eagerPop') rec[k] = Number(v);
   else if (k === 'settlements' || k === 'settl') o.settlements = settlementsFromString(v);
   else if (k === 'contours' || k === 'landuse' || k === 'labels' || k === 'legend') rec[k] = v === '1' || v === 'true';
   else if (k === 'mix' || k === 'cultureMix') o.cultureMix = mixFromString(v);

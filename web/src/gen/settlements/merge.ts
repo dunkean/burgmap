@@ -3,7 +3,7 @@
  * parcels and blocks offset), so the SVG and canvas renderers draw every town and village with the same code.
  * The main settlement's scalar fields (archetype, population, culture, phases) are kept.
  */
-import type { World, UrbanLayer, Settlement } from '../types';
+import type { World, UrbanLayer, Settlement, UrbanBlockInfo, UrbanParcel, Polygon } from '../types';
 
 export function mergeUrban(layers: UrbanLayer[]): UrbanLayer | undefined {
   if (!layers.length) return undefined;
@@ -47,9 +47,31 @@ export function placeholderUrban(s: Settlement): UrbanLayer {
   };
 }
 
+/**
+ * Megacity (URBAN_MORPHOLOGY §3d): the macro layer with a stand-in block for every quarter whose detail is not
+ * generated yet, followed by the detailed quarters (by id). The result has no `macro` (merging it again is a no-op).
+ */
+export function megaView(u: UrbanLayer, details?: Record<number, UrbanLayer>): UrbanLayer {
+  const M = u.macro;
+  if (!M) return u;
+  const blocks: Polygon[] = [], blockInfo: UrbanBlockInfo[] = [], parcels: UrbanParcel[] = [];
+  for (const q of M.quarters) {
+    if (details?.[q.id] || q.inset.length < 3) continue;
+    const bi = blocks.length;
+    blocks.push(q.inset);
+    blockInfo.push({ quarter: q.id, phase: q.phase, zone: q.zone, kind: q.kind === 'market' ? 'market' : q.kind === 'place' ? 'green' : 'block', culture: q.culture });
+    if (q.kind === 'market') parcels.push({ poly: q.inset, use: 'market', block: bi });
+    else if (q.kind === 'place') parcels.push({ poly: q.inset, use: 'green', block: bi });
+  }
+  const base: UrbanLayer = { ...u, macro: undefined, blocks, blockInfo, parcels };
+  const ds = details ? Object.keys(details).map(Number).sort((a, b) => a - b).map((k) => details[k]) : [];
+  return ds.length ? { ...mergeUrban([base, ...ds])!, macro: undefined } : base;
+}
+
 /** The World as the renderers should see it: `urban` = all settlements (main first; lazy ones as their extent). */
 export function renderView(world: World): World {
+  const main = world.urban?.macro ? megaView(world.urban, world.megaDetail) : world.urban;
   const extra = (world.settlements ?? []).filter((s) => !s.main && (s.urban || s.detail === 'lazy')).map((s) => s.urban ?? placeholderUrban(s));
-  if (!extra.length || !world.urban) return world;
-  return { ...world, urban: mergeUrban([world.urban, ...extra]) };
+  if (!extra.length || !main) return main === world.urban ? world : { ...world, urban: main };
+  return { ...world, urban: mergeUrban([main, ...extra]) };
 }

@@ -15,6 +15,7 @@ import { FONT_STACKS, fontString } from '../render/labelStyles';
 import { STYLE_LIST, isMapStyle, MapStyle } from '../render/styles';
 import type { Scene } from '../render/scene';
 import { buildScene } from '../render/scene';
+import { QuarterQueue } from './megaQueue';
 import { saveFile } from './download';
 import { worldToJson } from './exportWorld';
 import type { ImportedHeight } from '../gen/terrain/import';
@@ -260,7 +261,9 @@ function showStats(stats: Record<string, number | string>, ms: number): void {
   genTimeEl.textContent = `Generated in ${(ms / 1000).toFixed(2)} s`;
   const seaPct = Math.round(Number(stats.seaFraction ?? 0) * 100);
   statusEl.textContent = `terrain ${stats['ms.terrain']} ms, urban ${stats['ms.urban'] ?? 0} ms - ${stats.rivers} rivers, ${stats.lakes} lakes, sea ${seaPct}% - ${stats.roads ?? 0} roads, ${stats.bridges ?? 0} bridges - ${stats['urban.archetype'] ?? ''} pop ${stats['urban.pop'] ?? 0}: ${stats['urban.blocks'] ?? 0} blocks, ${stats['urban.buildings'] ?? 0} buildings`
-    + (Number(stats['settlements'] ?? 0) > 1 ? ` - ${stats['settlements']} settlements (${stats['ms.settlements'] ?? 0} ms)` : '');
+    + (Number(stats['settlements'] ?? 0) > 1 ? ` - ${stats['settlements']} settlements (${stats['ms.settlements'] ?? 0} ms)` : '')
+    + (stats['urban.mega'] ? ` - megacity plan: ${stats['urban.quarters']} quarters in ${stats['urban.rings']} rings, ${stats['urban.nuclei']} nuclei (zoom in to detail the quarters)` : '');
+  ($('exportSvgFull') as HTMLButtonElement).hidden = !stats['urban.mega'];
   showSettlementWarnings(stats);
 }
 
@@ -331,6 +334,11 @@ const backendEvents: BackendEvents = {
     rec('settlementDetail', d.ms);
     if (d.error) console.error('settlement detail:', d.error);
   },
+  onQuarters(d) {
+    if (d.id !== reqId) return;
+    megaProgress(d.done, d.queued, d.total);
+    rec('quarterSlice', d.ms);
+  },
   onFrame(f) {
     maybeDetail(f.view);
     lastLabels = f.labels; if (f.bitmap) perf.extra.lastFrameView = f.view;
@@ -353,6 +361,7 @@ function spawnWorker(): void {
     if (r.id !== reqId) return;
     if (r.stage) { setBusy(true, r.stage); return; }
     if (r.detail) { applyDetail(r.detail.index, r.detail.urban, r.detail.bridges); return; }
+    if (r.quarters) { applyQuarters(r.quarters.layers, r.quarters.drop); megaProgress(r.quarters.done, r.quarters.queued, r.quarters.total); return; }
     workerBusy = false;
     if (r.error) { setBusy(false); genTimeEl.textContent = 'Generation failed'; statusEl.textContent = 'Error: ' + r.error.split('\n')[0]; console.error(r.error); return; }
     show(r.world!, r.stats!, r.ms!);
@@ -369,6 +378,7 @@ function run(): void {
   if (!backendSettled) return; // the first run starts when the backend probe has answered
   const id = ++reqId;
   detailAsked.clear();
+  megaLocal?.stop(); megaLocal = null; megaRect = null;
   lastGenKey = genKey();
   genStart = performance.now();
   setBusy(true, 'starting');
@@ -491,6 +501,7 @@ function applyDetail(index: number, urban: NonNullable<World['urban']>, bridges:
 /** Detail level: settlements generated lazily are built when the view comes close enough (in a worker). */
 const DETAIL_SCALE = 0.12;
 function maybeDetail(v: { cx: number; cy: number; scale: number }): void {
+  maybeQuarters(v);
   if (v.scale < DETAIL_SCALE) return;
   const r = map.getBoundingClientRect();
   const hw = r.width / (2 * v.scale), hh = r.height / (2 * v.scale);
@@ -504,6 +515,39 @@ function maybeDetail(v: { cx: number; cy: number; scale: number }): void {
       const w = currentWorld, id = reqId;
       setTimeout(() => { if (id !== reqId) return; const res = generateSettlementDetail(w, s.index); if (res) applyDetail(s.index, res.urban, res.bridges); }, 0);
     }
+  }
+}
+// ---------- megacity (URBAN_MORPHOLOGY §3d): quarters detailed lazily, in the worker, as the view comes close ----------
+const MEGA_SCALE = 0.1;
+let megaRect: { x0: number; y0: number; x1: number; y1: number } | null = null;
+let megaLocal: QuarterQueue | null = null;
+let megaRedraw: number | undefined;
+const isMega = (): boolean => (backend ? !!meta?.mega : !!currentWorld?.urban?.macro);
+function megaProgress(done: number, queued: number, total: number): void {
+  statusEl.textContent = queued > 0 ? `Detailing quarters: ${done} ready, ${queued} queued (of ${total})` : `${done} of ${total} quarters detailed (zoom in elsewhere for more)`;
+}
+/** Main-thread / legacy mode: detailed quarters merged into the World, redrawn at most every 400 ms. */
+function applyQuarters(layers: Record<number, NonNullable<World['urban']>>, drop: number[]): void {
+  if (!currentWorld) return;
+  const det = { ...(currentWorld.megaDetail ?? {}), ...layers };
+  for (const id of drop) delete det[id];
+  currentWorld = { ...currentWorld, megaDetail: det };
+  if (megaRedraw !== undefined) return;
+  megaRedraw = window.setTimeout(() => { megaRedraw = undefined; sceneCache = null; rerender(true); }, 400);
+}
+function maybeQuarters(v: { cx: number; cy: number; scale: number }): void {
+  if (v.scale < MEGA_SCALE || !isMega()) return;
+  const r = map.getBoundingClientRect();
+  const hw = r.width / (2 * v.scale), hh = r.height / (2 * v.scale);
+  const rect = { x0: v.cx - hw, y0: v.cy - hh, x1: v.cx + hw, y1: v.cy + hh };
+  // (a new request only when the view moved or zoomed noticeably)
+  if (megaRect && Math.abs(rect.x0 - megaRect.x0) + Math.abs(rect.x1 - megaRect.x1) + Math.abs(rect.y0 - megaRect.y0) + Math.abs(rect.y1 - megaRect.y1) < 0.08 * (rect.x1 - rect.x0)) return;
+  megaRect = rect;
+  if (backend) backend.quarters(reqId, rect);
+  else if (worker) worker.postMessage({ type: 'quarters', id: reqId, rect });
+  else if (currentWorld) {
+    megaLocal ??= new QuarterQueue(currentWorld, (layers, drop, st) => { applyQuarters(layers, drop); megaProgress(st.done, st.queued, st.total); });
+    megaLocal.request(rect);
   }
 }
 function focusSettlement(s: SettlementMeta): void {
@@ -567,12 +611,17 @@ async function exportFile(name: string, data: Blob | string, mime: string): Prom
   }
 }
 /** SVG / JSON of the current world as a Blob: built in the generation worker (offscreen mode) so the page never blocks, or here. */
-async function buildExport(kind: 'svg' | 'json'): Promise<Blob> {
+async function buildExport(kind: 'svg' | 'json', full = false): Promise<Blob> {
   const t = pnow();
   let blob: Blob;
-  if (backend) blob = await backend.export(kind, display());
+  if (backend) blob = await backend.export(kind, display(), full);
   else {
     if (!currentWorld) throw new Error('nothing to export yet');
+    if (full && currentWorld.urban?.macro) {
+      // megacity: every quarter's detail first (tile by tile; slow)
+      const q = megaLocal ?? new QuarterQueue(currentWorld, () => {});
+      currentWorld = { ...currentWorld, megaDetail: q.all() };
+    }
     await new Promise((r) => setTimeout(r, 30)); // let the progress message paint before the synchronous build
     blob = kind === 'svg'
       ? new Blob([currentSvg()], { type: 'image/svg+xml' })
@@ -595,6 +644,12 @@ async function withProgress(btn: HTMLButtonElement, label: string, job: () => Pr
 const exportSvgBtn = $<HTMLButtonElement>('exportSvg');
 const exportPngBtn = $<HTMLButtonElement>('exportPng');
 const exportJsonBtn = $<HTMLButtonElement>('exportJson');
+const exportFullBtn = $<HTMLButtonElement>('exportSvgFull');
+exportFullBtn.addEventListener('click', () => {
+  void withProgress(exportFullBtn, 'Detailing all quarters...', async () => {
+    await exportFile(fname() + '-full.svg', await buildExport('svg', true), 'image/svg+xml');
+  });
+});
 exportSvgBtn.addEventListener('click', () => {
   void withProgress(exportSvgBtn, 'Building SVG...', async () => {
     await exportFile(fname() + '.svg', await buildExport('svg'), 'image/svg+xml');

@@ -7,7 +7,7 @@
 import type { Options } from '../gen/options';
 import GenWorker from './worker?worker&inline';
 import RenderWorker from './renderWorker?worker&inline';
-import type { GResponse, GDone, RResponse, RContent, RFrame, DisplayOpts, GDetailDone } from './protocol';
+import type { GResponse, GDone, RResponse, RContent, RFrame, DisplayOpts, GDetailDone, GQuartersDone } from './protocol';
 import type { FrameRequest } from './viewer';
 
 export interface BackendEvents {
@@ -20,6 +20,8 @@ export interface BackendEvents {
   onFatal(msg: string): void;
   /** A lazily requested settlement plan was generated (M3c). */
   onDetail?(d: GDetailDone): void;
+  /** Megacity: progress of the quarter detail queue. */
+  onQuarters?(d: GQuartersDone): void;
 }
 
 export class OffscreenBackend {
@@ -70,6 +72,7 @@ export class OffscreenBackend {
         case 'stage': this.ev.onStage(m.id, m.stage); break;
         case 'done': this.busy = false; this.ev.onDone(m); break;
         case 'detailDone': this.ev.onDetail?.(m); break;
+        case 'quartersDone': this.ev.onQuarters?.(m); break;
         case 'error': this.busy = false; this.ev.onError(m.id, m.error); break;
         case 'exported': {
           const p = this.pending.get(m.id);
@@ -103,17 +106,23 @@ export class OffscreenBackend {
     this.gen.postMessage({ type: 'detail', id, index });
   }
 
+  /** Megacity: detail the quarters meeting the view rectangle of run `id` (replaces the previous request). */
+  quarters(id: number, rect: { x0: number; y0: number; x1: number; y1: number }): void {
+    if (!this.gen || this.busy) return;
+    this.gen.postMessage({ type: 'quarters', id, rect });
+  }
+
   setDisplay(display: DisplayOpts): void { this.render.postMessage({ type: 'display', display }); }
 
   request(r: FrameRequest): void { this.render.postMessage({ type: 'view', ...r }); }
 
   /** Build the SVG / JSON of the current world in the generation worker. */
-  export(kind: 'svg' | 'json', display: DisplayOpts): Promise<Blob> {
+  export(kind: 'svg' | 'json', display: DisplayOpts, full = false): Promise<Blob> {
     return new Promise((resolve, reject) => {
       if (!this.gen || this.busy) { reject(new Error('the map is still being generated')); return; }
       const id = ++this.exportId;
       this.pending.set(id, { resolve, reject });
-      this.gen.postMessage({ type: 'export', id, kind, display });
+      this.gen.postMessage({ type: 'export', id, kind, display, full });
     });
   }
 }

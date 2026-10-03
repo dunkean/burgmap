@@ -10,7 +10,7 @@ import { createCanvasRenderer, CanvasRenderer, CanvasLike } from '../render/canv
 import { buildScene, Scene } from '../render/scene';
 import { PALETTES } from '../render/styles';
 import type { World } from '../gen/types';
-import type { RRequest, RResponse, RView, DisplayOpts, WorldMsg, RAttach, PortMsg, SettlementMsg } from './protocol';
+import type { RRequest, RResponse, RView, DisplayOpts, WorldMsg, RAttach, PortMsg, SettlementMsg, QuarterMsg } from './protocol';
 
 const ctx = self as unknown as Worker;
 const post = (r: RResponse, transfer: Transferable[] = []): void => ctx.postMessage(r, transfer);
@@ -81,11 +81,31 @@ function onSettlement(m: SettlementMsg): void {
   announce(rebuild());
 }
 
+/**
+ * Megacity: detailed quarters arrive in batches (every ~150 ms while the queue runs); they are merged into the
+ * World's `megaDetail` and the scene is rebuilt at most every 400 ms.
+ */
+let megaTimer: ReturnType<typeof setTimeout> | null = null;
+let megaLast = 0;
+function onQuarters(m: QuarterMsg): void {
+  if (m.gen !== gen || !world) return;
+  const det = { ...(world.megaDetail ?? {}), ...m.layers };
+  for (const id of m.drop) delete det[id];
+  world = { ...world, megaDetail: det };
+  if (megaTimer) return;
+  const wait = Math.max(0, 400 - (performance.now() - megaLast));
+  megaTimer = setTimeout(() => {
+    megaTimer = null; megaLast = performance.now();
+    sceneCache = null;
+    announce(rebuild());
+  }, wait);
+}
+
 function onAttach(m: RAttach): void {
   port?.close();
   gen = m.gen; port = m.port;
   port.onmessage = (e: MessageEvent<PortMsg>): void => {
-    try { if (e.data.type === 'settlement') onSettlement(e.data); else onWorld(e.data as WorldMsg); } catch (err) { post({ type: 'error', error: String((err as Error)?.stack ?? err) }); }
+    try { if (e.data.type === 'settlement') onSettlement(e.data); else if (e.data.type === 'quarters') onQuarters(e.data); else onWorld(e.data as WorldMsg); } catch (err) { post({ type: 'error', error: String((err as Error)?.stack ?? err) }); }
   };
   // the previous world stays on screen until the first snapshot of the new one arrives
 }

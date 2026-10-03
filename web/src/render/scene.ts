@@ -128,6 +128,8 @@ function polyArea(p: Polygon): number {
 export function buildDensity(world: World, cell = 60): DensityMap | null {
   const u = world.urban;
   if (!u) return null;
+  // megacity: the macro plan's raster (the detail exists only where the view has been)
+  if (u.densityGrid) return { w: u.densityGrid.w, h: u.densityGrid.w, cell: u.densityGrid.cell, cov: u.densityGrid.cov, max: u.densityGrid.max };
   const src: Polygon[] = u.buildings.length ? u.buildings.map((b) => b.poly) : u.blocks;
   const factor = u.buildings.length ? 1 : 0.6;
   if (!src.length) return null;
