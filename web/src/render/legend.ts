@@ -121,7 +121,7 @@ export function legendModel(world: World, pal: Palette): Panel {
     if (kinds.has('field')) add('Fields (strips)', (x, y) => [{ t: 'rect', x, y, w: SW, h: SH, fill: pal.land.field, stroke: pal.hedge, sw: 0.7 }, ...[3, 6, 9].map((d): Prim => ({ t: 'line', pts: [[x + 1, y + d], [x + SW - 1, y + d]], stroke: pal.furrow, sw: 0.6, op: 0.7 }))]);
     if (kinds.has('meadow')) add('Meadow', fillSwatch(pal.land.meadow, undefined, 0.9));
     if (kinds.has('pasture')) add('Pasture', fillSwatch(pal.land.pasture, undefined, 0.9));
-    if (kinds.has('commons')) add('Commons', fillSwatch(pal.land.commons, undefined, 0.9));
+    if (kinds.has('commons')) add(world.options.biome === 'desert' ? 'Bare ground, scrub' : world.options.biome === 'tundra' ? 'Heath, exposed ground' : 'Commons', fillSwatch(pal.land.commons, undefined, 0.9));
     if (kinds.has('forest')) add('Woodland', (x, y) => [{ t: 'rect', x, y, w: SW, h: SH, fill: pal.land.forest }, ...[[6, 4], [13, 8], [19, 4], [9, 8]].flatMap(([dx, dy]) => treeSymbol(pal, x + dx, y + dy, 2.4))]);
     if (kinds.has('orchard')) add('Orchard', (x, y) => [{ t: 'rect', x, y, w: SW, h: SH, fill: pal.land.orchard }, ...[[6, 4], [12, 4], [18, 4], [6, 9], [12, 9], [18, 9]].flatMap(([dx, dy]) => treeSymbol(pal, x + dx, y + dy, 1.7))]);
     if (kinds.has('marsh')) add('Marsh', (x, y) => [{ t: 'rect', x, y, w: SW, h: SH, fill: pal.land.marsh }, ...[5, 12, 19].map((dx): Prim => ({ t: 'line', pts: [[x + dx - 2, y + 8], [x + dx + 2, y + 8]], stroke: pal.reed, sw: 0.9 }))]);

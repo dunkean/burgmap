@@ -7,6 +7,7 @@ Procedural generator of pre-modern settlements in their landscape. From a seed (
 ## What it generates
 
 - **Landscape**
+  - selectable biomes: temperate countryside, woodland, desert/oases, steppe, tropical forest and tundra;
   - relief: plain, hills, valley or mountains;
   - coast with bays and islands;
   - rivers fed from outside the map, with confluences;

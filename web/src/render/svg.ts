@@ -3,7 +3,8 @@ import { renderView } from '../gen/settlements/merge';
 import { Vec2, chaikin, simplify, offsetRibbon } from '../gen/core/geom';
 import { marchingSquares } from '../gen/terrain/contour';
 import { contourSet, ContourSet } from './contours';
-import { PALETTES, Palette, MapStyle } from './styles';
+import { Palette, MapStyle } from './styles';
+import { biomePalette } from './biomes';
 import { renderTerrainRaster, pngDataUrl } from './raster';
 import { f1, pathD, seaWithIslands } from './util';
 import { landuseLayer, roadsLayer, siteLayer } from './landuse';
@@ -66,7 +67,7 @@ function decor(world: World, pal: Palette, u: number): string {
 export function renderSvg(world0: World, opts: RenderOptions = {}): string {
   const world = renderView(world0);
   const style = opts.style ?? world.options.style;
-  const pal = PALETTES[style];
+  const pal = biomePalette(style, world.options.biome);
   const S = world.mapSize;
   const u = S / 1600;
   const t = world.terrain;

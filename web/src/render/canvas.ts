@@ -11,7 +11,8 @@
  */
 import { bridgeShapes, isKinded, type BridgeShapes } from './townbridges';
 import type { World, LandKind, Vec2 } from '../gen/types';
-import { PALETTES, Palette, MapStyle, ruralInk } from './styles';
+import { Palette, MapStyle, ruralInk } from './styles';
+import { biomePalette } from './biomes';
 import { renderTerrainRaster } from './raster';
 import { buildScene, Scene, PolyLayer, LineLayer, TextureLayer, textureMarks, LAND_ORDER, WALL_LINE_W, CAMP_FENCE_W, FENCE_STYLE } from './scene';
 import { renderView } from '../gen/settlements/merge';
@@ -145,7 +146,7 @@ function defaultCreateCanvas(w: number, h: number): CanvasLike | null {
 
 export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: MapStyle | Palette, deps: CanvasRendererDeps = {}): CanvasRenderer {
   const world = renderView(world0);
-  const pal: Palette = typeof style === 'string' ? PALETTES[style] : style;
+  const pal = biomePalette(style, world.options.biome);
   const scene = deps.scene ?? buildScene(world, deps.tileSize);
   const S = world.mapSize;
   const now = deps.now ?? (() => (typeof performance !== 'undefined' ? performance.now() : Date.now()));

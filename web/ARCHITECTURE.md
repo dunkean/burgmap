@@ -48,6 +48,14 @@ web/
 
 ## Coordinates & units
 
+## Biomes
+
+`gen/biomes.ts` defines `temperate`, `forest`, `desert`, `steppe`, `tropical` and `tundra` climates. `Options.biome` is optional: existing links and the default temperate generator retain their output. The biome selector is a generation control and round-trips through `biome=` in links and exports.
+
+Rural classification combines the selected biome with water distance, height above water, slope, soil variation and settlement access. Desert fields and oasis groves require nearby water; woodland/tropical clearings shrink around settlements; steppe keeps riverine groves; tundra is treeless. Farm lots in deserts require water access. `render/biomes.ts` supplies a shared, immutable palette to both renderers and their terrain/legend layers. `scripts/biome_previews.ts` renders the six landscapes for visual checks.
+
+## Coordinates & units
+
 - World units are **meters**. Map is a square `[0, mapSize]²` with origin top-left, y down (SVG convention).
 - Size presets (options.size): `hamlet` (~50–150 inhabitants, map 1200 m), `village` (~300–800, 1600 m), `town` (~2k–5k, 2400 m), `city` (~10k–25k, 3600 m), `capital` (~40k+, 5000 m). Terrain grid resolution: ~ mapSize / 4 m… choose so the grid is ≤ 512² (e.g. 256–512 cells per side).
 - Realistic dimensions (medieval): main street 6–10 m, secondary 4–6 m, alleys 2–3 m; burgage plots 5–10 m frontage × 20–60 m depth; houses 5–9 m wide × 8–14 m deep; parish church 30–60 m long; cathedral 80–140 m; market square 1500–6000 m²; town wall 2–3 m thick with towers every 40–80 m; strip fields 10–25 m × 150–250 m.

@@ -1,5 +1,6 @@
 import type { NameFamily } from './names/types';
 import { NAME_FAMILIES } from './names/types';
+import { BIOME_NAMES, biomeName, type BiomeName } from './biomes';
 import type { ImportedHeight } from './terrain/import';
 import { CULTURE_IDS, CULTURES as CULTURE_REGISTRY, mixToString, mixFromString, planToString, planFromString } from './urban/culture';
 import type { CultureMix, PlanOverride } from './urban/culture';
@@ -50,6 +51,8 @@ export interface Options {
   seed: string;
   size: SizeName;
   relief: Relief;
+  /** Climate and vegetation; omitted on legacy links to preserve the temperate world. */
+  biome?: BiomeName;
   coast: CoastOpt;
   river: RiverOpt;
   /** Site archetype: 'auto' picks one from what the terrain offers. */
@@ -274,6 +277,7 @@ export function toQuery(o: Options): string {
   p.set('seed', o.seed);
   const keys = ['size', 'relief', 'coast', 'river', 'walls', 'castle', 'roads', 'style', 'culture', 'population'] as const;
   for (const k of keys) if (o[k] !== DEFAULTS[k]) p.set(k, String(o[k]));
+  if (o.biome && o.biome !== 'temperate') p.set('biome', o.biome);
   for (const [k, q] of LANDMARK_TOGGLES) if (o[k] && o[k] !== 'auto') p.set(q, String(o[k]));
   if (o.suburbs && o.suburbs !== 'auto') p.set('suburbs', o.suburbs);
   if (o.castles && o.castles !== 'auto') p.set('castles', o.castles);
@@ -309,6 +313,7 @@ export function fromQuery(q: string | URLSearchParams): Options {
   const o = makeOptions({ seed: p.get('seed') ?? DEFAULTS.seed });
   o.size = oneOf(p.get('size'), SIZES, DEFAULTS.size);
   o.relief = oneOf(p.get('relief'), RELIEFS, DEFAULTS.relief);
+  if (p.has('biome')) o.biome = oneOf(p.get('biome'), BIOME_NAMES, 'temperate');
   o.coast = oneOf(p.get('coast'), COASTS, DEFAULTS.coast);
   o.river = oneOf(p.get('river'), RIVERS, DEFAULTS.river);
   o.siteType = oneOf(p.get('site'), SITE_TYPES, 'auto');
@@ -358,6 +363,7 @@ export const wantsCustomHeight = (q: string | URLSearchParams): boolean =>
 export function applyOverride(o: Options, k: string, v: string): void {
   const rec = o as unknown as Record<string, unknown>;
   if (k === 'roads' || k === 'seaLevel' || k === 'population' || k === 'heightScale' || k === 'importSea' || k === 'mapSize' || k === 'sprawl' || k === 'eagerPop') rec[k] = Number(v);
+  else if (k === 'biome') o.biome = biomeName(v);
   else if (k === 'settlements' || k === 'settl') o.settlements = settlementsFromString(v);
   else if (k === 'contours' || k === 'landuse' || k === 'labels' || k === 'legend') rec[k] = v === '1' || v === 'true';
   else if (k === 'mix' || k === 'cultureMix') o.cultureMix = mixFromString(v);

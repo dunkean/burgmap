@@ -11,6 +11,7 @@ import type { WorkerResponse } from './worker';
 import { ControlRegistry, fillSelect, selectControl, checkControl, numberControl } from './controls';
 import { readHeightmap } from './heightmap';
 import { NAME_FAMILIES } from '../gen/names/types';
+import { BIOME_LABELS, biomeName } from '../gen/biomes';
 import { FONT_STACKS, fontString } from '../render/labelStyles';
 import { STYLE_LIST, isMapStyle, MapStyle } from '../render/styles';
 import type { Scene } from '../render/scene';
@@ -61,6 +62,7 @@ const genTimeEl = $('gentime');
 // ---------- controls (registry: new panel sections only have to add their controls here) ----------
 const registry = new ControlRegistry();
 const reliefEl = $<HTMLSelectElement>('relief');
+const biomeEl = $<HTMLSelectElement>('biome');
 const coastEl = $<HTMLSelectElement>('coast');
 const riverEl = $<HTMLSelectElement>('river');
 const sizeEl = $<HTMLSelectElement>('size');
@@ -72,6 +74,7 @@ const seedEl = $<HTMLInputElement>('seed');
 
 fillSelect(sizeEl, Object.entries(SIZE_PRESETS).map(([k, v]) => [k, `${v.label} (${v.mapSize} m)`]), opts.size);
 fillSelect(reliefEl, [['flat', 'Flat'], ['hills', 'Rolling hills'], ['valley', 'Valley'], ['mountains', 'Mountains']], opts.relief);
+fillSelect(biomeEl, BIOME_LABELS, biomeName(opts.biome));
 fillSelect(coastEl, [['none', 'None'], ['random', 'Random side'], ['N', 'North'], ['E', 'East'], ['S', 'South'], ['W', 'West']], opts.coast);
 fillSelect(riverEl, [['none', 'None'], ['stream', 'Stream'], ['river', 'River'], ['major', 'Major river']], opts.river);
 fillSelect(roadsEl, [['0', `Auto (${DEFAULT_ROADS[opts.size]})`], ...[1, 2, 3, 4, 5, 6, 7, 8].map((k) => [String(k), String(k)] as [string, string])], String(opts.roads));
@@ -89,6 +92,7 @@ registry.add(seedControl);
 // map extent (preset or custom), population slider and the settlement system (M3c)
 const settlUI = initSettlementsUI(registry, () => opts);
 registry.add(selectControl(reliefEl, 'relief', (v) => v as Options['relief']));
+registry.add(selectControl(biomeEl, 'biome', (v) => biomeName(v)));
 registry.add(selectControl(coastEl, 'coast', (v) => v as Options['coast']));
 registry.add(selectControl(riverEl, 'river', (v) => v as Options['river']));
 registry.add(selectControl(roadsEl, 'roads', (v) => Number(v)));

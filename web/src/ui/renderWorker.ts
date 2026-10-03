@@ -8,7 +8,7 @@
  */
 import { createCanvasRenderer, CanvasRenderer, CanvasLike } from '../render/canvas';
 import { buildScene, Scene } from '../render/scene';
-import { PALETTES } from '../render/styles';
+import { biomePalette } from '../render/biomes';
 import type { World } from '../gen/types';
 import type { RRequest, RResponse, RView, DisplayOpts, WorldMsg, RAttach, PortMsg, SettlementMsg, QuarterMsg } from './protocol';
 
@@ -59,7 +59,7 @@ function rebuild(): number {
 
 function announce(sceneMs: number): void {
   if (!world) return;
-  const pal = PALETTES[display.style];
+  const pal = biomePalette(display.style, world.options.biome);
   post({ type: 'content', gen, ver, mapSize: world.mapSize, final, sceneMs, marker: pal.marker, paper: pal.paper });
 }
 

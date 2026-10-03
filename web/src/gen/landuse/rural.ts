@@ -11,6 +11,7 @@ import { rasterizePolys } from '../geo/raster';
 import { partitionRegion, pruneWays, FieldCtx, FieldNet } from './fields';
 import type { World, LandArea, LandKind, Farmstead, LandUseLayer } from '../types';
 import { FARM_SIZES, farmSize, farmType, layoutFarm, placeFarm, frameOf, segRectDist, type FarmContext, type LocalFarm } from './farms';
+import { biomeName, biomeLandKind } from '../biomes';
 
 type Ring = [number, number][];
 
@@ -123,6 +124,7 @@ export function generateRural(world: World, root: Rng, mainRoads?: number, strip
   const rr = root.fork('rural');
   const noise = new Noise2D(rr.fork('noise'));
   const stats: Record<string, number> = {};
+  const biome = biomeName(world.options.biome);
 
   // ---- road distance + direction field, road exclusion
   const roadM = new Uint8Array(N);
@@ -268,6 +270,7 @@ export function generateRural(world: World, root: Rng, mainRoads?: number, strip
     const U = { x: V.y, y: -V.x };
     const P = (u: number, v: number): Vec2 => ({ x: o.x + u * U.x + v * V.x, y: o.y + u * U.y + v * V.y });
     const c = P(0, D / 2), rad = 0.5 * Math.hypot(W, D);
+    if (biome === 'desert' && f.dWater[cellAt(c)] > 350) return false;
     if (c.x - rad < 0.01 * S || c.y - rad < 0.01 * S || c.x + rad > 0.99 * S || c.y + rad > 0.99 * S) return false;
     for (const l of lotsC) if (dist(l.c, c) < l.r + rad + 12) return false;
     const st = Math.min(4, 0.45 * cell);
@@ -476,6 +479,10 @@ export function generateRural(world: World, root: Rng, mainRoads?: number, strip
       if (u < arable && soil > -0.6) k = C.FIELD;
       else if (u < u4 * (1 + 0.2 * soil)) k = soil < -0.05 || gB() > 0.35 ? C.COMMONS : C.PASTURE;
       else k = soil > 0 ? C.FOREST : C.PASTURE;
+    }
+    if (biome !== 'temperate') {
+      const kind = biomeLandKind(KINDS[k]!, biome, { water: dW, hab, slope: sl, soil, settlement: u, arableRadius: u3 });
+      k = KINDS.indexOf(kind);
     }
     // enclosed ground: closes around the farmsteads and the village edge, bocage in the wet and western country
     if (k === C.FIELD) {
