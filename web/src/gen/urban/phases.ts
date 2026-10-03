@@ -97,8 +97,8 @@ export function isoRegions(v: Float32Array, n: number, cell: number, level: numb
   return out;
 }
 
-/** Keeps the components that matter: the one holding (or nearest to) the center, plus large ones. */
-function keepMain(m: MultiPoly, center: Vec2, minFrac: number): MultiPoly {
+/** Keeps the main and large components, and any component containing land from an earlier phase. */
+function keepMain(m: MultiPoly, center: Vec2, minFrac: number, prev: MultiPoly = []): MultiPoly {
   if (!m.length) return m;
   const tot = mpArea(m);
   let main = m[0], bd = Infinity;
@@ -106,7 +106,8 @@ function keepMain(m: MultiPoly, center: Vec2, minFrac: number): MultiPoly {
     if (pointInRing(ph.outer, center)) { main = ph; bd = -1; break; }
     for (const q of ph.outer) { const d = dist(q, center); if (d < bd) { bd = d; main = ph; } }
   }
-  return m.filter((ph) => ph === main || area(ph.outer) >= minFrac * tot);
+  return m.filter((ph) => ph === main || area(ph.outer) >= minFrac * tot
+    || (prev.length > 0 && mpArea(intersection(ph, prev)) > 0.05));
 }
 
 /** Travel-cost field modulated by noise; Infinity where unbuildable. */
@@ -495,7 +496,9 @@ export function planTownPhases(ctx: UrbanCtx, pop: number, walled: boolean, main
     }
     // wall lines (the walled outer phase, and older lines that fossilize into ring streets) are polygons of
     // straight curtains that circumscribe the region
-    if (!ov.organicOutline && ((k < nPh - 1 && sp.fossil) || (k === nPh - 1 && walled))) R = keepMain(fortifyRegion(ctx, R, prev), ctx.center, 0.1);
+    // A small river-separated district may already be built. Dropping it here breaks nesting and lets the
+    // faubourgs claim the same land as its older plots and buildings.
+    if (!ov.organicOutline && ((k < nPh - 1 && sp.fossil) || (k === nPh - 1 && walled))) R = keepMain(fortifyRegion(ctx, R, prev), ctx.center, 0.1, prev);
     R = R.map((ph) => ({ outer: ph.outer, holes: ph.holes }));
     let band: MultiPoly = prev.length ? difference(R, prev) : R;
     band = dropSlivers(band, 400, 5);
