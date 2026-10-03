@@ -17,7 +17,7 @@ Agents: fix entries in order, then mark each one fixed with the commit hash (e.g
 - Les shanty towns doivent avoir des formes de maison/tentes plus réalistes → fixed in 264fc02
 - Quand il n'y a pas de rue qui séparent des zones de batiments, la jointure entre les zones produit des batiments qui s'overlap parfois ou qui on des formes vraiment bizarres. Il faut ptet merge les zones avant de mettre les batiments ou trouver une heuristique pour adapter la forme ou eviter l'overlap. (testé en "medieval organic") → fixed in 0b8b5b9 (seed=p4uefz, size=city: retain earlier riverbank districts in later enclosures; quarters and buildings in separate blocks no longer overlap)
 - Il faut ajouter des biomes (désert, foret, etc.) → fixed in 1508eb4 (six selectable biomes; climate/water-aware land use, SVG/Canvas palettes, share links and visual/UI checks)
-- les douves autour de "chinese walled city" en bleu, coupent tout n'importe comment. D'ailleurs douves devrait être une option mais bien pensée. La c'est un polygone border bleu qui entoure géométriquement la ville au dessus de tout les autres objets. Autre choses, certains quartier en "chinese" sont quasi vide et identiques, c'est bizarre.
+- les douves autour de "chinese walled city" en bleu, coupent tout n'importe comment. D'ailleurs douves devrait être une option mais bien pensée. La c'est un polygone border bleu qui entoure géométriquement la ville au dessus de tout les autres objets. Autre choses, certains quartier en "chinese" sont quasi vide et identiques, c'est bizarre. → fixed in 6f78c19, d0b5f99, 5dd7025 (optional exterior moats and accessible, varied siheyuan wards; reviewed code/visuals, 46 final targeted tests and browser checks)
 - "japanese castle town" (seed=p4uefz&size=city&culture=japanese-jokamachi&legend=1): j'ai des surface totalement vide (que relief) collées à la ville. Est-ce normal ? (idem en seed=p4uefz&size=city&culture=roman-core&legend=1 et peut être d'autres)
 - En mode inca, le rendu des terrasses est dégueulasse. Il faut le revoir → fixed in 84543a1, 9980f54
 - Retire les "up to metropolis", il faudra que tout marche → fixed in 5ccbc5e (caps removed on every preset; camp cultures grow into clusters, d48b251)
@@ -30,3 +30,4 @@ Agents: fix entries in order, then mark each one fixed with the commit hash (e.g
 - orcish war camp merite une meilleur texture sous les tentes → fixed in 264fc02
 - Entre certains champs y a un trait vert, c'est pas beau et trop visible.
 - Les traits de terrasses sont pas jolis non 
+- dans les open town, il faut que la frontière ne soit pas tracée nette. Mais que les maison déborde hors du cadre de la ville un peu.
