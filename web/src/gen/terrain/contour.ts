@@ -8,8 +8,9 @@ export interface ContourPath { pts: Vec2[]; closed: boolean }
  * Values strictly greater than `level` count as "inside".
  */
 export function marchingSquares(
-  f: ArrayLike<number>, w: number, h: number, level: number, cell: number, ox = 0, oy = 0,
+  f: ArrayLike<number>, w: number, h: number, level: number, cell: number, ox = 0, oy = 0, ix = 0, iy = 0,
 ): ContourPath[] {
+  // (ix, iy): integer offset of this raster in a larger one (a window): points are computed exactly as there
   // segments as pairs of edge ids
   const segA: number[] = [], segB: number[] = [];
   const pos = new Map<number, Vec2>();
@@ -25,7 +26,7 @@ export function marchingSquares(
     else { a = f[y * w + x]; b = f[y * w + x + 1]; x2 = x + 1; y2 = y; }
     const t = a === b ? 0.5 : (level - a) / (b - a);
     const tt = t < 0 ? 0 : t > 1 ? 1 : t;
-    p = { x: ox + (x + (x2 - x) * tt) * cell, y: oy + (y + (y2 - y) * tt) * cell };
+    p = { x: ox + ((x + ix) + (x2 - x) * tt) * cell, y: oy + ((y + iy) + (y2 - y) * tt) * cell };
     pos.set(id, p);
     return p;
   };

@@ -63,11 +63,13 @@ export const zonesFor = (n: number): UrbanZone[] =>
 const SHARES: Record<number, number[]> = { 1: [1], 2: [0.42, 0.58], 3: [0.24, 0.36, 0.4], 4: [0.13, 0.22, 0.3, 0.35] };
 
 /** Smoothed outer regions (with holes) where `v > level`. */
-export function isoRegions(v: Float32Array, n: number, cell: number, level: number, minArea: number): PolyH[] {
-  const pw = n + 2;
-  const pad = new Float32Array(pw * pw).fill(level - 1e6);
-  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) pad[(y + 1) * pw + x + 1] = v[y * n + x];
-  const paths = marchingSquares(pad, pw, pw, level, cell, -0.5 * cell, -0.5 * cell);
+export function isoRegions(v: Float32Array, n: number, cell: number, level: number, minArea: number, win?: { x0: number; y0: number; w: number; h: number }): PolyH[] {
+  // (win: v is a w × h window at cell offset (x0, y0) of the n × n grid; same points as on the whole grid)
+  const W = win ? win.w : n, Hh = win ? win.h : n;
+  const pw = W + 2, ph = Hh + 2;
+  const pad = new Float32Array(pw * ph).fill(level - 1e6);
+  for (let y = 0; y < Hh; y++) for (let x = 0; x < W; x++) pad[(y + 1) * pw + x + 1] = v[y * W + x];
+  const paths = marchingSquares(pad, pw, ph, level, cell, -0.5 * cell, -0.5 * cell, win ? win.x0 : 0, win ? win.y0 : 0);
   const loops: Polygon[] = [];
   for (const p of paths) {
     if (!p.closed || p.pts.length < 6) continue;
@@ -116,7 +118,7 @@ export function buildField(ctx: UrbanCtx, rng: Rng, steepMax = 0.2, blocked?: Ui
   const slopeS = site.fields.slopeS;
   // local slope (~25 m): valley floors and benches in steep country are buildable although the 100 m-blurred
   // slope says otherwise (it averages in the valley walls)
-  const slopeL = GROWTH_CACHE.get(ctx)?.slopeL ?? blurGrid(terrain.slope, Math.max(1, Math.round(12 / cell)), 2).data;
+  const slopeL = GROWTH_CACHE.get(ctx)?.slopeL ?? terrainRaster(terrain, 'slopeL', () => blurGrid(terrain.slope, Math.max(1, Math.round(12 / cell)), 2).data);
   const S = ctx.mapSize;
   // growth dials (URBAN_MORPHOLOGY §1): towns stretch along the roads and the waterfront, avoid wet low ground,
   // and their outlines are irregular (land ownership, soil) — so even a flat site does not give a circle
@@ -132,9 +134,11 @@ export function buildField(ctx: UrbanCtx, rng: Rng, steepMax = 0.2, blocked?: Ui
       dRoad = distanceField(m, n, n, cell).dist;
     }
     if (G.water > 0) {
-      const m = new Uint8Array(N);
-      for (let i = 0; i < N; i++) if (terrain.water[i]) m[i] = 1;
-      dBank = distanceField(m, n, n, cell).dist;
+      dBank = terrainRaster(terrain, 'dBank', () => {
+        const m = new Uint8Array(N);
+        for (let i = 0; i < N; i++) if (terrain.water[i]) m[i] = 1;
+        return distanceField(m, n, n, cell).dist;
+      });
     }
     cache = { dRoad, dBank, slopeL };
     GROWTH_CACHE.set(ctx, cache);
@@ -184,6 +188,15 @@ export function buildField(ctx: UrbanCtx, rng: Rng, steepMax = 0.2, blocked?: Ui
 }
 
 const FIELD_CACHE = new WeakMap<UrbanCtx, Map<string, PhaseField>>();
+/** Rasters that depend on the terrain only (shared by every settlement of a map; never mutated). */
+const TERRAIN_CACHE = new WeakMap<object, Map<string, Float32Array>>();
+function terrainRaster(terrain: UrbanCtx['terrain'], key: string, make: () => Float32Array): Float32Array {
+  let m = TERRAIN_CACHE.get(terrain);
+  if (!m) { m = new Map(); TERRAIN_CACHE.set(terrain, m); }
+  let v = m.get(key);
+  if (!v) { v = make(); m.set(key, v); }
+  return v;
+}
 const GROWTH_CACHE = new WeakMap<UrbanCtx, { dRoad: Float32Array | null; dBank: Float32Array | null; slopeL: Float32Array }>();
 
 /** Main road direction at the center (radians). */
@@ -265,33 +278,64 @@ export function phaseField(ctx: UrbanCtx, f: Float32Array): PhaseField {
 /** Buildable area (m²) of the nucleus component. */
 export const componentArea = (fld: PhaseField, cell: number): number => fld.sorted.length * cell * cell;
 
+/** Bounding box (cells) of the finite cells of a phase field (cached per field array). */
+const FINITE_BOX = new WeakMap<Float32Array, { x0: number; y0: number; x1: number; y1: number } | null>();
+function finiteBox(f: Float32Array, n: number): { x0: number; y0: number; x1: number; y1: number } | null {
+  if (FINITE_BOX.has(f)) return FINITE_BOX.get(f)!;
+  let x0 = n, y0 = n, x1 = -1, y1 = -1;
+  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+    if (!isFinite(f[y * n + x])) continue;
+    if (x < x0) x0 = x;
+    if (x > x1) x1 = x;
+    if (y < y0) y0 = y;
+    if (y > y1) y1 = y;
+  }
+  const bb = x1 < 0 ? null : { x0, y0, x1, y1 };
+  FINITE_BOX.set(f, bb);
+  return bb;
+}
+
 export function regionForArea(ctx: UrbanCtx, fld: PhaseField, targetArea: number, closing = 0): MultiPoly {
   const { f, lv, sorted } = fld;
   const thr = thresholdFor(sorted, ctx.cell, targetArea);
-  const N = f.length;
-  const v = new Float32Array(N);
+  const n = ctx.n, cell = ctx.cell;
   const cap = thr * 1.6 + 120;
+  const rad = Math.max(1, Math.round(22 / cell));
+  const rad2 = Math.max(1, Math.round(12 / cell));
+  // Exact window. Everything below only varies near the finite cells A of f: v is the constant -cap elsewhere,
+  // a 2-pass box blur of radius r reaches 2r cells, `inside` ⊂ A, d1 ≤ closing only within closing/cell of A,
+  // and `ind` is 0 beyond that. With a margin M ≥ 4r + 1 (blur), > closing/cell + 1 (d1: cells outside the window
+  // are farther than `closing` from every source, so every d1 ≤ closing is found through window cells), and
+  // ≥ closing/cell + 4r2 + 1 (second blur), each window cell gets the same value as on the whole grid; the
+  // window border cells are `outside` sources for d2 on both, which seals d2 inside the window. Cells outside
+  // the window would only hold constants (no isoline). On the whole map (main town) the window is the grid.
+  const bb = finiteBox(f, n) ?? { x0: 0, y0: 0, x1: n - 1, y1: n - 1 };
+  const M = Math.max(4 * rad + 1, closing > 0 ? Math.floor(closing / cell) + 4 * rad2 + 3 : 0) + 2;
+  const wx0 = Math.max(0, bb.x0 - M), wy0 = Math.max(0, bb.y0 - M), wx1 = Math.min(n - 1, bb.x1 + M), wy1 = Math.min(n - 1, bb.y1 + M);
+  const W = wx1 - wx0 + 1, H = wy1 - wy0 + 1, WN = W * H;
+  const win = { x0: wx0, y0: wy0, w: W, h: H };
+  const gi = (k: number) => (wy0 + ((k / W) | 0)) * n + wx0 + (k % W);
+  const v = new Float32Array(WN);
   // cells below the threshold but outside the nucleus component are lifted to their spill level (≥ thr)
   const fx = (i: number) => (f[i] < thr && !(lv[i] < thr) ? lv[i] : f[i]);
-  for (let i = 0; i < N; i++) { const x = fx(i); v[i] = -(isFinite(x) ? Math.min(x, cap) : cap); }
+  for (let k = 0; k < WN; k++) { const x = fx(gi(k)); v[k] = -(isFinite(x) ? Math.min(x, cap) : cap); }
   // smooth the field so that enclosures are smooth, compact curves (not cell-scale wiggles)
-  const rad = Math.max(1, Math.round(22 / ctx.cell));
-  const b = blurGrid({ w: ctx.n, h: ctx.n, cell: ctx.cell, data: v }, rad, 2).data;
-  for (let i = 0; i < N; i++) v[i] = isFinite(fx(i)) ? b[i] : Math.min(b[i], -cap);
+  const b = blurGrid({ w: W, h: H, cell, data: v }, rad, 2).data;
+  for (let k = 0; k < WN; k++) v[k] = isFinite(fx(gi(k))) ? b[k] : Math.min(b[k], -cap);
   let regs: PolyH[];
   if (closing > 0) {
     // morphological closing (dilate, then erode by `closing` m): enclosures are compact, not lobed
-    const inside = new Uint8Array(N);
-    for (let i = 0; i < N; i++) if (v[i] > -thr) inside[i] = 1;
-    const d1 = distanceField(inside, ctx.n, ctx.n, ctx.cell).dist;
-    const outside = new Uint8Array(N);
-    for (let i = 0; i < N; i++) if (d1[i] > closing) outside[i] = 1;
-    const d2 = distanceField(outside, ctx.n, ctx.n, ctx.cell).dist;
-    const ind = new Float32Array(N);
-    for (let i = 0; i < N; i++) ind[i] = (inside[i] || d2[i] > closing) && !ctx.terrain.water[i] ? 1 : 0;
-    const sm = blurGrid({ w: ctx.n, h: ctx.n, cell: ctx.cell, data: ind }, Math.max(1, Math.round(12 / ctx.cell)), 2).data;
-    regs = isoRegions(sm, ctx.n, ctx.cell, 0.5, Math.min(2500, targetArea * 0.05));
-  } else regs = isoRegions(v, ctx.n, ctx.cell, -thr, Math.min(2500, targetArea * 0.05));
+    const inside = new Uint8Array(WN);
+    for (let k = 0; k < WN; k++) if (v[k] > -thr) inside[k] = 1;
+    const d1 = distanceField(inside, W, H, cell).dist;
+    const outside = new Uint8Array(WN);
+    for (let k = 0; k < WN; k++) if (d1[k] > closing) outside[k] = 1;
+    const d2 = distanceField(outside, W, H, cell).dist;
+    const ind = new Float32Array(WN);
+    for (let k = 0; k < WN; k++) ind[k] = (inside[k] || d2[k] > closing) && !ctx.terrain.water[gi(k)] ? 1 : 0;
+    const sm = blurGrid({ w: W, h: H, cell, data: ind }, rad2, 2).data;
+    regs = isoRegions(sm, n, cell, 0.5, Math.min(2500, targetArea * 0.05), win);
+  } else regs = isoRegions(v, n, cell, -thr, Math.min(2500, targetArea * 0.05), win);
   let m: MultiPoly = regs;
   if (ctx.water.length) m = difference(m, ctx.water);
   return keepMain(m, ctx.center, 0.1);

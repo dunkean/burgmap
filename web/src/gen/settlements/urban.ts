@@ -19,12 +19,17 @@ import type { World, Settlement, SiteLayer, UrbanLayer, PolyH } from '../types';
 type Road = NonNullable<World['roads']>[number];
 type Bridge = NonNullable<World['bridges']>[number];
 
+/** Passability per (terrain, fields): the same for every settlement of a map (read-only here). */
+const PASS_CACHE = new WeakMap<object, { water: Uint8Array; pass: Uint8Array }>();
+
 /** Travel cost from `start`, explored only up to `limit` (m-equivalents); Infinity beyond. */
 export function boundedCost(world: World, start: Vec2, limit: number): SiteLayer['cost'] {
   const t = world.terrain, f = world.site!.fields;
   const { w: n, cell } = t.height;
   const H = t.height.data;
-  const pass = passability(t, f);
+  let pc = PASS_CACHE.get(f);
+  if (!pc || pc.water !== t.water) { pc = { water: t.water, pass: passability(t, f) }; PASS_CACHE.set(f, pc); }
+  const pass = pc.pass;
   const d = new Float32Array(n * n).fill(Infinity);
   const s0 = Math.min(n - 1, Math.max(0, Math.floor(start.y / cell))) * n + Math.min(n - 1, Math.max(0, Math.floor(start.x / cell)));
   const heap = new MinHeap<number>();
