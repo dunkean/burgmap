@@ -36,93 +36,93 @@ const campBase = (id: string, label: string, morphology: string): Omit<Culture, 
   ring: null, phaseCount: [[0, 1]], faubourg: null, faubShare: [0, 0], landmarks: [],
   village: { form: 'ring', morphology }, hamlet: { form: 'ring', morphology },
   m4: { castle: 'none', cathedral: null, palace: null, monastery: null, marketHall: false, arena: 0, port: false },
-  render: { towerShape: 'round', plotLines: false },
+  render: { towerShape: 'round', plotLines: false, openGround: true },
 });
 
 export const CAMP_CULTURES: Culture[] = [
   {
     ...campBase('stilt-town', 'Stilt town (marsh folk)', 'stilt-town'), fantasy: true,
-    scale: { min: 'hamlet', max: 'town' }, camp: { layout: 'stilts', variant: 'lagoon' }, waterBuild: true,
+    scale: { min: 'hamlet', max: 'megacity' }, camp: { layout: 'stilts', variant: 'lagoon' }, waterBuild: true,
     render: { towerShape: 'round', plotLines: true, stilts: true },
     sitePrefs: { flatness: 1.5, weights: { estuary: 3, harbor: 3, meander: 2, confluence: 2, bridge: 1, plain: 0.4, hilltop: 0, valley: 0.4 } },
   },
   {
     ...campBase('barbarian', 'Barbarian: Germanic village', 'barbarian'), family: 'barbarian',
-    scale: { min: 'hamlet', max: 'village' }, camp: { layout: 'yards', variant: 'germanic' },
+    scale: { min: 'hamlet', max: 'megacity' }, camp: { layout: 'yards', variant: 'germanic' },
     sitePrefs: { weights: { plain: 1.5, valley: 1.3, bridge: 1.2, hilltop: 0.6 } },
   },
   {
     ...campBase('barbarian-celtic', 'Barbarian: Celtic ringfort', 'barbarian-celtic'), family: 'barbarian',
-    scale: { min: 'hamlet', max: 'village' }, camp: { layout: 'yards', variant: 'celtic' },
+    scale: { min: 'hamlet', max: 'megacity' }, camp: { layout: 'yards', variant: 'celtic' },
     sitePrefs: { flatness: 0.6, weights: { hilltop: 2.5, plain: 0.6 } },
   },
   {
     ...campBase('barbarian-norse', 'Barbarian: Norse farmstead cluster', 'barbarian-norse'), family: 'barbarian',
-    scale: { min: 'hamlet', max: 'village' }, camp: { layout: 'yards', variant: 'norse' },
+    scale: { min: 'hamlet', max: 'megacity' }, camp: { layout: 'yards', variant: 'norse' },
     sitePrefs: { weights: { harbor: 2, estuary: 1.6, plain: 1, hilltop: 0.4 } },
   },
   {
     ...campBase('norse-ringfort', 'Norse ring fortress (Trelleborg)', 'norse-ringfort'),
-    scale: { min: 'hamlet', max: 'village' }, camp: { layout: 'ringfort', variant: 'trelleborg' },
+    scale: { min: 'hamlet', max: 'megacity' }, camp: { layout: 'ringfort', variant: 'trelleborg' },
     sitePrefs: { flatness: 1.4, weights: { harbor: 1.4, estuary: 1.4, plain: 1.5, hilltop: 0.5 } },
   },
   {
     // (Tikal, Copán, Caracol: a garden city; the dispersed houselots grow to a city of tens of thousands)
     ...campBase('maya', 'Maya city (ceremonial core, sacbeob)', 'maya'),
-    scale: { min: 'hamlet', max: 'city' }, camp: { layout: 'yards', variant: 'maya' },
+    scale: { min: 'hamlet', max: 'megacity' }, camp: { layout: 'yards', variant: 'maya' },
     render: { towerShape: 'square', plotLines: false },
     sitePrefs: { flatness: 1.2, weights: { plain: 1.6, hilltop: 1.2, valley: 1, harbor: 0.3 } },
   },
   {
     // (Angkor Thom: the moated square, the temple-mountain at the crossing of the avenues, the barays)
     ...campBase('khmer', 'Khmer city (Angkor)', 'khmer'),
-    scale: { min: 'hamlet', max: 'metropolis' }, camp: { layout: 'khmer', variant: 'angkor' },
+    scale: { min: 'hamlet', max: 'megacity' }, camp: { layout: 'khmer', variant: 'angkor' },
     render: { towerShape: 'square', plotLines: true },
     sitePrefs: { flatness: 2.4, weights: { plain: 2.5, bridge: 1, hilltop: 0, valley: 0.5, harbor: 0.2 } },
   },
   {
     // (Bibracte, Manching: the hilltop town of the late Iron Age)
     ...campBase('celtic-oppidum', 'Celtic oppidum', 'oppidum'),
-    scale: { min: 'hamlet', max: 'town' }, camp: { layout: 'yards', variant: 'oppidum' },
+    scale: { min: 'hamlet', max: 'megacity' }, camp: { layout: 'yards', variant: 'oppidum' },
     sitePrefs: { flatness: 0.4, weights: { hilltop: 3, valley: 0.8, plain: 0.5, harbor: 0.2, estuary: 0.2 } },
   },
   {
     ...campBase('orcish', 'Orcish war camp', 'orcish'), fantasy: true,
     // (chaotic sprawl inside lobed stake palisades: the camp grew by bursts; the ring layout's 'orc' variant is kept)
-    scale: { min: 'hamlet', max: 'town' }, camp: { layout: 'warcamp', variant: 'orc' },
+    scale: { min: 'hamlet', max: 'megacity' }, camp: { layout: 'warcamp', variant: 'orc' },
     sitePrefs: { flatness: 0.8, weights: { hilltop: 1.6, valley: 1.2, plain: 1, harbor: 0.3 } },
   },
   {
     ...campBase('halfling', 'Halfling shire', 'halfling'), fantasy: true,
-    scale: { min: 'hamlet', max: 'village' }, camp: { layout: 'yards', variant: 'halfling' },
+    scale: { min: 'hamlet', max: 'megacity' }, camp: { layout: 'yards', variant: 'halfling' },
     render: { towerShape: 'round', plotLines: false },
     sitePrefs: { flatness: 0.7, weights: { hilltop: 1.6, valley: 1.4, plain: 1, harbor: 0.2 } },
   },
   {
     ...campBase('kraal', 'Kraal (African homestead)', 'kraal'),
-    scale: { min: 'hamlet', max: 'village' }, camp: { layout: 'ring', variant: 'kraal' },
+    scale: { min: 'hamlet', max: 'megacity' }, camp: { layout: 'ring', variant: 'kraal' },
     sitePrefs: { flatness: 0.6, weights: { hilltop: 1.6, valley: 1.2, plain: 1, harbor: 0, estuary: 0 } },
   },
   {
     ...campBase('native-iroquoian', 'Native American: Iroquoian longhouse village', 'iroquoian'), family: 'native-american',
-    scale: { min: 'hamlet', max: 'village' }, camp: { layout: 'longhouses', variant: 'iroquoian' },
+    scale: { min: 'hamlet', max: 'megacity' }, camp: { layout: 'longhouses', variant: 'iroquoian' },
     sitePrefs: { flatness: 0.8, weights: { hilltop: 1.6, valley: 1.2, plain: 1, harbor: 0.2 } },
   },
   {
     ...campBase('native-pueblo', 'Native American: Pueblo', 'pueblo'), family: 'native-american',
     // (the pueblo grows to a town: several great houses, Chaco Canyon)
-    scale: { min: 'hamlet', max: 'town' }, camp: { layout: 'pueblo', variant: 'pueblo' },
+    scale: { min: 'hamlet', max: 'megacity' }, camp: { layout: 'pueblo', variant: 'pueblo' },
     render: { towerShape: 'square', plotLines: false, storeyShade: true },
     sitePrefs: { flatness: 0.9, weights: { valley: 2, plain: 1.4, hilltop: 0.8, harbor: 0, estuary: 0 } },
   },
   {
     ...campBase('native-plains', 'Native American: Plains tipi camp', 'plains-camp'), family: 'native-american',
-    scale: { min: 'hamlet', max: 'village' }, camp: { layout: 'ring', variant: 'tipi' },
+    scale: { min: 'hamlet', max: 'megacity' }, camp: { layout: 'ring', variant: 'tipi' },
     sitePrefs: { flatness: 1.8, weights: { plain: 2, bridge: 1.4, hilltop: 0, harbor: 0 } },
   },
   {
     ...campBase('nomad-camp', 'Nomad camp (steppe ordu)', 'nomad-camp'),
-    scale: { min: 'hamlet', max: 'village' }, camp: { layout: 'ring', variant: 'nomad' },
+    scale: { min: 'hamlet', max: 'megacity' }, camp: { layout: 'ring', variant: 'nomad' },
     sitePrefs: { flatness: 2, weights: { plain: 2.5, hilltop: 0, harbor: 0, estuary: 0 } },
   },
 ];

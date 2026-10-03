@@ -13,11 +13,10 @@ import { dist, polygonCentroid } from '../../core/geom';
 import type { Rng } from '../../core/rng';
 import type { World, UrbanLayer, UrbanLine, PolyH, Archetype } from '../../types';
 import type { Culture } from '../culture';
-import { scaleMaxPop } from '../culture';
 import { resolveMorph } from '../morphology';
 import { makeCtx, type UrbanCtx } from '../context';
-import { differenceS, unionS, unionMany, MultiPoly } from '../../geo/bool';
-import { area, pointInRing } from '../../geo/poly';
+import { differenceS, unionS, unionMany, intersectionS, mpArea, MultiPoly } from '../../geo/bool';
+import { area, pointInRing, bboxOf, distToRing } from '../../geo/poly';
 import { disk } from '../../geo/offset';
 import { CampOut, blockInfo } from './kit';
 import { ringCamp, RING_VARIANTS } from './ring';
@@ -28,6 +27,10 @@ import { ringFort } from './ringfort';
 import { khmerCity } from './khmer';
 import { stiltTown } from './stilts';
 import { warCamp } from './warcamp';
+import { germanicVillage } from './germanic';
+import { norseFarms } from './norse';
+import { celticVillage } from './celtic';
+import { satellite } from './satellites';
 
 export interface CampSpec {
   layout: 'ring' | 'yards' | 'longhouses' | 'pueblo' | 'ringfort' | 'khmer' | 'stilts' | 'warcamp';
@@ -46,6 +49,8 @@ export interface CampCtx {
   roadAngle: number;
   /** Sprawl factor (0.5 … 2): looser camps, larger yards, houses further apart. */
   sprawl: number;
+  /** Ground already taken by the other parts of a cluster (their quarters): dispersed farms keep off it. */
+  avoid?: Polygon[];
 }
 
 /** Direction of the longest regional road reaching the site centre. */
@@ -102,34 +107,89 @@ function dryShare(ctx: UrbanCtx, p: Vec2, r: number): number {
   return ok / n;
 }
 
-/** Sites of the satellite camps of a cluster: dry discs around the main one, preferably near the roads. */
+/** Sites of the satellite camps of a cluster: dry discs around the main one, preferably near the roads, the nearer
+ * the larger; the search widens ring by ring (large clusters spread over the map). */
 function clusterSites(ctx: UrbanCtx, c: Vec2, roads: Polyline[], r0: number, radii: number[], rng: Rng, dryMin = 0.8): Vec2[] {
   const placed: { p: Vec2; r: number }[] = [{ p: c, r: r0 }];
+  const roadPts: Vec2[] = [];
+  for (const pl of roads) for (let i = 0; i < pl.length; i += 3) roadPts.push(pl[i]);
   for (const r of radii) {
     let best: Vec2 | null = null, bs = -Infinity;
-    for (let ring = 0; ring < 7; ring++) for (let k = 0; k < 24; k++) {
-      const a = (k / 24) * 2 * Math.PI + rng.range(-0.1, 0.1);
-      const d = r0 + r + 45 + ring * 70 + rng.range(0, 25);
+    const far = placed.reduce((m, q) => Math.max(m, dist(q.p, c) + q.r), r0);
+    const nRing = Math.ceil((far + r + 200) / 70);
+    for (let ring = 0; ring < nRing; ring++) for (let k = 0; k < 24; k++) {
+      const a = (k / 24) * 2 * Math.PI + rng.range(-0.12, 0.12);
+      const d = r0 + r + 45 + ring * 70 + rng.range(0, 30);
       const p = { x: c.x + Math.cos(a) * d, y: c.y + Math.sin(a) * d };
       if (p.x < r + 20 || p.y < r + 20 || p.x > ctx.mapSize - r - 20 || p.y > ctx.mapSize - r - 20) continue;
-      if (placed.some((q) => dist(q.p, p) < q.r + r + 40)) continue;
+      if (placed.some((q) => dist(q.p, p) < q.r + r + 50)) continue;
       const dry = dryShare(ctx, p, r);
       if (dry < dryMin) continue;
       let dRoad = 1e9;
-      for (const pl of roads) for (const q of pl) dRoad = Math.min(dRoad, dist(q, p));
-      const s = dry * 2 - d / 600 - Math.max(0, dRoad - r - 30) / 250 + rng.float() * 0.2;
+      for (const q of roadPts) dRoad = Math.min(dRoad, dist(q, p));
+      // (close to the cluster: the distance to the nearest part counts, not only to the main one)
+      let dn = Infinity;
+      for (const q of placed) dn = Math.min(dn, dist(q.p, p) - q.r - r);
+      const s = dry * 2 - d / 1400 - Math.max(0, dn - 60) / 260 - Math.max(0, dRoad - r - 30) / 400 + rng.float() * 0.25;
       if (s > bs) { bs = s; best = p; }
     }
-    if (!best) break;
+    if (!best) continue;
     placed.push({ p: best, r });
   }
   return placed.slice(1).map((x) => x.p);
 }
 
+/**
+ * Natural size of one settlement of a culture's plan (inhabitants). Above it the settlement becomes a cluster: the
+ * main plan at about this size and outlying settlements of the culture's own outlying form (a confederation of
+ * villages, a gathering of camp circles along the river, a royal kraal and its homesteads, a hillfort and its raths).
+ */
+export const CAMP_NAT_MAX: Record<string, number> = {
+  barbarian: 1300, 'barbarian-celtic': 1500, 'barbarian-norse': 1400, 'norse-ringfort': 1100, kraal: 3000, 'native-plains': 2600,
+  'nomad-camp': 3500, 'native-iroquoian': 2200, 'native-pueblo': 3000, maya: 120000, khmer: 120000, 'celtic-oppidum': 12000,
+  orcish: 30000, halfling: 900, 'stilt-town': 6000,
+};
+
+/** Outlying settlements never exceed this many (the rest of the population lives in the larger ones). */
+const MAX_PARTS = 36;
+
+/**
+ * True for a secondary settlement of the settlement system (planned by `generateSettlementUrban`): it runs with
+ * `settlements: 'none'` on a site without archetype offers. (Hook for the planner: an explicit flag on the options
+ * would be cleaner, see the report.)
+ */
+export function isSecondary(world: World): boolean {
+  return world.options.settlements === 'none' && !!world.site && Object.keys(world.site.offers ?? {}).length === 0;
+}
+
+/** Populations of the parts of a settlement of `pop` (the main one first). */
+function partPops(pop: number, natMax: number, rng: Rng): number[] {
+  if (pop <= natMax) return [pop];
+  const n = Math.min(MAX_PARTS + 1, Math.ceil(pop / (natMax * 0.7)));
+  const main = Math.min(natMax, Math.round((pop / n) * 1.7));
+  const w = Array.from({ length: n - 1 }, (_, k) => rng.fork('w' + k).range(0.3, 1));
+  const tw = w.reduce((a, b) => a + b, 0);
+  return [main, ...w.map((x) => Math.min(natMax, Math.max(40, Math.round(((pop - main) * x) / tw))))];
+}
+
+/** Approximate outer radius (m) of one part (main plan or outlying form). */
+function partRadius(culture: string, spec: CampSpec, pop: number, satelliteForm: boolean): number {
+  if (satelliteForm) return 60 + Math.sqrt(pop) * 7;
+  switch (culture) {
+    case 'barbarian': return 40 + Math.sqrt(((pop / 12) * 1900) / Math.PI) * 1.25;
+    case 'barbarian-norse': return 120 + Math.sqrt(pop / 14) * 95;
+    case 'barbarian-celtic': return pop < 150 ? 70 + Math.sqrt(pop / 16) * 90 : Math.sqrt((pop * 105) / Math.PI) + 40;
+    default: return campRadius(spec, pop);
+  }
+}
+
 function plan(cc: CampCtx, spec: CampSpec, c: Vec2, pop: number, rng: Rng): CampOut {
   switch (spec.layout) {
     case 'ring': return ringCamp(cc, c, pop, RING_VARIANTS[spec.variant] ?? RING_VARIANTS.kraal, rng);
-    case 'yards': return yardsVillage(cc, c, pop, YARD_VARIANTS[spec.variant] ?? YARD_VARIANTS.germanic, rng);
+    case 'yards': if (spec.variant === 'germanic') return germanicVillage(cc, c, pop, rng);
+      if (spec.variant === 'norse') return norseFarms(cc, c, pop, rng);
+      if (spec.variant === 'celtic') return celticVillage(cc, c, pop, rng);
+      return yardsVillage(cc, c, pop, YARD_VARIANTS[spec.variant] ?? YARD_VARIANTS.germanic, rng);
     case 'longhouses': return longhouseVillage(cc, c, pop, rng);
     case 'pueblo': return puebloSettlement(cc, c, pop, rng);
     case 'ringfort': return ringFort(cc, c, pop, rng);
@@ -142,48 +202,60 @@ function plan(cc: CampCtx, spec: CampSpec, c: Vec2, pop: number, rng: Rng): Camp
 
 export interface CampResult { layer: UrbanLayer; stats: Record<string, number | string> }
 
-/** Plans a camp-culture settlement (one camp, a large village, or a cluster of villages) as an UrbanLayer. */
+/** Plans a camp-culture settlement (one camp or village, or a cluster with its outlying settlements) as an UrbanLayer. */
 export function generateCamp(world: World, root: Rng, culture: Culture, pop0: number): CampResult {
   const t0 = performance.now();
   const spec = culture.camp as CampSpec;
   const sprawl = Math.max(0.5, Math.min(2, world.options.sprawl ?? 1));
   const rng = root.fork('camp');
   const morph = resolveMorph(culture.core.morphology);
-  const maxPop = scaleMaxPop(culture.scale?.max ?? 'megacity');
-  // above the culture's class: a large village (≤ 1.5 × the bound), else a cluster of villages
-  let pops: number[] = [pop0];
-  if (pop0 > maxPop * 1.5) {
-    const n = Math.min(6, Math.max(2, Math.ceil(pop0 / (maxPop * 0.75))));
-    const each = Math.min(maxPop, Math.round(pop0 / n));
-    pops = Array.from({ length: n }, (_, k) => Math.round(each * (k === 0 ? 1.15 : 0.85 + 0.3 * rng.fork('cl:' + k).float())));
-  }
+  const natMax = CAMP_NAT_MAX[culture.id] ?? 1500;
+  const secondary = isSecondary(world);
+  let pops = partPops(pop0, natMax, rng.fork('parts'));
+  // a secondary settlement takes its culture's outlying form (when it has one) unless it is a large one
+  const satMain = secondary && pop0 < natMax * 0.6;
   const rk = Math.sqrt(sprawl);
-  const r0 = campRadius(spec, pops[0]) * rk;
-  const ctx = makeCtx(world, morph, Math.min(world.mapSize / 2, 2.2 * r0 + 600 + (pops.length > 1 ? 900 : 0)));
+  const r0 = partRadius(culture.id, spec, pops[0], satMain) * rk;
+  const ctx = makeCtx(world, morph, Math.min(world.mapSize / 2, 2.2 * r0 + 600 + (pops.length > 1 ? 900 + pops.length * 60 : 0)));
   const roads = (world.roads ?? []).filter((r) => r.kind !== 'track').map((r) => r.path);
   const roadAngle = mainRoadAngleOf(world);
   // the main camp stands on dry ground: beside the stream rather than astride it (a short way leads from the road)
   let main = ctx.center;
-  const rDry = r0 * (spec.layout === 'yards' || spec.layout === 'longhouses' ? 1.3 : spec.layout === 'khmer' ? 1.15 : 1.05);
+  const rDry = culture.id === 'barbarian-celtic' && !satMain && pops[0] >= 150 ? r0 : spec.variant === 'germanic' || spec.variant === 'norse' || satMain ? Math.min(r0 * 0.5, 90) : r0 * (spec.layout === 'yards' || spec.layout === 'longhouses' ? 1.3 : spec.layout === 'khmer' ? 1.15 : 1.05);
   // (a stilt town wants the water: it is sited on the shore by its layout)
-  if (!culture.waterBuild && dryShare(ctx, main, rDry) < 0.97) {
-    let bs = -Infinity;
+  // (a hillfort or an oppidum: the whole enclosure dry, on the highest ground near the site)
+  const fort = !satMain && ((culture.id === 'barbarian-celtic' && pops[0] >= 150) || culture.id === 'celtic-oppidum');
+  const hc = ctx.heightAt(ctx.center);
+  if (!culture.waterBuild && (fort || dryShare(ctx, main, rDry) < 0.97)) {
+    let bs = fort && dryShare(ctx, main, rDry) >= 0.97 ? 2 : -Infinity;
     const sr = rng.fork('dry');
-    for (let ring = 1; ring <= 10; ring++) for (let k = 0; k < 20; k++) {
+    for (let ring = 1; ring <= (fort ? 14 : 10); ring++) for (let k = 0; k < 20; k++) {
       const a = (k / 20) * 2 * Math.PI + sr.range(-0.1, 0.1);
       const d = ring * Math.max(25, r0 * 0.22);
       const p = { x: ctx.center.x + Math.cos(a) * d, y: ctx.center.y + Math.sin(a) * d };
       if (p.x < r0 + 20 || p.y < r0 + 20 || p.x > ctx.mapSize - r0 - 20 || p.y > ctx.mapSize - r0 - 20) continue;
       const dry = dryShare(ctx, p, rDry);
-      const s = (dry >= 0.97 ? 2 : dry) - d / (4 * r0 + 400);
+      const s = (dry >= 0.97 ? 2 : dry) - d / (4 * r0 + 400) + (fort ? Math.max(-0.5, Math.min(0.8, (ctx.heightAt(p) - hc) / 30)) : 0);
       if (s > bs) { bs = s; main = p; }
     }
   }
+  const radii = pops.map((p, k) => partRadius(culture.id, spec, p, k > 0 || satMain) * rk);
   const centers: Vec2[] = [main];
-  if (pops.length > 1) centers.push(...clusterSites(ctx, main, roads, r0 * 1.3, pops.slice(1).map((p) => campRadius(spec, p) * rk * 1.3), rng.fork('cluster'), spec.variant === 'norse' ? 0.45 : 0.8));
+  if (pops.length > 1) centers.push(...clusterSites(ctx, main, roads, r0 * 1.15, radii.slice(1).map((r) => r * 1.1), rng.fork('cluster'), spec.variant === 'norse' || spec.layout === 'yards' ? 0.5 : 0.75));
   pops = pops.slice(0, centers.length);
-  const parts: CampOut[] = centers.map((c, k) => plan({ ctx, world, culture, roads, main: k === 0, roadAngle, sprawl }, spec, c, pops[k], rng.fork('part:' + k)));
-  // tracks from each satellite to the main camp (a trampled way, drawn as a plan line), and from the road's end
+  // (each part keeps off the ground of the parts made before it; a quarter that still overlaps one is dropped)
+  const taken: { poly: Polygon; bb: ReturnType<typeof bboxOf> }[] = [];
+  const parts: CampOut[] = centers.map((c, k) => {
+    const cc: CampCtx = { ctx, world, culture, roads, main: k === 0, roadAngle, sprawl, avoid: taken.map((t) => t.poly) };
+    const r = rng.fork('part:' + k);
+    const sat = k > 0 || satMain ? satellite(culture.id, cc, c, pops[k], r) : null;
+    let part = sat ?? plan(cc, spec, c, pops[k], r);
+    if (taken.length) part = dropOverlapping(part, taken);
+    for (const q of part.quarters) taken.push({ poly: q, bb: bboxOf(q) });
+    return part;
+  });
+  // tracks from each satellite to the nearest part placed before it (a trampled way, drawn as a plan line), and
+  // from the road's end to the main camp
   const extraLines: UrbanLine[] = [];
   if (dist(main, ctx.center) > r0 * 0.6) {
     const L = dist(main, ctx.center);
@@ -191,15 +263,18 @@ export function generateCamp(world: World, root: Rng, culture: Culture, pop0: nu
     if (L > r0 + 4) extraLines.push({ kind: 'track', path: [ctx.center, { x: main.x - ux * (r0 - 2), y: main.y - uy * (r0 - 2) }], width: 3 });
   }
   for (let k = 1; k < centers.length; k++) {
-    const a = centers[k], b = centers[0];
+    const a = centers[k];
+    let j = 0;
+    for (let i = 1; i < k; i++) if (dist(centers[i], a) - radii[i] < dist(centers[j], a) - radii[j]) j = i;
+    const b = centers[j];
     const L = dist(a, b);
-    const ra = campRadius(spec, pops[k]) * rk, rb = r0;
-    if (L <= ra + rb) continue;
+    const ra = radii[k] * 0.8, rb = radii[j] * 0.8;
+    if (L <= ra + rb + 10) continue;
     const ux = (b.x - a.x) / L, uy = (b.y - a.y) / L;
     extraLines.push({ kind: 'track', path: [{ x: a.x + ux * ra, y: a.y + uy * ra }, { x: b.x - ux * rb, y: b.y - uy * rb }], width: 2.6 });
   }
   const pop = pops.reduce((s, p) => s + p, 0);
-  const archetype: Archetype = pop < 200 ? 'hamlet' : (spec.layout === 'pueblo' || spec.layout === 'khmer' || spec.layout === 'stilts' || spec.variant === 'maya') && pops[0] >= 1200 ? 'town' : 'nucleated-village';
+  const archetype: Archetype = pop < 200 ? 'hamlet' : (spec.layout === 'pueblo' || spec.layout === 'khmer' || spec.layout === 'stilts' || spec.variant === 'maya' || spec.variant === 'oppidum' || spec.layout === 'warcamp') && pops[0] >= 1200 ? 'town' : 'nucleated-village';
   const layer = assemble(world, parts, culture, morph.id, pop, archetype, ctx.water);
   layer.lines = [...extraLines, ...(layer.lines ?? [])];
   const stats: Record<string, number | string> = {
@@ -207,8 +282,47 @@ export function generateCamp(world: World, root: Rng, culture: Culture, pop0: nu
     blocks: layer.blocks.length, plots: layer.parcels.filter((p) => p.use === 'plot').length, buildings: layer.buildings.length,
   };
   if (pop !== pop0) stats['scale.requested'] = pop0;
+  if (secondary) stats['camp.outlying'] = satMain ? 1 : 0;
   stats['ms.urban'] = Math.round(performance.now() - t0);
   return { layer, stats };
+}
+
+/** A part without its quarters that overlap the ground already taken (with their blocks, plots, buildings and the
+ * plan lines, landmarks, trees and sites lying on them). */
+function dropOverlapping(part: CampOut, taken: { poly: Polygon; bb: ReturnType<typeof bboxOf> }[]): CampOut {
+  const drop = part.quarters.map((q) => {
+    const bb = bboxOf(q);
+    return taken.some((t) => !(t.bb.x0 > bb.x1 || t.bb.x1 < bb.x0 || t.bb.y0 > bb.y1 || t.bb.y1 < bb.y0) && mpArea(intersectionS(q, t.poly)) > 1);
+  });
+  if (!drop.some((d) => d)) return part;
+  const dq = part.quarters.filter((_, i) => drop[i]);
+  const inDropped = (p: Vec2): boolean => dq.some((q) => pointInRing(q, p) || distToRing(q, p) < 4);
+  const qMap: number[] = [];
+  let nq = 0;
+  drop.forEach((d, i) => { qMap[i] = d ? -1 : nq++; });
+  const bMap: number[] = [];
+  let nb = 0;
+  part.blocks.forEach((b, i) => { bMap[i] = qMap[b.quarter] < 0 ? -1 : nb++; });
+  const pMap: number[] = [];
+  let np = 0;
+  part.parcels.forEach((p, i) => { pMap[i] = bMap[p.block] < 0 ? -1 : np++; });
+  const mid = (pl: Vec2[]): Vec2 => pl[Math.floor(pl.length / 2)];
+  return {
+    ...part,
+    quarters: part.quarters.filter((_, i) => !drop[i]),
+    outline: part.outline.filter((o) => !inDropped(polygonCentroid(o))),
+    blocks: part.blocks.filter((_, i) => bMap[i] >= 0).map((b) => ({ ...b, quarter: qMap[b.quarter] })),
+    parcels: part.parcels.filter((_, i) => pMap[i] >= 0).map((p) => ({ ...p, block: bMap[p.block] })),
+    buildings: part.buildings.filter((b) => pMap[b.parcel] >= 0).map((b) => ({ ...b, parcel: pMap[b.parcel] })),
+    // (a street serving kept plots stays: only a street lying wholly on dropped ground goes)
+    streets: part.streets.filter((st) => !st.path.every((p) => dq.some((q) => pointInRing(q, p)))),
+    lines: part.lines.filter((l) => !inDropped(mid(l.path))),
+    landmarks: part.landmarks.filter((l) => !inDropped(polygonCentroid(l.poly))),
+    squares: part.squares.filter((sq) => !inDropped(polygonCentroid(sq))),
+    sites: part.sites.filter((st) => !inDropped(st.anchor)),
+    trees: part.trees?.filter((t) => !inDropped(t)),
+    walls: part.walls.filter((w) => !inDropped(w.path[0])),
+  };
 }
 
 /** Merges the camps (local indices) into one urban layer. */

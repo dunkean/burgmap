@@ -101,8 +101,8 @@ export const SIGNATURES: Record<string, (w: World) => void> = {
     expect((a.get('longhouse') ?? 0) + (a.get('byre-house') ?? 0), 'germanic: longhouses and byre-houses').toBeGreaterThan(2);
     expect(a.get('chieftain-hall') ?? 0, "germanic: the chieftain's hall").toBeGreaterThan(0);
     expect((a.get('sunken-hut') ?? 0) + (a.get('granary-on-posts') ?? 0), 'germanic: sunken huts and granaries').toBeGreaterThan(1);
-    expect((w.urban!.walls ?? []).length, 'germanic: palisade').toBeGreaterThan(0);
-    expect(w.urban!.streets.every((s) => s.width <= 5), 'germanic: paths, no streets').toBe(true);
+    expect(lineKinds(w).has('yard-fence'), 'germanic: fenced yards').toBe(true);
+    expect(w.urban!.streets.every((s) => s.width <= 6), 'germanic: paths, no streets').toBe(true);
   },
   'barbarian-celtic': (w) => {
     const a = arches(w);

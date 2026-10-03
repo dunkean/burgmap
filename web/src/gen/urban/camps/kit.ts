@@ -11,7 +11,7 @@ import type { UrbanStreet, UrbanLine, UrbanWall, UrbanSite, PolyH, UrbanBlockInf
 import { MultiPoly, differenceS, intersectionS, intersection, union, unionS, unionMany, mpArea } from '../../geo/bool';
 import { area, orientPos, pointInRing, distToRing, distToSeg, inscribed, cleanRing, bboxOf, interiorAngle, isSimple } from '../../geo/poly';
 import { ribbon } from '../../geo/offset';
-import { polyInside, isConvex, clipHalfPlaneConvex } from '../../geo/split';
+import { polyInside, isConvex, clipHalfPlaneConvex, segCrossesRing } from '../../geo/split';
 import { GridIndex } from '../../geo/spatial';
 import { truncateAcute } from '../blocks';
 
@@ -167,6 +167,17 @@ export function cutByCells(block: Polygon, cells: { poly: Polygon; tag: number }
   return out;
 }
 
+/** cutByCells, then whatever of the block no cell covers as pieces tagged -1 (the block stays exactly covered). */
+export function cutExact(block: Polygon, cells: { poly: Polygon; tag: number }[]): { poly: Polygon; tag: number }[] {
+  let parts = cutByCells(block, cells);
+  const A = area(block), S = parts.reduce((s, p) => s + area(p.poly), 0);
+  if (S < A * 0.999) {
+    const rest = pieces(parts.length ? differenceS([{ outer: block, holes: [] }], ...parts.map((p): MultiPoly => [{ outer: p.poly, holes: [] }])) : [{ outer: block, holes: [] }], 0.5);
+    parts = mergeSmall([...parts, ...rest.map((poly) => ({ poly, tag: -1 }))]);
+  }
+  return parts;
+}
+
 /** Sutherland–Hodgman: a polygon (any) clipped by a convex polygon (CCW). */
 function clipConvexCell(subject: Polygon, clip: Polygon): Polygon {
   let poly = subject;
@@ -316,6 +327,8 @@ export function fits(lot: Polygon, fp: Polygon, others: Polygon[], margin: numbe
     if (fb.x0 > ob.x1 + gap || fb.x1 < ob.x0 - gap || fb.y0 > ob.y1 + gap || fb.y1 < ob.y0 - gap) continue;
     for (const q of fp) if (pointInRing(o, q) || distToRing(o, q) < gap) return false;
     for (const q of o) if (pointInRing(fp, q)) return false;
+    // (crossing shapes, a + or a T, have no vertex inside the other)
+    for (let i = 0; i < fp.length; i++) if (segCrossesRing(o, fp[i], fp[(i + 1) % fp.length])) return false;
   }
   return true;
 }
@@ -448,6 +461,116 @@ export function roadCrossings(ring: Polygon, roads: Polyline[]): { p: Vec2; dir:
       }
     }
   });
+  return out;
+}
+
+/**
+ * Directions (radians, from c) of the regional roads that end at the site centre, taken where each road is at
+ * distance `reach` from c (so a street laid along it follows the road); near-duplicates dropped. Empty when c is
+ * not the site centre (a camp moved to dry ground, a satellite).
+ */
+export function roadDirections(cc: { ctx: { center: Vec2 }; roads: Polyline[] }, c: Vec2, reach: number): number[] {
+  if (dist(c, cc.ctx.center) > 15) return [];
+  const out: number[] = [];
+  for (const pl of cc.roads) {
+    if (dist(pl[pl.length - 1], cc.ctx.center) > 15) continue;
+    let q = pl[0];
+    for (let i = pl.length - 1; i >= 0; i--) if (dist(pl[i], c) >= reach) { q = pl[i]; break; }
+    const a = Math.atan2(q.y - c.y, q.x - c.x);
+    if (out.every((b) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b))) > 0.7)) out.push(a);
+  }
+  return out;
+}
+
+/** Arclength frame of a polyline: points and left normals (interpolated between vertices) at any arclength, the
+ * line extended straight beyond both ends. */
+export class Curv {
+  readonly pts: Vec2[];
+  readonly cum: number[];
+  readonly L: number;
+  private vn: Vec2[];
+  constructor(pl: Polyline) {
+    const pts: Vec2[] = [pl[0]];
+    for (let i = 1; i < pl.length; i++) if (dist(pl[i], pts[pts.length - 1]) > 0.5) pts.push(pl[i]);
+    if (pts.length < 2) pts.push({ x: pts[0].x + 1, y: pts[0].y });
+    this.pts = pts;
+    this.cum = [0];
+    for (let i = 1; i < pts.length; i++) this.cum.push(this.cum[i - 1] + dist(pts[i - 1], pts[i]));
+    this.L = this.cum[this.cum.length - 1];
+    const sn: Vec2[] = [];
+    for (let i = 1; i < pts.length; i++) { const l = dist(pts[i - 1], pts[i]); sn.push({ x: -(pts[i].y - pts[i - 1].y) / l, y: (pts[i].x - pts[i - 1].x) / l }); }
+    this.vn = pts.map((_, i) => {
+      const a = sn[Math.max(0, i - 1)], b = sn[Math.min(sn.length - 1, i)];
+      const x = a.x + b.x, y = a.y + b.y, l = Math.hypot(x, y) || 1;
+      return { x: x / l, y: y / l };
+    });
+  }
+  private loc(s: number): { i: number; t: number } {
+    if (s <= 0) return { i: 1, t: s / (this.cum[1] || 1) };
+    if (s >= this.L) { const n = this.pts.length - 1; return { i: n, t: 1 + (s - this.L) / ((this.cum[n] - this.cum[n - 1]) || 1) }; }
+    let i = 1;
+    while (i < this.pts.length - 1 && this.cum[i] < s) i++;
+    return { i, t: (s - this.cum[i - 1]) / ((this.cum[i] - this.cum[i - 1]) || 1) };
+  }
+  at(s: number): Vec2 {
+    const { i, t } = this.loc(s);
+    const a = this.pts[i - 1], b = this.pts[i];
+    return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+  }
+  normal(s: number): Vec2 {
+    const { i, t } = this.loc(s);
+    const tt = Math.max(0, Math.min(1, t));
+    const a = this.vn[i - 1], b = this.vn[i];
+    const x = a.x + (b.x - a.x) * tt, y = a.y + (b.y - a.y) * tt, l = Math.hypot(x, y) || 1;
+    return { x: x / l, y: y / l };
+  }
+  /** The polyline between arclengths s0 and s1. */
+  slice(s0: number, s1: number): Polyline {
+    const out: Polyline = [this.at(s0)];
+    for (let i = 0; i < this.pts.length; i++) if (this.cum[i] > s0 + 0.5 && this.cum[i] < s1 - 0.5) out.push(this.pts[i]);
+    out.push(this.at(s1));
+    return out;
+  }
+}
+
+/** The regional roads passing within `near` m of c, as polylines from c outward (both ways when the road goes on
+ * beyond c), each up to `maxLen` long; near-duplicate directions dropped. */
+export function roadPolylines(cc: { ctx: { center: Vec2 }; roads: Polyline[] }, c: Vec2, maxLen: number, near = 30): Polyline[] {
+  const out: Polyline[] = [];
+  const dirs: number[] = [];
+  const add = (r: Polyline): void => {
+    if (r.length < 2) return;
+    let q = r[r.length - 1];
+    for (const p of r) if (dist(p, c) > Math.min(60, maxLen / 2)) { q = p; break; }
+    if (dist(q, c) < 25) return;
+    const a = Math.atan2(q.y - c.y, q.x - c.x);
+    if (dirs.some((b) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b))) < 0.7)) return;
+    dirs.push(a);
+    out.push(r);
+  };
+  for (const pl of cc.roads) {
+    let bi = -1, bd = near;
+    pl.forEach((p, i) => { const d = dist(p, c); if (d < bd) { bd = d; bi = i; } });
+    if (bi < 0) continue;
+    for (const step of [-1, 1]) {
+      const r: Polyline = [c];
+      let L = 0;
+      for (let i = bi + step; i >= 0 && i < pl.length && L < maxLen; i += step) { if (dist(pl[i], r[r.length - 1]) < 0.5) continue; L += dist(pl[i], r[r.length - 1]); r.push(pl[i]); }
+      add(r);
+    }
+  }
+  return out;
+}
+
+/** A gently wandering polyline from p, heading a, of length L (steps of `step`, turning up to `turn` per step). */
+export function wanderLine(p: Vec2, a: number, L: number, r: { range: (a: number, b: number) => number }, step = 18, turn = 0.07): Polyline {
+  const out: Polyline = [p];
+  let h = a, q = p;
+  for (let s = 0; s < L; s += step) {
+    h += r.range(-turn, turn);
+    q = { x: q.x + Math.cos(h) * Math.min(step, L - s), y: q.y + Math.sin(h) * Math.min(step, L - s) };
+    out.push(q);
+  }
   return out;
 }
 

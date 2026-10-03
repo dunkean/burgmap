@@ -85,6 +85,8 @@ export interface RenderHints {
   moat?: boolean;
   /** Plot hairlines (false: camps and villages without property lines). */
   plotLines?: boolean;
+  /** Camps and barbarian villages: no ground fill; trampled paths and yards over the grass, fences drawn with posts. */
+  openGround?: boolean;
   /** Roof tones by storeys (terraced room blocks: the higher, the darker). */
   storeyShade?: boolean;
   /** Agricultural terraces along the contours on the slopes round the town (Inca andenes). */
