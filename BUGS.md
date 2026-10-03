@@ -13,7 +13,7 @@ Agents: fix entries in order, then mark each one fixed with the commit hash (e.g
 
 ## List (written by the user)
 
-- La légende n'apparait plus
+- La légende n'apparait plus → fixed in 2f65f13
 - Les shanty towns doivent avoir des formes de maison/tentes plus réalistes
 - Quand il n'y a pas de rue qui séparent des zones de batiments, la jointure entre les zones produit des batiments qui s'overlap parfois ou qui on des formes vraiment bizarres. Il faut ptet merge les zones avant de mettre les batiments ou trouver une heuristique pour adapter la forme ou eviter l'overlap. (testé en "medieval organic")
 - Il faut ajouter des biomes (désert, foret, etc.)
