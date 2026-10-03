@@ -65,6 +65,7 @@ import { streamBridges, STREAM_BRIDGES } from './streambridges';
 import { outerEnclosure, absorbedVillages, joinVillages, reserveVillages, quarterWall, type Village } from './m4/suburbs';
 import type { ReservedLot } from './primary';
 import { unionS } from '../geo/bool';
+import { servedFootprint } from './footprint';
 
 export interface UrbanResult { layer: UrbanLayer; stats: Record<string, number | string>; debug: UrbanDebug }
 export interface UrbanDebug { quarters: { poly: Polygon; phase: number; lab: number[] }[] }
@@ -987,6 +988,9 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     path: s.path, width: s.widths.reduce((a, b) => a + b, 0) / s.widths.length, widths: s.widths,
     kind: s.rank <= 1 ? 'main' : s.rank <= 2 ? 'street' : 'alley', rank: s.rank, role: s.role, phase: s.phase,
   }));
+  // A retained coarse footprint component may still contain districts that never got connected
+  // quarters. Resolve only the exported footprint here, after all seeded urban work is complete.
+  const footprint = servedFootprint(prim.footprint, keptQ.map((qi) => ({ outer: prim.quarters[qi].lp.pts, holes: [] })), layerStreets, prim.walls.map((w) => w.ring));
   const towerShape = hints.towerShape;
   // within 4 m of the water or in it (wall stretches along the water are left out): the water edges in a grid index
   // (the polygons are long river ribbons; a full scan per 2 m sample of every wall was the slowest part of the walls)
@@ -1027,8 +1031,8 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     return out;
   };
   const layer: UrbanLayer = {
-    footprint: prim.footprint.map((p) => p.outer),
-    footprintH: toPH(prim.footprint),
+    footprint: footprint.map((p) => p.outer),
+    footprintH: toPH(footprint),
     ...(prim.moat.length ? { ruralReserve: defensiveReserve } : {}),
     streets: layerStreets,
     blocks: carved.map((b) => b.poly), parcels, buildings,
