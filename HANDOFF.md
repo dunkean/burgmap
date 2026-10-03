@@ -83,6 +83,9 @@ GITHUB_TOKEN_FILE=/d/Workspace/dunk_token bash scripts/deploy_pages.sh   # build
 
 ## 6. Current state
 
+- **Road surfaces (`fc6a312`, 2026-10-04):** SVG and Canvas share physical road/bridge widths with bounded visibility floors; rural activity tracks use earth ink and minimum-width urban strokes stay within actual quarters/footprints. The 10 km p4uefz SVG no longer turns an 8 m road into a 42.5 m white band. All three reviewers approved before tests; eight focused regressions and 13 combined rendering tests, typecheck/build, PNG and live Canvas checks passed. Audit of rural activity yards and secondary street continuations found no remaining false surface on the examined cases. SVG casings now deliberately match Canvas. Resolved road-background report removed from BUGS.md.
+
+
 - **Chosen centres (`248fd34`, `0d968e6`, 2026-10-04):** the main city and surrounding villages can be placed by coordinates or map click, shared by URL and reset to automatic. Safety correction precedes travel costs, roads and urban generation; secondary corrections stay within 400 m and warn if no suitable position exists. Explicit megacities retain radius clearance on large maps. All three source reviewers approved implementation, fusion and edge-clearance amendment before validation; 13 focused and 15 existing tests, 31 combined-root regressions, 14 unchanged-world hashes, typecheck/build, actual browser click/cancel/reload and primitive-town relocation passed. The resolved placement report was removed from BUGS.md.
 
 

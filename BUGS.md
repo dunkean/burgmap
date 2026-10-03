@@ -14,9 +14,9 @@ Agents: fix the open reports; parallel work is allowed. Remove a report after it
 ## List (written by the user)
 
 - Les cultures qui sont faites pour être en tribus (genre nordic), lorsqu'on demande du gros, il faut faire une ville primitive au lieu des tribus. En gros on adapte l'archi urbaine à la taille de la pop + culture
-- sans town wall, le tour des villes est vraiment pas beau à cause de la couleur uniforme du background des quartiers. Sur les quatiers periphériques ca serait bien que le rendu "hors ville" se merge ou remplace le fond de texture des quarties.
+- sans town wall, le tour des villes est vraiment pas beau à cause de la couleur uniforme du background des quartiers. Sur les quatiers periphériques ca serait bien que le rendu "hors ville" se merge ou remplace le fond de texture des quarties. Glovalement le background des quartiers de villes ou de villages devraient reprendre le background naturel et l'adapter (sauf si c'est une ville pavé ou autre). Là j'ai des quartiers vides qui coupent la foret alors qu'il ne devrait pas (soit laisser la forer soit peupler: exemmple coordonnées 1144.3, 2033.8 m pour seed=g5fo4o&size=city&river=major&walls=none&culture=indian-temple&center=1549%2C2492&pins=1144.3%2C2033.8%2C&view=1727%2C2446.2%2C0.7573)
 - Les estuaires ont toujours une forme arrondi. Il faut plus de diversité donc juste un élargement de la riviere.
 - De très nimbreux town plan construire les quartiers sur l'eau sans en tenir compte. Il faut corriger
 - lignes de contours et interne des champs scale avec la taille de l'image. Sur de très grande map ca devient hideux.
-- les taches de bacground blancs sur les routes sont parfois mis n'importe ou et fond très laids. Surtout en plein campagne. A corriger ou adapter
 - le tracé des maisons en zone très denses, y a des overlaps, des coupures, voire des incohérence.
+- il faut pouvoir aussi placer des villages, hameau, fermes, etc.
