@@ -214,6 +214,15 @@ function cultureOverlay(ub: NonNullable<World['urban']>, pal: Palette, lw: (m: n
         s += `<path d="${dd}" fill="none" stroke="${pal.bridgeInk}" stroke-width="${f1(w + 0.9)}" stroke-linecap="butt"/><path d="${dd}" fill="none" stroke="${pal.bridgeDeck}" stroke-width="${f1(w)}" stroke-linecap="butt"/>`;
       }
     }
+    else if (k === 'bazaar-roof') {
+      // the vaulted bazaar street: a roof over the street's own width
+      for (const l of (ub.lines ?? []).filter((x) => x.kind === 'bazaar-roof')) {
+        const w = Math.max(2, (l.width ?? 5) - 0.6), dd = pathD(l.path, false);
+        s += `<path d="${dd}" fill="none" stroke="${U.landmarkEdge}" stroke-width="${f1(w + 0.8)}" stroke-linecap="butt" stroke-linejoin="round"/><path d="${dd}" fill="none" stroke="${U.landmark}" stroke-width="${f1(w)}" stroke-linecap="butt" stroke-linejoin="round"/>`;
+      }
+    }
+    else if (k === 'qanat') s += `<path d="${d}" fill="none" stroke="${U.wall}" stroke-width="${lw(1, 0.5)}" stroke-dasharray="4 3" stroke-opacity="0.7"/>`;
+    else if (k === 'qanat-shaft') s += `<path d="${d}" fill="${U.garden}" stroke="${U.wall}" stroke-width="${lw(0.7, 0.3)}"/>`;
     else if (k === 'hachure') s += `<path d="${d}" fill="none" stroke="${U.wall}" stroke-width="${lw(0.55, 0.3)}" stroke-opacity="0.85"/>`;
     else s += `<path class="u-line-${k}" d="${d}" fill="none" stroke="${U.wall}" stroke-width="${lw(WALL_LINES[k] ?? 1, 0.4)}" stroke-linejoin="miter" stroke-linecap="square"/>`;
   }

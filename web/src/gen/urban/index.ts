@@ -44,6 +44,7 @@ import { registerRussian } from './russian';
 import { registerFantasy } from './fantasy';
 import { registerByzantine, stairLanes } from './byzantine';
 import { registerVenice, lagoonWaterways, reserveArsenal } from './venice';
+import { registerPersian, bazaarRoofs, qanats } from './persian';
 import { siteCastle, type CastlePlan } from './m4/castle';
 import { reserveCastle, type M4State } from './m4/reserve';
 import { reserveCathedral, reservePalace, reserveMonasteries } from './m4/catalogue';
@@ -66,7 +67,7 @@ export interface UrbanDebug { quarters: { poly: Polygon; phase: number; lab: num
 const MARKET_AREA = (pop: number): number => (pop < 1200 ? 0 : Math.min(10000, 1800 + pop * 0.3));
 /** Qibla from the Maghreb, roughly east-south-east (map angle, y down). */
 const QIBLA = 0.2;
-const NUCLEUS_COMPOUND: Record<string, string> = { mosque: 'great-mosque', castle: 'castle', temple: 'hindu-temple', grove: 'grove', 'drum-tower': 'drum-tower', ushnu: 'inca-plaza', precinct: 'aztec-precinct', mortuary: 'mortuary-temple' };
+const NUCLEUS_COMPOUND: Record<string, string> = { mosque: 'great-mosque', castle: 'castle', temple: 'hindu-temple', grove: 'grove', 'drum-tower': 'drum-tower', ushnu: 'inca-plaza', precinct: 'aztec-precinct', mortuary: 'mortuary-temple', maidan: 'maidan' };
 
 /** A point strictly inside a polygon (centroid when inside, else the inscribed-circle center). */
 export function interiorPoint(p: Polygon): Vec2 {
@@ -115,6 +116,7 @@ const L2_SITES: Record<string, 'power' | 'worship' | 'market' | 'civic' | 'activ
   'orthodox-church': 'worship', 'mortuary-temple': 'worship', 'charnel-house': 'civic',
   'byz-church': 'worship', 'byz-metropolis': 'worship', 'byz-monastery': 'worship',
   campo: 'worship', 'doge-basilica': 'worship', 'doge-palace': 'power', arsenal: 'civic',
+  maidan: 'market', 'friday-mosque': 'worship', caravanserai: 'market', 'chahar-bagh': 'civic',
   'aztec-precinct': 'worship', 'calpulli-temple': 'worship', tecpan: 'power', tianguis: 'market',
 };
 /** Parcel uses of the open port pieces. */
@@ -179,6 +181,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   registerFantasy();
   registerByzantine();
   registerVenice();
+  registerPersian();
   const flags = m4Flags(opts, culture, pop, archetype, rng.fork('m4'));
   const sites: UrbanSite[] = [];
   const lotData = new Map<string, unknown>();
@@ -899,6 +902,9 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   if (hints.stairs) lines.push(...stairLanes(ctx, streets));
   // ---- lagoon towns: water down the canals, footbridges where the calli cross them
   if (hints.lagoon) lines.push(...lagoonWaterways(streets, rng.fork('canals'), ctx.isWater, l2First));
+  // ---- Persian city: the vaulted bazaar spine through the old town, the qanats across the fields
+  if (hints.bazaarRoof && archetype === 'town') lines.push(...bazaarRoofs(streets, eplan.phases.slice(0, Math.min(2, eplan.phases.length)).flatMap((p) => p.region), nucleus));
+  if (hints.qanats && archetype !== 'hamlet') lines.push(...qanats(ctx, prim.footprint, rng.fork('qanats'), pop < 3000 ? 2 : pop < 15000 ? 3 : 4));
   // ---- Aztec: canals down the lanes, chinampas round the city
   if (hints.streetCanals) lines.push(...streetCanals(streets));
   if (hints.chinampas && archetype !== 'hamlet') {

@@ -8,6 +8,8 @@ import { MORPHOLOGIES, EO_BASE, deepMerge } from './morphology';
 
 const morph = (id: string, base: MorphologyParams, over: Record<string, unknown>): MorphologyParams => deepMerge(base, { ...over, id });
 
+/** Registers the morphologies (after the base ones: some derive from the medina's). */
+export function registerMoreMorphologies(): void {
 const M: Record<string, MorphologyParams> = {};
 // ---------------------------------------------------------------- Byzantine / Greek hillside town
 M['byzantine'] = morph('byzantine', EO_BASE, {
@@ -37,7 +39,24 @@ M['venetian'] = morph('venetian', EO_BASE, {
   density: { core: 230, middle: 180, edge: 130, faubourg: 80, village: 40 },
   arch: { typology: 'venetian-house', roof: 'tiled-hip', storeys: [3, 4], material: 'brick' },
 });
+// ---------------------------------------------------------------- Persian city
+M['persian'] = morph('persian', MORPHOLOGIES['medina'], {
+  // kucheh: winding lanes and dead ends between the courtyard houses (larger courts with their pool than a medina)
+  streets: ['gateToGate', 'organicInfill', 'culDeSacTree'], curvature: 0.8, fieldNoise: 26, fieldRandom: 0.5, spineAmp: 8, deadEndRatio: 0.75,
+  blockSize: { core: [3000, 9000], middle: [6000, 18000], edge: [8000, 22000], faubourg: [6000, 16000], village: [6000, 16000] },
+  widthByRank: [7, 5, 3.6, 2.8, 2.4], accessDepth: 22,
+  houseArea: { core: [150, 420], middle: [200, 550], edge: [250, 700], faubourg: [250, 700], village: [300, 900] }, roomDepth: [4, 6],
+  coverage: { core: [0.86, 0.92], middle: [0.82, 0.9], edge: [0.76, 0.86], faubourg: [0.6, 0.72], village: [0.5, 0.65] },
+  density: { core: 260, middle: 200, edge: 150, faubourg: 80, village: 50 },
+  arch: { typology: 'persian-courtyard-house', roof: 'flat', storeys: [1, 2], material: 'mud' },
+});
+M['persian-bazaar'] = morph('persian-bazaar', MORPHOLOGIES['medina-souk'], {
+  // the bazaar quarter: shop cells in rows along the vaulted lanes, timchehs and caravanserais between them
+  streets: ['gateToGate', 'organicInfill'], spineAmp: 8, widthByRank: [7, 5, 3.4, 2.6, 2.2],
+  arch: { typology: 'bazaar-shop', roof: 'dome', storeys: [1, 1], material: 'brick' },
+});
 Object.assign(MORPHOLOGIES, M);
+}
 
 export const MORE_CULTURES: Culture[] = [
   {
@@ -80,5 +99,30 @@ export const MORE_CULTURES: Culture[] = [
     render: { towerShape: 'round', lagoon: true },
     scale: { min: 'hamlet', max: 'metropolis' },
     sitePrefs: { flatness: 2.5, weights: { estuary: 3, harbor: 2.6, bridge: 1.4, meander: 1.2, plain: 0.8, hilltop: 0, valley: 0.3 } },
+  },
+  {
+    id: 'persian', label: 'Persian city (Isfahan)',
+    nucleus: { kind: 'maidan', shape: 'rect', area: [9000, 70000], compound: true, ring: 9, orientation: 'cardinal' },
+    core: { morphology: 'persian-bazaar', share: 0.12, enclosure: { shape: 'organic', wall: 'wall', fossil: 'none', towers: 'round' } },
+    ring: { morphology: 'persian', enclosure: { shape: 'organic', wall: 'wall', fossil: 'none', towers: 'round' } },
+    phaseCount: [[0, 2], [9000, 3]],
+    faubourg: 'persian', faubShare: [0.05, 0.06],
+    landmarks: [
+      { role: 'worship', kind: 'friday-mosque', place: 'near-nucleus', area: [5000, 18000], minPop: 1500 },
+      { role: 'power', kind: 'palace', place: 'adjacent-nucleus', area: [3000, 12000], minPop: 6000 },
+      { role: 'market', kind: 'caravanserai', place: 'near-nucleus', area: [1600, 6000], minPop: 1500, count: 2, sep: 80 },
+      { role: 'extra', kind: 'caravanserai', place: 'gate', area: [1600, 6000], minPop: 2500, perPop: 7000, sep: 200 },
+      { role: 'extra', kind: 'hammam', place: 'near-nucleus', area: [500, 3000], minPop: 2000 },
+      { role: 'civic', kind: 'chahar-bagh', place: 'edge', area: [6000, 30000], minPop: 3000 },
+    ],
+    village: {
+      form: 'walled', morphology: 'persian', enclosure: { shape: 'rect', wall: 'wall', fossil: 'none', towers: 'round', orientation: 'road' },
+      nucleus: { kind: 'mosque', shape: 'rect', area: [500, 900], compound: true, ring: 3, orientation: 'qibla' },
+    },
+    hamlet: { form: 'auto', morphology: { base: 'persian', buildingOp: 'courtyardHouse' } },
+    m4: { castle: 'kasbah', cathedral: null, palace: null, monastery: 'madrasa', marketHall: false, arena: 0, shanty: 'gecekondu', activities: false },
+    render: { towerShape: 'round', bazaarRoof: true, qanats: true },
+    scale: { min: 'hamlet', max: 'megacity' },
+    sitePrefs: { flatness: 1.6, hillSide: 'N', weights: { plain: 2, valley: 1.4, bridge: 1.6, hilltop: 0.2, harbor: 0.3, estuary: 0.3 } },
   },
 ];

@@ -7,7 +7,7 @@ import type { MorphologyParams } from './morphology';
 import { MORPHOLOGIES, EO_BASE, deepMerge } from './morphology';
 import { CAMP_CULTURES } from './cultures_camps';
 import { CITY_CULTURES } from './cultures_cities';
-import { MORE_CULTURES } from './cultures_more';
+import { MORE_CULTURES, registerMoreMorphologies } from './cultures_more';
 
 const EO = EO_BASE;
 const morph = (id: string, base: MorphologyParams, over: Record<string, unknown>): MorphologyParams => deepMerge(base, { ...over, id });
@@ -122,6 +122,7 @@ M['chinese-suburb'] = morph('chinese-suburb', EO, {
 for (const [k, m] of Object.entries(M)) if (k !== 'bastide') { m.gatePlaces = 0; m.crossPlaces = 0; }
 M['roman-castrum'].gatePlaces = 0.4;
 Object.assign(MORPHOLOGIES, M);
+registerMoreMorphologies();
 
 // ---------------------------------------------------------------- cultures
 const walledEO = { shape: 'organic', wall: 'auto', fossil: 'street', towers: 'round' } as const;

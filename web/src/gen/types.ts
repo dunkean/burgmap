@@ -210,7 +210,7 @@ export interface UrbanLayer {
   /** Culture preset id, the cultures present (mixes) and render hints. */
   culture?: string;
   cultures?: string[];
-  renderHints?: { towerShape: 'round' | 'square'; compoundWalls?: boolean; wardWalls?: boolean; canopy?: boolean; terraces?: boolean; moat?: boolean; plotLines?: boolean; storeyShade?: boolean; graves?: boolean; stairs?: boolean; lagoon?: boolean };
+  renderHints?: { towerShape: 'round' | 'square'; compoundWalls?: boolean; wardWalls?: boolean; canopy?: boolean; terraces?: boolean; moat?: boolean; plotLines?: boolean; storeyShade?: boolean; graves?: boolean; stairs?: boolean; lagoon?: boolean; bazaarRoof?: boolean; qanats?: boolean };
   lines?: UrbanLine[];
   trees?: UrbanTree[];
   /** Water pieces of the plan (moats, tanks, ponds) — parcels of use 'moat' / 'tank' are also listed here. */
