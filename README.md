@@ -2,7 +2,7 @@
 
 Procedural generator of pre-modern settlements in their landscape. From a seed (or an imported heightmap) plus options, it builds a farmstead, a village, a town or a city. Everything runs in the browser: there is no server.
 
-**Live demo:** https://dunkean.github.io/burgmap/
+**Live demo:** https://dunkean.github.io/burgmap/ · **Handoff / project state:** [HANDOFF.md](HANDOFF.md)
 
 ## What it generates
 
