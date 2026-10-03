@@ -13,6 +13,7 @@ import type { World, LandKind, Vec2 } from '../gen/types';
 import { PALETTES, Palette, MapStyle } from './styles';
 import { renderTerrainRaster } from './raster';
 import { buildScene, Scene, PolyLayer, LineLayer, TextureLayer, textureMarks, LAND_ORDER } from './scene';
+import { renderView } from '../gen/settlements/merge';
 import { selectLod, lineWidth, Lod, BAND_MIN_EDGE } from './lod';
 import { View, viewRect, Rect4 } from './view';
 import { Label, placeLabels } from './labels';
@@ -141,7 +142,8 @@ function defaultCreateCanvas(w: number, h: number): CanvasLike | null {
   return null;
 }
 
-export function createCanvasRenderer(canvas: CanvasLike, world: World, style: MapStyle | Palette, deps: CanvasRendererDeps = {}): CanvasRenderer {
+export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: MapStyle | Palette, deps: CanvasRendererDeps = {}): CanvasRenderer {
+  const world = renderView(world0);
   const pal: Palette = typeof style === 'string' ? PALETTES[style] : style;
   const scene = deps.scene ?? buildScene(world, deps.tileSize);
   const S = world.mapSize;

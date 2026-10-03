@@ -1,4 +1,5 @@
 import type { World } from '../gen/types';
+import { renderView } from '../gen/settlements/merge';
 import { Vec2, chaikin, simplify, offsetRibbon } from '../gen/core/geom';
 import { marchingSquares } from '../gen/terrain/contour';
 import { contourSet, ContourSet } from './contours';
@@ -62,7 +63,8 @@ function decor(world: World, pal: Palette, u: number): string {
   return panelSvg({ w: W, h: W, prims: frameModel(W, W, pal, true) }, 0, 0, u, FONT_STACKS[pal.name] ?? pal.fontFamily, 'layer-decor');
 }
 
-export function renderSvg(world: World, opts: RenderOptions = {}): string {
+export function renderSvg(world0: World, opts: RenderOptions = {}): string {
+  const world = renderView(world0);
   const style = opts.style ?? world.options.style;
   const pal = PALETTES[style];
   const S = world.mapSize;

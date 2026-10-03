@@ -221,6 +221,37 @@ export interface UrbanLayer {
   quays?: Polyline[];
 }
 
+import type { SettlementClass } from './options';
+export type { SettlementClass };
+/**
+ * One settlement of the map's settlement system (M3c). The main settlement (index 0) is `world.site` + `world.urban`;
+ * secondary ones carry their own urban layer, generated eagerly or (big maps) lazily on demand.
+ */
+export interface Settlement {
+  /** Stable key: the rng stream is `fork('settlement:' + key)`. 'main' for the main settlement. */
+  key: string;
+  index: number;
+  main?: boolean;
+  cls: SettlementClass;
+  population: number;
+  culture: string;
+  center: Vec2;
+  archetype: SiteArchetype;
+  /** Projected radius of the built extent (m) and its outline (disc clipped to the region). */
+  radius: number;
+  extent: Polygon;
+  /** Region the settlement may occupy: the Voronoi cell of its site, clipped to the map. */
+  region: Polygon;
+  /** Explicitly positioned (list mode). */
+  fixed?: boolean;
+  name?: string;
+  /** 'eager' urban generated with the map, 'lazy' generated on demand (viewport), 'farmstead' drawn by land use. */
+  detail: 'main' | 'eager' | 'lazy' | 'farmstead';
+  urban?: UrbanLayer;
+  /** Crossing / harbor points used by its plan. */
+  crossing?: Vec2; harbor?: Vec2;
+}
+
 export interface World {
   seed: string;
   options: Options;
@@ -234,6 +265,8 @@ export interface World {
   landuse?: LandUseLayer;
   /** Toponyms with anchor geometry (M5a). */
   names?: NamesLayer;
+  /** Settlement system (M3c): index 0 = the main settlement. */
+  settlements?: Settlement[];
   /** Stage-internal data for debug rendering (not part of the contract). */
   debug?: Record<string, unknown>;
   stats: Record<string, number | string>;
