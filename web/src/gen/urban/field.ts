@@ -75,9 +75,11 @@ export class GuidanceField {
     const ix = Math.min(g.w - 1, Math.max(0, Math.floor(p.x / g.cell))), iy = Math.min(g.h - 1, Math.max(0, Math.floor(p.y / g.cell)));
     const [gx, gy] = gradientAt(g, ix, iy);
     const sl = Math.hypot(gx, gy);
-    if (sl > 0.06) {
+    // (hill towns: `contourBlend` makes the contours win from gentler slopes on)
+    const cb = P.contourBlend ?? 0;
+    if (sl > (cb ? 0.025 : 0.06)) {
       const tc = Math.atan2(gy, gx) + Math.PI / 2;
-      const w = 0.75 * smoothstep(sl, 0.06, 0.14);
+      const w = cb ? Math.max(0.75 * smoothstep(sl, 0.06, 0.14), cb * smoothstep(sl, 0.025, 0.08)) : 0.75 * smoothstep(sl, 0.06, 0.14);
       cx = (1 - w) * cx + w * Math.cos(4 * tc);
       cy = (1 - w) * cy + w * Math.sin(4 * tc);
     }

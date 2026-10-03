@@ -97,6 +97,8 @@ export interface RenderHints {
   chinampas?: boolean;
   /** Back land and lot grounds drawn as graves (a necropolis). */
   graves?: boolean;
+  /** Stair treads across the lanes that climb the slope (hill towns). */
+  stairs?: boolean;
 }
 export interface SettlementForm {
   /** Village / hamlet layout: EO rule (street or nucleated village), a walled compact block, a grove, terraces. */

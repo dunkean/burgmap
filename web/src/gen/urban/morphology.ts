@@ -122,6 +122,8 @@ export interface MorphologyParams {
   faubFade?: boolean;
   /** Organic splitting guided by the local contours (0–1): terraces cut along the slope, ramps across it. */
   contourFollow?: number;
+  /** Weight (0–1) of the contour direction in the organic cross-field from gentle slopes on (hill towns). */
+  contourBlend?: number;
   /** Gross densities (inhabitants per ha) per zone, used to size phase regions. */
   density: Record<Zone, number>;
 }

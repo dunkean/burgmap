@@ -42,6 +42,7 @@ import { registerInca, andenes, canals } from './inca';
 import { registerAztec, streetCanals, chinampas } from './aztec';
 import { registerRussian } from './russian';
 import { registerFantasy } from './fantasy';
+import { registerByzantine, stairLanes } from './byzantine';
 import { siteCastle, type CastlePlan } from './m4/castle';
 import { reserveCastle, type M4State } from './m4/reserve';
 import { reserveCathedral, reservePalace, reserveMonasteries } from './m4/catalogue';
@@ -111,11 +112,12 @@ const L2_SITES: Record<string, 'power' | 'worship' | 'market' | 'civic' | 'activ
   'jp-temple': 'worship', 'hindu-temple': 'worship', palace: 'power', basilica: 'civic', 'roman-temple': 'worship', castle: 'power', hammam: 'civic',
   'inca-temple': 'worship', 'inca-palace': 'power', 'inca-plaza': 'civic',
   'orthodox-church': 'worship', 'mortuary-temple': 'worship', 'charnel-house': 'civic',
+  'byz-church': 'worship', 'byz-metropolis': 'worship', 'byz-monastery': 'worship',
   'aztec-precinct': 'worship', 'calpulli-temple': 'worship', tecpan: 'power', tianguis: 'market',
 };
 /** Parcel uses of the open port pieces. */
 const LOT_USE: Record<string, string> = { 'm4-quay': 'quay', 'm4-pier': 'pier', 'm4-slipway': 'slipway', 'm4-green': 'green', 'm4-bridge-houses': 'bridge' };
-const castleTower = (cid: string): 'round' | 'square' => (cid === 'medina' || cid === 'chinese' || cid === 'indian-temple' ? 'square' : 'round');
+const castleTower = (cid: string): 'round' | 'square' => (cid === 'medina' || cid === 'chinese' || cid === 'indian-temple' || cid === 'byzantine-greek' ? 'square' : 'round');
 
 export function generateUrban(world: World, root: Rng): UrbanResult {
   const t0 = performance.now();
@@ -173,6 +175,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   registerAztec();
   registerRussian();
   registerFantasy();
+  registerByzantine();
   const flags = m4Flags(opts, culture, pop, archetype, rng.fork('m4'));
   const sites: UrbanSite[] = [];
   const lotData = new Map<string, unknown>();
@@ -886,6 +889,8 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     for (const f of an.fields) landmarks.push({ kind: 'terrace-field', poly: f });
   }
   if (hints.canals) lines.push(...canals(ctx, prim.footprint));
+  // ---- hill towns: stair treads on the lanes that climb the slope
+  if (hints.stairs) lines.push(...stairLanes(ctx, streets));
   // ---- Aztec: canals down the lanes, chinampas round the city
   if (hints.streetCanals) lines.push(...streetCanals(streets));
   if (hints.chinampas && archetype !== 'hamlet') {

@@ -24,12 +24,13 @@ import { disk } from '../../geo/offset';
 import { outsetConvex } from '../streetops';
 import { kasbah, type CompoundCtx } from '../compounds';
 import { kremlinInterior } from '../russian';
+import { kastroInterior } from '../byzantine';
 import { TAU, wetFraction, fracInside, clearOfLines, inMP, rectAt, frameAt, scalePoly } from './lots';
 import { Mask } from './site';
 import { samplePoly, LineIndex } from './lots';
 import { emptyOut, pieces, splitLine, largest, alongEdge, placeRect, minus, inter, fits, type Out } from './kit';
 
-export type CastleVariant = 'castle' | 'kasbah' | 'motte' | 'inca-fortress' | 'kremlin';
+export type CastleVariant = 'castle' | 'kasbah' | 'motte' | 'inca-fortress' | 'kremlin' | 'kastro';
 /** Debug counters of the castle siting (rejections by reason). */
 export const CASTLE_DBG: Record<string, number> = {};
 const why = (k: string) => { CASTLE_DBG[k] = (CASTLE_DBG[k] ?? 0) + 1; };
@@ -60,6 +61,8 @@ export function castleArea(variant: CastleVariant, pop: number, rng: Rng): numbe
   if (variant === 'kasbah') return Math.min(26000, 6000 + pop * 0.4) * j;
   if (variant === 'inca-fortress') return Math.min(42000, 9000 + pop * 0.5) * j;
   if (variant === 'kremlin') return Math.min(150000, 20000 + pop * 2) * j;
+  // (the kastro: the upper town on the summit, a citadel larger than a castle)
+  if (variant === 'kastro') return Math.min(36000, 7000 + pop * 0.9) * j;
   return Math.min(22000, 2600 + pop * 0.36) * j;
 }
 
@@ -152,14 +155,14 @@ export function siteCastle(ctx: UrbanCtx, inp: CastleSiteIn, rng: Rng): CastlePl
   const R = Math.sqrt(A / Math.PI);
   const encR = Math.sqrt(mpArea(inp.enclosure) / Math.PI);
   if (encR < 2.2 * R) { why('small'); return null; }
-  const ditch = inp.variant === 'kasbah' || inp.variant === 'inca-fortress' ? 0 : inp.variant === 'motte' ? 7 : inp.variant === 'kremlin' ? rng.range(12, 16) : rng.range(9, 13);
-  const espl = inp.variant === 'kasbah' ? rng.range(12, 18) : inp.variant === 'motte' ? 8 : inp.variant === 'inca-fortress' ? rng.range(10, 16) : inp.variant === 'kremlin' ? rng.range(34, 52) : Math.min(38, rng.range(16, 24) + R * 0.12);
+  const ditch = inp.variant === 'kasbah' || inp.variant === 'inca-fortress' || inp.variant === 'kastro' ? 0 : inp.variant === 'motte' ? 7 : inp.variant === 'kremlin' ? rng.range(12, 16) : rng.range(9, 13);
+  const espl = inp.variant === 'kasbah' ? rng.range(12, 18) : inp.variant === 'motte' ? 8 : inp.variant === 'inca-fortress' ? rng.range(10, 16) : inp.variant === 'kremlin' ? rng.range(34, 52) : inp.variant === 'kastro' ? rng.range(8, 14) : Math.min(38, rng.range(16, 24) + R * 0.12);
   const core = inp.phases.length > 1 ? inp.phases[0].region : [];
   const roads = new LineIndex(inp.roads.map((path) => ({ path, hw: 5 })));
   // local relief statistics
   const ring2 = (p: Vec2, r: number): number => { let s = 0; for (let k = 0; k < 12; k++) s += ctx.heightAt({ x: p.x + Math.cos((k / 12) * TAU) * r, y: p.y + Math.sin((k / 12) * TAU) * r }); return s / 12; };
   // (a kremlin: a triangle or a quadrilateral on its spur between the rivers)
-  const nSides = inp.variant === 'kasbah' ? 4 : inp.variant === 'motte' ? 8 : inp.variant === 'kremlin' ? rng.int(3, 4) : rng.int(5, 8);
+  const nSides = inp.variant === 'kasbah' ? 4 : inp.variant === 'motte' ? 8 : inp.variant === 'kremlin' ? rng.int(3, 4) : inp.variant === 'kastro' ? rng.int(6, 9) : rng.int(5, 8);
   const a0 = rng.range(0, TAU);
   const cands: Vec2[] = [];
   const L = ring.length;
@@ -213,7 +216,8 @@ export function siteCastle(ctx: UrbanCtx, inp: CastleSiteIn, rng: Rng): CastlePl
     }
     flank = nf ? flank / nf : 0;
     const wet = wetFraction(ctx, outsetConvex(C, ditch), 6);
-    let s = prom + 4 * Math.min(0.25, flank) + 1.4 * Math.min(1, wrap / 7) - 3 * wet;
+    // (a kastro crowns the summit: prominence weighs double)
+    let s = (inp.variant === 'kastro' ? 2 : 1) * prom + 4 * Math.min(0.25, flank) + 1.4 * Math.min(1, wrap / 7) - 3 * wet;
     if (inp.citadelSpot && !inp.avoid?.length) s += 1.0 * Math.exp(-dist(p, inp.citadelSpot) / 160);
     if (inp.avoid?.length && inp.bridges?.length) s += 1.5 * Math.exp(-Math.min(...inp.bridges.map((b) => dist(b, p))) / 150);
     if (core.length) s -= 1.5 * fracInside(core, C, 10);
@@ -252,7 +256,7 @@ export function siteCastle(ctx: UrbanCtx, inp: CastleSiteIn, rng: Rng): CastlePl
   if (!lotPh) { why('lot'); return null; }
   const lot = orientPos(cleanRing(lotPh.outer, 0.3, 1));
   const lowAt = (q: Vec2) => (ctx.site.fields?.hab ? sampleHab(ctx, q) : 99);
-  const moat = inp.variant !== 'kasbah' && inp.variant !== 'inca-fortress' && (lowAt(cc) < 7 || wetFraction(ctx, outsetConvex(C, ditch + 25), 8) > 0.04);
+  const moat = inp.variant !== 'kasbah' && inp.variant !== 'inca-fortress' && inp.variant !== 'kastro' && (lowAt(cc) < 7 || wetFraction(ctx, outsetConvex(C, ditch + 25), 8) > 0.04);
   return {
     variant: inp.variant, C, lot, ditch, espl, gate, moat,
     outside: fracInside(inp.enclosure, C, 7) < 0.98, enclosure: [mainX, ...encX.filter((ph) => ph !== mainX)],
@@ -358,6 +362,10 @@ export function buildCastle(B: Polygon, cx: CompoundCtx): Out {
     }
     return bi;
   };
+  if (plan.variant === 'kastro') {
+    kastroInterior(inner, out, iInner, g.p, cx.rng);
+    out.landmarks.push({ kind: 'kastro', poly: plan.C });
+  }
   if (kremlin) {
     kremlinInterior(inner, out, iInner, g.p, cx.rng);
     out.landmarks.push({ kind: 'kremlin', poly: plan.C });
