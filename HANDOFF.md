@@ -83,6 +83,9 @@ GITHUB_TOKEN_FILE=/d/Workspace/dunk_token bash scripts/deploy_pages.sh   # build
 
 ## 6. Current state
 
+- **Chosen centres (`248fd34`, `0d968e6`, 2026-10-04):** the main city and surrounding villages can be placed by coordinates or map click, shared by URL and reset to automatic. Safety correction precedes travel costs, roads and urban generation; secondary corrections stay within 400 m and warn if no suitable position exists. Explicit megacities retain radius clearance on large maps. All three source reviewers approved implementation, fusion and edge-clearance amendment before validation; 13 focused and 15 existing tests, 31 combined-root regressions, 14 unchanged-world hashes, typecheck/build, actual browser click/cancel/reload and primitive-town relocation passed. The resolved placement report was removed from BUGS.md.
+
+
 - **Primitive cities (`4fb1626`, 2026-10-04):** twelve tribal cultures now transition to a connected town at population-specific thresholds while preserving their architecture. Small villages remain byte-identical. All three required source reviewers accepted the implementation and UI amendment; 18 tests, 14 world-hash controls, typecheck/build, twelve culture previews and live Norse Canvas checks passed. The resolved primitive-city report was removed from BUGS.md as requested. Other parallel fixes remain pending their own triple reviews and validation.
 
 

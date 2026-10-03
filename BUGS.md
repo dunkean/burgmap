@@ -17,7 +17,6 @@ Agents: fix the open reports; parallel work is allowed. Remove a report after it
 - sans town wall, le tour des villes est vraiment pas beau à cause de la couleur uniforme du background des quartiers. Sur les quatiers periphériques ca serait bien que le rendu "hors ville" se merge ou remplace le fond de texture des quarties.
 - Les estuaires ont toujours une forme arrondi. Il faut plus de diversité donc juste un élargement de la riviere.
 - De très nimbreux town plan construire les quartiers sur l'eau sans en tenir compte. Il faut corriger
-- pouvoir choisir le centroid de la ville (et potentiellement de villages autour)
 - lignes de contours et interne des champs scale avec la taille de l'image. Sur de très grande map ca devient hideux.
 - les taches de bacground blancs sur les routes sont parfois mis n'importe ou et fond très laids. Surtout en plein campagne. A corriger ou adapter
 - le tracé des maisons en zone très denses, y a des overlaps, des coupures, voire des incohérence.
