@@ -9,6 +9,8 @@ export const SHADOW_SCALE = 0.9;
 export const PARCEL_SCALE = 0.6;
 /** Individual buildings (fill + outline): the narrowest houses (~5 m) are >= ~0.6 px wide, so outlines stay ~0.5 px apart. */
 export const BUILDING_SCALE = 0.12;
+/** Fine plan detail (stair treads, fence dashes, patio courts, pavement and landmark hatching). */
+export const FINE_SCALE = 0.2;
 
 /** Per-band vertex decimation tolerance (m). Constant per band so cached paths stay valid. */
 export const BAND_MIN_EDGE: readonly number[] = [10, 1.5, 0];
@@ -20,6 +22,7 @@ export interface Lod {
   minorRoads: boolean; streets: boolean; alleys: boolean;
   blocks: boolean; landmarks: boolean; towers: boolean; strips: boolean; farmsteads: boolean;
   /** parcels = plot hairlines; buildings = building masses (courtyards as holes). */
+  fine: boolean;
   parcels: boolean; buildings: boolean; individual: boolean; shadows: boolean; textures: boolean;
   /** Density tint opacity multiplier (fades out when zoomed in). */
   densityAlpha: number;
@@ -36,7 +39,7 @@ export function selectLod(scale: number): Lod {
     minorRoads: scale >= 0.02,
     streets: band >= 1, alleys: band >= 2,
     blocks: band >= 1, landmarks: band >= 1, towers: band >= 1, strips: band >= 1, farmsteads: band >= 1,
-    parcels: scale >= PARCEL_SCALE, buildings: band >= 1, individual: scale >= BUILDING_SCALE,
+    fine: scale >= FINE_SCALE, parcels: scale >= PARCEL_SCALE, buildings: band >= 1, individual: scale >= BUILDING_SCALE,
     shadows: scale >= SHADOW_SCALE, textures: scale >= TEXTURE_SCALE,
     densityAlpha: band === 2 ? fade : 1,
   };
