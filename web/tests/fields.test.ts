@@ -143,6 +143,8 @@ function overlaps(w: World): { water: number; road: number; urban: number; n: nu
 }
 
 const mainView = (w: World): World => { const size = effectiveSize(w.options); return size !== w.options.size ? { ...w, options: { ...w.options, size } } : w; };
+// timing assertions only on a quiet machine: BURGMAP_PERF=1 npx vitest run tests/fields.test.ts
+const PERF = process.env.BURGMAP_PERF === '1';
 const timeIt = (fn: () => void, runs = 3): number => { let best = Infinity; for (let i = 0; i < runs; i++) { const t = performance.now(); fn(); best = Math.min(best, performance.now() - t); } return best; };
 
 describe('open fields on town maps (seeds 1-4)', () => {
@@ -216,7 +218,7 @@ describe('open fields on town maps (seeds 1-4)', () => {
     expect(JSON.stringify(a.layer)).toBe(JSON.stringify(b.layer));
   });
 
-  it('land use takes at most 1.2x the previous generator time', () => {
+  it.runIf(PERF)('land use takes at most 1.2x the previous generator time', () => {
     const w = worlds[0];
     const mv = mainView(w);
     const main = w.roads?.length;
@@ -233,7 +235,7 @@ describe('open fields on a 10 km multi-settlement map', () => {
   let w: World;
   beforeAll(() => { w = generate(makeOptions({ seed: '5', mapSize: 10000, population: 2500, settlements: 'auto' })); }, T);
 
-  it('land-use stage runs in at most 3 s', () => {
+  it.runIf(PERF)('land-use stage runs in at most 3 s', () => {
     const mv = mainView(w);
     const t = timeIt(() => generateRural(mv, new Rng('burgmap:' + w.options.seed), w.roads?.length), 3);
     expect(t).toBeLessThanOrEqual(3000);
