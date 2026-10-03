@@ -71,7 +71,7 @@ M['jp-samurai'] = morph('jp-samurai', EO, {
   arch: { typology: 'yashiki', roof: 'tiled-hip', storeys: [1, 1], material: 'wood' },
 });
 M['jp-merchant'] = morph('jp-merchant', MORPHOLOGIES['bastide'], {
-  streets: ['radials', 'defensiveKinks', 'grid'], closeOp: 'none', plotOp: 'machiya', buildingOp: 'machiya', kinks: 1,
+  streets: ['radials', 'defensiveKinks', 'grid', 'roji'], closeOp: 'roji', accessDepth: 30, plotOp: 'machiya', buildingOp: 'machiya', kinks: 1,
   // (machiwari: blocks of ~66 × 120 m, machiya lots back to back on both long sides, 25–35 m deep)
   gridSpacing: [66, 120], gridSkew: 0.02, blockSize: { core: [5000, 9000], middle: [5000, 9000], edge: [5000, 9500], faubourg: [4000, 10000] },
   minWidth: 30, widthByRank: [9, 7, 5.5, 3.6, 2.5],

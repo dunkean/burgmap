@@ -13,7 +13,7 @@ export type Range = [number, number];
 /** Street operators (URBAN_MORPHOLOGY.md §2). Level 1 ops shape the primary network, level 2 ops split quarters. */
 export type StreetOpId =
   | 'radials' | 'rings' | 'organicInfill' | 'grid' | 'axis' | 'gateToGate' | 'culDeSacTree' | 'closes'
-  | 'wardWalls' | 'defensiveKinks' | 'ribbon' | 'spiral' | 'switchbacks' | 'extraRadials';
+  | 'wardWalls' | 'defensiveKinks' | 'ribbon' | 'spiral' | 'switchbacks' | 'extraRadials' | 'roji';
 export type PlotOpId = 'burgage' | 'courtyard' | 'siheyuan' | 'machiya' | 'compound' | 'garden';
 export type BuildingOpId = 'streetFrontRow' | 'courtyardHouse' | 'shopRow' | 'pavilionCompound' | 'yashiki' | 'machiya' | 'detached' | 'treeHouse' | 'hall' | 'longhouse' | 'kancha' | 'yardHouse' | 'tomb' | 'venetian' | 'konak' | 'sahelCompound' | 'giebelhaus' | 'hanok' | 'gnome';
 export type RoofKind = 'gable' | 'hip' | 'flat' | 'dome' | 'pyramidal' | 'pagoda' | 'thatch-round' | 'none' | 'tiled-hip' | 'conical' | 'barrel' | 'terraced';
@@ -27,8 +27,8 @@ export interface MorphologyParams {
   streets: StreetOpId[];
   /** Level-2 street operator: organic cross-field splitting, or a (skewed) lattice. */
   streetOp: 'organic' | 'grid';
-  /** Dead ends: European closes, medina derbs, cardinal Chinese hutongs, or none. */
-  closeOp: 'closes' | 'culDeSacTree' | 'hutong' | 'none';
+  /** Dead ends: European closes, medina derbs, cardinal Chinese hutongs, local-grid Japanese roji, or none. */
+  closeOp: 'closes' | 'culDeSacTree' | 'hutong' | 'roji' | 'none';
   plotOp: PlotOpId;
   buildingOp: BuildingOpId;
   /** Lattice orientation: along the main road, or true north. */
@@ -44,7 +44,7 @@ export interface MorphologyParams {
   /** Courtyard / compound lots: area range per zone (m²); room depth of courtyard houses (m). */
   houseArea: Record<Zone, Range>;
   roomDepth: Range;
-  /** Derb/hutong target depth from street access (m); invalid paths are rejected. */
+  /** Derb/hutong/roji target depth from street access (m); invalid paths are rejected. */
   accessDepth: number;
   /** Twist (radians) added to the radial/tangential field: spiral streets. */
   fieldTwist: number;
