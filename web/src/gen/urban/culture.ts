@@ -42,7 +42,7 @@ export interface EnclosureSpec {
 }
 export interface SectorSpec { morphology: MorphRef; share: number; culture?: string }
 export interface PhaseSpec { morphology: MorphRef; enclosure: EnclosureSpec; share?: number; sectors?: SectorSpec[]; culture?: string }
-export type NucleusKind = 'market' | 'forum' | 'mosque' | 'drum-tower' | 'castle' | 'temple' | 'grove' | 'ushnu' | 'precinct' | 'mortuary' | 'maidan' | 'mud-mosque' | 'wizard-tower' | 'none';
+export type NucleusKind = 'market' | 'forum' | 'mosque' | 'drum-tower' | 'castle' | 'temple' | 'grove' | 'ushnu' | 'precinct' | 'mortuary' | 'maidan' | 'mud-mosque' | 'wizard-tower' | 'clocktower' | 'none';
 export interface NucleusSpec {
   kind: NucleusKind;
   shape: 'hull' | 'rect' | 'square' | 'circle';
@@ -104,6 +104,8 @@ export interface RenderHints {
   /** Persian city: the covered bazaar spine (vault and domes) and the qanat lines across the fields. */
   bazaarRoof?: boolean;
   qanats?: boolean;
+  /** Lock gates along the canals (gnomish towns). */
+  locks?: boolean;
 }
 export interface SettlementForm {
   /** Village / hamlet layout: EO rule (street or nucleated village), a walled compact block, a grove, terraces. */

@@ -138,9 +138,39 @@ function observatory(lot: Polygon, cx: CompoundCtx): CompoundOut {
   return out;
 }
 
+/**
+ * The clock-tower plaza of a gnomish town: the tall clock tower in the middle (its four dials and the great wheel
+ * drawn on the paving), four fountains on the diagonals.
+ */
+function clocktower(lot: Polygon, cx: CompoundCtx): CompoundOut {
+  const out: CompoundOut = { parcels: [{ poly: lot, use: 'place' }], buildings: [], lines: [], water: [], landmarks: [] };
+  const P = orientPos(lot);
+  const ins = inscribed(P, [], 1);
+  const o = obb(P);
+  const ang = Math.atan2(o.u.y, o.u.x);
+  const s = Math.max(4, Math.min(8, ins.r * 0.25));
+  const t = placeRect(P, ins.c, ang, s, s, 1);
+  if (!t) return out;
+  out.buildings.push({ poly: t, kind: 'landmark', parcel: 0, arch: 'clock-tower', roof: 'pyramidal', material: 'brick', storeys: 10 });
+  out.landmarks.push({ kind: 'clock-tower', poly: t });
+  // the great wheel set in the paving round the tower (gear teeth as short spokes)
+  const R = Math.min(ins.r - 2, s * 2.2);
+  if (R > s + 2) {
+    out.lines.push({ kind: 'arcane-circle', path: ring(ins.c, R, 40), width: 0.5 });
+    for (let i = 0; i < 24; i++) { const a = (i / 24) * Math.PI * 2; out.lines.push({ kind: 'arcane-circle', path: [{ x: ins.c.x + Math.cos(a) * R, y: ins.c.y + Math.sin(a) * R }, { x: ins.c.x + Math.cos(a) * (R + 1.6), y: ins.c.y + Math.sin(a) * (R + 1.6) }], width: 0.5 }); }
+  }
+  for (const k of [0, 1, 2, 3]) {
+    const a = ang + Math.PI / 4 + (k * Math.PI) / 2;
+    const q = { x: ins.c.x + Math.cos(a) * (R + 6), y: ins.c.y + Math.sin(a) * (R + 6) };
+    if (pointInRing(P, q) && distToRing(P, q) > 3) out.water.push(orientPos(disk(q, 1.6, 12)));
+  }
+  void cx;
+  return out;
+}
+
 let registered = false;
 export function registerFantasy(): void {
   if (registered) return;
   registered = true;
-  registerBuilders({ 'mortuary-temple': mortuaryTemple, 'charnel-house': charnelHouse, 'wizard-tower': wizardTower, 'mage-tower': mageTower, 'arcane-garden': arcaneGarden, observatory });
+  registerBuilders({ 'mortuary-temple': mortuaryTemple, 'charnel-house': charnelHouse, 'wizard-tower': wizardTower, 'mage-tower': mageTower, 'arcane-garden': arcaneGarden, observatory, clocktower });
 }

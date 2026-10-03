@@ -139,6 +139,21 @@ M['wizard'] = morph('wizard', EO_BASE, {
   density: { core: 160, middle: 120, edge: 90, faubourg: 55, village: 35 },
   arch: { typology: 'mage-quarter-house', roof: 'hip', storeys: [2, 4], material: 'stone' },
 });
+// ---------------------------------------------------------------- Gnomish town (fantasy)
+M['gnomish'] = morph('gnomish', EO_BASE, {
+  // radial-geometric districts (a straight, regular cross-field), every long cut dug as a canal with its locks;
+  // very narrow tall houses wall to wall, workshops behind them
+  streets: ['radials', 'rings', 'organicInfill'], buildingOp: 'gnome', longCut: 80, extraRadials: true, curvature: 0.25, fieldNoise: 3, fieldRandom: 0.05,
+  ringGaps: 1, deadEndRatio: 0.1, gatePlaces: 0.3, crossPlaces: 0.5, placeThreshold: 600,
+  blockSize: { core: [1500, 4000], middle: [2000, 5000], edge: [2500, 6500], faubourg: [3000, 9000], village: [4000, 12000] },
+  minBlock: 450, minWidth: 14, widthByRank: [7, 6, 7.5, 2.6, 2], widthJitter: 0, plotTilt: 1,
+  frontage: { core: [4.5, 6], middle: [4.5, 6.5], edge: [5, 7], faubourg: [5, 8], village: [10, 20] },
+  plotDepth: { core: [14, 22], middle: [15, 24], edge: [16, 26], faubourg: [16, 26], village: [20, 34] },
+  coverage: { core: [0.88, 0.95], middle: [0.84, 0.92], edge: [0.75, 0.85], faubourg: [0.6, 0.72], village: [0.25, 0.4] },
+  wideLotChance: 0.03,
+  density: { core: 280, middle: 220, edge: 170, faubourg: 90, village: 45 },
+  arch: { typology: 'gnome-tallhouse', roof: 'pyramidal', storeys: [5, 7], material: 'brick' },
+});
 Object.assign(MORPHOLOGIES, M);
 }
 
@@ -314,5 +329,22 @@ export const MORE_CULTURES: Culture[] = [
     render: { towerShape: 'round' },
     scale: { min: 'hamlet', max: 'metropolis' },
     sitePrefs: { flatness: 2, weights: { plain: 2, hilltop: 1.5, valley: 0.6, harbor: 0.6 } },
+  },
+  {
+    id: 'gnomish', label: 'Gnomish canal town', fantasy: true,
+    nucleus: { kind: 'clocktower', shape: 'square', area: [1600, 5000], compound: true, ring: 6, orientation: 'road' },
+    core: { morphology: 'gnomish', enclosure: { shape: 'organic', wall: 'auto', fossil: 'street', towers: 'square' } },
+    ring: { morphology: 'gnomish', enclosure: { shape: 'organic', wall: 'auto', fossil: 'street', towers: 'square' } },
+    phaseCount: [[0, 1], [5000, 2], [18000, 3]],
+    faubourg: 'gnomish', faubShare: [0.06, 0.06],
+    landmarks: [
+      { role: 'civic', kind: 'forge', place: 'spread', area: [400, 3000], minPop: 800, perPop: 2500, sep: 180 },
+    ],
+    village: { form: 'auto', morphology: 'gnomish' },
+    hamlet: { form: 'auto', morphology: 'gnomish' },
+    m4: { castle: 'none', cathedral: null, palace: null, monastery: null, marketHall: false, arena: 0, activities: false },
+    render: { towerShape: 'square', lagoon: true, locks: true },
+    scale: { min: 'hamlet', max: 'metropolis' },
+    sitePrefs: { flatness: 0.9, weights: { valley: 2, bridge: 1.6, confluence: 1.6, meander: 1.2, plain: 1, hilltop: 0.6 } },
   },
 ];

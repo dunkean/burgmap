@@ -59,7 +59,7 @@ function endDir(pl: Polyline, k: 0 | 1): Vec2 {
  * water on some), extended across a land street where the canal goes on beyond it (a bridge carries the street),
  * and a footbridge wherever a calle ends on a canal with a fondamenta (or another calle) across.
  */
-export function lagoonWaterways(streets: Streets, rng: Rng, isWater: (p: Vec2) => boolean, l2First: number): UrbanLine[] {
+export function lagoonWaterways(streets: Streets, rng: Rng, isWater: (p: Vec2) => boolean, l2First: number, locks = false): UrbanLine[] {
   L2_FIRST = l2First;
   const out: UrbanLine[] = [];
   const canals = streets.list.filter(isCanal);
@@ -126,6 +126,24 @@ export function lagoonWaterways(streets: Streets, rng: Rng, isWater: (p: Vec2) =
       }
     }
     out.push({ kind: 'canal', path: pl, width: cw });
+    // locks (gnomish canals): a pair of gates across the water every ~80 m, the chamber between them
+    if (locks) {
+      let acc = 0, next = rng.range(25, 45);
+      for (let i = 1; i < pl.length; i++) {
+        const a = pl[i - 1], b = pl[i], l = dist(a, b);
+        while (acc + l >= next) {
+          const t = (next - acc) / l;
+          const t2 = Math.min(1, (next + 7 - acc) / l);
+          const n = { x: -(b.y - a.y) / l, y: (b.x - a.x) / l };
+          for (const tt of [t, t2]) {
+            const q = { x: a.x + (b.x - a.x) * tt, y: a.y + (b.y - a.y) * tt };
+            out.push({ kind: 'lock-gate', path: [{ x: q.x - n.x * cw / 2, y: q.y - n.y * cw / 2 }, { x: q.x + n.x * cw / 2, y: q.y + n.y * cw / 2 }], width: 0.8 });
+          }
+          next += rng.range(70, 95);
+        }
+        acc += l;
+      }
+    }
   }
   // footbridges: a calle ending on a canal crosses it when a fondamenta or another lane is there to land on
   for (const s of land) {

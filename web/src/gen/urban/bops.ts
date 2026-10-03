@@ -781,6 +781,39 @@ function hanok(pl: Plot, cov: number, P: MorphologyParams, rng: Rng): ArchBldg[]
   return out;
 }
 
+// ---------------------------------------------------------------- gnomish tall house
+/**
+ * Gnomish house: a very narrow, very tall house on the street front (5–7 storeys under a steep pyramidal roof),
+ * the workshop behind it across a light well, a passage along one side line to the workshop door.
+ */
+function gnomeHouse(pl: Plot, cov: number, P: MorphologyParams, rng: Rng): ArchBldg[] {
+  const f = frame(pl);
+  if (!f) return [];
+  const us = usable(pl, f);
+  if (!us) return [];
+  const { u0, u1, D } = us;
+  const ori = Math.atan2(f.n.y, f.n.x);
+  const out: ArchBldg[] = [];
+  const hd = Math.min(D - 0.4, rng.range(8, 11));
+  // (the front house takes the lot's whole street front: plot ∩ the depth band, wall to wall with its neighbours)
+  let front: Polygon | null = null;
+  for (const r of clipPlot(pl.poly, [{ p: f.fa, n: f.n }, { p: { x: f.fa.x + f.n.x * hd, y: f.fa.y + f.n.y * hd }, n: { x: -f.n.x, y: -f.n.y } }], isConvex(pl.poly, 1e-3))) {
+    const c = cleanRing(r, 0.005, 0.5, 0.002, false);
+    if (c.length >= 3 && (!front || area(c) > area(front))) front = c;
+  }
+  if (front && (shapeOf(front).w < MIN_BW || shapeOf(front).asp > MAX_ASPECT)) front = rectIn(pl, f, u0, u1, 0, hd, 15);
+  if (front) out.push({ poly: front, kind: 'house', arch: 'gnome-tallhouse', roof: 'pyramidal', material: P.arch.material, storeys: rng.int(5, 7), orientation: ori });
+  const w0 = hd + rng.range(1.6, 2.6), w1 = Math.min(D - 0.4, w0 + rng.range(6, 10) * (0.6 + cov * 0.5));
+  const left = rng.chance(0.5);
+  const pass = (u1 - u0) > 6.5 ? 1.2 : 0;
+  if (w1 - w0 >= 4.5) {
+    const ws = rectIn(pl, f, left ? u0 + pass : u0, left ? u1 : u1 - pass, w0, w1, 15);
+    if (ws) out.push({ poly: ws, kind: 'rear', arch: 'gnome-workshop', roof: 'gable', material: P.arch.material, storeys: 2, orientation: ori });
+  }
+  pl.gated = true;
+  return out;
+}
+
 // ---------------------------------------------------------------- Inca kancha
 /**
  * Kancha: a walled rectangular compound of single-room houses set along the inside of its wall around a central
@@ -932,6 +965,7 @@ function buildOnRaw(pl: Plot, cov: number, P: MorphologyParams, rng: Rng, hint?:
     case 'sahelCompound': return sahelCompound(pl, cov, P, rng);
     case 'giebelhaus': return giebelhaus(pl, cov, P, rng);
     case 'hanok': return hanok(pl, cov, P, rng);
+    case 'gnome': return gnomeHouse(pl, cov, P, rng);
     default: {
       const ori = Math.atan2(pl.nrm.y, pl.nrm.x);
       return buildPlot(pl, cov, P, rng, hint).map((b) => (b.kind === 'garden' ? b : {

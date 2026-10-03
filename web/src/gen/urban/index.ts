@@ -72,7 +72,7 @@ export interface UrbanDebug { quarters: { poly: Polygon; phase: number; lab: num
 const MARKET_AREA = (pop: number): number => (pop < 1200 ? 0 : Math.min(10000, 1800 + pop * 0.3));
 /** Qibla from the Maghreb, roughly east-south-east (map angle, y down). */
 const QIBLA = 0.2;
-const NUCLEUS_COMPOUND: Record<string, string> = { mosque: 'great-mosque', castle: 'castle', temple: 'hindu-temple', grove: 'grove', 'drum-tower': 'drum-tower', ushnu: 'inca-plaza', precinct: 'aztec-precinct', mortuary: 'mortuary-temple', maidan: 'maidan', 'mud-mosque': 'mud-mosque', 'wizard-tower': 'wizard-tower' };
+const NUCLEUS_COMPOUND: Record<string, string> = { mosque: 'great-mosque', castle: 'castle', temple: 'hindu-temple', grove: 'grove', 'drum-tower': 'drum-tower', ushnu: 'inca-plaza', precinct: 'aztec-precinct', mortuary: 'mortuary-temple', maidan: 'maidan', 'mud-mosque': 'mud-mosque', 'wizard-tower': 'wizard-tower', clocktower: 'clocktower' };
 
 /** A point strictly inside a polygon (centroid when inside, else the inscribed-circle center). */
 export function interiorPoint(p: Polygon): Vec2 {
@@ -141,6 +141,7 @@ const L2_SITES: Record<string, 'power' | 'worship' | 'market' | 'civic' | 'activ
   'hall-church': 'worship', rathaus: 'civic',
   'korean-palace': 'power', jongmyo: 'worship', hyanggyo: 'civic', 'korean-temple': 'worship',
   'wizard-tower': 'power', 'mage-tower': 'civic', 'arcane-garden': 'civic', observatory: 'civic',
+  clocktower: 'civic',
   'aztec-precinct': 'worship', 'calpulli-temple': 'worship', tecpan: 'power', tianguis: 'market',
 };
 /** Parcel uses of the open port pieces. */
@@ -933,7 +934,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   // ---- hill towns: stair treads on the lanes that climb the slope
   if (hints.stairs) lines.push(...stairLanes(ctx, streets));
   // ---- lagoon towns: water down the canals, footbridges where the calli cross them
-  if (hints.lagoon) lines.push(...lagoonWaterways(streets, rng.fork('canals'), ctx.isWater, l2First));
+  if (hints.lagoon) lines.push(...lagoonWaterways(streets, rng.fork('canals'), ctx.isWater, l2First, !!hints.locks));
   // ---- Persian city: the vaulted bazaar spine through the old town, the qanats across the fields
   if (hints.bazaarRoof && archetype === 'town') lines.push(...bazaarRoofs(streets, eplan.phases.slice(0, Math.min(2, eplan.phases.length)).flatMap((p) => p.region), nucleus));
   if (hints.qanats && archetype !== 'hamlet') lines.push(...qanats(ctx, prim.footprint, rng.fork('qanats'), pop < 3000 ? 2 : pop < 15000 ? 3 : 4));
