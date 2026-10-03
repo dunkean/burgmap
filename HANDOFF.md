@@ -127,7 +127,12 @@ GITHUB_TOKEN_FILE=/d/Workspace/dunk_token bash scripts/deploy_pages.sh   # build
    - PNG export still stalls the page 0.3–0.9 s;
    - optional WebGL for live views of over 100 k inhabitants;
    - optional Rust/WASM raster for huge exports. Measurements showed neither is needed for normal use.
-6. **Nice to have:** a 3D or roof view from the building `arch`/`roof` metadata (already stored per building), and a JSON import/export round trip for editing.
+6. **Farmstead variety.** Farmsteads scattered over the map all look the same. Vary them by:
+   - culture and region: courtyard farm (Vierkanthof), longère, Einhaus/longhouse, L- or U-yard, scattered buildings around a yard;
+   - size and wealth: cottage with a shed up to a large manor farm with barns, dovecote and walled yard;
+   - terrain: bank barns on slopes, raised farms on wet ground;
+   - orientation toward the track, south-facing yards, and an orchard or garden placed by context.
+7. **Nice to have:** a 3D or roof view from the building `arch`/`roof` metadata (already stored per building), and a JSON import/export round trip for editing.
 
 ## 8. Working conventions used so far
 

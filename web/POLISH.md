@@ -93,3 +93,4 @@ Each culture gets a `scale` range: the settlement classes it can produce. [x] `s
 
 ## UI
 - [~] Loading bar at the top during generation; the current map stays visible.
+- [ ] Farmsteads scattered over the map all look the same: vary type (courtyard farm, longere, longhouse, L/U yard, scattered yard), size/wealth (cottage to manor farm), terrain adaptation and orientation, by culture and region.
