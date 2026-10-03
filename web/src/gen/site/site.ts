@@ -161,7 +161,8 @@ export function chooseSite(terrain: TerrainLayer, opts: Options, mapSize: number
   };
 
   const Rres = RESERVE_RADIUS[opts.size];
-  const margin = 0.2 * S;
+  const mFrac = Math.max(0.2, Math.min(0.45, prefs.margin ?? 0.2));
+  const margin = mFrac * S;
   const inM = (x: number, y: number, slack = 0): boolean => x >= margin - slack && x <= S - margin + slack && y >= margin - slack && y <= S - margin + slack;
   const C0: Vec2 = { x: S / 2, y: S / 2 };
   const jit = new Noise2D(r.fork('jitter'));
@@ -554,7 +555,7 @@ export function chooseSite(terrain: TerrainLayer, opts: Options, mapSize: number
     // last resort: relaxed constraints anywhere in the 20 % margin
     const nd: Need = { habMin: 1, slopeMax: Math.max(0.16, capRaw * 1.3), smoothMax: Math.max(0.2, capSmooth * 1.3), bfracMin: 0.1, rb: 0.5 * Rres };
     let best = -Infinity, bi = -1;
-    const lo = Math.floor(0.2 * n), hi = Math.ceil(0.8 * n);
+    const lo = Math.floor(mFrac * n), hi = Math.ceil((1 - mFrac) * n);
     for (let y = lo; y < hi; y += 2) for (let x = lo; x < hi; x += 2) {
       const i = y * n + x;
       const e = evalCell(i, nd);

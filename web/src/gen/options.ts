@@ -36,6 +36,8 @@ export interface SitePrefs {
   woodland?: number;
   /** Multiplier on the importance of flat ground (Chinese plains: > 1). */
   flatness?: number;
+  /** Share of the map side kept free between the site and the map edge (default 0.2; megacities need more). */
+  margin?: number;
 }
 /** Culture preset id (URBAN_MORPHOLOGY.md §3; registry in urban/cultures.ts). */
 export type Culture = string;

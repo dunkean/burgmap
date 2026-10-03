@@ -297,12 +297,16 @@ export function planSettlements(world: World, opts: Options, root: Rng): PlanRes
   const BUCKET = 2000;
   const buckets = new Map<number, Settlement[]>();
   let maxPop = 0;
+  // (the main settlement is tested on its own: its gap can be several km wide around a large city)
+  let maxPopNM = 0;
   const addBucket = (o: Settlement): void => {
+    maxPop = Math.max(maxPop, o.population);
+    if (o.main) return;
     const k = Math.floor(o.center.y / BUCKET) * 4096 + Math.floor(o.center.x / BUCKET);
     let l = buckets.get(k);
     if (!l) buckets.set(k, (l = []));
     l.push(o);
-    maxPop = Math.max(maxPop, o.population);
+    maxPopNM = Math.max(maxPopNM, o.population);
   };
   addBucket(main);
   // (the spacing functions are pure in the two populations: memoized, the candidate scans call them per pair)
@@ -322,8 +326,12 @@ export function planSettlements(world: World, opts: Options, root: Rng): PlanRes
     const ci = Math.min(n - 1, Math.floor(p.y / cell)) * n + Math.min(n - 1, Math.floor(p.x / cell));
     // the main town's real footprint plus a gardens ring
     if (dFoot[ci] < ext + 80 + 0.2 * mainR) return false;
+    {
+      const d = dist(main.center, p);
+      if (d < ext + mainR + 80 || d < relax * pairSp(main.population, pop)) return false;
+    }
     // only the placed settlements within the largest possible spacing (buckets of 2 km)
-    const R = Math.max(pairSp(maxPop, pop), extGap(maxPop, pop), ext + mainR + 80);
+    const R = Math.max(pairSp(maxPopNM, pop), extGap(maxPopNM, pop));
     const bx0 = Math.floor((p.x - R) / BUCKET), bx1 = Math.floor((p.x + R) / BUCKET), by0 = Math.floor((p.y - R) / BUCKET), by1 = Math.floor((p.y + R) / BUCKET);
     for (let by = by0; by <= by1; by++) for (let bx = bx0; bx <= bx1; bx++) for (const o of buckets.get(by * 4096 + bx) ?? []) {
       const d = dist(o.center, p);

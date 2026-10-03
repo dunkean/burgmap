@@ -52,6 +52,31 @@ export const densityScale = (pop: number): number => Math.max(1, Math.min(1.5, 1
 /** Target quarter area (m²) by zone (the lazy detail of one quarter stays well under 300 ms). */
 const QUARTER_AREA: Record<UrbanZone, number> = { core: 42000, middle: 70000, edge: 110000, faubourg: 150000, village: 90000 };
 
+/** Cumulative land area (m²) inside each growth line (k = 1..nR) and the suburbs' outer limit (k = nR + 1). */
+function ringAreas(pop: number, nR: number, density: (k: number) => number): number[] {
+  // population shares: geometric growth of the enclosed rings, the suburbs outside the last line
+  const faubShare = 0.22;
+  const wts = Array.from({ length: nR }, (_, k) => Math.pow(1.9, k));
+  const wsum = wts.reduce((a, b) => a + b, 0);
+  const shares = [...wts.map((w) => (w / wsum) * (1 - faubShare)), faubShare];
+  const areas: number[] = [];
+  let acc = 0;
+  // (+12 %: the streets of the macro graph)
+  for (let k = 1; k <= nR + 1; k++) { acc += ((shares[k - 1] * pop) / density(k)) * 1e4 * 1.12; areas.push(acc); }
+  return areas;
+}
+
+/** Expected radius (m) of a megacity's built-up area (site selection keeps that much land around the site). */
+export function megaRadius(pop: number, opts: World['options']): number {
+  const plan = resolvePlan(getCulture(opts.culture).id, pop, opts.cultureMix, opts.plan);
+  const nR = ringCount(pop), nPh = plan.phases.length, dS = densityScale(pop);
+  const sp = Math.max(0.5, Math.min(2, opts.sprawl ?? 1));
+  const zone = (k: number): UrbanZone => (k === 1 ? 'core' : k === 2 ? 'middle' : k <= nR ? 'edge' : 'faubourg');
+  const dens = (k: number) => (k <= nR ? plan.phases[Math.min(nPh, Math.max(1, Math.round(1 + ((k - 1) * (nPh - 1)) / Math.max(1, nR - 1)))) - 1].morph : plan.faubourg).density[zone(k)] * dS / sp;
+  const a = ringAreas(pop, nR, dens);
+  return Math.sqrt(a[nR] / Math.PI);
+}
+
 export interface MegaResult {
   layer: UrbanLayer;
   stats: Record<string, number | string>;
@@ -274,18 +299,7 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
   const ringPhase = (k: number) => plan.phases[Math.min(nPh, Math.max(1, Math.round(1 + ((k - 1) * (nPh - 1)) / Math.max(1, nR - 1)))) - 1];
   const zoneOf = (k: number): UrbanZone => (k === 1 ? 'core' : k === 2 ? 'middle' : k <= nR ? 'edge' : 'faubourg');
   const ringMorph = (k: number): MorphologyParams => (k <= nR ? ringPhase(k).morph : plan.faubourg);
-  // population shares: geometric growth of the enclosed rings, the suburbs outside the last line
-  const faubShare = 0.22;
-  const wts = Array.from({ length: nR }, (_, k) => Math.pow(1.9, k));
-  const wsum = wts.reduce((a, b) => a + b, 0);
-  const shares = [...wts.map((w) => (w / wsum) * (1 - faubShare)), faubShare];
-  const areas: number[] = [];
-  let acc = 0;
-  for (let k = 1; k <= nR + 1; k++) {
-    const m = ringMorph(k);
-    acc += ((shares[k - 1] * pop) / (m.density[zoneOf(k)] * dS)) * 1e4 * 1.12; // (+12 %: the streets of the macro graph)
-    areas.push(acc);
-  }
+  const areas = ringAreas(pop, nR, (k) => ringMorph(k).density[zoneOf(k)] * dS);
   const estR = Math.sqrt(areas[nR] / Math.PI);
   const coreM = ringMorph(1);
   const ctxRadius = Math.min(world.mapSize / 2, estR * 1.7 + 900);
@@ -329,7 +343,15 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
   const rays = castRays(world, c, M);
   const gap = Math.max(110, 0.05 * estR);
   const radii: number[][] = [];
-  for (let k = 0; k <= nR; k++) radii.push(smoothCirc(isoRadii(rays, areas[k]), 3, 2));
+  for (let k = 0; k <= nR; k++) {
+    // growth is never even: lobes and dents of the line (a few low angular frequencies), stronger on the outer lines
+    const r = smoothCirc(isoRadii(rays, areas[k]), 3, 2);
+    const rn = rng.fork('ringNoise:' + k);
+    const amp = (k === nR ? 0.16 : 0.07 + 0.025 * k) * (plan.phases[0].morph.streetOp === 'grid' ? 0.5 : 1);
+    const waves = [2, 3, 5].map((f) => ({ f, a: rn.range(0.4, 1) / f ** 0.5, ph: rn.float() * TAU }));
+    const wn = waves.reduce((t, w) => t + w.a, 0);
+    radii.push(r.map((v, j) => v * (1 + (amp / wn) * waves.reduce((t, w) => t + w.a * Math.sin(w.f * (j / M) * TAU + w.ph), 0))));
+  }
   // suburbs grow along the roads: bulges of the outer limit where a road leaves the last ring
   const roadsIn = (world.roads ?? []).filter((r) => r.kind !== 'track');
   {
@@ -511,7 +533,9 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
   // ---- nuclei: the main core, fused satellite towns (polycentric), absorbed villages with their green
   const nuclei: MacroNucleus[] = [{ p: c, kind: 'main', r: ringR[0] }];
   const nr = rng.fork('nuclei');
-  const nTown = pop >= 2500000 ? 2 : pop >= 600000 ? 1 : 0;
+  // fused towns: older market towns the city grew into (own wall or boulevard, market, streets converging on it)
+  const nTown = pop >= 2500000 ? 4 : pop >= 1000000 ? 3 : pop >= 400000 ? 2 : pop >= 150000 ? 1 : 0;
+  const townR = Math.max(300, Math.min(900, 250 + 0.25 * Math.sqrt(pop)));
   const nVill = Math.max(1, Math.min(22, Math.round(pop / 110000)));
   const free = (p: Vec2, r: number): boolean => {
     if (ctx.isWater(p) || !pointInRing(outer, p)) return false;
@@ -540,7 +564,7 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
       }
       const d = dist(p, c);
       if (d < rIn || d > rOut) continue;
-      if (!free(p, R + 45)) continue;
+      if (kind === 'village' ? !free(p, R + 45) : ctx.isWater(p) || !pointInRing(outer, p) || nuclei.some((nu) => dist(nu.p, p) < R + nu.r * 1.8 + 600)) continue;
       // not astride a ring line
       if (rings.some((rg) => Math.abs(d - (ringAt(rg, c, Math.atan2(p.y - c.y, p.x - c.x)) ? dist(ringAt(rg, c, Math.atan2(p.y - c.y, p.x - c.x))!, c) : 0)) < R + 80)) continue;
       return { p, kind, r: R };
@@ -548,7 +572,12 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
     return null;
   };
   for (let k = 0; k < nTown; k++) {
-    const nu = tryNucleus('town', ringR[Math.max(0, nR - 3)] + 300, ringR[nR] - 900, nr.range(380, 620), 60);
+    // (a smaller town where the bands between the ring lines are narrow)
+    let nu: MacroNucleus | null = null;
+    for (let f = 1; f >= 0.55 && !nu; f -= 0.15) {
+      const Rt = townR * f * nr.range(0.9, 1.1);
+      nu = tryNucleus('town', ringR[Math.min(1, nR - 1)] + Rt + 200, ringR[nR] - Rt - 150, Rt, 45);
+    }
     if (nu) nuclei.push(nu);
   }
   for (let k = 0; k < nVill; k++) {
@@ -605,7 +634,10 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
     insert(closed(green), gid);
     nucStreets.push(gid);
     if (ringLine) {
-      const rid = addStreet(closed(ringLine), 16, 0, 'ring', 2);
+      // (most fused towns kept their walls: a standing line inside the city, with its gates on the spokes)
+      nu.ring = ringLine;
+      nu.walled = walledCulture && wallsOpt !== 'none' && nr.chance(0.65);
+      const rid = nu.walled ? addStreet(closed(ringLine), 0, 0, 'wall-lane', 2, LAB_WALL) : addStreet(closed(ringLine), 16, 0, 'ring', 2);
       insert(closed(ringLine), rid);
       nucStreets.push(rid);
     }
@@ -664,7 +696,27 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
     for (let i = 1; i < nuclei.length; i++) if (pointInRing(lp.pts, nuclei[i].p) && lp.lab.every((l) => nucStreets.includes(l))) return i;
     return -1;
   };
-  const final: { lp: LPoly; kind: MacroQuarter['kind']; nucleus: number }[] = [];
+  // the palace city: a large lot in the middle rings, by the water or on high ground, away from the old towns
+  const palaceA = Math.max(40000, Math.min(900000, pop * 0.18));
+  let palaceP: Vec2 | null = null;
+  {
+    const pr = rng.fork('palace');
+    const h0 = ctx.heightAt(c);
+    let bs = -Infinity;
+    const k1 = Math.min(nR, 2), k2 = Math.max(k1, nR - 1);
+    for (let k = k1; k <= k2; k++) for (let j = 0; j < 36; j++) {
+      const a = (j / 36) * TAU + pr.range(-0.05, 0.05);
+      const p0 = ringAt(rings[k - 2] ?? market, c, a), p1 = ringAt(rings[k - 1], c, a);
+      if (!p0 || !p1) continue;
+      const p = { x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2 };
+      if (ctx.isWater(p) || nuclei.some((nu, i) => i > 0 && dist(nu.p, p) < nu.r + 700)) continue;
+      let wet = 0;
+      for (let q = 0; q < 8; q++) if (ctx.isWater({ x: p.x + Math.cos((q / 8) * TAU) * 350, y: p.y + Math.sin((q / 8) * TAU) * 350 })) wet = 1;
+      const sc = 1.2 * wet + (ctx.heightAt(p) - h0) / 50 + pr.float() * 0.8;
+      if (sc > bs) { bs = sc; palaceP = p; }
+    }
+  }
+  const final: { lp: LPoly; kind: MacroQuarter['kind']; nucleus: number; tag?: 'palace' }[] = [];
   const queue: LPoly[] = cells.slice().reverse();
   let guard = 0;
   while (queue.length && guard++ < 40000) {
@@ -677,13 +729,17 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
     const k = ringOf(ob.c);
     const T = quarterArea(k);
     const ni = nucleusFor(ob.c);
-    const Tn = ni > 0 && dist(ob.c, nuclei[ni].p) < (nuclei[ni].kind === 'town' ? nuclei[ni].r : 300) ? QUARTER_AREA.core : T;
-    if (A < 1.55 * Tn && ob.hu / Math.max(1, ob.hv) < 3.2) { final.push({ lp: X, kind: 'quarter', nucleus: ni }); continue; }
+    const pal = !!palaceP && pointInRing(X.pts, palaceP);
+    const Tn = pal ? palaceA : ni > 0 && dist(ob.c, nuclei[ni].p) < (nuclei[ni].kind === 'town' ? nuclei[ni].r : 300) ? QUARTER_AREA.core : T;
+    if (A < 1.55 * Tn && ob.hu / Math.max(1, ob.hv) < (pal ? 2.2 : 3.2)) {
+      if (pal && A > 0.45 * palaceA) { final.push({ lp: X, kind: 'lot', nucleus: ni, tag: 'palace' }); palaceP = null; } else final.push({ lp: X, kind: 'quarter', nucleus: ni });
+      continue;
+    }
     const m = ringMorph(k);
     const nu = nuclei[ni].p;
     let th: number;
     if (m.streetOp === 'grid' && ni === 0) th = m.orientation === 'cardinal' ? 0 : m.orientation === 'terrain' ? terrainAngle : m.orientation === 'water' ? waterAngle : mainAngle;
-    else th = Math.atan2(ob.c.y - nu.y, ob.c.x - nu.x) + 0.25 * noise.fbm(ob.c.x / 1800, ob.c.y / 1800, 2);
+    else th = Math.atan2(ob.c.y - nu.y, ob.c.x - nu.x) + 0.45 * noise.fbm(ob.c.x / 1600, ob.c.y / 1600, 2) + split.range(-0.14, 0.14);
     const fams = [th, th + Math.PI / 2];
     const perpU = fams.map((f) => Math.abs(Math.cos(f) * ob.u.x + Math.sin(f) * ob.u.y));
     const order = perpU[0] <= perpU[1] ? [1, 0] : [0, 1];
@@ -734,6 +790,7 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
 
   // ---- quarters: phase, zone, morphology, density, culture, nucleus, district
   const quarters: MacroQuarter[] = [];
+  let palaceQ: MacroQuarter | null = null;
   const mstreetsObj = new Streets();
   for (const st of mstreets) mstreetsObj.add(st.path, st.widths, st.rank, st.role, st.phase, st.widths[0] > 0);
   const fsec = (ph: ResolvedPlan['phases'][number], p: Vec2): { morph: MorphologyParams; culture: string } => {
@@ -767,6 +824,7 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
       density: Math.round(dens), pop: Math.round((dens * A) / 1e4), district, nucleus: f.nucleus, wants: [], area: Math.round(A),
       bb: [bb.x0, bb.y0, bb.x1, bb.y1], inset: [],
     });
+    if (f.tag === 'palace') palaceQ = quarters[quarters.length - 1];
   }
   morphIdx(plan.faubourg);
 
@@ -783,19 +841,30 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
     cat.wants.push({ kind: 'm4-cathedral-close', place: 'near-nucleus', area: [9000, 30000], data: { kind: 'cathedral-close', ang: 0, Lc: pop > 500000 ? 135 : 115 } });
     cat.district = 'cathedral';
   }
-  // the palace city: a large quarter of the middle rings, by the water or on high ground, made one walled lot
+  if (palaceQ) {
+    const pal = palaceQ as MacroQuarter;
+    const ip = innerPoint(pal.pts);
+    pal.compound = 'm4-palace'; pal.district = 'palace'; pal.density = 20; pal.pop = Math.round((pal.area * 20) / 1e4);
+    pal.data = { kind: 'palace', ang: Math.atan2(c.y - ip.y, c.x - ip.x) };
+    sites.push({ id: 'palace', kind: 'palace', role: 'power', lot: pal.pts, anchor: ip, culture: pal.culture });
+  }
+  // parks, hunting grounds and great cemeteries: a few large green quarters in the outer rings
   {
-    const cands = quarters.filter((q) => q.kind === 'quarter' && q.phase >= 2 && q.phase <= nR && q.area > 60000 && q.area < 420000 && q.district === 'town');
-    const pal = byScore(cands, (q) => {
-      const ip = innerPoint(q.pts);
-      const wet = q.lab.some((l) => l === LAB_WATER) ? 1 : 0;
-      return wet * 1.2 + ctx.heightAt(ip) / 60 - Math.abs(q.area - 180000) / 200000 + lm.float() * 0.6;
-    });
-    if (pal) {
-      const ip = innerPoint(pal.pts);
-      pal.kind = 'lot'; pal.compound = 'm4-palace'; pal.district = 'palace'; pal.density = 20; pal.pop = Math.round(pal.area * 20 / 1e4);
-      pal.data = { kind: 'palace', ang: Math.atan2(c.y - ip.y, c.x - ip.x) };
-      sites.push({ id: 'palace', kind: 'palace', role: 'power', lot: pal.pts, anchor: ip, culture: pal.culture });
+    const nPark = pop >= 1000000 ? 2 + Math.floor(pop / 2000000) : pop >= 200000 ? 1 : 0;
+    const pk = rng.fork('parks');
+    const cands = quarters.filter((q) => q.kind === 'quarter' && q.phase >= Math.min(3, nR) && q.district !== 'village' && q.district !== 'satellite' && q.area > 0.7 * quarterArea(q.phase));
+    const chosenP: MacroQuarter[] = [];
+    for (let t = 0; t < nPark && cands.length; t++) {
+      const q = byScore(cands, (x) => {
+        const ip = innerPoint(x.pts);
+        const dO = Math.min(...chosenP.map((y) => dist(innerPoint(y.pts), ip)), 1e9);
+        return Math.min(dO, 4000) / 1000 + ctx.slopeAt(ip) * 20 + x.area / 300000 + pk.float();
+      });
+      if (!q) break;
+      chosenP.push(q);
+      cands.splice(cands.indexOf(q), 1);
+      q.kind = 'lot'; q.district = 'gardens'; q.density = 0; q.pop = 0; q.wants = [];
+      sites.push({ id: 'park:' + q.id, kind: 'park', role: 'civic', lot: q.pts, anchor: innerPoint(q.pts), culture: q.culture });
     }
   }
   // parish churches (one quarter in two in the old rings, one in four outside), abbeys in the outer rings
@@ -853,7 +922,7 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
   // ---- stand-in blocks (the quarter inset by its streets' half widths) and the density raster
   for (const q of quarters) {
     const ins = q.kind === 'market' || q.kind === 'place' ? null : insetPiece({ pts: q.pts, lab: q.lab }, mstreetsObj, (2.6 + 3) / 2);
-    q.inset = ins ?? (q.kind === 'market' || q.kind === 'place' ? q.pts : []);
+    q.inset = ins ?? q.pts;
   }
   const S = world.mapSize;
   const dcell = Math.max(60, S / 640);
@@ -861,7 +930,7 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
   const cov = new Float32Array(dw * dw);
   let dmax = 0;
   for (const q of quarters) {
-    const f = q.kind === 'market' || q.kind === 'place' ? 0.04 : q.kind === 'lot' ? 0.16 : Math.min(0.92, 0.1 + q.density / 380);
+    const f = q.kind === 'market' || q.kind === 'place' || q.district === 'gardens' ? 0.03 : q.kind === 'lot' ? 0.16 : Math.min(0.92, 0.1 + q.density / 380);
     fillPoly(cov, dw, dcell, q.inset.length >= 3 ? q.inset : q.pts, f);
     dmax = Math.max(dmax, f);
   }
@@ -871,10 +940,8 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
   const walls: UrbanWall[] = [];
   const nearW = (q: Vec2): boolean => ctx.isWater(q);
   const towerShape = plan.render.towerShape ?? 'round';
-  for (const k of [...standing].sort((a, b) => a - b)) {
-    const ring = rings[k - 1];
+  const wallOn = (ring: Polygon, gidx: GridIndex<number>, key: string, thickness: number, spacing: number, role: UrbanWall['role']): void => {
     const gates: { p: Vec2; dir: Vec2; width: number }[] = [];
-    const gidx = ringIdx[k - 1];
     for (let si = 0; si < mstreets.length; si++) {
       const st = mstreets[si];
       if (st.role !== 'radial') continue;
@@ -891,9 +958,11 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
         });
       }
     }
-    const wf = wallFeatures(ring, gates, rng.fork('wall:' + k), ctx.isWater, nearW, ringR[k - 1] > 3000 ? 85 : 60);
-    walls.push({ path: ring, closed: true, towers: wf.towers, gates: gates.map((x) => x.p), thickness: k === nR ? 3.6 : 3, gateInfo: gates, pieces: wf.pieces, gateTowers: wf.gateTowers, towerScale: wf.towerScale, curtains: wf.curtains, towerShape, role: k === nR ? 'town' : 'outer' });
-  }
+    const wf = wallFeatures(ring, gates, rng.fork('wall:' + key), ctx.isWater, nearW, spacing);
+    walls.push({ path: ring, closed: true, towers: wf.towers, gates: gates.map((x) => x.p), thickness, gateInfo: gates, pieces: wf.pieces, gateTowers: wf.gateTowers, towerScale: wf.towerScale, curtains: wf.curtains, towerShape, role });
+  };
+  for (const k of [...standing].sort((a, b) => a - b)) wallOn(rings[k - 1], ringIdx[k - 1], String(k), k === nR ? 3.6 : 3, ringR[k - 1] > 3000 ? 85 : 60, k === nR ? 'town' : 'outer');
+  nuclei.forEach((nu, i) => { if (nu.walled && nu.ring) wallOn(nu.ring, ringIndex(nu.ring), 'town:' + i, 2.8, 50, 'quarter'); });
   lap('walls');
 
   // ---- bridges where the arterials cross the water (rivers, canals; not the open sea)
@@ -902,6 +971,10 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
     const wseg = new GridIndex<{ a: Vec2; b: Vec2 }>(60);
     for (const ph of water) for (const r of [ph.outer, ...ph.holes]) for (let i = 0; i < r.length; i++) wseg.insertSeg(r[i], r[(i + 1) % r.length], { a: r[i], b: r[(i + 1) % r.length] });
     const inWater = (p: Vec2) => water.some((ph, i) => p.x >= waterBB[i].x0 && p.x <= waterBB[i].x1 && p.y >= waterBB[i].y0 && p.y <= waterBB[i].y1 && pointInRing(ph.outer, p) && !ph.holes.some((h) => pointInRing(h, p)));
+    // (a bridge crosses a river: about as long as the river is wide there, never along it, never over a lake)
+    const rv = new GridIndex<{ p: Vec2; w: number }>(120);
+    for (const r of world.terrain.rivers) r.path.forEach((p, i) => rv.insertBox(p.x, p.y, p.x, p.y, { p, w: Math.max(2.5, r.width[i] ?? 2.5) + 2 }));
+    const riverW = (p: Vec2): number => { let bd = 260, w = -1; for (const v of rv.queryPt(p, 260)) { const d = dist(v.p, p); if (d < bd) { bd = d; w = v.w; } } return w; };
     for (const st of mstreets) {
       if (st.role === 'boundary' || st.role === 'wall-lane' || st.role === 'quay' || st.widths[0] <= 0) continue;
       const pl = st.path;
@@ -921,7 +994,11 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
       for (let i = 0; i + 1 < uniq.length; i++) {
         const a = uniq[i], b = uniq[i + 1];
         const mid = { x: (a.p.x + b.p.x) / 2, y: (a.p.y + b.p.y) / 2 };
-        if (b.s - a.s > 3 && b.s - a.s < 420 && inWater(mid)) bridges.push({ a: a.p, b: b.p, width: Math.max(6, st.widths[0] * 0.8) });
+        const L = b.s - a.s, w = riverW(mid);
+        if (L <= 3 || w < 0 || L > 1.6 * w + 18 || L > 420 || !inWater(mid)) continue;
+        const width = Math.max(6, st.widths[0] * 0.8);
+        if (bridges.some((x) => dist({ x: (x.a.x + x.b.x) / 2, y: (x.a.y + x.b.y) / 2 }, mid) < Math.max(20, width + x.width))) continue;
+        bridges.push({ a: a.p, b: b.p, width });
       }
     }
   }
@@ -935,7 +1012,7 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
   const macro: MacroPlan = {
     version: 1, seedKey: rng.seedKey, eagerPop, population: pop, center: c, mainAngle, terrainAngle, waterAngle, cityR: ringR[nR], ctxRadius,
     nucleusCompound: plan.nucleus.kind !== 'none' ? NUCLEUS_COMPOUND[plan.nucleus.kind] : undefined,
-    streets: mstreets, quarters, nuclei, morphs, wallRings: [...standing].sort((a, b) => a - b).map((k) => rings[k - 1]), rings, timings: tm,
+    streets: mstreets, quarters, nuclei, morphs, wallRings: [...[...standing].sort((a, b) => a - b).map((k) => rings[k - 1]), ...nuclei.filter((nu) => nu.walled && nu.ring).map((nu) => nu.ring!)], rings,
   };
   const marketQ = quarters.find((q) => q.kind === 'market' && q.nucleus === 0);
   const layer: UrbanLayer = {

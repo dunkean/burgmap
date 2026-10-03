@@ -215,7 +215,8 @@ export function megaQuarterDetail(world: World, id: number): UrbanLayer | null {
     blockInfill.push(infill);
     if (compoundOf[bi]) return;
     if (b.kind !== 'block') {
-      const use = b.kind === 'market' ? (mq.district === 'market' || mq.nucleus === 0 ? 'market' : 'green') : b.kind === 'church' ? 'church' : mq.kind === 'place' ? 'green' : 'place';
+      const use = mq.district === 'gardens' ? 'green' : b.kind === 'market' ? (mq.district === 'market' || mq.nucleus === 0 ? 'market' : 'green') : b.kind === 'church' ? 'church' : mq.kind === 'place' ? 'green' : 'place';
+      if (use === 'green') b.kind = 'green';
       parcels.push({ poly: b.poly, use, block: bi, zone: b.zone });
       return;
     }

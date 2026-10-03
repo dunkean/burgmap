@@ -1,4 +1,5 @@
-// Usage: node scripts/ui_check.mjs <baseUrl> <outDir> [--set "seed=1&size=town&style=atlas"] [--name tag] [--scales 0.04,0.12,0.6] [--exports]
+// Usage: node scripts/ui_check.mjs <baseUrl> <outDir> [--set "seed=1&size=town&style=atlas"] [--name tag] [--scales 0.04,0.12,0.6] [--wait ms] [--exports]
+// (--wait: time to let lazy detail arrive after each zoom, default 500 ms; megacity quarters need several seconds)
 // Screenshots the UI at several zooms on the settlement centre (via window.__burgmap) and optionally tests the exports.
 import { chromium } from 'playwright';
 import fs from 'node:fs';
@@ -16,7 +17,7 @@ p.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') logs.
 p.on('pageerror', e => logs.push(`[pageerror] ${e.message}`));
 const url = base + (base.includes('?') ? '&' : '?') + query;
 await p.goto(url);
-await p.waitForFunction(() => /Generated in|failed/.test(document.getElementById('gentime')?.textContent ?? '') || /Error/.test(document.getElementById('status')?.textContent ?? ''), null, { timeout: 120000 });
+await p.waitForFunction(() => /Generated in|failed/.test(document.getElementById('gentime')?.textContent ?? '') || /Error/.test(document.getElementById('status')?.textContent ?? ''), null, { timeout: 300000 });
 await p.waitForTimeout(800);
 console.log('status:', await p.evaluate(() => document.getElementById('status').textContent));
 for (const sc of scales) {
@@ -24,7 +25,7 @@ for (const sc of scales) {
     const h = window.__burgmap;
     if (sc === 'fit') h.fit(); else { const c = h.center(); h.setView({ cx: c.x, cy: c.y, scale: Number(sc) }); }
   }, sc);
-  await p.waitForTimeout(500);
+  await p.waitForTimeout(Number(opt('--wait', '500')));
   const f = `${outDir}/${tag}_${sc}.png`;
   await p.screenshot({ path: f });
   console.log('shot', f, await p.evaluate(() => document.getElementById('hud')?.textContent));

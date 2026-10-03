@@ -4,6 +4,7 @@
  * The main settlement's scalar fields (archetype, population, culture, phases) are kept.
  */
 import type { World, UrbanLayer, Settlement, UrbanBlockInfo, UrbanParcel, Polygon } from '../types';
+import { standIn } from '../urban/mega/standin';
 
 export function mergeUrban(layers: UrbanLayer[]): UrbanLayer | undefined {
   if (!layers.length) return undefined;
@@ -54,16 +55,24 @@ export function placeholderUrban(s: Settlement): UrbanLayer {
 export function megaView(u: UrbanLayer, details?: Record<number, UrbanLayer>): UrbanLayer {
   const M = u.macro;
   if (!M) return u;
-  const blocks: Polygon[] = [], blockInfo: UrbanBlockInfo[] = [], parcels: UrbanParcel[] = [];
+  const blocks: Polygon[] = [], blockInfo: UrbanBlockInfo[] = [], parcels: UrbanParcel[] = [], masses: UrbanLayer['masses'] = [];
   for (const q of M.quarters) {
     if (details?.[q.id] || q.inset.length < 3) continue;
+    const green = q.kind === 'place' || q.district === 'gardens';
+    if (q.kind === 'quarter') {
+      // stand-in fabric: block-sized pieces with their built mass
+      const si = standIn(q);
+      for (const b of si.blocks) { blocks.push(b); blockInfo.push({ quarter: q.id, phase: q.phase, zone: q.zone, kind: 'block', culture: q.culture }); }
+      for (const m of si.masses) masses.push({ outer: m, holes: [] });
+      continue;
+    }
     const bi = blocks.length;
     blocks.push(q.inset);
-    blockInfo.push({ quarter: q.id, phase: q.phase, zone: q.zone, kind: q.kind === 'market' ? 'market' : q.kind === 'place' ? 'green' : 'block', culture: q.culture });
+    blockInfo.push({ quarter: q.id, phase: q.phase, zone: q.zone, kind: q.kind === 'market' ? 'market' : green ? 'green' : 'block', culture: q.culture });
     if (q.kind === 'market') parcels.push({ poly: q.inset, use: 'market', block: bi });
-    else if (q.kind === 'place') parcels.push({ poly: q.inset, use: 'green', block: bi });
+    else if (green) parcels.push({ poly: q.inset, use: 'green', block: bi });
   }
-  const base: UrbanLayer = { ...u, macro: undefined, blocks, blockInfo, parcels };
+  const base: UrbanLayer = { ...u, macro: undefined, blocks, blockInfo, parcels, masses };
   const ds = details ? Object.keys(details).map(Number).sort((a, b) => a - b).map((k) => details[k]) : [];
   return ds.length ? { ...mergeUrban([base, ...ds])!, macro: undefined } : base;
 }

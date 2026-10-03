@@ -388,8 +388,52 @@ export function generateNames(world: World, root: Rng): NamesLayer {
       add({ kind: 'street', text, rank: s.rank, anchor: mid, path: s.path, sub: String(len | 0) });
     }
 
+    // megacity (macro plan): district names, not one per quarter — the old town, the fused towns and absorbed
+    // villages (polycentric), one ward per ring band and sector, the palace
+    if (u.macro) {
+      const M = u.macro;
+      const core = M.quarters.filter((q) => q.phase === 1 && q.nucleus === 0);
+      if (core.length) {
+        const bb = bbox(core.flatMap((q) => q.pts));
+        const oldName = use(pickFrom(V.old, rng.fork('old')));
+        if (oldName) add({ kind: 'quarter', text: oldName, rank: 1, anchor: { x: (bb.minX + bb.maxX) / 2, y: (bb.minY + bb.maxY) / 2 }, span: (bb.maxX - bb.minX) * 0.75, sub: 'old' });
+      }
+      M.nuclei.forEach((nu, i) => {
+        if (nu.kind === 'main') return;
+        const text = unique('mega:' + i, nu.kind === 'town' ? 1 : 2);
+        nu.name = text;
+        add({ kind: 'quarter', text, rank: nu.kind === 'town' ? 1 : 2, anchor: nu.p, span: Math.max(300, nu.r * 2.2), sub: nu.kind });
+      });
+      for (const st of u.sites ?? []) {
+        if (st.kind === 'palace') add({ kind: 'castle', text: V.castle(town), rank: 2, anchor: st.anchor });
+        if ((st.kind === 'satellite-town' || st.kind === 'absorbed-village') && !st.name) st.name = M.nuclei[Number(st.id.split(':')[1])]?.name;
+      }
+      // wards: per ring band, one name for every ~ 60° sector (on its largest quarter)
+      const sect = new Map<string, { q: (typeof M.quarters)[number]; ar: number }>();
+      for (const q of M.quarters) {
+        if (q.kind !== 'quarter' || q.phase === 1 || q.district === 'village' || q.district === 'satellite') continue;
+        const c = polygonCentroid(q.pts);
+        const ns = q.phase <= 2 ? 6 : 8 + 2 * q.phase;
+        const a = Math.floor((((Math.atan2(c.y - M.center.y, c.x - M.center.x) / (2 * Math.PI)) + 1) % 1) * ns);
+        const key = q.phase + ':' + a;
+        const cur = sect.get(key);
+        if (!cur || q.area > cur.ar) sect.set(key, { q, ar: q.area });
+      }
+      for (const [key, { q }] of [...sect].sort((x, y) => (x[0] < y[0] ? -1 : 1))) {
+        const r = rng.fork('ward:' + key);
+        const c = polygonCentroid(q.pts);
+        const kind = q.zone === 'faubourg' ? 'faubourg' : q.zone === 'edge' ? 'edge' : 'ring';
+        let text: string | null = null;
+        for (let a = 0; !text && a < 6; a++) {
+          const rr = r.fork('q' + a);
+          text = use(V.ward(rr, kind, saintOf(`w${key}:${a}`), V.dirs[dirOf(center, c)], V.crafts[rr.pick(crafts)]));
+        }
+        const pole = poleOf(q.pts);
+        if (text) add({ kind: 'quarter', text, rank: 2, anchor: pole.p, span: horizontalSpan(q.pts, pole.p.x, pole.p.y) || pole.r * 2 });
+      }
+    }
     // quarters: the core gets one "old town" name (anchored on the union of its sectors), every other sector its own name
-    if (u.quarters.length >= 2) {
+    else if (u.quarters.length >= 2) {
       const core = u.quarters.filter((q) => q.zone === 'core');
       const groupCore = core.length >= 3;
       if (core.length) {

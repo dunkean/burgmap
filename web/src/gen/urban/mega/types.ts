@@ -10,7 +10,11 @@ import type { UrbanZone, StreetRole } from '../../types';
 export interface MacroStreet { path: Polyline; widths: number[]; rank: number; role: StreetRole; phase: number }
 
 /** A nucleus of the polycentric plan: the main core, a fused satellite town, an absorbed village. */
-export interface MacroNucleus { p: Vec2; kind: 'main' | 'town' | 'village'; r: number; name?: string }
+export interface MacroNucleus {
+  p: Vec2; kind: 'main' | 'town' | 'village'; r: number; name?: string;
+  /** A fused satellite town keeps its own line: a ring boulevard or (walled) a standing wall. */
+  ring?: Polygon; walled?: boolean;
+}
 
 /** A landmark the quarter detail claims on its best piece (city-rank lots are whole quarters instead). */
 export interface MacroWant { kind: string; place: 'near-nucleus' | 'any' | 'edge'; area: [number, number]; data?: unknown }
@@ -70,5 +74,4 @@ export interface MacroPlan {
   wallRings: Polygon[];
   /** Ring lines of the growth phases (oldest first) and the outer limit of the built-up area. */
   rings: Polygon[];
-  timings: Record<string, number>;
 }

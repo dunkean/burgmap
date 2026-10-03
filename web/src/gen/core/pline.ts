@@ -54,10 +54,38 @@ export function firstCrossing(pl: Polyline, other: Polyline, skipFirstLen = 0): 
 
 /** Self-intersection test (non-adjacent segments). */
 export function selfIntersects(pl: Polyline): boolean {
-  for (let i = 0; i + 1 < pl.length; i++) {
-    for (let j = i + 2; j + 1 < pl.length; j++) {
-      if (segHit(pl[i], pl[i + 1], pl[j], pl[j + 1])) return true;
+  const m = pl.length - 1;
+  if (m < 48) {
+    for (let i = 0; i + 1 < pl.length; i++) {
+      for (let j = i + 2; j + 1 < pl.length; j++) {
+        if (segHit(pl[i], pl[i + 1], pl[j], pl[j + 1])) return true;
+      }
     }
+    return false;
+  }
+  // long polylines: sweep over x (only pairs whose boxes overlap can hit; a tiny margin keeps the test exact)
+  const E = 1e-6;
+  const x0 = new Float64Array(m), x1 = new Float64Array(m), y0 = new Float64Array(m), y1 = new Float64Array(m);
+  const ord: number[] = [];
+  for (let i = 0; i < m; i++) {
+    const a = pl[i], b = pl[i + 1];
+    x0[i] = Math.min(a.x, b.x) - E; x1[i] = Math.max(a.x, b.x) + E; y0[i] = Math.min(a.y, b.y) - E; y1[i] = Math.max(a.y, b.y) + E;
+    ord.push(i);
+  }
+  ord.sort((p, q) => x0[p] - x0[q]);
+  const active: number[] = [];
+  for (const i of ord) {
+    let w = 0;
+    for (let k = 0; k < active.length; k++) {
+      const j = active[k];
+      if (x1[j] < x0[i]) continue;
+      active[w++] = j;
+      if (Math.abs(i - j) < 2 || y1[j] < y0[i] || y1[i] < y0[j]) continue;
+      const lo = Math.min(i, j), hi = Math.max(i, j);
+      if (segHit(pl[lo], pl[lo + 1], pl[hi], pl[hi + 1])) return true;
+    }
+    active.length = w;
+    active.push(i);
   }
   return false;
 }

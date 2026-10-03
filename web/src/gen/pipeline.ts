@@ -13,7 +13,7 @@ import { routeNetwork } from './settlements/network';
 import { generateSettlementUrban } from './settlements/urban';
 import { choosePopulation } from './urban/phases';
 import { scaleMinPop, scaleMaxPop } from './urban/culture';
-import { generateMega } from './urban/mega/plan';
+import { generateMega, megaRadius } from './urban/mega/plan';
 
 /** Above this total population, secondary settlements are generated lazily (on demand, URBAN_MORPHOLOGY §3d). */
 export const EAGER_POP = 50000;
@@ -76,7 +76,10 @@ export function generate(options: Options, onStage?: (stage: string, partial?: W
   onStage?.('site & roads', world);
   // the culture's site preferences apply unless the options set their own
   const cprefs = getCulture(options.culture).sitePrefs;
-  world.site = chooseSite(terrain, mainOpts.sitePrefs || !cprefs ? mainOpts : { ...mainOpts, sitePrefs: cprefs }, mapSize, root);
+  let siteOpts = mainOpts.sitePrefs || !cprefs ? mainOpts : { ...mainOpts, sitePrefs: cprefs };
+  // a megacity needs its built-up radius free around the site (kept off the map edge as far as the map allows)
+  if (mega) siteOpts = { ...siteOpts, sitePrefs: { ...(siteOpts.sitePrefs ?? {}), margin: (megaRadius(megaPop, mainOpts) + 400) / mapSize } };
+  world.site = chooseSite(terrain, siteOpts, mapSize, root);
   const t2 = performance.now();
   stats['ms.site'] = r(t2 - t1);
   stats['site.x'] = r(world.site.center.x);
