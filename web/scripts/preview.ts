@@ -24,7 +24,7 @@ for (let i = 0; i < args.length; i++) {
   else if (a === '--crop') { const [x, y, w] = v.split(',').map(Number); crop = { x, y, w }; i++; }
   else if (a === '--debug') { debug = true; }
   else if (a === '--focus') { focus = Number(v); i++; }
-  else if (a === '--opt') { const [k, val] = v.split('='); applyOverride(opts, k, val); i++; }
+  else if (a === '--opt') { const eq = v.indexOf('='); applyOverride(opts, v.slice(0, eq), v.slice(eq + 1)); i++; }
 }
 
 const t0 = performance.now();

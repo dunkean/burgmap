@@ -27,6 +27,8 @@ import { OffscreenBackend, BackendEvents } from './backend';
 import type { DisplayOpts, GDone, SettlementMeta } from './protocol';
 import { initSettlementsUI, showSettlementWarnings } from './settlementsPanel';
 import { screenToWorld } from '../render/view';
+import { Pin, ViewState, fullQuery, uiStateFromQuery, bugReport } from './share';
+import { createPins } from './pins';
 import { generateSettlementDetail, EAGER_MAIN_POP } from '../gen/pipeline';
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
@@ -45,6 +47,11 @@ let importedMem: ImportedHeight | null = null;
 /** Set when the page was opened from a link that used a custom heightmap we do not have. */
 let missingCustom = wantsCustomHeight(location.search);
 let heightId = 0;
+/** UI-only state of the link (pins, view): never part of the options, so never of the generation. */
+const initUi = uiStateFromQuery(location.search);
+/** A view from the link, applied once the first map content has arrived (the map size is known then). */
+let pendingView: ViewState | null = initUi.view;
+let viewReady = false;
 
 const statusEl = $('status');
 const busyEl = $('busy');
@@ -240,6 +247,7 @@ function rerender(keepView = true): void {
   currentRenderer = createCanvasRenderer(canvasEl, w, mapStyle(), { scene: sceneCache.scene });
   rec('createRenderer', pnow() - t1);
   viewer.setRenderer(currentRenderer, w.mapSize, keepView);
+  applyPendingView();
 }
 
 /** Main-thread mode: the finished World arrived (structured clone) - draw it. */
@@ -303,6 +311,13 @@ function setBusy(on: boolean, stage = ''): void {
   if (on) { busyEl.textContent = stage ? `generating: ${stage}...` : 'generating...'; genTimeEl.textContent = stage ? `Generating: ${stage}...` : 'Generating...'; }
 }
 
+/** The view of an opened link: set after the first content (the map size is then known); later changes are the user's. */
+function applyPendingView(): void {
+  if (viewReady) return;
+  viewReady = true;
+  if (pendingView) { viewer.setView(pendingView); pendingView = null; }
+}
+
 // ---- offscreen mode events
 let firstContentGen = 0, firstFrameGen = 0, awaitVer = 0;
 const backendEvents: BackendEvents = {
@@ -321,6 +336,7 @@ const backendEvents: BackendEvents = {
   onContent(c) {
     // new snapshot (terrain, then roads, then the town...) or a style change: redraw, keeping the view unless the map size changed
     viewer.contentChanged(c.mapSize, true, c.marker);
+    applyPendingView();
     map.style.background = c.paper;
     awaitVer = c.ver;
     if (c.gen !== reqId) return;
@@ -418,7 +434,7 @@ function commit(mode: 'push' | 'replace' | 'none', displayOnly = false): void {
   roadsEl.options[0].textContent = `Auto (${DEFAULT_ROADS[opts.size]})`;
   updateHeightmapUI();
   if (mode !== 'none') {
-    const q = '?' + toQuery(opts);
+    const q = '?' + curQuery();
     if (q !== location.search) (mode === 'push' ? history.pushState : history.replaceState).call(history, null, '', q);
   }
   if (!displayOnly && genKey() !== lastGenKey) schedule();
@@ -458,21 +474,40 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'r' || e.key === 'R') { e.preventDefault(); reroll(); }
 });
 
-const copyBtn = $<HTMLButtonElement>('copyLink');
-copyBtn.addEventListener('click', async () => {
-  const url = location.origin + location.pathname + '?' + toQuery(opts);
+/** The query of the current state: options + pins + view (the latter two only in the link, see share.ts). */
+const urlView = (): ViewState | null => (viewReady ? viewer.getView() : pendingView);
+const curQuery = (): string => fullQuery(opts, pinsUI.pins, urlView());
+let urlTimer: number | undefined;
+/** Keep the address bar in step with the pins and the view (debounced, replaceState: no history entries). */
+function syncUrl(): void {
+  window.clearTimeout(urlTimer);
+  urlTimer = window.setTimeout(() => {
+    const q = '?' + curQuery();
+    if (q !== location.search) history.replaceState(null, '', q);
+  }, 300);
+}
+async function copyText(text: string): Promise<boolean> {
   let ok = false;
-  try { await navigator.clipboard.writeText(url); ok = true; } catch {
+  try { await navigator.clipboard.writeText(text); ok = true; } catch {
     const ta = document.createElement('textarea');
-    ta.value = url; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
     document.body.appendChild(ta); ta.select();
     try { ok = document.execCommand('copy'); } catch { ok = false; }
     ta.remove();
   }
-  copyBtn.textContent = ok ? 'Link copied' : 'Copy failed';
-  (window as unknown as Record<string, unknown>).__lastCopied = url;
-  window.setTimeout(() => { copyBtn.textContent = 'Copy link'; }, 1600);
-});
+  (window as unknown as Record<string, unknown>).__lastCopied = text;
+  return ok;
+}
+function wireCopy(btn: HTMLButtonElement, text: () => string, done: string): void {
+  const label = btn.textContent;
+  btn.addEventListener('click', async () => {
+    const ok = await copyText(text());
+    btn.textContent = ok ? done : 'Copy failed';
+    window.setTimeout(() => { btn.textContent = label; }, 1600);
+  });
+}
+wireCopy($<HTMLButtonElement>('copyLink'), () => location.origin + location.pathname + '?' + curQuery(), 'Link copied');
+wireCopy($<HTMLButtonElement>('copyBug'), () => bugReport(opts, pinsUI.pins, viewer.getView(), location.origin + location.pathname, map.clientWidth), 'Report copied');
 
 // ---------- viewer (canvas, LOD) ----------
 // CANVAS-VIEWER (begin viewer)
@@ -481,9 +516,52 @@ const canvasEl = $<HTMLCanvasElement>('view');
 const hudEl = $('hud');
 const viewer = createViewer({
   container: map, canvas: canvasEl, minimap: $<HTMLCanvasElement>('minimap'),
+  onView: (v, w, h) => { pinsUI.update(v, w, h); renderCoords(); if (viewReady) syncUrl(); },
   onFrame: (ms, band, scale) => { maybeDetail(viewer.getView()); perf.frames.push(ms); if (perf.frames.length > 5000) perf.frames.shift(); hudEl.textContent = `${['far', 'mid', 'near'][band]} - ${scale.toFixed(3)} px/m - ${ms.toFixed(1)} ms`; },
 });
 $('fit').addEventListener('click', () => viewer.fit());
+
+// ---------- debug / feedback tools: coordinate readout, pins ----------
+const coordText = $('coordText');
+let hover: [number, number] | null = null;
+let lastClick: [number, number] | null = null;
+const mapPoint = (e: MouseEvent): [number, number] => {
+  const r = map.getBoundingClientRect();
+  return screenToWorld(viewer.getView(), r.width, r.height, e.clientX - r.left, e.clientY - r.top);
+};
+function renderCoords(): void {
+  const f = (p: [number, number]): string => `${p[0].toFixed(1)}, ${p[1].toFixed(1)}`;
+  coordText.textContent = `${hover ? 'x,y ' + f(hover) : 'x,y -'} m${lastClick ? ' | click ' + f(lastClick) : ''} | ${viewer.getView().scale.toPrecision(3)} px/m`;
+}
+map.addEventListener('pointermove', (e) => { hover = mapPoint(e); renderCoords(); });
+map.addEventListener('pointerleave', () => { hover = null; renderCoords(); });
+$('coordCopy').addEventListener('click', async (e) => {
+  const p = lastClick ?? hover;
+  if (!p) return;
+  const b = e.currentTarget as HTMLButtonElement;
+  const ok = await copyText(`${p[0].toFixed(1)},${p[1].toFixed(1)}`);
+  b.textContent = ok ? 'Copied' : 'Failed';
+  window.setTimeout(() => { b.textContent = 'Copy'; }, 1200);
+});
+$('coords').addEventListener('pointerdown', (e) => e.stopPropagation());
+$('coords').addEventListener('pointerup', (e) => e.stopPropagation());
+const pinsUI = createPins({
+  map, layer: $('pins'), pop: $('pinpop'), list: $('pinList'),
+  onChange: () => syncUrl(),
+  onFocus: (p) => viewer.setView({ cx: p.x, cy: p.y, scale: Math.max(viewer.getView().scale, 0.3) }),
+});
+let pinMode = false;
+function setPinMode(on: boolean): void {
+  pinMode = on;
+  map.classList.toggle('pinning', on);
+  $('pinMode').classList.toggle('on', on);
+  $('pinModeBtn').classList.toggle('on', on);
+}
+$('pinMode').addEventListener('click', () => setPinMode(!pinMode));
+$('pinModeBtn').addEventListener('click', () => setPinMode(!pinMode));
+$('pinsClear').addEventListener('click', () => { pinsUI.set([]); syncUrl(); });
+function setPins(p: Pin[]): void { pinsUI.set(p); if (p.length) ($('sec-pins') as HTMLDetailsElement).open = true; }
+setPins(initUi.pins);
 
 // ---------- settlements (M3c): click to focus / to place a listed settlement, lazy detail on zoom ----------
 const detailAsked = new Set<number>();
@@ -565,13 +643,15 @@ function focusSettlement(s: SettlementMeta): void {
   let down: { x: number; y: number; t: number } | null = null;
   map.addEventListener('pointerdown', (e) => { down = { x: e.clientX, y: e.clientY, t: performance.now() }; });
   map.addEventListener('pointerup', (e) => {
-    if (!down || (e.target as HTMLElement).closest('button')) { down = null; return; }
+    if (!down || (e.target as HTMLElement).closest('button, #pinpop, #coords')) { down = null; return; }
     const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y), dt = performance.now() - down.t;
     down = null;
     if (moved > 5 || dt > 500) return;
     const r = map.getBoundingClientRect();
     const v = viewer.getView();
     const [x, y] = screenToWorld(v, r.width, r.height, e.clientX - r.left, e.clientY - r.top);
+    lastClick = [x, y]; renderCoords();
+    if (pinMode || e.altKey) { pinsUI.add(x, y); ($('sec-pins') as HTMLDetailsElement).open = true; return; }
     if (settlUI.picking !== null) { settlUI.place({ x, y }); return; }
     let best: SettlementMeta | null = null, bd = Infinity;
     for (const s of settlementList()) {
@@ -699,7 +779,7 @@ exportPngBtn.addEventListener('click', () => {
   });
 });
 
-history.replaceState(null, '', '?' + toQuery(opts));
+history.replaceState(null, '', '?' + curQuery());
 updateHeightmapUI();
 // Probe the offscreen pipeline first (a few ms), then start the first run on whichever path works.
 const backendReady: Promise<OffscreenBackend | null> = forceMain ? Promise.resolve(null) : OffscreenBackend.create(backendEvents, window.devicePixelRatio || 1);

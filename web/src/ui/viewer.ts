@@ -20,6 +20,8 @@ export interface ViewerOptions {
   canvas: HTMLCanvasElement;
   minimap?: HTMLCanvasElement;
   onFrame?: (ms: number, band: number, scale: number) => void;
+  /** The (clamped) view of the frame about to be shown, with the container size: overlays (pins) follow it. */
+  onView?: (v: View, w: number, h: number) => void;
 }
 
 export interface FrameRequest { seq: number; view: View; w: number; h: number; dpr: number; /** minimap size in device px */ mini: number }
@@ -116,6 +118,7 @@ export function createViewer(o: ViewerOptions): Viewer {
     if (!dirty) return;
     dirty = false;
     view = clampView(view, mapSize, w, h);
+    o.onView?.(view, w, h);
     if (source) {
       applyTransform();
       drawMiniOverlay();

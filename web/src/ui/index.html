@@ -54,6 +54,22 @@
   #minimap { position:absolute; right:12px; bottom:12px; width:140px; height:140px; border:1px solid var(--line); box-shadow:0 2px 10px rgba(0,0,0,.5); background:#eee2c3; cursor:pointer; }
   #hud { position:absolute; left:12px; bottom:10px; color:#f3ead2; font-size:11px; opacity:.75; pointer-events:none; }
   #fit { position:absolute; right:12px; top:36px; padding:4px 8px; font-size:12px; }
+  #pinMode { position:absolute; right:12px; top:70px; padding:4px 8px; font-size:12px; }
+  #pinMode.on { background:#2b2118; color:#f3ead2; border-color:#2b2118; }
+  #map.pinning { cursor:crosshair; }
+  #coords { position:absolute; left:12px; bottom:28px; display:flex; gap:6px; align-items:center; padding:2px 4px 2px 8px; border-radius:4px; background:rgba(30,22,14,.55); color:#f3ead2; font:11px ui-monospace,Consolas,monospace; z-index:3; }
+  #coords button { padding:1px 6px; font-size:11px; }
+  #pins { position:absolute; inset:0; overflow:hidden; pointer-events:none; z-index:2; }
+  .pin { position:absolute; left:-10px; top:-10px; width:20px; height:20px; padding:0; border-radius:50%; background:#2b2118; color:#f3ead2; border:2px solid #f3ead2; box-shadow:0 1px 4px rgba(0,0,0,.6); font:bold 11px/16px sans-serif; text-align:center; cursor:pointer; pointer-events:auto; }
+  #pinpop { position:absolute; z-index:5; width:190px; padding:6px 8px; border-radius:6px; background:#f6efdc; border:1px solid var(--line); box-shadow:0 2px 10px rgba(0,0,0,.5); font-size:12px; display:grid; grid-template-columns:1fr auto; gap:4px 6px; align-items:center; }
+  #pinpop[hidden] { display:none; }
+  #pinpop input { grid-column:1 / 3; margin:0; }
+  #pinpop .pc { color:var(--ink2); font-size:11px; }
+  .pinrow { display:flex; gap:4px; margin-top:4px; }
+  .pinbtn { flex:1; display:flex; gap:6px; align-items:baseline; text-align:left; padding:3px 6px; font-size:12px; min-width:0; }
+  .pinbtn span { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .pinbtn span.dim { opacity:.55; }
+  .pinbtn small { color:var(--ink2); }
   #busy { position:absolute; right:14px; top:12px; color:#f3ead2; font-size:12px; opacity:0; transition:opacity .2s; pointer-events:none; }
   #busy.on { opacity:1; }
   #loadbar { position:absolute; left:0; right:0; top:0; height:3px; z-index:4; pointer-events:none; opacity:0; transition:opacity .3s; background:rgba(0,0,0,.12); }
@@ -82,7 +98,7 @@
     <div>
       <label for="seed" style="margin-top:0">Seed</label>
       <div class="row"><input id="seed" type="text" spellcheck="false"><button id="dice" class="secondary" title="Random seed (R)">&#127922; Random</button></div>
-      <div class="btns"><button id="copyLink" class="secondary" title="Copy a link to this exact map">Copy link</button></div>
+      <div class="btns"><button id="copyLink" class="secondary" title="Copy a link to this exact map, with the pins and the current view">Copy link</button><button id="copyBug" class="secondary" title="Copy a Markdown bug report: link, options, pins, view and the command to reproduce it">Copy bug report</button></div>
       <div id="shareState" class="hint"></div>
     </div>
 
@@ -120,12 +136,18 @@
       <div class="check"><input id="legend" type="checkbox"><span>Legend</span></div>
     </div></details>
 
+    <details class="sec" id="sec-pins"><summary>Pins</summary><div class="body">
+      <div class="btns"><button id="pinModeBtn" class="secondary" title="Click the map to drop pins (or Alt-click)">Pin mode</button><button id="pinsClear" class="secondary" title="Remove all pins">Clear all</button></div>
+      <div id="pinList"></div>
+      <div class="hint">Pins and the view are saved in the link only; they never change the map.</div>
+    </div></details>
+
     <div class="btns"><button id="exportSvg">Export SVG</button><button id="exportPng">Export PNG</button><button id="exportJson" class="secondary" title="World data (options + vector layers, no rasters) for other tools">Export JSON</button><button id="exportSvgFull" class="secondary" hidden title="Megacity: generate the detail of every quarter, then export the SVG (slow)">SVG, all quarters (slow)</button></div>
     <div id="progress"><i></i></div>
     <div id="gentime"></div>
     <div id="status"></div>
   </aside>
-  <main id="map"><div id="loadbar"><i></i></div><canvas id="view"></canvas><canvas id="minimap"></canvas><div id="hud"></div><button id="fit" class="secondary" title="Fit map (0)">Fit</button><div id="busy">generating...</div></main>
+  <main id="map"><div id="loadbar"><i></i></div><canvas id="view"></canvas><canvas id="minimap"></canvas><div id="pins"></div><div id="pinpop" hidden></div><div id="coords"><span id="coordText">x -, y - m</span><button id="coordCopy" class="secondary small" title="Copy x,y of the last click (or the cursor)">Copy</button></div><div id="hud"></div><button id="pinMode" class="secondary" title="Pin mode: click to drop a pin (or Alt-click)">Pin</button><button id="fit" class="secondary" title="Fit map (0)">Fit</button><div id="busy">generating...</div></main>
 </div>
 <script type="module" src="./main.ts"></script>
 </body>
