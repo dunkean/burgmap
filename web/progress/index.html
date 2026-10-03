@@ -98,12 +98,15 @@ const DATA = {
     { s: "done",  t: "M2 · Site, routes, campagne", d: "Choix du site (gué, port, éperon défensif), routes régionales A* avec ponts, anneaux agricoles : jardins, vergers, champs en lanières, prés inondables, forêts." },
     { s: "done",  t: "M3 · Tissu urbain", d: "Rues principales et secondaires, îlots, parcelles en lanières (burgage plots), maisons alignées sur rue, cours et jardins." },
     { s: "done",  t: "M3b · Cultures urbaines (Opus)", d: "Plans configurables et mélangeables. Historiques : européenne organique (défaut), bastide, noyau romain, médina, chinoise, jōkamachi, ville-temple indienne, nordique, oppidum celte, byzantine, kremlin russe, hanséatique, lagune vénitienne, persane, ottomane, sahélienne, swahilie, aztèque, maya, inca, khmère, coréenne, camp nomade. Imaginaires : elfes, nains, semi-hommes, orques, gnomes, cité sur pilotis, cité des mages, nécropole. Un plan = une suite de phases de croissance, chacune avec sa morphologie." },
-    { s: "todo",  t: "M3c · De 10 habitants à 5 millions", d: "La forme change avec l'échelle : ferme isolée, hameau, village-rue, village-tas ou circulade, bourg, ville, métropole polycentrique, mégapole. Au-delà d'environ 50 000 habitants, génération à deux niveaux : trame globale, puis quartiers détaillés à la demande au zoom. Rendu Canvas avec niveaux de détail." },
+    { s: "doing", t: "M3c · De 10 habitants à 5 millions", d: "La forme change avec l'échelle : ferme isolée, hameau, village-rue, village-tas ou circulade, bourg, ville, métropole polycentrique, mégapole. Au-delà d'environ 50 000 habitants, génération à deux niveaux : trame globale, puis quartiers détaillés à la demande au zoom. Rendu Canvas avec niveaux de détail." },
     { s: "done",  t: "M4 · Remparts et activités", d: "Banlieues et bidonvilles (optionnels). Sites marquants intégrés au plan : château, palais, cathédrale et temples, grand-place et places, arènes, port avec quais et chantier naval, halles, moulins. "+"Enceinte avec tours et portes, château, églises, cathédrale, place du marché, monastère, quais et chantier naval, moulins, tanneries, faubourgs." },
     { s: "todo",  t: "M5 · Rendu et interface", d: "Styles de carte (parchemin, atlas), légende, toponymes, export SVG/PNG, partage par URL, import d'une carte de relief." },
     { s: "todo",  t: "M6 · Contrôle qualité", d: "Revue sur 50 graines, invariants (rien dans l'eau, pas de chevauchement), performances, démo publiée." }
   ],
   plates: [
+    { src: "c3_cultures.png", cap: "Dernières cultures : byzantine, vénitienne, persane, ottomane, sahélienne, hanséatique, coréenne, cité des mages, gnomes, cité sur pilotis, camp orque, médina à patios." },
+    { src: "m3c_region.png", cap: "M3c · carte de 10 km : 44 établissements, 9 256 habitants. Bourg sur la rivière, villages dans leurs clairières de champs, forêts entre les territoires, routes en troncs communs." },
+    { src: "c2_cultures.png", cap: "Nouvelles cultures : kraal, camp de tipis, ordu, village iroquois, germanique, fort celte, fermes et fort annulaire scandinaves, pueblo, oppidum, inca, aztèque, maya, khmère, kremlin, camp orque, nécropole, semi-hommes, et l'effet du facteur d'étalement." },
     { src: "m4_sites.png", cap: "M4 · port et quais, château sur un éperon de méandre, enclos de cathédrale, faubourgs et bidonvilles, médina avec kasbah et mellah, ville chinoise avec port." },
     { src: "m3b_cultures.png", cap: "M3b · même terrain, même population (4 640 hab.), douze plans : européen, bastide, noyau romain, médina, chinois, jōkamachi, ville-temple indienne, elfique, nain, et trois mélanges (romain + européen, médina + bastide, médina ~ européen)." },
     { src: "m5_ui.png", cap: "Interface · Sauville, bourg de 4 300 habitants : toponymes générés, étiquettes le long des routes et rivières, cartouche, légende, relief sous la végétation." },
@@ -116,6 +119,17 @@ const DATA = {
     { src: "m1_vallee.png", cap: "M1 · graine 2 · vallée et grande rivière, affluents, estompage et courbes de niveau." }
   ],
   log: [
+    { d: "4 oct.", h: "Performances, champs, dix cultures de plus", b: [
+      "Performances : 23 optimisations sans changement des cartes produites. Carte de 10 km : 12,7 s → 7,3 s ; 20 km : 27 s → 15 s ; culture la plus lente sous 0,9 s.",
+      "Champs : plus de nid d'abeille. Quartiers de culture bornés par les chemins, les fourrières et le relief, lanières en S, closes à haies, bocage, essarts. 84 à 91 % des limites suivent un élément réel.",
+      "Dix cultures de plus : byzantine, vénitienne, persane, ottomane, sahélienne, hanséatique, coréenne, gnomes, cité sur pilotis, cité des mages. 43 cultures au total, 619 tests. En cours : mégapoles générées par quartiers jusqu'à 5 millions d'habitants."
+    ]},
+    { d: "3 oct.", h: "Retouches, 15 nouvelles cultures, établissements multiples", b: [
+      "Empreintes au sol : chaque parcelle reçoit un programme bâti selon sa largeur, sa profondeur, sa zone et sa richesse (pignon ou long pan, ailes en L, T ou U, cours appariées, tourelles, porches, angles coupés). La surface médiane d'un logement passe à 87 m² ; seuls 29 % des bâtiments restent de simples rectangles.",
+      "Nouvelles cultures, chacune avec sa plage d'échelle : kraal, camp de tipis, ordu, iroquois, germanique, celte, scandinave, pueblo, inca, aztèque, maya, khmère, kremlin, fort annulaire, oppidum, nécropole, semi-hommes, orques. Facteur d'étalement de 0,5 à 2.",
+      "Plusieurs établissements par carte : taille de carte libre (600 m à 40 km), population libre, planification des sites par type et par culture, réseau routier qui relie tout, champs propres à chaque village. Au-delà de 50 000 habitants, les établissements secondaires sont générés au zoom.",
+      "522 tests. Reste à faire : performances (20 s pour une carte de 10 km), mégapoles par quartiers, cultures restantes (byzantine, vénitienne, persane, ottomane, sahélienne, hanséatique, coréenne, gnomes, pilotis, mages)."
+    ]},
     { d: "3 oct.", h: "M4 : sites marquants, port, banlieues · dépôt public", b: [
       "Les sites sont réservés dans la partition avant le découpage. On y trouve : château polygonal sur le site défendable (fossé, esplanade, basses-cours, donjon), enclos de cathédrale, palais, monastères, halle sur la grand-place, paroisses intégrées au bâti, port avec quais rectilignes, rue de quai, jetées, chantier naval et corderie, ponts tous les 250 à 500 m, moulins, métiers polluants en aval, banlieues avec villages absorbés et bidonvilles. Options : nombre de châteaux, enceinte aucune, simple ou double.",
       "Chaque bâtiment est accessible depuis la rue (passage, cour, porche), et un test le vérifie. Interface : rendu dans un worker, fluidité à 60 images par seconde, barre de progression, affichage progressif.",
