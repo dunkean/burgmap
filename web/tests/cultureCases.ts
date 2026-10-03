@@ -29,6 +29,7 @@ export const CULTURE_CASES: CultureCase[] = [
   { label: 'venetian-lagoon', culture: 'venetian-lagoon', seeds: ['1', '2'] },
   { label: 'persian', culture: 'persian', seeds: ['1', '2'] },
   { label: 'ottoman', culture: 'ottoman', seeds: ['1', '2'] },
+  { label: 'sahel', culture: 'sahel', seeds: ['1', '2'] },
   { label: 'roman-core+european-organic', culture: 'roman-core', mix: 'european-organic:0.6:phases' },
   { label: 'medina+bastide', culture: 'medina', mix: 'bastide:0.45:phases' },
 ];
@@ -142,6 +143,11 @@ export function expectSignature(c: CultureCase, w: World): void {
       expect(has('ottoman-wooden-house'), 'ottoman: wooden houses').toBe(true);
       expect(has('ulu-cami') || has('kulliye-mosque'), 'ottoman: Ulu Cami or kulliye').toBe(true);
       expect(has('dukkan-shop'), 'ottoman: carsi shops').toBe(true);
+      break;
+    case 'sahel':
+      expect(has('mud-great-mosque'), 'sahel: the great mud mosque').toBe(true);
+      expect(has('granary'), 'sahel: granaries in the compounds').toBe(true);
+      expect(has('sudano-sahelian-house'), 'sahel: mud houses').toBe(true);
       break;
     case 'roman-core': case 'roman-core+european-organic':
       expect(u.landmarks.some((l) => l.kind === 'forum'), 'roman: forum').toBe(true);

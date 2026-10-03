@@ -73,6 +73,30 @@ M['ottoman-carsi'] = morph('ottoman-carsi', MORPHOLOGIES['medina-souk'], {
   streets: ['radials', 'organicInfill'], widthByRank: [6.5, 5, 3.4, 2.6, 2.2], fieldRandom: 0.4,
   arch: { typology: 'dukkan-shop', roof: 'tiled-hip', storeys: [1, 2], material: 'wood' },
 });
+// ---------------------------------------------------------------- Sahelian town
+M['sahel'] = morph('sahel', EO_BASE, {
+  // sand lanes of uneven width, widening into irregular open spaces; walled compounds round their courts
+  streets: ['radials', 'organicInfill', 'closes'], buildingOp: 'sahelCompound', extraRadials: true, curvature: 0.9, fieldNoise: 30, fieldRandom: 0.75,
+  gatePlaces: 0.6, crossPlaces: 0.6, ringGaps: 4, deadEndRatio: 0.45, placeThreshold: 2600, widthJitter: 0.45,
+  blockSize: { core: [2200, 6500], middle: [3000, 9000], edge: [4000, 12000], faubourg: [4000, 12000], village: [5000, 16000] },
+  minWidth: 18, widthByRank: [9, 7, 5, 3.6, 3],
+  frontage: { core: [10, 16], middle: [12, 18], edge: [13, 21], faubourg: [14, 22], village: [16, 28] },
+  plotDepth: { core: [14, 22], middle: [16, 26], edge: [18, 28], faubourg: [18, 30], village: [20, 34] },
+  coverage: { core: [0.62, 0.74], middle: [0.5, 0.62], edge: [0.4, 0.52], faubourg: [0.32, 0.45], village: [0.25, 0.4] },
+  footprintConformity: { core: 0, middle: 0, edge: 0, faubourg: 0, village: 0 },
+  density: { core: 210, middle: 160, edge: 120, faubourg: 70, village: 45 },
+  arch: { typology: 'sudano-sahelian-house', roof: 'flat', storeys: [1, 2], material: 'mud' },
+});
+M['sahel-town'] = morph('sahel-town', MORPHOLOGIES['medina'], {
+  // the old town (Djenne): two-storey mud houses round their courts, wall to wall along the sand lanes
+  streets: ['radials', 'organicInfill', 'culDeSacTree'], curvature: 0.85, fieldNoise: 28, fieldRandom: 0.7, deadEndRatio: 0.55,
+  placeThreshold: 1600, widthJitter: 0.4, widthByRank: [8, 6, 4.2, 3.2, 2.6], gatePlaces: 0.5, crossPlaces: 0.5,
+  blockSize: { core: [2500, 7000], middle: [4000, 12000], edge: [5000, 14000], faubourg: [5000, 14000], village: [5000, 14000] },
+  houseArea: { core: [140, 380], middle: [180, 460], edge: [220, 560], faubourg: [220, 560], village: [250, 600] }, roomDepth: [3.6, 5],
+  coverage: { core: [0.84, 0.92], middle: [0.8, 0.88], edge: [0.72, 0.82], faubourg: [0.6, 0.72], village: [0.5, 0.65] },
+  density: { core: 240, middle: 190, edge: 140, faubourg: 80, village: 50 },
+  arch: { typology: 'sudano-sahelian-house', roof: 'flat', storeys: [1, 2], material: 'mud' },
+});
 Object.assign(MORPHOLOGIES, M);
 }
 
@@ -165,5 +189,26 @@ export const MORE_CULTURES: Culture[] = [
     render: { towerShape: 'round' },
     scale: { min: 'hamlet', max: 'metropolis' },
     sitePrefs: { flatness: 0.8, hillSide: 'S', weights: { valley: 2, hilltop: 1.2, bridge: 1.4, plain: 1, harbor: 1.2 } },
+  },
+  {
+    id: 'sahel', label: 'Sahelian mud town (Djenne)',
+    nucleus: { kind: 'mud-mosque', shape: 'rect', area: [4500, 16000], compound: true, ring: 8, orientation: 'cardinal' },
+    core: { morphology: 'sahel-town', enclosure: { shape: 'organic', wall: 'none', fossil: 'none' } },
+    ring: { morphology: 'sahel', enclosure: { shape: 'organic', wall: 'none', fossil: 'none' } },
+    phaseCount: [[0, 1], [2500, 2], [12000, 3]],
+    faubourg: 'sahel', faubShare: [0.1, 0.1],
+    landmarks: [
+      { role: 'power', kind: 'sahel-palace', place: 'near-nucleus', area: [1800, 6000], minPop: 2000 },
+      { role: 'worship', kind: 'sahel-mosque', place: 'spread', area: [900, 4000], minPop: 3000, perPop: 5000, sep: 300 },
+    ],
+    village: {
+      form: 'walled', morphology: 'sahel', enclosure: { shape: 'organic', wall: 'none', fossil: 'none' },
+      nucleus: { kind: 'mud-mosque', shape: 'rect', area: [1200, 2500], compound: true, ring: 6, orientation: 'cardinal' },
+    },
+    hamlet: { form: 'auto', morphology: 'sahel' },
+    m4: { castle: 'none', cathedral: null, palace: null, monastery: null, marketHall: false, arena: 0, shanty: 'bidonville', activities: false },
+    render: { towerShape: 'square', compoundWalls: true },
+    scale: { min: 'hamlet', max: 'city' },
+    sitePrefs: { flatness: 2, weights: { meander: 2, confluence: 2, bridge: 1.6, plain: 1.6, estuary: 1, harbor: 0.6, hilltop: 0, valley: 0.5 } },
   },
 ];

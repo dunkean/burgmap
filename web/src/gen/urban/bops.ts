@@ -620,6 +620,56 @@ function konak(pl: Plot, cov: number, P: MorphologyParams, rng: Rng): ArchBldg[]
   return out;
 }
 
+// ---------------------------------------------------------------- Sahelian compound house
+/**
+ * Sahelian compound (Djenne, Kano, Timbuktu): the lot walled in mud; the entrance hall (zaure) and the front range
+ * on the street (two storeys in the town, its facade ribbed), rooms along a side wall and at the back of the court,
+ * one to three round granaries standing in the court.
+ */
+function sahelCompound(pl: Plot, cov: number, P: MorphologyParams, rng: Rng): ArchBldg[] {
+  const f = frame(pl);
+  if (!f) return [];
+  const us = usable(pl, f);
+  if (!us) return [];
+  const { u0, u1, D } = us;
+  const W = u1 - u0;
+  const ori = Math.atan2(f.n.y, f.n.x);
+  const out: ArchBldg[] = [];
+  const town = pl.zone === 'core' || pl.zone === 'middle';
+  const put = (poly: Polygon | null, arch: string, kind: Bldg['kind'], storeys: number, roof: ArchSpec['roof'] = 'flat') => {
+    if (poly && !out.some((b) => bboxHit(b.poly, poly) && polysOverlap(b.poly, poly))) out.push({ poly, kind, arch, roof, material: 'mud', storeys, orientation: ori });
+  };
+  const fd = Math.min(D - 2, rng.range(4.6, 6.5));
+  const gate = Math.min(3, W * 0.25);
+  const gl = rng.chance(0.5);
+  // the front range either side of the gate in the middle of the street wall (the zaure beside it)
+  const mid = (u0 + u1) / 2;
+  put(rectIn(pl, f, u0 + 0.6, mid - gate / 2, 0.4, fd, 12), town ? 'sudano-sahelian-house' : 'compound-room', 'house', town && cov > 0.6 ? 2 : 1);
+  put(rectIn(pl, f, mid + gate / 2, u1 - 0.6, 0.4, fd, 12), 'zaure', 'house', 1);
+  // rooms along one side and across the back of the court
+  const side = gl ? 1 : 0;
+  const sw = Math.min(W * 0.35, rng.range(3.8, 4.8));
+  const backD = rng.range(3.8, 4.8);
+  if (D > fd + 9) put(rectIn(pl, f, side ? u1 - 0.6 - sw : u0 + 0.6, side ? u1 - 0.6 : u0 + 0.6 + sw, fd + 1.5, Math.min(D - backD - 2.5, fd + 1.5 + rng.range(7, 12)), 12), 'compound-room', 'rear', 1);
+  if (D > fd + 12 && cov > 0.35) put(rectIn(pl, f, u0 + 0.6, u1 - 0.6, D - 0.6 - backD, D - 0.6, 12), 'compound-room', 'back', 1);
+  // granaries in the court
+  const nG = W > 12 && D > 16 ? rng.int(1, 3) : W > 8 && D > 12 ? 1 : 0;
+  for (let k = 0; k < nG; k++) {
+    for (let t = 0; t < 6; t++) {
+      const u = u0 + 2.5 + rng.float() * (W - 5), d = fd + 2.5 + rng.float() * Math.max(0.1, D - fd - backD - 5);
+      const c = { x: f.fa.x + f.t.x * u + f.n.x * d, y: f.fa.y + f.t.y * u + f.n.y * d };
+      const g = orientPos(disk(c, rng.range(1.2, 1.7), 10));
+      if (!polyInside(pl.poly, g) || out.some((b) => bboxHit(b.poly, g))) continue;
+      out.push({ poly: g, kind: 'back', arch: 'granary', roof: 'conical', material: 'mud', storeys: 1, orientation: ori, ring: true });
+      break;
+    }
+  }
+  pl.gated = true;
+  void P;
+  return out;
+}
+const polysOverlap = (a: Polygon, b: Polygon): boolean => a.some((q) => pointInRing(b, q)) || b.some((q) => pointInRing(a, q));
+
 // ---------------------------------------------------------------- Inca kancha
 /**
  * Kancha: a walled rectangular compound of single-room houses set along the inside of its wall around a central
@@ -768,6 +818,7 @@ function buildOnRaw(pl: Plot, cov: number, P: MorphologyParams, rng: Rng, hint?:
     case 'tomb': return tomb(pl, P, rng);
     case 'venetian': return venetian(pl, cov, P, rng, hint);
     case 'konak': return konak(pl, cov, P, rng);
+    case 'sahelCompound': return sahelCompound(pl, cov, P, rng);
     default: {
       const ori = Math.atan2(pl.nrm.y, pl.nrm.x);
       return buildPlot(pl, cov, P, rng, hint).map((b) => (b.kind === 'garden' ? b : {

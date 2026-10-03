@@ -46,6 +46,7 @@ import { registerByzantine, stairLanes } from './byzantine';
 import { registerVenice, lagoonWaterways, reserveArsenal } from './venice';
 import { registerPersian, bazaarRoofs, qanats } from './persian';
 import { registerOttoman } from './ottoman';
+import { registerSahel } from './sahel';
 import { siteCastle, type CastlePlan } from './m4/castle';
 import { reserveCastle, type M4State } from './m4/reserve';
 import { reserveCathedral, reservePalace, reserveMonasteries } from './m4/catalogue';
@@ -68,7 +69,7 @@ export interface UrbanDebug { quarters: { poly: Polygon; phase: number; lab: num
 const MARKET_AREA = (pop: number): number => (pop < 1200 ? 0 : Math.min(10000, 1800 + pop * 0.3));
 /** Qibla from the Maghreb, roughly east-south-east (map angle, y down). */
 const QIBLA = 0.2;
-const NUCLEUS_COMPOUND: Record<string, string> = { mosque: 'great-mosque', castle: 'castle', temple: 'hindu-temple', grove: 'grove', 'drum-tower': 'drum-tower', ushnu: 'inca-plaza', precinct: 'aztec-precinct', mortuary: 'mortuary-temple', maidan: 'maidan' };
+const NUCLEUS_COMPOUND: Record<string, string> = { mosque: 'great-mosque', castle: 'castle', temple: 'hindu-temple', grove: 'grove', 'drum-tower': 'drum-tower', ushnu: 'inca-plaza', precinct: 'aztec-precinct', mortuary: 'mortuary-temple', maidan: 'maidan', 'mud-mosque': 'mud-mosque' };
 
 /** A point strictly inside a polygon (centroid when inside, else the inscribed-circle center). */
 export function interiorPoint(p: Polygon): Vec2 {
@@ -119,6 +120,7 @@ const L2_SITES: Record<string, 'power' | 'worship' | 'market' | 'civic' | 'activ
   campo: 'worship', 'doge-basilica': 'worship', 'doge-palace': 'power', arsenal: 'civic',
   maidan: 'market', 'friday-mosque': 'worship', caravanserai: 'market', 'chahar-bagh': 'civic',
   mescit: 'worship', kulliye: 'worship', 'ulu-cami': 'worship', bedesten: 'market',
+  'mud-mosque': 'worship', 'sahel-mosque': 'worship', 'sahel-palace': 'power',
   'aztec-precinct': 'worship', 'calpulli-temple': 'worship', tecpan: 'power', tianguis: 'market',
 };
 /** Parcel uses of the open port pieces. */
@@ -185,6 +187,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   registerVenice();
   registerPersian();
   registerOttoman();
+  registerSahel();
   const flags = m4Flags(opts, culture, pop, archetype, rng.fork('m4'));
   const sites: UrbanSite[] = [];
   const lotData = new Map<string, unknown>();
@@ -827,7 +830,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   if (hints.compoundWalls) {
     plots.forEach((pl, pi) => {
       const op = plotMorph[pi].buildingOp;
-      if ((op !== 'yashiki' && op !== 'pavilionCompound' && op !== 'kancha' && op !== 'yardHouse') || !plotBld[pi].length) return;
+      if ((op !== 'yashiki' && op !== 'pavilionCompound' && op !== 'kancha' && op !== 'yardHouse' && op !== 'sahelCompound') || !plotBld[pi].length) return;
       const p = pl.poly;
       const fm = { x: (pl.front[0].x + pl.front[1].x) / 2, y: (pl.front[0].y + pl.front[1].y) / 2 };
       if (op === 'yardHouse') {
@@ -835,7 +838,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
         for (const w of openRing(orientPos(p), [{ p: fm, width: 3.2 }])) lines.push({ kind: 'yard-fence', path: w, width: 0.45 });
         return;
       }
-      if (op === 'kancha') {
+      if (op === 'kancha' || op === 'sahelCompound') {
         // the kancha wall: the whole lot line, with the single gate in the middle of the street side
         for (const w of openRing(orientPos(p), [{ p: fm, width: 3.4 }])) lines.push({ kind: 'compound-wall', path: w, width: 1 });
         return;
