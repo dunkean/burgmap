@@ -175,7 +175,7 @@ export const MORE_CULTURES: Culture[] = [
     hamlet: { form: 'auto', morphology: 'byzantine' },
     m4: { castle: 'kastro', cathedral: null, palace: null, monastery: null, marketHall: false, arena: 0, shanty: 'gecekondu', activities: false },
     render: { towerShape: 'square', stairs: true },
-    scale: { min: 'hamlet', max: 'city' },
+    scale: { min: 'hamlet', max: 'megacity' },
     // (the town hangs on a slope below its kastro: high ground behind, the valley or the sea below)
     sitePrefs: { flatness: 0.5, hillSide: 'N', weights: { hilltop: 1.6, valley: 2.2, harbor: 2, plain: 0.25, bridge: 0.6, estuary: 0.6 } },
   },
@@ -196,7 +196,7 @@ export const MORE_CULTURES: Culture[] = [
     hamlet: { form: 'auto', morphology: 'venetian' },
     m4: { castle: 'none', cathedral: null, palace: null, monastery: 'monastery', marketHall: false, arena: 0, shanty: 'riverbank', activities: false, arsenal: true },
     render: { towerShape: 'round', lagoon: true },
-    scale: { min: 'hamlet', max: 'metropolis' },
+    scale: { min: 'hamlet', max: 'megacity' },
     sitePrefs: { flatness: 2.5, weights: { estuary: 3, harbor: 2.6, bridge: 1.4, meander: 1.2, plain: 0.8, hilltop: 0, valley: 0.3 } },
   },
   {
@@ -244,7 +244,7 @@ export const MORE_CULTURES: Culture[] = [
     hamlet: { form: 'auto', morphology: 'ottoman' },
     m4: { castle: 'castle', cathedral: null, palace: null, monastery: null, marketHall: false, arena: 0, shanty: 'gecekondu', activities: false },
     render: { towerShape: 'round' },
-    scale: { min: 'hamlet', max: 'metropolis' },
+    scale: { min: 'hamlet', max: 'megacity' },
     sitePrefs: { flatness: 0.8, hillSide: 'S', weights: { valley: 2, hilltop: 1.2, bridge: 1.4, plain: 1, harbor: 1.2 } },
   },
   {
@@ -265,7 +265,7 @@ export const MORE_CULTURES: Culture[] = [
     hamlet: { form: 'auto', morphology: 'sahel' },
     m4: { castle: 'none', cathedral: null, palace: null, monastery: null, marketHall: false, arena: 0, shanty: 'bidonville', activities: false },
     render: { towerShape: 'square', compoundWalls: true },
-    scale: { min: 'hamlet', max: 'city' },
+    scale: { min: 'hamlet', max: 'megacity' },
     sitePrefs: { flatness: 2, weights: { meander: 2, confluence: 2, bridge: 1.6, plain: 1.6, estuary: 1, harbor: 0.6, hilltop: 0, valley: 0.5 } },
   },
   {
@@ -284,7 +284,7 @@ export const MORE_CULTURES: Culture[] = [
     hamlet: { form: 'auto' },
     m4: { castle: 'none', cathedral: null, palace: null, monastery: 'monastery', marketHall: false, arena: 0, shanty: 'zone' },
     render: { towerShape: 'square' },
-    scale: { min: 'hamlet', max: 'metropolis' },
+    scale: { min: 'hamlet', max: 'megacity' },
     sitePrefs: { flatness: 1.2, weights: { harbor: 3, estuary: 3, bridge: 1.2, confluence: 1.2, plain: 0.8, hilltop: 0.4, valley: 0.5 } },
   },
   {
@@ -304,7 +304,7 @@ export const MORE_CULTURES: Culture[] = [
     hamlet: { form: 'auto', morphology: 'korean' },
     m4: { castle: 'none', cathedral: null, palace: null, monastery: null, marketHall: false, arena: 0, shanty: 'riverbank', activities: false },
     render: { towerShape: 'square', compoundWalls: true },
-    scale: { min: 'hamlet', max: 'metropolis' },
+    scale: { min: 'hamlet', max: 'megacity' },
     // pungsu (baesanimsu): the mountain behind on the north, the water in front on the south
     sitePrefs: { flatness: 1, hillSide: 'N', waterSide: 'S', weights: { valley: 2.2, bridge: 1.6, meander: 1.4, plain: 1, hilltop: 0.2, harbor: 0.6 } },
   },
@@ -327,7 +327,7 @@ export const MORE_CULTURES: Culture[] = [
     hamlet: { form: 'auto', morphology: 'wizard' },
     m4: { castle: 'none', cathedral: null, palace: null, monastery: null, marketHall: false, arena: 0, port: true, activities: false },
     render: { towerShape: 'round' },
-    scale: { min: 'hamlet', max: 'metropolis' },
+    scale: { min: 'hamlet', max: 'megacity' },
     sitePrefs: { flatness: 2, weights: { plain: 2, hilltop: 1.5, valley: 0.6, harbor: 0.6 } },
   },
   {
@@ -344,7 +344,7 @@ export const MORE_CULTURES: Culture[] = [
     hamlet: { form: 'auto', morphology: 'gnomish' },
     m4: { castle: 'none', cathedral: null, palace: null, monastery: null, marketHall: false, arena: 0, activities: false },
     render: { towerShape: 'square', lagoon: true, locks: true },
-    scale: { min: 'hamlet', max: 'metropolis' },
+    scale: { min: 'hamlet', max: 'megacity' },
     sitePrefs: { flatness: 0.9, weights: { valley: 2, bridge: 1.6, confluence: 1.6, meander: 1.2, plain: 1, hilltop: 0.6 } },
   },
 ];

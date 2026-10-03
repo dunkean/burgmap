@@ -79,7 +79,7 @@ export const CITY_CULTURES: Culture[] = [
     hamlet: { form: 'walled', morphology: 'necropolis', enclosure: { shape: 'rect', wall: 'none', fossil: 'none', orientation: 'cardinal' } },
     m4: { castle: 'none', cathedral: null, palace: null, monastery: null, marketHall: false, arena: 0, port: false, activities: false },
     render: { towerShape: 'square', graves: true },
-    scale: { min: 'hamlet', max: 'city' },
+    scale: { min: 'hamlet', max: 'megacity' },
     sitePrefs: { flatness: 1.2, weights: { hilltop: 1.5, valley: 1.2, plain: 1, harbor: 0.2 } },
   },
   {
@@ -119,7 +119,7 @@ export const CITY_CULTURES: Culture[] = [
     hamlet: { form: 'auto', morphology: 'aztec' },
     m4: { castle: 'none', cathedral: null, palace: null, monastery: null, marketHall: false, arena: 0, shanty: 'riverbank', port: false, activities: false },
     render: { towerShape: 'square', streetCanals: true, chinampas: true, plotLines: true },
-    scale: { min: 'hamlet', max: 'metropolis' },
+    scale: { min: 'hamlet', max: 'megacity' },
     sitePrefs: { flatness: 2.2, weights: { harbor: 2.2, estuary: 2.2, plain: 1.6, bridge: 1.2, hilltop: 0, valley: 0.6 } },
   },
   {
@@ -140,7 +140,7 @@ export const CITY_CULTURES: Culture[] = [
     hamlet: { form: 'auto', morphology: 'inca' },
     m4: { castle: 'inca-fortress', cathedral: null, palace: null, monastery: null, marketHall: false, arena: 0, shanty: 'gecekondu', port: false, activities: false },
     render: { towerShape: 'square', compoundWalls: true, andenes: true, canals: true },
-    scale: { min: 'hamlet', max: 'city' },
+    scale: { min: 'hamlet', max: 'megacity' },
     sitePrefs: { flatness: 0.7, hillSide: 'N', weights: { valley: 2.5, confluence: 1.5, hilltop: 0.6, plain: 0.6, harbor: 0, estuary: 0 } },
   },
 ];
