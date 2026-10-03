@@ -21,7 +21,7 @@ Agents: fix entries in order, then mark each one fixed with the commit hash (e.g
 - "japanese castle town" (seed=p4uefz&size=city&culture=japanese-jokamachi&legend=1): j'ai des surface totalement vide (que relief) collées à la ville. Est-ce normal ? (idem en seed=p4uefz&size=city&culture=roman-core&legend=1 et peut être d'autres) → fixed in 0340ace, 01171fe (unserved reserve released; connected merchant roji fill the crescent and western ward; Roman riverbank gardens verified intentional)
 - En mode inca, le rendu des terrasses est dégueulasse. Il faut le revoir → fixed in 84543a1, 9980f54
 - Retire les "up to metropolis", il faudra que tout marche → fixed in 5ccbc5e (caps removed on every preset; camp cultures grow into clusters, d48b251)
-- "Venitian lagoon" certaines rivieres ne sont pas connectés à rien
+- "Venitian lagoon" certaines rivieres ne sont pas connectés à rien → fixed in e2c4514 (all canal components reach natural water; short shore outlets and dry bridge landings preserve access)
 - "Stilt town" se construit au dessus des rivieres et tout. Il faut quand meme adapter au relief/eau
 - "barbarian (germanic village)" est hideux. Les patatoides font tout la meme taille, les maison sont trop similaire, la cloture est trop géometrique au rendu on dirait des patates. → fixed in d48b251
 - En fait tous les barbarian sont médiocres (le sol est un patch marron), on a 4 fois le meme village. Il faut raffiner et adapter à l'environnement, et revoir la diversité et le rendu → fixed in d48b251, 4d99db4, a728b3b
