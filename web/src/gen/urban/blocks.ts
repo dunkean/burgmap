@@ -263,6 +263,8 @@ export function splitQuarter(ctx: UrbanCtx, q: Quarter, qi: number, streets: Str
       if (ok) { best = c; break; }
     }
     if (!best) { if (SPLIT_DBG.on) SPLIT_DBG.why[cands.length ? 'width' : 'noCand'] = (SPLIT_DBG.why[cands.length ? 'width' : 'noCand'] ?? 0) + 1; out.push(pc); continue; }
+    // (lagoon towns: every long cut is a rank-2 cut, dug as a canal)
+    if (P.longCut && best.rank > 2) { let L = 0; for (let i = 1; i < best.chord.length; i++) L += dist(best.chord[i - 1], best.chord[i]); if (L >= P.longCut) best.rank = 2; }
     const role = best.rank <= 2 ? 'street' : 'lane';
     const w = P.widthByRank[best.rank] * P.widthScale;
     const id = streets.add(best.chord, jitterWidths(best.chord, w, P.widthJitter, () => rng.float()), best.rank, role, pc.phase);

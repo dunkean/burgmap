@@ -15,7 +15,7 @@ export type StreetOpId =
   | 'radials' | 'rings' | 'organicInfill' | 'grid' | 'axis' | 'gateToGate' | 'culDeSacTree' | 'closes'
   | 'wardWalls' | 'defensiveKinks' | 'ribbon' | 'spiral' | 'switchbacks' | 'extraRadials';
 export type PlotOpId = 'burgage' | 'courtyard' | 'siheyuan' | 'machiya' | 'compound' | 'garden';
-export type BuildingOpId = 'streetFrontRow' | 'courtyardHouse' | 'shopRow' | 'pavilionCompound' | 'yashiki' | 'machiya' | 'detached' | 'treeHouse' | 'hall' | 'longhouse' | 'kancha' | 'yardHouse' | 'tomb';
+export type BuildingOpId = 'streetFrontRow' | 'courtyardHouse' | 'shopRow' | 'pavilionCompound' | 'yashiki' | 'machiya' | 'detached' | 'treeHouse' | 'hall' | 'longhouse' | 'kancha' | 'yardHouse' | 'tomb' | 'venetian';
 export type RoofKind = 'gable' | 'hip' | 'flat' | 'dome' | 'pyramidal' | 'pagoda' | 'thatch-round' | 'none' | 'tiled-hip' | 'conical' | 'barrel' | 'terraced';
 export type Material = 'timber' | 'stone' | 'brick' | 'mud' | 'wood' | 'paper-wood' | 'living-wood' | 'rock' | 'thatch' | 'hide' | 'felt' | 'bark' | 'adobe' | 'turf' | 'earth' | 'wattle';
 /** Architecture of a building type (metadata for later rendering / 3D). */
@@ -124,6 +124,8 @@ export interface MorphologyParams {
   contourFollow?: number;
   /** Weight (0–1) of the contour direction in the organic cross-field from gentle slopes on (hill towns). */
   contourBlend?: number;
+  /** Cuts at least this long (m) take rank 2 whatever their level (lagoon towns: the canals between the islands). */
+  longCut?: number;
   /** Gross densities (inhabitants per ha) per zone, used to size phase regions. */
   density: Record<Zone, number>;
 }

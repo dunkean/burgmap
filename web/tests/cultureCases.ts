@@ -26,6 +26,7 @@ export const CULTURE_CASES: CultureCase[] = [
   { label: 'necropolis', culture: 'necropolis', seeds: ['1', '2'] },
   // (the third culture pass)
   { label: 'byzantine-greek', culture: 'byzantine-greek', seeds: ['1', '2'] },
+  { label: 'venetian-lagoon', culture: 'venetian-lagoon', seeds: ['1', '2'] },
   { label: 'roman-core+european-organic', culture: 'roman-core', mix: 'european-organic:0.6:phases' },
   { label: 'medina+bastide', culture: 'medina', mix: 'bastide:0.45:phases' },
 ];
@@ -119,6 +120,14 @@ export function expectSignature(c: CultureCase, w: World): void {
       expect((u.lines ?? []).some((l) => l.kind === 'dome'), 'byzantine: domes').toBe(true);
       expect((u.sites ?? []).some((st) => st.kind === 'kastro'), 'byzantine: kastro').toBe(true);
       break;
+    case 'venetian-lagoon': {
+      const lk = new Set((u.lines ?? []).map((l) => l.kind));
+      expect(lk.has('canal'), 'venetian: canals').toBe(true);
+      expect(lk.has('footbridge'), 'venetian: footbridges').toBe(true);
+      expect(compounds.has('campo'), 'venetian: island campi').toBe(true);
+      expect(has('palazzo'), 'venetian: palazzi on the canals').toBe(true);
+      break;
+    }
     case 'roman-core': case 'roman-core+european-organic':
       expect(u.landmarks.some((l) => l.kind === 'forum'), 'roman: forum').toBe(true);
       break;

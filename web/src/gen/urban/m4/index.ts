@@ -26,10 +26,12 @@ export interface M4Catalogue {
   port?: boolean;
   /** European activities (mills, windmills, nuisance trades, inns, gallows, lazar house) in auto mode. */
   activities?: boolean;
+  /** A walled arsenal (basin and covered slips) reserved at level 1 in a large town (lagoon towns). */
+  arsenal?: boolean;
 }
 
 export const DEFAULT_M4: Required<M4Catalogue> = {
-  castle: 'castle', cathedral: 'cathedral-close', palace: 'palace-eu', monastery: 'monastery', marketHall: true, arena: 0.04, shanty: 'zone', port: true, activities: true,
+  castle: 'castle', cathedral: 'cathedral-close', palace: 'palace-eu', monastery: 'monastery', marketHall: true, arena: 0.04, shanty: 'zone', port: true, activities: true, arsenal: false,
 };
 
 export interface M4Flags {

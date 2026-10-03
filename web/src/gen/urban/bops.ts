@@ -535,6 +535,43 @@ function tomb(pl: Plot, P: MorphologyParams, rng: Rng): ArchBldg[] {
   return out;
 }
 
+// ---------------------------------------------------------------- Venetian palazzo
+/**
+ * Palazzo on a canal (Ca' d'Oro, Ca' Foscari): the water front range over the whole frontage (the portego hall
+ * running through it, the water gate), a wing along one side line, the cortile behind with its well-head and open
+ * stair; the land side of the lot a garden or a back range. Ordinary lots: the row houses of the burgage cycle.
+ */
+function venetian(pl: Plot, cov: number, P: MorphologyParams, rng: Rng, hint?: CourtHint): ArchBldg[] {
+  const f = frame(pl);
+  const ori = Math.atan2(pl.nrm.y, pl.nrm.x);
+  if (f && pl.rank <= 2 && f.W >= 12 && f.D >= 22 && (pl.wealth ?? 0.4) > 0.3 && rng.chance(0.7)) {
+    const us = usable(pl, f);
+    if (us) {
+      const out: ArchBldg[] = [];
+      const fd = Math.min(us.D - 6, rng.range(12, 16));
+      const front = rectIn(pl, f, us.u0, us.u1, 0, fd, 40);
+      if (front) {
+        out.push({ poly: front, kind: 'house', arch: 'palazzo', roof: 'tiled-hip', material: 'brick', storeys: rng.int(3, 4), orientation: ori, courtyards: [] });
+        const left = rng.chance(0.5);
+        const ww = Math.min((us.u1 - us.u0) * 0.38, rng.range(5, 6.5));
+        const wEnd = Math.min(us.D - 0.4, fd + rng.range(10, 18));
+        const wing = rectIn(pl, f, left ? us.u0 : us.u1 - ww, left ? us.u0 + ww : us.u1, fd, wEnd, 20);
+        if (wing) out.push({ poly: wing, kind: 'rear', arch: 'palazzo-wing', roof: 'tiled-hip', material: 'brick', storeys: 3, orientation: ori });
+        if (us.D - wEnd > 9 && cov > 0.75) {
+          const back = rectIn(pl, f, us.u0, us.u1, us.D - rng.range(6, 8), us.D - 0.3, 20);
+          if (back) out.push({ poly: back, kind: 'back', arch: 'palazzo-back-range', roof: 'tiled-hip', material: 'brick', storeys: 2, orientation: ori });
+        }
+        pl.gated = true;
+        return out;
+      }
+    }
+  }
+  return buildPlot(pl, cov, P, rng, hint).map((b) => (b.kind === 'garden' ? b : {
+    ...b, arch: b.kind === 'hall' ? 'courtyard-hall' : b.kind === 'house' ? P.arch.typology : P.arch.typology + '-' + b.kind,
+    roof: P.arch.roof, material: P.arch.material, storeys: b.kind === 'house' || b.kind === 'hall' ? Math.round(rng.range(P.arch.storeys[0], P.arch.storeys[1])) : Math.max(1, P.arch.storeys[0] - 1), orientation: ori,
+  }));
+}
+
 // ---------------------------------------------------------------- Inca kancha
 /**
  * Kancha: a walled rectangular compound of single-room houses set along the inside of its wall around a central
@@ -681,6 +718,7 @@ function buildOnRaw(pl: Plot, cov: number, P: MorphologyParams, rng: Rng, hint?:
     case 'kancha': return kancha(pl, P, rng);
     case 'yardHouse': return yardHouse(pl, cov, P, rng);
     case 'tomb': return tomb(pl, P, rng);
+    case 'venetian': return venetian(pl, cov, P, rng, hint);
     default: {
       const ori = Math.atan2(pl.nrm.y, pl.nrm.x);
       return buildPlot(pl, cov, P, rng, hint).map((b) => (b.kind === 'garden' ? b : {

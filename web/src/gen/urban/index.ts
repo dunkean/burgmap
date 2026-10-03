@@ -43,6 +43,7 @@ import { registerAztec, streetCanals, chinampas } from './aztec';
 import { registerRussian } from './russian';
 import { registerFantasy } from './fantasy';
 import { registerByzantine, stairLanes } from './byzantine';
+import { registerVenice, lagoonWaterways, reserveArsenal } from './venice';
 import { siteCastle, type CastlePlan } from './m4/castle';
 import { reserveCastle, type M4State } from './m4/reserve';
 import { reserveCathedral, reservePalace, reserveMonasteries } from './m4/catalogue';
@@ -113,6 +114,7 @@ const L2_SITES: Record<string, 'power' | 'worship' | 'market' | 'civic' | 'activ
   'inca-temple': 'worship', 'inca-palace': 'power', 'inca-plaza': 'civic',
   'orthodox-church': 'worship', 'mortuary-temple': 'worship', 'charnel-house': 'civic',
   'byz-church': 'worship', 'byz-metropolis': 'worship', 'byz-monastery': 'worship',
+  campo: 'worship', 'doge-basilica': 'worship', 'doge-palace': 'power', arsenal: 'civic',
   'aztec-precinct': 'worship', 'calpulli-temple': 'worship', tecpan: 'power', tianguis: 'market',
 };
 /** Parcel uses of the open port pieces. */
@@ -176,6 +178,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   registerRussian();
   registerFantasy();
   registerByzantine();
+  registerVenice();
   const flags = m4Flags(opts, culture, pop, archetype, rng.fork('m4'));
   const sites: UrbanSite[] = [];
   const lotData = new Map<string, unknown>();
@@ -356,6 +359,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
       if (flags.monasteries && flags.monastery) tm('monastery', () => { for (const l of reserveMonasteries(st, api, ci, flags.monasteries, flags.monastery!)) push(l); });
       const ai = { avoid: ci.avoid, nucleus: ci.nucleus, roads: nonTrack, bridges: world.bridges ?? [], lines: siteLines };
       if (flags.arena) tm('arena', () => push(reserveArena(st, api, ai)));
+      if (culture.m4?.arsenal && archetype === 'town' && pop >= 8000) tm('arsenal', () => push(reserveArsenal(st, api, ci.avoid.slice(), ci.nucleus)));
       if (flags.activities && archetype === 'town') {
         tm('activities', () => {
           tm('tannery', () => { for (const l of reserveTanneries(st, api, ai)) push(l); });
@@ -406,6 +410,8 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   const nucleus = prim.market ? polygonCentroid(prim.market) : ctx.center;
   const field = new GuidanceField(ctx, nucleus, streets, mainAngle, rng.fork('field'));
   field.terrainAngle = terrainAngle;
+  // (the first street cut at level 2: lagoon canals are level-2 cuts only)
+  const l2First = streets.list.length;
   const pieces: Piece[][] = prim.quarters.map(() => []);
   const done = prim.quarters.map(() => false);
   for (let round = 0; round < 6; round++) {
@@ -709,7 +715,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
       if (b.kind === 'garden') { plotGardens.push(b.poly); continue; }
       if (first && b.kind === 'house') { b.arch = 'smithy'; first = false; }
       // the warehouse row on the quay (merchant quarter) and the craftsmen's quarter by the tanneries
-      if (onQuay && b.kind === 'house') { b.arch = 'warehouse'; b.storeys = 3; }
+      if (onQuay && b.kind === 'house' && plotMorph[pi].buildingOp !== 'venetian') { b.arch = 'warehouse'; b.storeys = 3; }
       else if (craft && b.kind === 'house') b.arch = 'craft-workshop';
       plotBld[pi].push(b);
     }
@@ -891,6 +897,8 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   if (hints.canals) lines.push(...canals(ctx, prim.footprint));
   // ---- hill towns: stair treads on the lanes that climb the slope
   if (hints.stairs) lines.push(...stairLanes(ctx, streets));
+  // ---- lagoon towns: water down the canals, footbridges where the calli cross them
+  if (hints.lagoon) lines.push(...lagoonWaterways(streets, rng.fork('canals'), ctx.isWater, l2First));
   // ---- Aztec: canals down the lanes, chinampas round the city
   if (hints.streetCanals) lines.push(...streetCanals(streets));
   if (hints.chinampas && archetype !== 'hamlet') {

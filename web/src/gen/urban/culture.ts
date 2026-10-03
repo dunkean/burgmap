@@ -99,6 +99,8 @@ export interface RenderHints {
   graves?: boolean;
   /** Stair treads across the lanes that climb the slope (hill towns). */
   stairs?: boolean;
+  /** Lagoon town: the first cuts of the quarters are canals (water, fondamenta) crossed by footbridges. */
+  lagoon?: boolean;
 }
 export interface SettlementForm {
   /** Village / hamlet layout: EO rule (street or nucleated village), a walled compact block, a grove, terraces. */

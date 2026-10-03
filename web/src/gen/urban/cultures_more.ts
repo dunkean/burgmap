@@ -24,6 +24,19 @@ M['byzantine'] = morph('byzantine', EO_BASE, {
   density: { core: 200, middle: 150, edge: 110, faubourg: 70, village: 40 },
   arch: { typology: 'byzantine-house', roof: 'tiled-hip', storeys: [2, 3], material: 'stone' },
 });
+// ---------------------------------------------------------------- Venetian lagoon town
+M['venetian'] = morph('venetian', EO_BASE, {
+  // the first cut of each quarter is dug as a canal (rank 2: the width of a rio with its fondamenta); calli inside
+  streets: ['radials', 'organicInfill', 'closes'], buildingOp: 'venetian', longCut: 85, growth: { road: 0.12, water: 0.55, noise: 0.22, wavelength: 300, elongation: 0.1, wet: 0.15, bipolar: 0.2 }, extraRadials: false, curvature: 0.8, fieldNoise: 22, fieldRandom: 0.6,
+  gatePlaces: 0.2, crossPlaces: 0.25, ringGaps: 2.5, placeThreshold: 650, deadEndRatio: 0.45,
+  blockSize: { core: [1500, 4200], middle: [2000, 5500], edge: [2600, 7500], faubourg: [3000, 9000], village: [5000, 14000] },
+  minBlock: 500, minWidth: 15, widthByRank: [6.5, 5.5, 8.5, 2.6, 2.1], widthJitter: 0.12,
+  frontage: { core: [5, 8], middle: [5.5, 9], edge: [6.5, 11], faubourg: [7, 12], village: [14, 28] },
+  plotDepth: { core: [16, 28], middle: [18, 32], edge: [20, 36], faubourg: [20, 36], village: [28, 50] },
+  coverage: { core: [0.88, 0.95], middle: [0.8, 0.9], edge: [0.66, 0.8], faubourg: [0.55, 0.68], village: [0.2, 0.35] },
+  density: { core: 230, middle: 180, edge: 130, faubourg: 80, village: 40 },
+  arch: { typology: 'venetian-house', roof: 'tiled-hip', storeys: [3, 4], material: 'brick' },
+});
 Object.assign(MORPHOLOGIES, M);
 
 export const MORE_CULTURES: Culture[] = [
@@ -47,5 +60,25 @@ export const MORE_CULTURES: Culture[] = [
     scale: { min: 'hamlet', max: 'city' },
     // (the town hangs on a slope below its kastro: high ground behind, the valley or the sea below)
     sitePrefs: { flatness: 0.5, hillSide: 'N', weights: { hilltop: 1.6, valley: 2.2, harbor: 2, plain: 0.25, bridge: 0.6, estuary: 0.6 } },
+  },
+  {
+    id: 'venetian-lagoon', label: 'Venetian lagoon town',
+    nucleus: { kind: 'market', shape: 'rect', area: [2500, 11000], compound: false, ring: 6 },
+    core: { morphology: 'venetian', enclosure: { shape: 'organic', wall: 'none', fossil: 'street' } },
+    ring: { morphology: 'venetian', enclosure: { shape: 'organic', wall: 'none', fossil: 'none' } },
+    phaseCount: [[0, 1], [5000, 2], [20000, 3]],
+    faubourg: 'venetian', faubShare: [0.06, 0.06],
+    landmarks: [
+      { role: 'worship', kind: 'doge-basilica', place: 'adjacent-nucleus', area: [2500, 9000], minPop: 4000 },
+      { role: 'power', kind: 'doge-palace', place: 'adjacent-nucleus', area: [2500, 9000], minPop: 7000 },
+      // (an island parish every ~1,400 inhabitants: its campo, church, campanile and well)
+      { role: 'extra', kind: 'campo', place: 'spread', area: [1100, 4500], minPop: 300, perPop: 1400, sep: 150 },
+    ],
+    village: { form: 'auto', morphology: 'venetian' },
+    hamlet: { form: 'auto', morphology: 'venetian' },
+    m4: { castle: 'none', cathedral: null, palace: null, monastery: 'monastery', marketHall: false, arena: 0, shanty: 'riverbank', activities: false, arsenal: true },
+    render: { towerShape: 'round', lagoon: true },
+    scale: { min: 'hamlet', max: 'metropolis' },
+    sitePrefs: { flatness: 2.5, weights: { estuary: 3, harbor: 2.6, bridge: 1.4, meander: 1.2, plain: 0.8, hilltop: 0, valley: 0.3 } },
   },
 ];
