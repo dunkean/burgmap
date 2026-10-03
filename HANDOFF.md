@@ -120,7 +120,7 @@ GITHUB_TOKEN_FILE=/d/Workspace/dunk_token bash scripts/deploy_pages.sh   # build
 ## 7. What is left (priority order)
 
 0. **Bugs in `BUGS.md`** (repo root, maintained by the user) come first. Open entries at the pause:
-   - overlapping or odd buildings where two zones meet without a street (medieval organic);
+   - overlapping or odd buildings where two zones meet without a street (medieval organic) → fixed in 0b8b5b9; see continuation notes below;
    - biomes (desert, forest…), a new feature;
    - Chinese: moats cut through everything and should be a well-designed option; some quarters are empty and identical;
    - Japanese and Roman core (`seed=p4uefz&size=city`): empty areas stuck to the city;
@@ -177,3 +177,13 @@ GITHUB_TOKEN_FILE=/d/Workspace/dunk_token bash scripts/deploy_pages.sh   # build
 - Every visual change was checked by rendering PNGs and reading them. Unit tests alone were never trusted for visuals.
 - Commit at each step and push to `main`. Redeploy Pages with `web/scripts/deploy_pages.sh`. The GitHub token is read from a local file and must never be printed or committed.
 - The progress journal (French) is a private claude.ai artifact; its source is `web/progress/index.html`.
+
+## 9. Codex continuation
+
+- The annotated local tag `claude-opus-5.5-handoff-2026-10-03` preserves the original handoff commit `06d7fa4`.
+- `AGENTS.md` documents repository conventions (`a71d457`).
+- First open bug fixed in `0b8b5b9`: `seed=p4uefz&size=city&culture=european-organic` produced 124 building overlaps. Filtering small fortified-region components removed older riverbank districts from the latest enclosure, so faubourgs claimed already-built land. Later phases now retain components containing earlier-phase land.
+- Regression suite: `tests/urban.phaseboundaries.test.ts` checks phase nesting and disjoint quarters/buildings across blocks. It failed before the fix with 56,483 m² of older districts outside the last phase, and passes afterward.
+- Validation: 50 tests passed across the regression, determinism, town/city invariants, and selected Chinese/Japanese/Roman/Medina town suites and mixes; typecheck and build passed. The full suite was not run. Town seeds 1, 4, and 6 retain byte-identical urban layers against the handoff. Before/after PNG crops were inspected in `web/out/seams/` (ignored).
+- Next open entry, in user priority order: biomes. The other open entries in `BUGS.md` remain pending.
+- Pre-existing untracked `web/scripts/repro_culture.mjs` and `web/scripts/repro_race.mjs` were preserved.
