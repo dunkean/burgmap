@@ -47,6 +47,37 @@ export class GridIndex<T> {
   }
   queryPt(p: Vec2, r: number): T[] { return this.query(p.x - r, p.y - r, p.x + r, p.y + r); }
   /**
+   * Minimum of `f` over the entries of the cells overlapping the box (as forEachIn would visit them), searched in
+   * rings of cells around (px, py) and stopped once no unvisited entry can be closer: `f` must be a distance from
+   * (px, py) to the entry's box content (the entries farther out are ≥ (k)·cell away after ring k). Infinity if none.
+   */
+  minOver(x0: number, y0: number, x1: number, y1: number, px: number, py: number, f: (it: T) => number): number {
+    const c = this.cell;
+    if (++this.tick === 0xffffffff) { this.stamp.fill(0); this.tick = 1; }
+    const tk = this.tick, st = this.stamp, items = this.items;
+    const ix0 = Math.floor(x0 / c), ix1 = Math.floor(x1 / c), iy0 = Math.floor(y0 / c), iy1 = Math.floor(y1 / c);
+    const cx = Math.floor(px / c), cy = Math.floor(py / c);
+    const K = Math.max(cx - ix0, ix1 - cx, cy - iy0, iy1 - cy);
+    let best = Infinity;
+    const R = Math.min(px - x0, x1 - px, py - y0, y1 - py);
+    const visit = (ix: number, iy: number): void => {
+      if (ix < ix0 || ix > ix1 || iy < iy0 || iy > iy1) return;
+      const l = this.cells.get(this.key(ix, iy));
+      if (l) for (let k = 0; k < l.length; k++) { const id = l[k]; if (st[id] !== tk) { st[id] = tk; const d = f(items[id]); if (d < best) best = d; } }
+    };
+    for (let k = 0; k <= K; k++) {
+      if (k === 0) visit(cx, cy);
+      else {
+        for (let ix = cx - k; ix <= cx + k; ix++) { visit(ix, cy - k); visit(ix, cy + k); }
+        for (let iy = cy - k + 1; iy <= cy + k - 1; iy++) { visit(cx - k, iy); visit(cx + k, iy); }
+      }
+      // every entry not visited yet lies only in cells of ring ≥ k + 1 (at least k·cell from (px, py)) or reaches
+      // the box only with points outside it (farther than R)
+      if (best <= k * c && best <= R) break;
+    }
+    return best;
+  }
+  /**
    * Visits the entries of the overlapped cells, each insertion once, in first-seen cell order (fast; for
    * idempotent visitors: flags, minimum distances).
    */

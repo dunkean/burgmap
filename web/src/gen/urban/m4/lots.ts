@@ -31,9 +31,8 @@ export class LineIndex {
   }
   /** Distance from p to the nearest line (∞ beyond r). */
   dist(p: Vec2, r: number): number {
-    let d = Infinity;
-    this.idx.forEachIn(p.x - r, p.y - r, p.x + r, p.y + r, (sg) => { d = Math.min(d, distToSeg(p, sg.a, sg.b)); });
-    return d;
+    // (the minimum over the same segments as a scan of the box, found ring by ring from p)
+    return this.idx.minOver(p.x - r, p.y - r, p.x + r, p.y + r, p.x, p.y, (sg) => distToSeg(p, sg.a, sg.b));
   }
 }
 
