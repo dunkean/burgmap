@@ -165,6 +165,7 @@ export function buildScene(world0: World, tileSize = TILE_SIZE): Scene {
     addPoly('farm-yards', lu.farmsteads.map((f) => f.yard));
     addPoly('farm-buildings', lu.farmsteads.flatMap((f) => f.buildings));
     addLines('farm-drives', 'drive', 'drive', 2, lu.farmsteads.map((f) => f.drive));
+    addLines('field-ways', 'drive', 'drive', 2.2, (lu as { ways?: Polyline[] }).ways ?? []);
   }
 
   // regional roads

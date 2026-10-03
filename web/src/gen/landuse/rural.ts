@@ -2,18 +2,24 @@ import polygonClipping from 'polygon-clipping';
 import { Delaunay } from 'd3-delaunay';
 import type { Rng } from '../core/rng';
 import { Noise2D } from '../core/noise';
-import { blurGrid, gradientAt, D8 } from '../core/grid';
+import { gradientAt, D8 } from '../core/grid';
+import { blurFast as blurGrid } from './blur';
 import { Vec2, Polygon, Polyline, chaikin, simplify, polygonArea, polygonCentroid, polygonContains, bbox, dist } from '../core/geom';
 import { distanceField, forCellsNearPolyline, smoothstep } from '../core/field';
 import { marchingSquares } from '../terrain/contour';
 import { rasterizePolys } from '../geo/raster';
+import { partitionRegion, FieldCtx, FieldNet } from './fields';
 import type { World, LandArea, LandKind, Farmstead, LandUseLayer } from '../types';
 
 type Ring = [number, number][];
 
+/** Extra layer data (field ways = cart tracks between furlongs, headlands = narrow baulks/hedges); closes carry `enclosed` on their LandArea. */
+export interface FieldNetExtras { ways: Polyline[]; headlands: Polyline[] }
+
 const K_NONE = 0;
-const KINDS: (LandKind | null)[] = [null, 'field', 'meadow', 'pasture', 'forest', 'orchard', 'garden', 'marsh', 'commons'];
-const C = { NONE: 0, FIELD: 1, MEADOW: 2, PASTURE: 3, FOREST: 4, ORCHARD: 5, GARDEN: 6, MARSH: 7, COMMONS: 8 } as const;
+const KINDS: (LandKind | null)[] = [null, 'field', 'meadow', 'pasture', 'forest', 'orchard', 'garden', 'marsh', 'commons', 'field'];
+/** CLOSE: enclosed ground (hedged closes: bocage, farm closes, assarts); it becomes fields or pasture. */
+const C = { NONE: 0, FIELD: 1, MEADOW: 2, PASTURE: 3, FOREST: 4, ORCHARD: 5, GARDEN: 6, MARSH: 7, COMMONS: 8, CLOSE: 9 } as const;
 
 /** Rectangle polygon centered at (cx, cy) with long axis at `ang`. */
 function rect(cx: number, cy: number, len: number, wid: number, ang: number): Polygon {
@@ -35,24 +41,43 @@ const fromRing = (r: Ring): Polygon => {
 
 interface Region { outer: Polygon; holes: Polygon[] }
 
-/** Smooth region polygons (with holes) of the cells where `ind` is 1. */
-function vectorize(ind: Float32Array, w: number, h: number, cell: number, minArea: number): Region[] {
-  const bl = blurGrid({ w, h, cell, data: ind }, 1, 1).data;
-  const pw = w + 2, ph = h + 2;
+/** Drops vertices closer than `d` to the last kept one (O(n); the loops are already smooth). */
+function decimate(pts: Polygon, d: number): Polygon {
+  if (pts.length < 8) return pts;
+  const out: Polygon = [pts[0]];
+  const d2 = d * d;
+  for (let i = 1; i < pts.length - 1; i++) {
+    const q = out[out.length - 1];
+    if ((pts[i].x - q.x) ** 2 + (pts[i].y - q.y) ** 2 >= d2) out.push(pts[i]);
+  }
+  out.push(pts[pts.length - 1]);
+  return out;
+}
+
+/** Smooth region polygons (with holes) of the cells where `ind` is 1 (only the window `win` of cells is processed). */
+function vectorize(ind: Float32Array, w: number, h: number, cell: number, minArea: number, win: { x0: number; y0: number; x1: number; y1: number }): Region[] {
+  // crop to the cells of the class, with a margin for the blur and the closing border
+  const X0 = Math.max(0, win.x0 - 2), Y0 = Math.max(0, win.y0 - 2), X1 = Math.min(w - 1, win.x1 + 2), Y1 = Math.min(h - 1, win.y1 + 2);
+  const cw = X1 - X0 + 1, ch = Y1 - Y0 + 1;
+  const sub = new Float32Array(cw * ch);
+  for (let y = 0; y < ch; y++) for (let x = 0; x < cw; x++) sub[y * cw + x] = ind[(y + Y0) * w + x + X0];
+  const bl = blurGrid({ w: cw, h: ch, cell, data: sub }, 1, 1).data;
+  const pw = cw + 2, ph = ch + 2;
   const pad = new Float32Array(pw * ph);
-  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) pad[(y + 1) * pw + x + 1] = bl[y * w + x];
-  const paths = marchingSquares(pad, pw, ph, 0.5, cell, -0.5 * cell, -0.5 * cell);
+  for (let y = 0; y < ch; y++) for (let x = 0; x < cw; x++) pad[(y + 1) * pw + x + 1] = bl[y * cw + x];
+  const paths = marchingSquares(pad, pw, ph, 0.5, cell, (X0 - 0.5) * cell, (Y0 - 0.5) * cell);
   const loops: Polygon[] = [];
   for (const p of paths) {
     if (!p.closed || p.pts.length < 4) continue;
-    let pts = chaikin(p.pts, 2, true);
-    pts = simplify(pts, 0.1 * cell);
+    const pts = decimate(chaikin(p.pts, 2, true), 0.3 * cell);
     if (pts.length >= 3 && Math.abs(polygonArea(pts)) >= minArea * 0.4) loops.push(pts);
   }
   const areas = loops.map((l) => Math.abs(polygonArea(l)));
+  const boxes = loops.map((l) => bbox(l));
+  const inside = (j: number, p: Vec2): boolean => { const b = boxes[j]; return p.x >= b.minX && p.x <= b.maxX && p.y >= b.minY && p.y <= b.maxY && polygonContains(loops[j], p); };
   const depth = loops.map((l, i) => {
     let d = 0;
-    for (let j = 0; j < loops.length; j++) if (j !== i && areas[j] > areas[i] && polygonContains(loops[j], l[0])) d++;
+    for (let j = 0; j < loops.length; j++) if (j !== i && areas[j] > areas[i] && inside(j, l[0])) d++;
     return d;
   });
   const out: Region[] = [];
@@ -61,7 +86,7 @@ function vectorize(ind: Float32Array, w: number, h: number, cell: number, minAre
   loops.forEach((l, i) => {
     if (depth[i] % 2 === 1 && areas[i] >= minArea * 0.5) {
       let bi = -1, ba = Infinity;
-      outerIdx.forEach((oi, k) => { if (areas[oi] > areas[i] && areas[oi] < ba && polygonContains(loops[oi], l[0])) { ba = areas[oi]; bi = k; } });
+      outerIdx.forEach((oi, k) => { if (areas[oi] > areas[i] && areas[oi] < ba && inside(oi, l[0])) { ba = areas[oi]; bi = k; } });
       if (bi >= 0) out[bi].holes.push(l);
     }
   });
@@ -93,6 +118,7 @@ export function generateRural(world: World, root: Rng, mainRoads?: number, strip
   const N = n * n;
   const H = terrain.height.data;
   const f = site.fields;
+  const tStart = performance.now();
   const rr = root.fork('rural');
   const noise = new Noise2D(rr.fork('noise'));
   const stats: Record<string, number> = {};
@@ -284,6 +310,21 @@ export function generateRural(world: World, root: Rng, mainRoads?: number, strip
   }
 
   // ---- class grid
+  const tClass = performance.now();
+  stats['ms.lu.pre'] = Math.round(tClass - tStart);
+  const dFarm = new Float32Array(N).fill(1e9);
+  for (const fm of farmsteads) {
+    const cx = Math.floor(fm.pos.x / cell), cy = Math.floor(fm.pos.y / cell), r = Math.ceil(200 / cell) + 1;
+    for (let y = Math.max(0, cy - r); y <= Math.min(n - 1, cy + r); y++) for (let x = Math.max(0, cx - r); x <= Math.min(n - 1, cx + r); x++) {
+      const d = Math.hypot((x + 0.5) * cell - fm.pos.x, (y + 0.5) * cell - fm.pos.y);
+      if (d < dFarm[y * n + x]) dFarm[y * n + x] = d;
+    }
+  }
+  const bocNoise = new Noise2D(rr.fork('bocage'));
+  const bocage = (wx: number, wy: number, dW: number): number => {
+    const base = 0.35 * (1 - Math.min(1, dW / 450)) + 0.45 * (0.5 - wx / S) - (world.options.relief === 'mountains' ? 0.2 : 0);
+    return base + 0.5 <= 0.4 ? -1 : base + 0.5 * bocNoise.fbm(wx / 900, wy / 900, 2);
+  };
   const cls = new Uint8Array(N);
   const hb = blurGrid(terrain.height, Math.max(2, Math.round(300 / cell)), 2).data;
   const promVals: number[] = [];
@@ -292,6 +333,19 @@ export function generateRural(world: World, root: Rng, mainRoads?: number, strip
   const promHi = Math.max(4, promVals.length ? promVals[Math.floor(promVals.length * 0.75)] : 8);
   const sea = terrain.seaFraction > 0.02;
   const multi = secondary.length > 0;
+  // low-frequency noise on a coarse grid (bilinear): the soil field varies over hundreds of metres
+  const sStride = Math.max(1, Math.min(8, Math.floor(380 / (4 * cell))));
+  const sgw = Math.ceil((n - 1) / sStride) + 2;
+  const soilG = new Float32Array(sgw * sgw);
+  for (let gy = 0; gy < sgw; gy++) for (let gx = 0; gx < sgw; gx++) soilG[gy * sgw + gx] = noise.fbm(((gx * sStride + 0.5) * cell) / 380, ((gy * sStride + 0.5) * cell) / 380, 3);
+  const soilAt = (x: number, y: number): number => {
+    const fx = x / sStride, fy = y / sStride, x0 = Math.floor(fx), y0 = Math.floor(fy), tx = fx - x0, ty = fy - y0;
+    const o = y0 * sgw + x0;
+    return (soilG[o] * (1 - tx) + soilG[o + 1] * tx) * (1 - ty) + (soilG[o + sgw] * (1 - tx) + soilG[o + sgw + 1] * tx) * ty;
+  };
+  let cwx = 0, cwy = 0;
+  const gB = (): number => noise.fbm(cwx / 110 + 40, cwy / 110 - 17, 2);
+  const gC = (): number => noise.fbm(cwx / 70 - 9, cwy / 70 + 5, 2);
   const u1 = 0.05 * Lm + 30, u2 = 0.11 * Lm, u3 = 0.42 * Lm, u4 = 0.55 * Lm;
   for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
     const i = y * n + x;
@@ -300,40 +354,58 @@ export function generateRural(world: World, root: Rng, mainRoads?: number, strip
     const sl = slopeL[i];
     const hab = f.hab[i], dW = f.dWater[i];
     const u = uDist[i];
-    const soil = noise.fbm(wx / 380, wy / 380, 3); // -1..1
-    const nB = noise.fbm(wx / 110 + 40, wy / 110 - 17, 2);
-    const nC = noise.fbm(wx / 70 - 9, wy / 70 + 5, 2);
+    cwx = wx; cwy = wy;
+    const soil = soilAt(x, y); // -1..1
     const prom = H[i] - hb[i];
     let k: number;
-    if (hab < 1.4 && sl < 0.02 && dW < 150 && nB > -0.15 - (sea && f.dSea[i] < 200 ? 0.25 : 0)) k = C.MARSH;
+    if (hab < 1.4 && sl < 0.02 && dW < 150 && gB() > -0.15 - (sea && f.dSea[i] < 200 ? 0.25 : 0)) k = C.MARSH;
     else if (hab < 4.5 && dW < 240 && sl < 0.5 * fieldMax && (dW < 130 || soil < 0.1)) k = C.MEADOW;
     else if (sl > pastureMax || (prom > promHi * 1.15 && sl > fieldMax)) k = C.FOREST;
-    else if (farmMask[i] === 2) k = nC > 0 ? C.ORCHARD : C.GARDEN;
-    else if (u < u1 && sl < fieldMax) k = dRoad[i] < 80 && nC > -0.05 ? C.GARDEN : C.ORCHARD;
-    else if (u < u2 && sl < fieldMax) k = nC > 0.05 ? C.ORCHARD : nC > -0.35 ? C.FIELD : C.MEADOW;
+    else if (farmMask[i] === 2) k = gC() > 0 ? C.ORCHARD : C.GARDEN;
+    else if (u < u1 && sl < fieldMax) k = dRoad[i] < 80 && gC() > -0.05 ? C.GARDEN : C.ORCHARD;
+    else if (u < u2 && sl < fieldMax) k = gC() > 0.05 ? C.ORCHARD : gC() > -0.35 ? C.FIELD : C.MEADOW;
     // settlement system: the land between the village territories is woodland (with some heath), not a patchwork
     else if (multi && u > u4 * (1 + 0.2 * soil)) k = soil > -0.45 ? C.FOREST : C.COMMONS;
     else if (sl > fieldMax) k = soil > 0.15 ? C.FOREST : C.PASTURE;
     else {
       const arable = u3 * (1 + 0.28 * soil);
       if (u < arable && soil > -0.6) k = C.FIELD;
-      else if (u < u4 * (1 + 0.2 * soil)) k = soil < -0.05 || nB > 0.35 ? C.COMMONS : C.PASTURE;
+      else if (u < u4 * (1 + 0.2 * soil)) k = soil < -0.05 || gB() > 0.35 ? C.COMMONS : C.PASTURE;
       else k = soil > 0 ? C.FOREST : C.PASTURE;
+    }
+    // enclosed ground: closes around the farmsteads and the village edge, bocage in the wet and western country
+    if (k === C.FIELD) {
+      const cl = (dFarm[i] < 190 && dFarm[i] < 115 + 75 * gC()) || (u < 0.17 * Lm && gB() > -0.3) || bocage(wx, wy, dW) > 0.4;
+      if (cl) k = C.CLOSE;
     }
     cls[i] = k;
   }
+  // assarts: clearings cut out of the wood along its edge with the fields
+  {
+    const fm = new Uint8Array(N);
+    for (let i = 0; i < N; i++) if (cls[i] === C.FIELD || cls[i] === C.CLOSE) fm[i] = 1;
+    const dF = distanceField(fm, n, n, cell).dist;
+    for (let i = 0; i < N; i++) {
+      if (cls[i] !== C.FOREST || dF[i] > 95) continue;
+      const wx = ((i % n) + 0.5) * cell, wy = (((i / n) | 0) + 0.5) * cell;
+      const a = noise.fbm(wx / 95 + 200, wy / 95 + 77, 2);
+      if (a > 0.05 && dF[i] < 30 + 90 * a && slopeL[i] < fieldMax * 1.15 && f.hab[i] > 2.5) cls[i] = C.CLOSE;
+    }
+  }
   // majority filter + small-component cleanup
   const tmp = new Uint8Array(N);
-  const cnt = new Uint8Array(9);
+  const cnt = new Uint8Array(10);
   for (let pass = 0; pass < 2; pass++) {
     tmp.set(cls);
     for (let y = 1; y < n - 1; y++) for (let x = 1; x < n - 1; x++) {
       const i = y * n + x;
       if (!cls[i]) continue;
+      const ci = cls[i];
+      if (cls[i - 1] === ci && cls[i + 1] === ci && cls[i - n] === ci && cls[i + n] === ci && cls[i - n - 1] === ci && cls[i - n + 1] === ci && cls[i + n - 1] === ci && cls[i + n + 1] === ci) continue;
       cnt.fill(0);
       for (const [dx, dy] of D8) cnt[cls[i + dy * n + dx]]++;
       let bk = cls[i], bc = cnt[cls[i]];
-      for (let k = 1; k < 9; k++) if (cnt[k] > bc) { bc = cnt[k]; bk = k; }
+      for (let k = 1; k < 10; k++) if (cnt[k] > bc) { bc = cnt[k]; bk = k; }
       if (bk !== cls[i] && bc >= 5) tmp[i] = bk;
     }
     cls.set(tmp);
@@ -364,129 +436,141 @@ export function generateRural(world: World, root: Rng, mainRoads?: number, strip
         for (const [dx, dy] of D8) { const nx = cx + dx, ny = cy + dy; if (nx >= 0 && ny >= 0 && nx < n && ny < n) { const v = cls[ny * n + nx]; if (v !== k) cnt[v]++; } }
       }
       let bk = 0, bc = 0;
-      for (let v = 1; v < 9; v++) if (cnt[v] > bc) { bc = cnt[v]; bk = v; }
+      for (let v = 1; v < 10; v++) if (cnt[v] > bc) { bc = cnt[v]; bk = v; }
       for (const c of comp) cls[c] = bk;
     }
   }
 
-  // ---- vectorize
+  stats['ms.lu.classes'] = Math.round(performance.now() - tClass);
+  // ---- vectorize (polygon edges get a position-based domain warp: natural, wavering edges that stay shared between classes)
   const areas: LandArea[] = [];
   const fieldRegions: Region[] = [];
+  const closeRegions: Region[] = [];
   const minArea = Math.max(1200, 2.2 * cell * cell);
   const counts: Record<string, number> = {};
-  for (let k = 1; k < 9; k++) {
+  const tVec = performance.now();
+  const wnA = new Noise2D(rr.fork('warp'));
+  const wAmp = Math.max(2, Math.min(4, 0.5 * cell));
+  const exM = new Uint8Array(N);
+  for (let i = 0; i < N; i++) if (!cls[i]) exM[i] = 1;
+  const exDist = (x: number, y: number): number => {
+    const cx = Math.min(n - 1, Math.max(0, Math.floor(x / cell))), cy = Math.min(n - 1, Math.max(0, Math.floor(y / cell)));
+    let best = 3 * cell;
+    for (let yy = Math.max(0, cy - 3); yy <= Math.min(n - 1, cy + 3); yy++) for (let xx = Math.max(0, cx - 3); xx <= Math.min(n - 1, cx + 3); xx++) {
+      if (!exM[yy * n + xx]) continue;
+      const d = Math.hypot((xx + 0.5) * cell - x, (yy + 0.5) * cell - y);
+      if (d < best) best = d;
+    }
+    return best;
+  };
+  const warpRing = (r: Polygon): Polygon => {
+    const dense: Polygon = [];
+    for (let i = 0; i < r.length; i++) {
+      const a = r[i], b = r[(i + 1) % r.length];
+      const L = dist(a, b), m = Math.max(1, Math.ceil(L / 14));
+      for (let k = 0; k < m; k++) dense.push({ x: a.x + ((b.x - a.x) * k) / m, y: a.y + ((b.y - a.y) * k) / m });
+    }
+    return simplify(dense, 0.35).map((q) => {
+      // no displacement next to water, roads and the reserve (they keep their margins)
+      const a = wAmp * smoothstep(exDist(q.x, q.y), 0.8 * cell, 2.4 * cell);
+      return {
+        x: q.x + a * (wnA.noise(q.x / 48, q.y / 48) + 0.25 * wnA.noise(q.x / 20 + 5, q.y / 20)),
+        y: q.y + a * (wnA.noise(q.x / 48 + 31, q.y / 48 - 7) + 0.25 * wnA.noise(q.x / 20, q.y / 20 + 9)),
+      };
+    });
+  };
+  const warpRegion = (rg: Region): Region[] => [{ outer: warpRing(rg.outer), holes: rg.holes.map(warpRing) }];
+  const wins = Array.from({ length: 10 }, () => ({ x0: n, y0: n, x1: -1, y1: -1, any: 0 }));
+  for (let y = 0, i = 0; y < n; y++) for (let x = 0; x < n; x++, i++) {
+    const k = cls[i];
+    if (!k) continue;
+    const wn = wins[k];
+    wn.any++;
+    if (x < wn.x0) wn.x0 = x; if (x > wn.x1) wn.x1 = x; if (y < wn.y0) wn.y0 = y; if (y > wn.y1) wn.y1 = y;
+  }
+  for (let k = 1; k < 10; k++) {
+    if (!wins[k].any) continue;
     const ind = new Float32Array(N);
-    let any = 0;
-    for (let i = 0; i < N; i++) if (cls[i] === k) { ind[i] = 1; any++; }
-    if (!any) continue;
-    const regions = vectorize(ind, n, n, cell, minArea);
+    for (let i = 0; i < N; i++) if (cls[i] === k) ind[i] = 1;
+    const regions = vectorize(ind, n, n, cell, minArea, wins[k]).flatMap(warpRegion);
     for (const rg of regions) {
-      if (KINDS[k] === 'field') fieldRegions.push(rg);
+      if (k === C.FIELD) fieldRegions.push(rg);
+      else if (k === C.CLOSE) closeRegions.push(rg);
       else areas.push({ kind: KINDS[k]!, poly: rg.outer, holes: rg.holes.length ? rg.holes : undefined });
     }
-    counts[KINDS[k]!] = regions.length;
+    counts[KINDS[k]! + (k === C.CLOSE ? '.close' : '')] = regions.length;
   }
+  stats['ms.lu.vector'] = Math.round(performance.now() - tVec);
 
-  // ---- furlongs and strips
+  // ---- furlongs, closes and strips
+  const tFields = performance.now();
   const hSm = blurGrid(terrain.height, 2, 2);
   const ftRng = rr.fork('furlong');
   const angNoise = new Noise2D(rr.fork('angle'));
-  let stripCount = 0, furlongCount = 0, fieldArea = 0;
-  const idxAt = (p: Vec2) => Math.min(n - 1, Math.max(0, Math.floor(p.y / cell))) * n + Math.min(n - 1, Math.max(0, Math.floor(p.x / cell)));
+  const idxAt = (x: number, y: number) => Math.min(n - 1, Math.max(0, Math.floor(y / cell))) * n + Math.min(n - 1, Math.max(0, Math.floor(x / cell)));
+  // strip direction field, as doubled-angle vectors so that it blends without the pi ambiguity:
+  // contours on slopes (strips lie across the slope), perpendicular to the nearest road, else a slow noise
+  const dirAt = (x: number, y: number): number => {
+    const ci = idxAt(x, y);
+    const sl = slopeL[ci];
+    const wS = smoothstep(sl, 0.022, 0.05);
+    const gxy = gradientAt(hSm, Math.min(n - 2, Math.max(1, Math.floor(x / cell))), Math.min(n - 2, Math.max(1, Math.floor(y / cell))));
+    const aS = Math.atan2(gxy[1], gxy[0]) + Math.PI / 2;
+    const wR = 1 - smoothstep(dRoad[ci], 110, 300);
+    const aR = roadAng[ci] + Math.PI / 2;
+    const aN = angNoise.fbm(x / 700, y / 700, 2) * 2.4;
+    const fx = (1 - wR) * Math.cos(2 * aN) + wR * Math.cos(2 * aR);
+    const fy = (1 - wR) * Math.sin(2 * aN) + wR * Math.sin(2 * aR);
+    const vx = wS * Math.cos(2 * aS) + (1 - wS) * fx, vy = wS * Math.sin(2 * aS) + (1 - wS) * fy;
+    return Math.atan2(vy, vx) / 2;
+  };
+  const net: FieldNet = { furlongs: [], ways: [], headlands: [] };
+  const mkCtx = (closed: boolean): FieldCtx => ({
+    dirAt, slopeAt: (x, y) => slopeL[idxAt(x, y)], closeAt: () => closed, noise: angNoise, rng: ftRng,
+    stripsAt: stripLod ? (c) => dist(c, stripLod.center) < stripLod.radius : undefined,
+  });
+  let fieldArea = 0;
   for (const rg of fieldRegions) {
-    const area = Math.abs(polygonArea(rg.outer)) - rg.holes.reduce((s, hl) => s + Math.abs(polygonArea(hl)), 0);
-    fieldArea += area;
-    const bb = bbox(rg.outer);
-    const sp = ftRng.range(190, 250);
-    const pts: Vec2[] = [];
-    const ox = ftRng.float() * sp, oy = ftRng.float() * sp;
-    for (let row = -1, y = bb.minY - sp + oy; y < bb.maxY + sp; y += sp * 0.88, row++) {
-      for (let x = bb.minX - sp + ox + (row & 1 ? sp / 2 : 0); x < bb.maxX + sp; x += sp) {
-        pts.push({ x: x + (ftRng.float() - 0.5) * sp * 0.55, y: y + (ftRng.float() - 0.5) * sp * 0.55 });
-      }
-    }
-    const regMP: [Ring[]] = [[toRing(rg.outer), ...rg.holes.map(toRing)]];
-    const pieces: Ring[][] = [];
-    if (area < 2.2 * sp * sp || pts.length < 4) {
-      pieces.push(...(regMP as unknown as Ring[][]));
-    } else {
-      const del = Delaunay.from(pts, (p) => p.x, (p) => p.y);
-      const vor = del.voronoi([bb.minX - 5, bb.minY - 5, bb.maxX + 5, bb.maxY + 5]);
-      for (let i = 0; i < pts.length; i++) {
-        const cp = vor.cellPolygon(i);
-        if (!cp || cp.length < 4) continue;
-        let res: ReturnType<typeof polygonClipping.intersection>;
-        try { res = polygonClipping.intersection(regMP, [[cp as Ring]]); } catch { continue; }
-        for (const pg of res) pieces.push(pg as Ring[]);
-      }
-    }
-    for (const pg of pieces) {
-      const outer = fromRing(pg[0]);
-      const holes = pg.slice(1).map(fromRing);
-      const a = Math.abs(polygonArea(outer));
-      if (a < 1400) continue;
-      const cen = polygonCentroid(outer);
-      const ci = idxAt(cen);
-      // strip direction: along contours on slopes, perpendicular to a nearby road on the flat
-      let ang: number;
-      const sl = slopeL[ci];
-      if (sl > 0.03) {
-        const [gx, gy] = gradientAt(hSm, Math.min(n - 1, Math.floor(cen.x / cell)), Math.min(n - 1, Math.floor(cen.y / cell)));
-        ang = Math.atan2(gy, gx) + Math.PI / 2;
-      } else if (dRoad[ci] < 260) ang = roadAng[ci] + Math.PI / 2;
-      else ang = angNoise.fbm(cen.x / 700, cen.y / 700, 2) * 2.4;
-      ang += ftRng.range(-0.12, 0.12);
-      ang = Math.round(ang / (Math.PI / 18)) * (Math.PI / 18);
-      ang = ((ang % Math.PI) + Math.PI) % Math.PI;
-      // strips: slice the furlong with parallel slabs
-      const ca = Math.cos(ang), sa = Math.sin(ang);
-      const bbf = bbox(outer);
-      // rotated extents
-      let vmin = Infinity, vmax = -Infinity, umin = Infinity, umax = -Infinity;
-      for (const q of outer) {
-        const v = -q.x * sa + q.y * ca, u = q.x * ca + q.y * sa;
-        vmin = Math.min(vmin, v); vmax = Math.max(vmax, v); umin = Math.min(umin, u); umax = Math.max(umax, u);
-      }
-      void bbf;
-      const ws = ftRng.range(11, 22);
-      const strips: Polygon[] = [];
-      const furlongMP = [pg as Ring[]];
-      const slabs = Math.ceil((vmax - vmin) / ws);
-      // level of detail (big lazy maps): the strips are cut only near the main town
-      const stripsHere = !stripLod || dist(cen, stripLod.center) < stripLod.radius;
-      if (stripsHere && slabs >= 2 && slabs <= 60 && a > 2500) {
-        for (let s = 0; s < slabs; s++) {
-          const v0 = vmin + s * ws, v1 = v0 + ws * ftRng.range(0.92, 1.0);
-          const slab: Ring = [[0, 0], [0, 0], [0, 0], [0, 0], [0, 0]];
-          const cornerU = [umin - 5, umax + 5, umax + 5, umin - 5];
-          const cornerV = [v0, v0, v1, v1];
-          for (let c = 0; c < 4; c++) slab[c] = [cornerU[c] * ca - cornerV[c] * sa, cornerU[c] * sa + cornerV[c] * ca];
-          slab[4] = slab[0];
-          let res: ReturnType<typeof polygonClipping.intersection>;
-          try { res = polygonClipping.intersection(furlongMP, [[slab]]); } catch { continue; }
-          for (const sp2 of res) {
-            const poly = fromRing(sp2[0] as Ring);
-            if (Math.abs(polygonArea(poly)) >= 120) strips.push(poly);
-          }
-        }
-      }
-      stripCount += strips.length;
-      furlongCount++;
-      areas.push({ kind: 'field', poly: outer, holes: holes.length ? holes : undefined, stripAngle: ang, strips: strips.length ? strips : undefined });
-    }
+    fieldArea += Math.abs(polygonArea(rg.outer)) - rg.holes.reduce((s, hl) => s + Math.abs(polygonArea(hl)), 0);
+    partitionRegion(rg.outer, rg.holes, mkCtx(false), net);
   }
+  for (const rg of closeRegions) {
+    fieldArea += Math.abs(polygonArea(rg.outer)) - rg.holes.reduce((s, hl) => s + Math.abs(polygonArea(hl)), 0);
+    partitionRegion(rg.outer, rg.holes, mkCtx(true), net);
+  }
+  let stripCount = 0, furlongCount = 0, closeCount = 0;
+  for (const fl of net.furlongs) {
+    if (fl.enclosed) {
+      closeCount++;
+      // enclosed ground: ploughed closes and hedged pasture (a close is never cut into strips)
+      const pasture = ftRng.chance(0.42);
+      const ar: LandArea & { enclosed?: boolean } = pasture
+        ? { kind: 'pasture', poly: fl.outer, holes: fl.holes.length ? fl.holes : undefined }
+        : { kind: 'field', poly: fl.outer, holes: fl.holes.length ? fl.holes : undefined, stripAngle: fl.angle };
+      ar.enclosed = true;
+      areas.push(ar);
+      continue;
+    }
+    stripCount += fl.strips?.length ?? 0;
+    furlongCount++;
+    areas.push({ kind: 'field', poly: fl.outer, holes: fl.holes.length ? fl.holes : undefined, stripAngle: fl.angle, strips: fl.strips });
+  }
+  stats['ms.lu.fields'] = Math.round(performance.now() - tFields);
 
   // reserve outline
   const resInd = new Float32Array(N);
   for (let i = 0; i < N; i++) resInd[i] = reserve[i] ? 1 : 0;
-  const reservePolys = foot.length ? foot.map((ph) => ph.outer) : vectorize(resInd, n, n, cell, 4000).map((rg) => rg.outer);
+  const reservePolys = foot.length ? foot.map((ph) => ph.outer) : vectorize(resInd, n, n, cell, 4000, { x0: 0, y0: 0, x1: n - 1, y1: n - 1 }).map((rg) => rg.outer);
 
   stats['furlongs'] = furlongCount;
+  stats['closes'] = closeCount;
+  stats['ways'] = net.ways.length;
   stats['strips'] = stripCount;
   stats['areas'] = areas.length;
   stats['farmsteads'] = farmsteads.length;
   stats['fieldHa'] = Math.round(fieldArea / 1e4);
   for (const [k, v] of Object.entries(counts)) stats['n.' + k] = v;
   void K_NONE; void smoothstep; void ({} as Polyline);
-  return { layer: { areas, farmsteads, reserve: reservePolys }, stats };
+  const layer: LandUseLayer & FieldNetExtras = { areas, farmsteads, reserve: reservePolys, ways: net.ways, headlands: net.headlands };
+  return { layer, stats };
 }
