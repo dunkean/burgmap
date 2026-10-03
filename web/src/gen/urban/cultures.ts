@@ -6,6 +6,7 @@ import type { Culture } from './culture';
 import type { MorphologyParams } from './morphology';
 import { MORPHOLOGIES, EO_BASE, deepMerge } from './morphology';
 import { CAMP_CULTURES } from './cultures_camps';
+import { CITY_CULTURES } from './cultures_cities';
 
 const EO = EO_BASE;
 const morph = (id: string, base: MorphologyParams, over: Record<string, unknown>): MorphologyParams => deepMerge(base, { ...over, id });
@@ -294,4 +295,4 @@ const BASE_CULTURES: Culture[] = [
   },
 ];
 
-export const CULTURE_LIST: Culture[] = [...BASE_CULTURES, ...CAMP_CULTURES];
+export const CULTURE_LIST: Culture[] = [...BASE_CULTURES, ...CITY_CULTURES, ...CAMP_CULTURES];

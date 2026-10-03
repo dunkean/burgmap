@@ -530,10 +530,11 @@ export function createCanvasRenderer(canvas: CanvasLike, world: World, style: Ma
       // plan lines: walls of compounds and wards, quay edges, terraces, hedges, footpaths
       {
         const ul = (kinds: string[]) => linesOf((l) => l.role === 'uline' && kinds.includes(l.kind));
-        strokeLines(ul(['compound-wall', 'ward-wall', 'citadel-wall', 'stone-wall', 'prakara', 'barbican', 'quay-edge']), U.wall, (l) => lw(l.width * 0.9, 0.8), 1, [], 'butt');
+        strokeLines(ul(['compound-wall', 'ward-wall', 'citadel-wall', 'stone-wall', 'prakara', 'barbican', 'quay-edge', 'zigzag-wall', 'canal-wall']), U.wall, (l) => lw(l.width * 0.9, 0.8), 1, [], 'butt');
         strokeLines(ul(['terrace']), U.massEdge, (l) => lw(l.width * 0.6, 0.7));
         if (near) strokeLines(ul(['hachure']), U.massEdge, (l) => lw(l.width, 0.4), 0.7);
         strokeLines(ul(['hedge']), '#5f7a3a', (l) => lw(l.width, 1));
+        strokeLines(ul(['andene']), U.wall, (l) => lw(l.width * 0.7, 0.5), 0.55);
         // camps and villages: thorn fences, byre / yard / pen fences, earthen ramparts and ditches
         strokeLines(ul(['rampart']), U.garden, (l) => lw(l.width, 1.4), 0.9);
         strokeLines(ul(['ditch']), U.wall, (l) => lw(l.width, 0.9), 0.35);

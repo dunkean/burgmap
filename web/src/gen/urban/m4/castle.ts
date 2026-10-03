@@ -28,7 +28,7 @@ import { Mask } from './site';
 import { samplePoly, LineIndex } from './lots';
 import { emptyOut, pieces, splitLine, largest, alongEdge, placeRect, minus, inter, fits, type Out } from './kit';
 
-export type CastleVariant = 'castle' | 'kasbah' | 'motte';
+export type CastleVariant = 'castle' | 'kasbah' | 'motte' | 'inca-fortress';
 /** Debug counters of the castle siting (rejections by reason). */
 export const CASTLE_DBG: Record<string, number> = {};
 const why = (k: string) => { CASTLE_DBG[k] = (CASTLE_DBG[k] ?? 0) + 1; };
@@ -57,6 +57,7 @@ export function castleArea(variant: CastleVariant, pop: number, rng: Rng): numbe
   const j = rng.range(0.85, 1.2);
   if (variant === 'motte') return 1100 * j;
   if (variant === 'kasbah') return Math.min(26000, 6000 + pop * 0.4) * j;
+  if (variant === 'inca-fortress') return Math.min(42000, 9000 + pop * 0.5) * j;
   return Math.min(22000, 2600 + pop * 0.36) * j;
 }
 
@@ -149,8 +150,8 @@ export function siteCastle(ctx: UrbanCtx, inp: CastleSiteIn, rng: Rng): CastlePl
   const R = Math.sqrt(A / Math.PI);
   const encR = Math.sqrt(mpArea(inp.enclosure) / Math.PI);
   if (encR < 2.2 * R) { why('small'); return null; }
-  const ditch = inp.variant === 'kasbah' ? 0 : inp.variant === 'motte' ? 7 : rng.range(9, 13);
-  const espl = inp.variant === 'kasbah' ? rng.range(12, 18) : inp.variant === 'motte' ? 8 : Math.min(38, rng.range(16, 24) + R * 0.12);
+  const ditch = inp.variant === 'kasbah' || inp.variant === 'inca-fortress' ? 0 : inp.variant === 'motte' ? 7 : rng.range(9, 13);
+  const espl = inp.variant === 'kasbah' ? rng.range(12, 18) : inp.variant === 'motte' ? 8 : inp.variant === 'inca-fortress' ? rng.range(10, 16) : Math.min(38, rng.range(16, 24) + R * 0.12);
   const core = inp.phases.length > 1 ? inp.phases[0].region : [];
   const roads = new LineIndex(inp.roads.map((path) => ({ path, hw: 5 })));
   // local relief statistics
@@ -248,7 +249,7 @@ export function siteCastle(ctx: UrbanCtx, inp: CastleSiteIn, rng: Rng): CastlePl
   if (!lotPh) { why('lot'); return null; }
   const lot = orientPos(cleanRing(lotPh.outer, 0.3, 1));
   const lowAt = (q: Vec2) => (ctx.site.fields?.hab ? sampleHab(ctx, q) : 99);
-  const moat = inp.variant !== 'kasbah' && (lowAt(cc) < 7 || wetFraction(ctx, outsetConvex(C, ditch + 25), 8) > 0.04);
+  const moat = inp.variant !== 'kasbah' && inp.variant !== 'inca-fortress' && (lowAt(cc) < 7 || wetFraction(ctx, outsetConvex(C, ditch + 25), 8) > 0.04);
   return {
     variant: inp.variant, C, lot, ditch, espl, gate, moat,
     outside: fracInside(inp.enclosure, C, 7) < 0.98, enclosure: [mainX, ...encX.filter((ph) => ph !== mainX)],
@@ -274,6 +275,7 @@ export function buildCastle(B: Polygon, cx: CompoundCtx): Out {
   const out = emptyOut();
   if (!plan) { out.parcels.push({ poly: B, use: 'compound:castle' }); return out; }
   if (plan.variant === 'kasbah') return buildKasbah(B, plan, cx);
+  if (plan.variant === 'inca-fortress') return buildIncaFortress(B, plan, cx);
   const Cin = largest(inter(plan.C, B));
   if (!Cin || area(Cin) < 300) { out.parcels.push({ poly: B, use: 'esplanade' }); return out; }
   const g = plan.gate, n = g.n, ang = Math.atan2(n.y, n.x);
@@ -381,6 +383,58 @@ function buildKasbah(B: Polygon, plan: CastlePlan, cx: CompoundCtx): Out {
   if (gh && !out.buildings.some((b) => intersectionS(b.poly, gh).length)) out.buildings.push({ poly: gh, kind: 'landmark', parcel: 0, arch: 'kasbah-gate', roof: 'flat', material: 'mud', storeys: 2 });
   out.lines = out.lines.filter((l) => l.kind !== 'citadel-wall');
   out.walls = [{ ring: plan.C, gates: [{ p: g.p, dir: { x: -g.n.x, y: -g.n.y }, width: 5 }], role: 'castle' }];
+  return out;
+}
+
+/**
+ * Inca fortress (Sacsayhuamán): on the hill above the town, three zigzag terrace walls across the side facing the
+ * town (salients every ~12 m, like saw teeth), the summit with a round tower (Muyuqmarka), two square towers and
+ * rows of storehouses (qollqa). No curtain towers: the walls are terraces of fitted stone.
+ */
+function buildIncaFortress(B: Polygon, plan: CastlePlan, cx: CompoundCtx): Out {
+  const Cin = largest(inter(plan.C, B));
+  if (!Cin) return { ...emptyOut(), parcels: [{ poly: B, use: 'esplanade' }] };
+  const out = emptyOut();
+  out.parcels.push({ poly: Cin, use: 'compound:inca-fortress' });
+  for (const e of minus(B, Cin)) out.parcels.push({ poly: e, use: 'esplanade' });
+  const g = plan.gate, n = g.n, u = { x: -n.y, y: n.x }, inward = { x: -n.x, y: -n.y };
+  let depth = 0, half = 0;
+  for (const q of Cin) { depth = Math.max(depth, (q.x - g.p.x) * inward.x + (q.y - g.p.y) * inward.y); half = Math.max(half, Math.abs((q.x - g.p.x) * u.x + (q.y - g.p.y) * u.y)); }
+  // three zigzag walls, 9 m apart, the salients pointing to the town
+  const per = 12, amp = 4.5;
+  for (let k = 0; k < 3; k++) {
+    const v0 = 6 + k * 9;
+    if (v0 + amp > depth * 0.55) break;
+    const pts: Vec2[] = [];
+    for (let s = -half - per; s <= half + per; s += per / 2) {
+      const tooth = (Math.round(s / (per / 2)) % 2 === 0) ? 0 : amp;
+      pts.push({ x: g.p.x + u.x * s + inward.x * (v0 + amp - tooth), y: g.p.y + u.y * s + inward.y * (v0 + amp - tooth) });
+    }
+    // keep the runs inside the enceinte (2 m clear of its line)
+    let run: Vec2[] = [];
+    const flush = () => { if (run.length >= 3) out.lines.push({ kind: 'zigzag-wall', path: run, width: 2.4 }); run = []; };
+    for (const q of pts) { if (pointInRing(Cin, q) && distToRing(Cin, q) > 2) run.push(q); else flush(); }
+    flush();
+  }
+  const ang = Math.atan2(u.y, u.x);
+  const far = { x: g.p.x + inward.x * depth * 0.72, y: g.p.y + inward.y * depth * 0.72 };
+  const R0 = Math.max(6, Math.min(11, Math.sqrt(area(Cin)) * 0.07));
+  const placed: Polygon[] = [];
+  const add = (poly: Polygon | null, arch: string, storeys: number, roof: Out['buildings'][number]['roof']) => {
+    if (!poly || !fits(Cin, poly, 1.5) || placed.some((p) => intersectionS(p, poly).length)) return false;
+    placed.push(poly);
+    out.buildings.push({ poly, kind: 'landmark', parcel: 0, arch, roof, material: 'stone', storeys, orientation: ang });
+    return true;
+  };
+  add(orientPos(disk(far, R0, 20)), 'round-tower', 4, 'dome');
+  out.landmarks.push({ kind: 'fortress', poly: plan.C });
+  for (const sg of [-1, 1]) add(placeRect(Cin, { x: far.x + u.x * sg * (R0 + 16), y: far.y + u.y * sg * (R0 + 16) }, ang, 9, 6.5, 1.5), 'square-tower', 3, 'gable');
+  // storehouses: a row behind the towers
+  for (let i = -3; i <= 3; i++) {
+    const c = { x: far.x + inward.x * (R0 + 12) + u.x * i * 9, y: far.y + inward.y * (R0 + 12) + u.y * i * 9 };
+    add(rectAt(c, ang, -3.2, 3.2, -2.5, 2.5), 'qollqa', 1, 'gable');
+  }
+  out.lines.push({ kind: 'citadel-wall', path: Cin.concat([Cin[0]]), width: 2 });
   return out;
 }
 

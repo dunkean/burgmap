@@ -144,7 +144,7 @@ function buildingsSvg(ub: NonNullable<World['urban']>, U: Palette['urban'], lw: 
 const GROUND_USES = new Set(['bailey', 'causeway', 'ghat', 'castle-honmaru', 'compound:castle-honmaru', 'bailey-gate', 'esplanade']);
 /** Fences of camps and villages (width m): byre, yard, pen and orda fences, palisade lines inside a village. */
 const CAMP_FENCES: Record<string, number> = { 'kraal-fence': 1.1, 'yard-fence': 0.45, 'pen-fence': 0.5, 'orda-fence': 0.8, palisade: 1.2 };
-const WALL_LINES: Record<string, number> = { 'compound-wall': 1, 'citadel-wall': 2.4, 'stone-wall': 1.8, prakara: 1.6, 'ward-wall': 1.8 };
+const WALL_LINES: Record<string, number> = { 'zigzag-wall': 2.4, 'canal-wall': 1,  'compound-wall': 1, 'citadel-wall': 2.4, 'stone-wall': 1.8, prakara: 1.6, 'ward-wall': 1.8 };
 
 /** Compound grounds, water pieces (moats, tanks) and the moat outside the town wall (drawn under the buildings). */
 function cultureUnderlay(ub: NonNullable<World['urban']>, pal: Palette, lw: (m: number, px: number) => string): string {
@@ -161,7 +161,7 @@ function cultureUnderlay(ub: NonNullable<World['urban']>, pal: Palette, lw: (m: 
   const ditch = ub.parcels.filter((p) => p.use === 'ditch');
   if (ditch.length) s += `<path class="u-ditch" d="${ditch.map((p) => pathD(p.poly, true)).join('')}" fill="${U.garden}" stroke="${U.plotLine}" stroke-width="${lw(0.3, 0.12)}"/><path d="${ditch.map((p) => pathD(p.poly, true)).join('')}" fill="url(#p-ugarden)"/>`;
   // cornfields round a native village: corn hills in rows
-  const corn = ub.landmarks.filter((l) => l.kind === 'cornfield');
+  const corn = ub.landmarks.filter((l) => l.kind === 'cornfield' || l.kind === 'terrace-field');
   if (corn.length) {
     const d = corn.map((l) => pathD(l.poly, true)).join('');
     s += `<defs><pattern id="p-ucorn" patternUnits="userSpaceOnUse" width="3" height="3" patternTransform="rotate(12)"><circle cx="1.5" cy="1.5" r="0.45" fill="${U.gardenInk}" opacity="0.6"/></pattern></defs>`;
@@ -195,6 +195,7 @@ function cultureOverlay(ub: NonNullable<World['urban']>, pal: Palette, lw: (m: n
     else if (k === 'parterre' || k === 'footpath') s += `<path d="${d}" fill="none" stroke="${k === 'footpath' ? U.street : U.plotLine}" stroke-width="${lw(k === 'footpath' ? 1.4 : 0.5, 0.15)}" stroke-linecap="round"/>`;
     else if (k === 'ghat-steps') s += `<path d="${d}" fill="none" stroke="${U.plotLine}" stroke-width="${lw(0.3, 0.12)}"/>`;
     else if (k === 'terrace') s += `<path d="${d}" fill="none" stroke="${U.wall}" stroke-width="${lw(1.6, 0.8)}"/>`;
+    else if (k === 'andene') s += `<path d="${d}" fill="none" stroke="${U.wall}" stroke-width="${lw(0.9, 0.4)}" stroke-opacity="0.75"/>`;
     else if (k === 'thorn-fence') s += `<path d="${d}" fill="none" stroke="${pal.treeInk ?? '#4a6a3a'}" stroke-width="${lw(2.2, 0.8)}" stroke-opacity="0.85" stroke-dasharray="1.3 0.9" stroke-linecap="round"/>`;
     else if (CAMP_FENCES[k]) s += `<path d="${d}" fill="none" stroke="${U.wall}" stroke-width="${lw(CAMP_FENCES[k], 0.25)}" stroke-opacity="0.9"${k === 'kraal-fence' || k === 'palisade' ? '' : ' stroke-dasharray="1.6 0.8"'}/>`;
     else if (k === 'rampart') s += `<path d="${d}" fill="none" stroke="${U.garden}" stroke-width="${lw(7, 1.4)}" stroke-opacity="0.9"/><path d="${d}" fill="none" stroke="${U.wall}" stroke-width="${lw(0.6, 0.3)}"/>`;

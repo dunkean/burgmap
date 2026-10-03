@@ -24,10 +24,12 @@ export interface M4Catalogue {
   /** Shanty-town flavour: the zone outside the walls, bidonville edges, hillside gecekondu, river banks. */
   shanty?: 'zone' | 'bidonville' | 'gecekondu' | 'riverbank';
   port?: boolean;
+  /** European activities (mills, windmills, nuisance trades, inns, gallows, lazar house) in auto mode. */
+  activities?: boolean;
 }
 
 export const DEFAULT_M4: Required<M4Catalogue> = {
-  castle: 'castle', cathedral: 'cathedral-close', palace: 'palace-eu', monastery: 'monastery', marketHall: true, arena: 0.04, shanty: 'zone', port: true,
+  castle: 'castle', cathedral: 'cathedral-close', palace: 'palace-eu', monastery: 'monastery', marketHall: true, arena: 0.04, shanty: 'zone', port: true, activities: true,
 };
 
 export interface M4Flags {
@@ -83,7 +85,7 @@ export function m4Flags(opts: Options, culture: Culture, pop: number, archetype:
     castle: castles ? castle : null, castles, cathedral, palace, monasteries, monastery: cat.monastery, marketHall: cat.marketHall && town,
     // fantasy cultures keep their own plan: no gallows, lazar houses or shanty belts unless asked for
     port: cat.port && opts.port !== 'no', arena,
-    activities: opts.activities === 'yes' || (opts.activities !== 'no' && !culture.fantasy), suburbs,
+    activities: opts.activities === 'yes' || (opts.activities !== 'no' && !culture.fantasy && cat.activities), suburbs,
     shanty: culture.fantasy && sh === 'auto' ? 'none' : shanty, shantyKind: cat.shanty,
   };
 }

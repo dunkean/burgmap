@@ -37,7 +37,7 @@ Each culture gets a `scale` range: the settlement classes it can produce. [x] `s
   - [x] **Bantu kraal / African village** (`kraal`, camps/ring.ts): a ring of round huts around a central cattle kraal, granaries, a thorn fence.
   - [x] **Nomad camp** (`nomad-camp`, camps/ring.ts): tents in concentric circles around the chief's tent.
 - **City cultures**
-  - [ ] **Inca**:
+  - [x] **Inca** (`inca`: cultures_cities.ts, inca.ts, kancha building operator, Inca fortress castle variant):
     - kancha blocks (rectangular walled compounds with houses around a courtyard) on an orthogonal grid adapted to the terrain;
     - a great central plaza (haukaypata), ushnu platform, temple (Coricancha-like), fortress on the hill (Sacsayhuamán-like zigzag walls);
     - agricultural terraces on the slopes around;

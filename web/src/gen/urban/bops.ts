@@ -406,6 +406,52 @@ function machiya(pl: Plot, cov: number, P: MorphologyParams, rng: Rng): ArchBldg
   return out;
 }
 
+// ---------------------------------------------------------------- Inca kancha
+/**
+ * Kancha: a walled rectangular compound of single-room houses set along the inside of its wall around a central
+ * court, the corners left open; on the street side two shorter houses flank the single gate. (The enclosure wall
+ * itself is drawn as a compound-wall plan line, open at the gate.)
+ */
+function kancha(pl: Plot, P: MorphologyParams, rng: Rng): ArchBldg[] {
+  const f = frame(pl);
+  if (!f) return [];
+  const Q = orientPos(pl.poly);
+  const out: ArchBldg[] = [];
+  const fm = { x: (pl.front[0].x + pl.front[1].x) / 2, y: (pl.front[0].y + pl.front[1].y) / 2 };
+  const dep = rng.range(P.roomDepth[0], P.roomDepth[1]);
+  const gap = rng.range(2.6, 4.2);
+  const room = (a: Vec2, b: Vec2, s0: number, s1: number): Polygon | null => {
+    const L = dist(a, b);
+    if (s1 - s0 < 6) return null;
+    const t = { x: (b.x - a.x) / L, y: (b.y - a.y) / L }, n = { x: -t.y, y: t.x };
+    const o = 0.7;
+    const p = (s: number, d: number): Vec2 => ({ x: a.x + t.x * s + n.x * d, y: a.y + t.y * s + n.y * d });
+    const r = orientPos([p(s0, o), p(s1, o), p(s1, o + dep), p(s0, o + dep)]);
+    return polyInside(Q, r) ? r : null;
+  };
+  for (let i = 0; i < Q.length; i++) {
+    const a = Q[i], b = Q[(i + 1) % Q.length];
+    const L = dist(a, b);
+    if (L < 10) continue;
+    const m = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    const isFront = dist(m, fm) < 0.5 || distToSegPt(fm, a, b) < 0.3;
+    // (the corners stay open: each range stops a gap short of the next range's depth)
+    const g0 = 0.7 + dep + gap * 0.6, g1 = L - g0;
+    const polys: (Polygon | null)[] = isFront
+      // the gate in the middle of the street side, a short house either side of it
+      ? [room(a, b, g0, L / 2 - 2.2), room(a, b, L / 2 + 2.2, g1)]
+      : [L > 34 && rng.chance(0.5) ? room(a, b, g0, L / 2 - 1.5) : room(a, b, g0, g1), L > 34 ? room(a, b, L / 2 + 1.5, g1) : null];
+    for (const r of polys) if (r && shapeOf(r).w >= MIN_BW) out.push(tag({ poly: r, kind: 'house' }, P.arch, rng, { orientation: Math.atan2(b.y - a.y, b.x - a.x), ring: true }));
+  }
+  pl.gated = true;
+  return out;
+}
+function distToSegPt(p: Vec2, a: Vec2, b: Vec2): number {
+  const dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy || 1;
+  const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / l2));
+  return Math.hypot(p.x - a.x - t * dx, p.y - a.y - t * dy);
+}
+
 // ---------------------------------------------------------------- elven tree houses
 function treeHouse(pl: Plot, P: MorphologyParams, rng: Rng): ArchBldg[] {
   const ins = inscribed(pl.poly, [], 0.5);
@@ -503,6 +549,7 @@ function buildOnRaw(pl: Plot, cov: number, P: MorphologyParams, rng: Rng, hint?:
     case 'machiya': return machiya(pl, cov, P, rng);
     case 'treeHouse': return treeHouse(pl, P, rng);
     case 'hall': return hall(pl, P, rng);
+    case 'kancha': return kancha(pl, P, rng);
     default: {
       const ori = Math.atan2(pl.nrm.y, pl.nrm.x);
       return buildPlot(pl, cov, P, rng, hint).map((b) => (b.kind === 'garden' ? b : {

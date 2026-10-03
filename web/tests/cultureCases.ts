@@ -19,6 +19,7 @@ export const CULTURE_CASES: CultureCase[] = [
   { label: 'indian-temple', culture: 'indian-temple' },
   { label: 'elven', culture: 'elven' },
   { label: 'dwarven', culture: 'dwarven', relief: 'mountains' },
+  { label: 'inca', culture: 'inca' },
   { label: 'roman-core+european-organic', culture: 'roman-core', mix: 'european-organic:0.6:phases' },
   { label: 'medina+bastide', culture: 'medina', mix: 'bastide:0.45:phases' },
 ];
@@ -86,6 +87,12 @@ export function expectSignature(c: CultureCase, w: World): void {
     case 'dwarven':
       expect(has('stone-hall') || has('octagonal-hall'), 'dwarven: stone halls').toBe(true);
       expect((u.lines ?? []).some((l) => l.kind === 'terrace'), 'dwarven: terraces').toBe(true);
+      break;
+    case 'inca':
+      expect(has('kancha-house'), 'inca: kancha compounds').toBe(true);
+      expect(has('ushnu'), 'inca: ushnu on the great plaza').toBe(true);
+      expect(compounds.has('inca-temple'), 'inca: temple').toBe(true);
+      expect((u.walls ?? []).filter((wl) => wl.role === 'town').length, 'inca: no town wall').toBe(0);
       break;
     case 'roman-core': case 'roman-core+european-organic':
       expect(u.landmarks.some((l) => l.kind === 'forum'), 'roman: forum').toBe(true);

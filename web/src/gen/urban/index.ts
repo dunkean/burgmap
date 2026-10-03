@@ -30,13 +30,15 @@ import { GridIndex } from '../geo/spatial';
 import { wallFeatures } from './walls';
 import { buildCompound, pickBlock, ClaimBlock } from './compounds';
 import { approachGates, axisLines, outsetConvex } from './streetops';
-import { distToRing, pointInRing, area as areaOf, inscribed, convexHull, distToSeg, segSegT, bboxOf } from '../geo/poly';
+import { distToRing, pointInRing, area as areaOf, inscribed, convexHull, distToSeg, segSegT, bboxOf, orientPos } from '../geo/poly';
+import { openRing } from './camps/kit';
 import { outerRing } from './m4/castle';
 import { unionMany } from '../geo/bool';
 import { StreetGraph } from '../geo/graph';
 import { polyInside } from '../geo/split';
 import type { UrbanBuilding, PolyH, UrbanParcel, UrbanSite, UrbanWall } from '../types';
 import { m4Flags, registerM4 } from './m4/index';
+import { registerInca, andenes, canals } from './inca';
 import { siteCastle, type CastlePlan } from './m4/castle';
 import { reserveCastle, type M4State } from './m4/reserve';
 import { reserveCathedral, reservePalace, reserveMonasteries } from './m4/catalogue';
@@ -59,7 +61,7 @@ export interface UrbanDebug { quarters: { poly: Polygon; phase: number; lab: num
 const MARKET_AREA = (pop: number): number => (pop < 1200 ? 0 : Math.min(10000, 1800 + pop * 0.3));
 /** Qibla from the Maghreb, roughly east-south-east (map angle, y down). */
 const QIBLA = 0.2;
-const NUCLEUS_COMPOUND: Record<string, string> = { mosque: 'great-mosque', castle: 'castle', temple: 'hindu-temple', grove: 'grove', 'drum-tower': 'drum-tower' };
+const NUCLEUS_COMPOUND: Record<string, string> = { mosque: 'great-mosque', castle: 'castle', temple: 'hindu-temple', grove: 'grove', 'drum-tower': 'drum-tower', ushnu: 'inca-plaza' };
 
 /** A point strictly inside a polygon (centroid when inside, else the inscribed-circle center). */
 export function interiorPoint(p: Polygon): Vec2 {
@@ -104,6 +106,7 @@ export function contourAngle(world: World, p: Vec2): number {
 const L2_SITES: Record<string, 'power' | 'worship' | 'market' | 'civic' | 'activity'> = {
   hospital: 'civic', kasbah: 'power', 'great-mosque': 'worship', yamen: 'power', 'chinese-temple': 'worship', 'walled-market': 'market',
   'jp-temple': 'worship', 'hindu-temple': 'worship', palace: 'power', basilica: 'civic', 'roman-temple': 'worship', castle: 'power', hammam: 'civic',
+  'inca-temple': 'worship', 'inca-palace': 'power', 'inca-plaza': 'civic',
 };
 /** Parcel uses of the open port pieces. */
 const LOT_USE: Record<string, string> = { 'm4-quay': 'quay', 'm4-pier': 'pier', 'm4-slipway': 'slipway', 'm4-green': 'green', 'm4-bridge-houses': 'bridge' };
@@ -161,6 +164,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   const terrainAngle = TERRAIN_ANGLE;
   const streets = new Streets();
   registerM4();
+  registerInca();
   const flags = m4Flags(opts, culture, pop, archetype, rng.fork('m4'));
   const sites: UrbanSite[] = [];
   const lotData = new Map<string, unknown>();
@@ -792,9 +796,14 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   if (hints.compoundWalls) {
     plots.forEach((pl, pi) => {
       const op = plotMorph[pi].buildingOp;
-      if ((op !== 'yashiki' && op !== 'pavilionCompound') || !plotBld[pi].length) return;
+      if ((op !== 'yashiki' && op !== 'pavilionCompound' && op !== 'kancha') || !plotBld[pi].length) return;
       const p = pl.poly;
       const fm = { x: (pl.front[0].x + pl.front[1].x) / 2, y: (pl.front[0].y + pl.front[1].y) / 2 };
+      if (op === 'kancha') {
+        // the kancha wall: the whole lot line, with the single gate in the middle of the street side
+        for (const w of openRing(orientPos(p), [{ p: fm, width: 3.4 }])) lines.push({ kind: 'compound-wall', path: w, width: 1 });
+        return;
+      }
       for (let k = 0; k < p.length; k++) {
         const a = p[k], c = p[(k + 1) % p.length];
         // the street front: walls between the gate ranges only (the ranges stand on the wall line)
@@ -848,6 +857,13 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
       }
     }
   }
+  // ---- Inca: agricultural terraces on the slopes round the town, stone-lined channels for the streams through it
+  if (hints.andenes && archetype !== 'hamlet') {
+    const an = andenes(ctx, prim.footprint.map((p) => p.outer), Math.min(520, 160 + Math.sqrt(pop) * 3));
+    lines.push(...an.lines);
+    for (const f of an.fields) landmarks.push({ kind: 'terrace-field', poly: f });
+  }
+  if (hints.canals) lines.push(...canals(ctx, prim.footprint));
   // ---- elven canopy: trees over the town, clear of the houses
   const trees: UrbanTree[] = [...compoundTrees];
   if (hints.canopy) {

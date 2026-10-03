@@ -133,7 +133,7 @@ export function reserveCastle(s: M4State, api: ReserveApi, plan: CastlePlan, id 
   s.lotData.set(id, plan);
   const c = polygonCentroid(plan.C);
   const ph = phaseAt(api, c);
-  s.sites.push({ id, kind: plan.variant === 'kasbah' ? 'kasbah' : plan.variant === 'motte' ? 'motte' : 'castle', role: 'power', lot: plan.lot, entrance: acc.entrance, anchor: c, culture: s.culture });
+  s.sites.push({ id, kind: plan.variant === 'kasbah' ? 'kasbah' : plan.variant === 'motte' ? 'motte' : plan.variant === 'inca-fortress' ? 'inca-fortress' : 'castle', role: 'power', lot: plan.lot, entrance: acc.entrance, anchor: c, culture: s.culture });
   return { id, kind: 'm4-castle', poly: plan.lot, phase: ph.phase, zone: ph.zone, cuts: acc.cuts };
 }
 

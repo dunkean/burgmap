@@ -42,7 +42,7 @@ export interface EnclosureSpec {
 }
 export interface SectorSpec { morphology: MorphRef; share: number; culture?: string }
 export interface PhaseSpec { morphology: MorphRef; enclosure: EnclosureSpec; share?: number; sectors?: SectorSpec[]; culture?: string }
-export type NucleusKind = 'market' | 'forum' | 'mosque' | 'drum-tower' | 'castle' | 'temple' | 'grove' | 'none';
+export type NucleusKind = 'market' | 'forum' | 'mosque' | 'drum-tower' | 'castle' | 'temple' | 'grove' | 'ushnu' | 'none';
 export interface NucleusSpec {
   kind: NucleusKind;
   shape: 'hull' | 'rect' | 'square' | 'circle';
@@ -87,6 +87,10 @@ export interface RenderHints {
   plotLines?: boolean;
   /** Roof tones by storeys (terraced room blocks: the higher, the darker). */
   storeyShade?: boolean;
+  /** Agricultural terraces along the contours on the slopes round the town (Inca andenes). */
+  andenes?: boolean;
+  /** Stone-lined channels along the watercourses through the town. */
+  canals?: boolean;
 }
 export interface SettlementForm {
   /** Village / hamlet layout: EO rule (street or nucleated village), a walled compact block, a grove, terraces. */
