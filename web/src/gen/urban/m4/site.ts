@@ -105,7 +105,7 @@ export function siteLot(ctx: UrbanCtx, streets: Streets, spec: LotSpec, rng: Rng
         if (ctx.isWater(p)) wet++;
         cnt++;
         return true;
-      });
+      }, true);
       if (!ok || wet > (spec.wet ?? 0) * cnt) continue;
       if (spec.avoid.some((a) => polysNear(poly, a, spec.gap))) continue;
       if (!clearOfStreets(poly, streets, spec.margin, spec.ignore)) continue;

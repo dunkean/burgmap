@@ -74,8 +74,21 @@ export function samplePoly(poly: Polygon, step: number): Vec2[] {
   return out;
 }
 
-/** The samples of `samplePoly`, in the same order, to a visitor that may stop early (returns false if stopped). */
-export function forSamples(poly: Polygon, step: number, fn: (p: Vec2) => boolean): boolean {
+/**
+ * The samples of `samplePoly`, in the same order, to a visitor that may stop early (returns false if stopped).
+ * `boundaryFirst` visits the boundary samples before the interior rows (same set; for order-free tests, where an
+ * outside sample is found sooner on the boundary).
+ */
+export function forSamples(poly: Polygon, step: number, fn: (p: Vec2) => boolean, boundaryFirst = false): boolean {
+  const boundary = (): boolean => {
+    for (let i = 0; i < poly.length; i++) {
+      const a = poly[i], b = poly[(i + 1) % poly.length];
+      const n = Math.max(1, Math.ceil(dist(a, b) / (step / 2)));
+      for (let k = 0; k < n; k++) if (!fn({ x: a.x + ((b.x - a.x) * k) / n, y: a.y + ((b.y - a.y) * k) / n })) return false;
+    }
+    return true;
+  };
+  if (boundaryFirst && !boundary()) return false;
   const bb = bboxOf(poly);
   // scanlines: the inside intervals of each row (even–odd crossings), sampled on the same lattice
   const xs: number[] = [];
@@ -91,12 +104,7 @@ export function forSamples(poly: Polygon, step: number, fn: (p: Vec2) => boolean
       for (let k = Math.max(0, k0); k <= k1; k++) { const x = bb.x0 + step / 2 + k * step; if (x < bb.x1 && !fn({ x, y })) return false; }
     }
   }
-  for (let i = 0; i < poly.length; i++) {
-    const a = poly[i], b = poly[(i + 1) % poly.length];
-    const n = Math.max(1, Math.ceil(dist(a, b) / (step / 2)));
-    for (let k = 0; k < n; k++) if (!fn({ x: a.x + ((b.x - a.x) * k) / n, y: a.y + ((b.y - a.y) * k) / n })) return false;
-  }
-  return true;
+  return boundaryFirst ? true : boundary();
 }
 
 /** Share of the polygon's samples that lie in water (terrain grid). */

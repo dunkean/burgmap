@@ -73,6 +73,61 @@ const geomBox = (g: Geom): Box => {
 /** Boxes overlap or touch (a margin keeps the test conservative). */
 const boxMeets = (a: Box, b: Box): boolean => !(a.x0 > b.x1 + 1e-6 || a.x1 < b.x0 - 1e-6 || a.y0 > b.y1 + 1e-6 || a.y1 < b.y0 - 1e-6);
 
+/** Sutherland–Hodgman clip of a closed ring ([first] repeated last) to a box; open vertex list out. */
+function clipRingBox(r: Ring, b: Box): [number, number][] {
+  let pts: [number, number][] = r.slice(0, -1);
+  const planes: [(p: [number, number]) => number][] = [[(p) => p[0] - b.x0], [(p) => b.x1 - p[0]], [(p) => p[1] - b.y0], [(p) => b.y1 - p[1]]];
+  for (const [side] of planes) {
+    if (!pts.length) break;
+    const out: [number, number][] = [];
+    for (let i = 0; i < pts.length; i++) {
+      const P = pts[i], Q = pts[(i + 1) % pts.length];
+      const sp = side(P), sq = side(Q);
+      if (sp >= 0) out.push(P);
+      if ((sp >= 0) !== (sq >= 0)) { const t = sp / (sp - sq); out.push([P[0] + (Q[0] - P[0]) * t, P[1] + (Q[1] - P[1]) * t]); }
+    }
+    pts = out;
+  }
+  const dedup: [number, number][] = [];
+  for (const p of pts) { const l = dedup[dedup.length - 1]; if (!l || l[0] !== p[0] || l[1] !== p[1]) dedup.push(p); }
+  while (dedup.length > 1 && dedup[0][0] === dedup[dedup.length - 1][0] && dedup[0][1] === dedup[dedup.length - 1][1]) dedup.pop();
+  return dedup;
+}
+
+const TRIM_MIN = 96, TRIM_MARGIN = 60;
+/**
+ * A clip polygon with many vertices is replaced by its rings clipped to the subject's box grown by TRIM_MARGIN,
+ * when that is exact for the boolean: every edge reaching within 1 m of the subject's box lies wholly inside the
+ * clip box (so the edges that can meet the subject keep their original endpoints), and the clipped rings cover the
+ * same points inside the box. Edges changed or added by the clip stay ≥ ~59 m from the subject. Null = polygon
+ * outside the box (it cannot touch the result).
+ */
+function trimPolygon(pg: Ring[], sb: Box): Ring[] | null {
+  let nv = 0;
+  for (const r of pg) nv += r.length;
+  if (nv < TRIM_MIN) return pg;
+  const cb: Box = { x0: sb.x0 - TRIM_MARGIN, y0: sb.y0 - TRIM_MARGIN, x1: sb.x1 + TRIM_MARGIN, y1: sb.y1 + TRIM_MARGIN };
+  const nb: Box = { x0: sb.x0 - 1, y0: sb.y0 - 1, x1: sb.x1 + 1, y1: sb.y1 + 1 };
+  const ob = ringBox(pg[0]);
+  // (only worth it when the polygon reaches well beyond the box)
+  if (ob.x0 >= cb.x0 && ob.y0 >= cb.y0 && ob.x1 <= cb.x1 && ob.y1 <= cb.y1) return pg;
+  for (const r of pg) {
+    for (let i = 0; i + 1 < r.length; i++) {
+      const [ax, ay] = r[i], [bx, by] = r[i + 1];
+      const sx0 = Math.min(ax, bx), sx1 = Math.max(ax, bx), sy0 = Math.min(ay, by), sy1 = Math.max(ay, by);
+      if (sx0 > nb.x1 || sx1 < nb.x0 || sy0 > nb.y1 || sy1 < nb.y0) continue;
+      if (sx0 < cb.x0 || sx1 > cb.x1 || sy0 < cb.y0 || sy1 > cb.y1) return pg;
+    }
+  }
+  const out: Ring[] = [];
+  for (let k = 0; k < pg.length; k++) {
+    const c = clipRingBox(pg[k], cb);
+    if (c.length < 3) { if (k === 0) return null; continue; }
+    out.push([...c, [c[0][0], c[0][1]]]);
+  }
+  return out;
+}
+
 function run(op: 'union' | 'intersection' | 'difference', a: Operand, rest: Operand[], snapped = false): MultiPoly {
   let ga = toGeom(a);
   let gr = rest.map(toGeom).filter((g) => g.length);
@@ -86,6 +141,10 @@ function run(op: 'union' | 'intersection' | 'difference', a: Operand, rest: Oper
     // the subject's rings.)
     const sb = geomBox(ga);
     gr = gr.map((g) => (g.length > 1 ? g.filter((pg) => boxMeets(ringBox(pg[0]), sb)) : g));
+    if (op === 'difference') gr = gr.filter((g) => g.length);
+    else if (gr.some((g) => !g.length)) return [];
+    // long clip rings far larger than the subject (river ribbons, coastlines) are cut down to a box around it
+    gr = gr.map((g) => g.map((pg) => trimPolygon(pg, sb)).filter((pg): pg is Ring[] => pg !== null));
     if (op === 'difference') gr = gr.filter((g) => g.length);
     else if (gr.some((g) => !g.length)) return [];
   }
