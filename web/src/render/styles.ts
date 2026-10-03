@@ -58,6 +58,11 @@ export interface Palette {
   treeFill: string; treeInk: string;
   grass: string; reed: string; orchardDot: string;
   roadEdge: string; roadFill: string; trackFill: string;
+  /**
+   * Rural network (visual hierarchy below the cased roads): tracks, field ways and headlands are thin, earth-toned and
+   * translucent, never paper-white. `ink` defaults to `trackFill`; alphas are stroke opacities.
+   */
+  rural: { ink?: string; track: number; way: number; headland: number };
   bridgeDeck: string; bridgeInk: string;
   farmRoof: string; farmInk: string; farmYard: string;
   marker: string;
@@ -134,6 +139,7 @@ const PARCHMENT: Palette = {
   treeFill: '#8aa065', treeInk: '#4a5a33',
   grass: '#5f7a3c', reed: '#4f7a72', orchardDot: '#55703a',
   roadEdge: '#4e3b28', roadFill: '#f6edd0', trackFill: '#6b5236',
+  rural: { track: 0.6, way: 0.42, headland: 0.32 },
   bridgeDeck: '#f6edd0', bridgeInk: '#3b2c1c',
   farmRoof: '#c69b70', farmInk: '#4e3b28', farmYard: '#d8c79a',
   marker: '#8b2f1f',
@@ -300,7 +306,7 @@ const blueprint = derive('blueprint', 'Blueprint', {
   treeShape: 'crown',
   stripA: '#2a5aa0', stripB: '#2a5aa0', stripAlpha: [0, 0.25], furrow: '#8fb0e4', furrowAlpha: 0.5, hedge: '#8fb0e4',
   treeFill: '#16407c', treeInk: '#9fbfee', grass: '#8fb0e4', reed: '#8fb0e4', orchardDot: '#9fbfee',
-  roadEdge: '#e6efff', roadFill: '#12356a', trackFill: '#a9c2ea', bridgeDeck: '#12356a', bridgeInk: '#e6efff',
+  roadEdge: '#e6efff', roadFill: '#12356a', trackFill: '#a9c2ea', rural: { track: 0.5, way: 0.32, headland: 0.24 }, bridgeDeck: '#12356a', bridgeInk: '#e6efff',
   farmRoof: '#1e4d92', farmInk: '#e6efff', farmYard: '#16407c', marker: '#ffd27a',
   urban: {
     street: '#12356a', streetEdge: '#e6efff', yard: '#173f7a', garden: '#1a4484', gardenInk: '#7fa2d8',
@@ -391,7 +397,7 @@ const night = derive('night', 'Night', {
   treeShape: 'blob',
   stripA: '#1d2a48', stripB: '#16203a', stripAlpha: [0.5, 0.5], furrow: '#3b4c78', furrowAlpha: 0.5, hedge: '#1c4a3c', hedgeOn: true,
   treeFill: '#12342c', treeInk: '#0a1c18', grass: '#1f5a48', reed: '#2a6a72', orchardDot: '#1c4a3c',
-  roadEdge: '#04060e', roadFill: '#3a3529', trackFill: '#2a2b38', bridgeDeck: '#3a3529', bridgeInk: '#04060e',
+  roadEdge: '#04060e', roadFill: '#3a3529', trackFill: '#2a2b38', rural: { ink: '#5a5446', track: 0.7, way: 0.5, headland: 0.35 }, bridgeDeck: '#3a3529', bridgeInk: '#04060e',
   farmRoof: '#22283e', farmInk: '#04060e', farmYard: '#1a2236', marker: '#ffb45a',
   urban: {
     street: '#352f26', streetEdge: '#04060e', yard: '#141a2c', garden: '#14281f', gardenInk: '#2d6a4a',
@@ -414,3 +420,6 @@ export const PALETTES: Record<MapStyle, Palette> = {
 /** Display order for the UI. */
 export const STYLE_LIST: { id: MapStyle; label: string }[] = (Object.values(PALETTES) as Palette[]).map((p) => ({ id: p.name, label: p.label }));
 export const isMapStyle = (v: string | null | undefined): v is MapStyle => !!v && Object.prototype.hasOwnProperty.call(PALETTES, v);
+
+/** Ink of the rural network (tracks, field ways, headlands) of a style. */
+export const ruralInk = (pal: Palette): string => pal.rural.ink ?? pal.trackFill;

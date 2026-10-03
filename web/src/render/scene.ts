@@ -241,7 +241,7 @@ export function buildScene(world0: World, tileSize = TILE_SIZE): Scene {
   }
 
   // regional roads
-  const roadW = { major: 8, minor: 5, track: 3 } as const;
+  const roadW = { major: 8, minor: 3.6, track: 3 } as const;
   for (const kind of ['track', 'minor', 'major'] as const) {
     addLines('road-' + kind, 'road', kind, roadW[kind], (world.roads ?? []).filter((r) => r.kind === kind).map((r) => r.path));
   }
@@ -310,18 +310,24 @@ export function buildScene(world0: World, tileSize = TILE_SIZE): Scene {
     }
     addLines('church-cross', 'cross', 'cross', 0.9, crosses);
     addPoly('landmarks', ur.landmarks.map((l) => l.poly));
-    // streets by rank and (rounded) width so each layer shares one stroke width
+    // streets by rank and (rounded) width so each layer shares one stroke width; the streets of the secondary
+    // settlements (villages, hamlets) are kept in their own layers ('vstreet-*'): the renderer never draws them as
+    // far-zoom arterials
+    const secondary = new Set<unknown>();
+    for (const s of world0.settlements ?? []) if (!s.main) for (const st of s.urban?.streets ?? []) secondary.add(st);
     const byW = new Map<string, Polyline[]>();
     for (const st of ur.streets) {
-      const k = `${st.rank}|${st.role === 'close' ? 'c' : ''}|${Math.round(st.width * 2) / 2}`;
+      const k = `${secondary.has(st) ? 'v' : ''}${st.rank}|${st.role === 'close' ? 'c' : ''}|${Math.round(st.width * 2) / 2}`;
       let l = byW.get(k);
       if (!l) byW.set(k, (l = []));
       l.push(st.path);
     }
-    const sorted = [...byW.entries()].sort((a, b) => Number(b[0].split('|')[0]) - Number(a[0].split('|')[0]));
+    const rankOf = (k: string): number => Number(k.split('|')[0].replace('v', ''));
+    const sorted = [...byW.entries()].sort((a, b) => rankOf(b[0]) - rankOf(a[0]));
     for (const [k, src] of sorted) {
       const [rank, close, w] = k.split('|');
-      addLines('street-' + k, 'street', `r${rank}${close}`, Number(w), src);
+      const v = rank.startsWith('v');
+      addLines((v ? 'vstreet-' : 'street-') + k, 'street', `r${v ? rank.slice(1) : rank}${close}`, Number(w), src);
     }
     if (ur.walls) {
       const towers: Polygon[] = [], gateTowers: Polygon[] = [];

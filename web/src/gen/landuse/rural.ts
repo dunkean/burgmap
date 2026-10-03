@@ -8,7 +8,7 @@ import { Vec2, Polygon, Polyline, chaikin, simplify, polygonArea, polygonCentroi
 import { distanceField, forCellsNearPolyline, smoothstep } from '../core/field';
 import { marchingSquares } from '../terrain/contour';
 import { rasterizePolys } from '../geo/raster';
-import { partitionRegion, FieldCtx, FieldNet } from './fields';
+import { partitionRegion, pruneWays, FieldCtx, FieldNet } from './fields';
 import type { World, LandArea, LandKind, Farmstead, LandUseLayer } from '../types';
 
 type Ring = [number, number][];
@@ -537,6 +537,14 @@ export function generateRural(world: World, root: Rng, mainRoads?: number, strip
   for (const rg of closeRegions) {
     fieldArea += Math.abs(polygonArea(rg.outer)) - rg.holes.reduce((s, hl) => s + Math.abs(polygonArea(hl)), 0);
     partitionRegion(rg.outer, rg.holes, mkCtx(true), net);
+  }
+  {
+    // only connected, non-duplicate field ways are cart tracks (the others become headlands)
+    const edges = [world.urban, ...(world.settlements ?? []).filter((st) => !st.main).map((st) => st.urban)]
+      .flatMap((u) => u?.footprintH ?? []).map((ph) => [...ph.outer, ph.outer[0]]);
+    const pr = pruneWays(net, [...roads.map((r) => r.path), ...farmsteads.map((f) => f.drive), ...edges], 1.6 * cell + 20);
+    stats['ways.dropped'] = pr.dropped;
+    stats['ways.demoted'] = pr.demoted;
   }
   let stripCount = 0, furlongCount = 0, closeCount = 0;
   for (const fl of net.furlongs) {

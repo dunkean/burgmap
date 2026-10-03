@@ -52,6 +52,64 @@ export interface Furlong {
 
 export interface FieldNet { furlongs: Furlong[]; ways: Polyline[]; headlands: Polyline[] }
 
+/**
+ * Field ways worth drawing as cart tracks: a way that duplicates a road or an earlier way (most of its length within
+ * a few meters of it) is dropped, and a way not linked (through other ways) to a road, track or farm drive is demoted
+ * to a headland: the partition is unchanged (the line stays a furlong boundary), but no isolated track runs through
+ * the fields without connecting anything.
+ */
+export function pruneWays(net: FieldNet, connectors: Polyline[], tol = 12): { dropped: number; demoted: number } {
+  type Box = { x0: number; y0: number; x1: number; y1: number };
+  const boxOf = (pl: Polyline, m: number): Box => {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const p of pl) { if (p.x < x0) x0 = p.x; if (p.x > x1) x1 = p.x; if (p.y < y0) y0 = p.y; if (p.y > y1) y1 = p.y; }
+    return { x0: x0 - m, y0: y0 - m, x1: x1 + m, y1: y1 + m };
+  };
+  const inBox = (p: Vec2, b: Box): boolean => p.x >= b.x0 && p.x <= b.x1 && p.y >= b.y0 && p.y <= b.y1;
+  const con = connectors.filter((c) => c.length >= 2).map((c) => ({ c, b: boxOf(c, 2 * tol) }));
+  const nearCon = (p: Vec2, d: number): boolean => con.some(({ c, b }) => inBox(p, b) && distToPolyline(p, c) < d);
+  const samples = (pl: Polyline): Vec2[] => {
+    const out: Vec2[] = [];
+    for (let i = 1; i < pl.length; i++) {
+      const a = pl[i - 1], b = pl[i];
+      const n = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / 10));
+      for (let k = i === 1 ? 0 : 1; k <= n; k++) out.push({ x: a.x + ((b.x - a.x) * k) / n, y: a.y + ((b.y - a.y) * k) / n });
+    }
+    return out;
+  };
+  // 1. duplicates of a road or of an earlier way
+  const kept: { pl: Polyline; b: Box }[] = [];
+  let dropped = 0;
+  for (const pl of net.ways) {
+    if (pl.length < 2) continue;
+    const ss = samples(pl);
+    let dup = 0;
+    for (const p of ss) if (nearCon(p, 8) || kept.some((k) => inBox(p, k.b) && distToPolyline(p, k.pl) < 6)) dup++;
+    if (dup >= 0.7 * ss.length) { dropped++; continue; }
+    kept.push({ pl, b: boxOf(pl, 2 * tol) });
+  }
+  // 2. connectivity to the road network (fixpoint over the ways touching each other)
+  const linked = kept.map((k) => nearCon(k.pl[0], tol) || nearCon(k.pl[k.pl.length - 1], tol));
+  for (let changed = true; changed;) {
+    changed = false;
+    for (let i = 0; i < kept.length; i++) {
+      if (linked[i]) continue;
+      const a = kept[i].pl;
+      const ends = [a[0], a[a.length - 1]];
+      for (let j = 0; j < kept.length && !linked[i]; j++) {
+        if (!linked[j] || i === j) continue;
+        const b = kept[j].pl;
+        if (ends.some((e) => inBox(e, kept[j].b) && distToPolyline(e, b) < tol) || [b[0], b[b.length - 1]].some((e) => inBox(e, kept[i].b) && distToPolyline(e, a) < tol)) { linked[i] = true; changed = true; }
+      }
+    }
+  }
+  const ways: Polyline[] = [];
+  let demoted = 0;
+  kept.forEach((k, i) => { if (linked[i]) ways.push(k.pl); else { net.headlands.push(k.pl); demoted++; } });
+  net.ways = ways;
+  return { dropped, demoted };
+}
+
 /** Largest total bending (rad) of the central line for which the strips follow it. */
 const MAX_BEND = 0.42;
 const GAP = { way: 4.4, headland: 2.4, hedge: 1.3 };

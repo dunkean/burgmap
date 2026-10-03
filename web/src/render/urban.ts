@@ -289,10 +289,13 @@ export function urbanLayer(world: World, pal: Palette, u: number, debug: boolean
   }
   s += cultureOverlay(ub, pal, lw);
   // main streets keep a legible minimum width at small scales (drawn over the street space only where wider)
-  const mains = ub.streets.filter((st) => st.rank <= 1 && st.role !== 'close');
+  // (not the village and hamlet streets: widened to the town's minimum they become long white strokes on the map)
+  const secondary = new Set<unknown>();
+  for (const st of world.settlements ?? []) if (!st.main) for (const x of st.urban?.streets ?? []) secondary.add(x);
+  const mains = ub.streets.filter((st) => st.rank <= 1 && st.role !== 'close' && !secondary.has(st));
   const minW = 2.4 * u;
   const wide = mains.filter((st) => st.width < minW);
-  if (wide.length) s += `<path class="u-main-streets" d="${wide.map((st) => pathD(st.path, false)).join('')}" fill="none" stroke="${U.street}" stroke-width="${f1(minW)}" stroke-linecap="round" stroke-linejoin="round"/>`;
+  if (wide.length) s += `<path class="u-main-streets"${stilts || !(world.terrain.coastline.length || world.terrain.lakes.some((l) => l.length >= 3)) ? '' : ' clip-path="url(#landclip)"'} d="${wide.map((st) => pathD(st.path, false)).join('')}" fill="none" stroke="${U.street}" stroke-width="${f1(minW)}" stroke-linecap="round" stroke-linejoin="round"/>`;
   if (!stilts) s += `<path class="u-block-edges" d="${ub.blocks.map((b) => pathD(b, true)).join('')}" fill="none" stroke="${U.blockEdge}" stroke-width="${lw(U.blockEdgeW, 0.3)}"/>`;
   for (const w of ub.walls ?? []) s += wallSvg(w, U.wall, U.wallFill, U.wallScale, U.towerScale);
   s += '</g>';
