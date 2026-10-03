@@ -1,4 +1,4 @@
-import { Options, SIZE_PRESETS, DEFAULT_ROADS, fromQuery, toQuery, wantsCustomHeight, DEFAULTS } from '../gen/options';
+import { Options, SIZE_PRESETS, DEFAULT_ROADS, fromQuery, toQuery, wantsCustomHeight, DEFAULTS, withCulture } from '../gen/options';
 import { generate } from '../gen/pipeline';
 import { renderSvg } from '../render/svg';
 // CANVAS-VIEWER (begin imports)
@@ -86,7 +86,8 @@ registry.add(selectControl(coastEl, 'coast', (v) => v as Options['coast']));
 registry.add(selectControl(riverEl, 'river', (v) => v as Options['river']));
 registry.add(selectControl(roadsEl, 'roads', (v) => Number(v)));
 registry.add(numberControl($<HTMLInputElement>('population'), 'population', 0));
-registry.add(selectControl(cultureEl, 'culture', (v) => v as Options['culture']));
+// (a culture switch drops the previous culture's plan override / mix: see withCulture)
+registry.add({ ...selectControl(cultureEl, 'culture', (v) => v as Options['culture']), read: (o) => withCulture(o, cultureEl.value as Options['culture']) });
 registry.add(selectControl(languageEl, 'language', (v) => v as Options['language']));
 registry.add(numberControl($<HTMLInputElement>('hmScale'), 'heightScale', DEFAULTS.heightScale ?? 120));
 registry.add(numberControl($<HTMLInputElement>('hmSea'), 'importSea', 0));
