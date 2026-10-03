@@ -169,7 +169,7 @@ export function cutCourtyards(block: Polygon, bi: number, zone: Zone, P: Morphol
     return s2;
   };
   // (a lot narrower than 2.2 m, a sliver along a block edge, joins its neighbour too)
-  const okF = plots.map((p) => ribbonLen(p.poly) >= 3.3 && inscribed(p.poly, [], 0.1).r * 2 >= 2.2);
+  const okF = plots.map((p) => ribbonLen(p.poly) >= 3.3 && inscribed(p.poly, [], 0.1, 1.1).r * 2 >= 2.2);
   for (let i = 0; i < plots.length; i++) {
     if (okF[i] || !plots[i]) continue;
     let best = -1, bl = 0;

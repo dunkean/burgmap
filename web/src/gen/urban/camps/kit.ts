@@ -110,7 +110,7 @@ export function snapRing(p: Polygon): Polygon {
 export function goodShape(p: Polygon, minW = 2.2): boolean {
   if (p.length < 3) return false;
   for (let i = 0; i < p.length; i++) if (interiorAngle(p, i) < (13 * Math.PI) / 180) return false;
-  return inscribed(p, [], 0.1).r * 2 >= minW;
+  return inscribed(p, [], 0.1, minW / 2).r * 2 >= minW;
 }
 
 /** Cleaned simple polygons of a MultiPoly (holes cut open), dropping slivers. */

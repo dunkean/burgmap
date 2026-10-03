@@ -193,7 +193,9 @@ export function obb(pts: Vec2[]): OBB {
  * Largest inscribed circle (polylabel, Garcia-Castellanos & Lombardo / Mapbox). `holes` optional.
  * Returns center and radius; precision in meters.
  */
-export function inscribed(outer: Polygon, holes: Polygon[] = [], precision = 0.5): { c: Vec2; r: number } {
+export function inscribed(outer: Polygon, holes: Polygon[] = [], precision = 0.5, enough = Infinity): { c: Vec2; r: number } {
+  // (`enough`: the search may stop once a circle of that radius is found — for callers that only compare the
+  // radius with that threshold; the full search could only return a larger one)
   const rings = [outer, ...holes];
   const bb = bboxOf(outer);
   const w = bb.x1 - bb.x0, h = bb.y1 - bb.y0;
@@ -255,7 +257,7 @@ export function inscribed(outer: Polygon, holes: Polygon[] = [], precision = 0.5
   const bbc = mk(bb.x0 + w / 2, bb.y0 + h / 2, 0);
   if (bbc.d > best.d) best = bbc;
   let guard = 0;
-  while (queue.length && guard++ < 4000) {
+  while (queue.length && guard++ < 4000 && !(best.d >= enough)) {
     const c = queue.pop();
     if (c.d > best.d) best = c;
     if (c.max - best.d <= precision) continue;

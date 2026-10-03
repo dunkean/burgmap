@@ -402,7 +402,7 @@ export function cutPlots(
     if (a >= 600) return false;
     // (the half width of the hull bounds the inscribed radius: thin cells are found without the polylabel search)
     if (convexWidth(convexHull(c.poly)) / 2 < 1.25) return true;
-    return (isConvex(c.poly, 1e-3) ? convexWidth(c.poly) / 2 : inscribed(c.poly, [], 0.3).r) < 1.25;
+    return (isConvex(c.poly, 1e-3) ? convexWidth(c.poly) / 2 : inscribed(c.poly, [], 0.3, 1.25).r) < 1.25;
   };
   const shared = (X: Polygon, Y: Polygon): number => {
     let s2 = 0;
@@ -556,7 +556,7 @@ export function cutPlots(
     const a = area(c.poly);
     if (a < (c.plot ? 35 : 20)) return true;
     if (minAng(c.poly) < (12 * Math.PI) / 180) return true;
-    return a < 600 && (convexWidth(convexHull(c.poly)) / 2 < 1.05 || inscribed(c.poly, [], 0.3).r < 1.05);
+    return a < 600 && (convexWidth(convexHull(c.poly)) / 2 < 1.05 || inscribed(c.poly, [], 0.3, 1.05).r < 1.05);
   };
   for (let i = 0; i < cellsF.length; i++) {
     const c = cellsF[i];

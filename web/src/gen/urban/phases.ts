@@ -363,7 +363,7 @@ export function regionForArea(ctx: UrbanCtx, fld: PhaseField, targetArea: number
 
 /** Drops pieces thinner than `minR` (inscribed radius) or smaller than `minA`. */
 export function dropSlivers(m: MultiPoly, minA: number, minR: number): MultiPoly {
-  return m.filter((ph) => area(ph.outer) >= minA && inscribed(ph.outer, ph.holes, 1).r >= minR);
+  return m.filter((ph) => area(ph.outer) >= minA && inscribed(ph.outer, ph.holes, 1, minR).r >= minR);
 }
 
 /** Rectangle aligned with `ang`, centered at c. */

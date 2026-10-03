@@ -256,8 +256,9 @@ export function splitQuarter(ctx: UrbanCtx, q: Quarter, qi: number, streets: Str
     for (const c of cands.slice(0, 6)) {
       let ok = true;
       for (const [X, isPlace] of [[c.A, c.placeA], [c.B, c.placeB]] as [LPoly, boolean][]) {
-        const w = isConvex(X.pts, 1e-3) ? convexWidth(X.pts) : inscribed(X.pts, [], 1).r * 2;
-        if (isPlace ? w < 6 : w < P.minWidth) { ok = false; break; }
+        const need = isPlace ? 6 : P.minWidth;
+        const w = isConvex(X.pts, 1e-3) ? convexWidth(X.pts) : inscribed(X.pts, [], 1, need / 2).r * 2;
+        if (w < need) { ok = false; break; }
       }
       if (ok) { best = c; break; }
     }
@@ -452,7 +453,7 @@ export function carveBlocks(q: Quarter, pieces: Piece[], ribbonIndex: RibbonInde
       if (near.length) polys = differenceS(ins, ...near.map((c) => [{ outer: c.ribbon, holes: [] }] as MultiPoly)).map((ph) => ph.outer);
       for (const p0 of polys) {
         let poly = truncateAcute(p0, (22 * Math.PI) / 180, 5);
-        if (poly.length < 3 || area(poly) < 40 || (isConvex(poly, 1e-3) ? convexWidth(poly) / 2 : inscribed(poly, [], 0.5).r) < 2.2) continue;
+        if (poly.length < 3 || area(poly) < 40 || (isConvex(poly, 1e-3) ? convexWidth(poly) / 2 : inscribed(poly, [], 0.5, 2.2).r) < 2.2) continue;
         poly = cleanRing(poly, 0.05, 0.5, 0.002, false);
         if (poly.length >= 3) poly = cleanRing(truncateAcute(poly, (22 * Math.PI) / 180, 5), 0.05, 0.5, 0.002, false);
         if (poly.length >= 3) blocks.push({ poly, kind: pc.kind, phase: pc.phase, zone: pc.zone, age: pc.age, quarter: pc.quarter, compound: pc.compound, lot: pc.lot });
@@ -495,7 +496,7 @@ export function carveBlocks(q: Quarter, pieces: Piece[], ribbonIndex: RibbonInde
       }
       const a = area(poly);
       if (a < 40) continue;
-      if (inscribed(poly, [], 0.5).r < 2.2) continue;
+      if (inscribed(poly, [], 0.5, 2.2).r < 2.2) continue;
       blocks.push({ poly, kind: pc.kind, phase: pc.phase, zone: pc.zone, age: pc.age, quarter: pc.quarter, compound: pc.compound, lot: pc.lot });
     }
   }
