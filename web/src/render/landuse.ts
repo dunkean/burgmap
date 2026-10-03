@@ -96,17 +96,21 @@ export function landuseLayer(world: World, pal: Palette, u: number): string {
     out += `<g class="lu-${kind}">`;
     if (kind === 'field') {
       out += `<g fill="${pal.land.field}" fill-opacity="${pal.landOpacity}" fill-rule="evenodd"${mul(pal)}>${list.map((a) => `<path d="${ringsD(a)}"/>`).join('')}</g>`;
-      // strips: alternate tints, thin dividing lines and furrow texture
+      // strips: each holder's strip has its own tone; one furrow-textured path per furlong (its own direction)
+      const tone: string[] = ['', '', '', ''];
+      let fi = 0;
       for (const a of list) {
         if (!a.strips || a.stripAngle === undefined) continue;
         const deg = Math.round((a.stripAngle * 180) / Math.PI) % 180;
-        let dA = '', dB = '', all = '';
-        a.strips.forEach((st, i) => { const d = pathD(st, true); all += d; if (i & 1) dB += d; else dA += d; });
-        out += `<path d="${dA}" fill="${pal.stripA}" fill-opacity="${pal.stripAlpha[0]}"${mul(pal)}/><path d="${dB}" fill="${pal.stripB}" fill-opacity="${pal.stripAlpha[1]}"${mul(pal)}/>` +
-          `<path d="${all}" fill="url(#p-fur-${deg})" stroke="${pal.furrow}" stroke-width="${f1(0.28 * s)}" stroke-opacity="${Math.min(1, pal.furrowAlpha * 0.9)}"/>`;
+        let all = '';
+        a.strips.forEach((st, i) => { const d = pathD(st, true); all += d; tone[(i * 5 + fi * 3 + (i >> 2)) & 3] += d; });
+        fi++;
+        out += `<path d="${all}" fill="url(#p-fur-${deg})" stroke="${pal.furrow}" stroke-width="${f1(0.28 * s)}" stroke-opacity="${Math.min(1, pal.furrowAlpha * 0.9)}"/>`;
       }
-      // hedges along furlong edges
-      if (pal.hedgeOn) out += `<g fill="none" stroke="${pal.hedge}" stroke-width="${f1(0.9 * s)}" stroke-opacity="0.75" stroke-dasharray="${f1(4 * s)} ${f1(1.2 * s)}" stroke-linecap="round">${list.map((a) => `<path d="${ringsD(a)}"/>`).join('')}</g>`;
+      const mk = [0.5, 0.75, 0.3, 0.9];
+      tone.forEach((d, k) => { if (d) out += `<path d="${d}" fill="${k & 1 ? pal.stripB : pal.stripA}" fill-opacity="${Math.min(1, pal.stripAlpha[k & 1] * mk[k])}"${mul(pal)}/>`; });
+      // furlong edges: a faint line where the strips end (open fields carry no hedges)
+      out += `<g fill="none" stroke="${pal.furrow}" stroke-width="${f1(0.45 * s)}" stroke-opacity="0.55" stroke-linejoin="round">${list.filter((a) => !(a as Enc).enclosed).map((a) => `<path d="${ringsD(a)}"/>`).join('')}</g>`;
     } else {
       const d = list.map(ringsD).join('');
       const alpha = kind === 'forest' ? 0.7 : pal.landOpacity;
@@ -117,7 +121,59 @@ export function landuseLayer(world: World, pal: Palette, u: number): string {
     }
     out += '</g>';
   }
+  out += fieldNetwork(world, pal, s);
   out += '</g>';
+  return out;
+}
+
+type Enc = LandArea & { enclosed?: boolean };
+type Net = { ways?: Vec2[][]; headlands?: Vec2[][] };
+
+const hash2 = (x: number, y: number): number => {
+  let h = Math.imul(Math.round(x * 7) ^ 0x9e3779b1, 0x85ebca6b) ^ Math.imul(Math.round(y * 7) + 0x7f4a7c15, 0xc2b2ae35);
+  h = Math.imul(h ^ (h >>> 15), 0x2c1b3c6d);
+  return ((h ^ (h >>> 12)) >>> 0) / 4294967296;
+};
+
+/** Field ways (cart tracks), narrow headlands and the hedgerows of the closes, with an occasional tree. */
+function fieldNetwork(world: World, pal: Palette, s: number): string {
+  const lu = world.landuse as (World['landuse'] & Net) | undefined;
+  if (!lu) return '';
+  let out = '';
+  const ways = lu.ways ?? [];
+  if (ways.length) {
+    const d = ways.map((w) => pathD(w, false)).join('');
+    out += `<g class="lu-ways" fill="none" stroke-linecap="butt" stroke-linejoin="round"><path d="${d}" stroke="${pal.roadFill}" stroke-width="${f1(2.6 * s)}" stroke-opacity="0.7"/><path d="${d}" stroke="${pal.roadEdge}" stroke-width="${f1(0.7 * s)}" stroke-opacity="0.55" stroke-dasharray="${f1(5 * s)} ${f1(3.5 * s)}"/></g>`;
+  }
+  const hl = lu.headlands ?? [];
+  if (hl.length) {
+    const d = hl.map((w) => pathD(w, false)).join('');
+    out += `<g class="lu-headlands" fill="none"><path d="${d}" stroke="${pal.roadFill}" stroke-width="${f1(1.5 * s)}" stroke-opacity="0.45"/><path d="${d}" stroke="${pal.furrow}" stroke-width="${f1(0.5 * s)}" stroke-opacity="0.5"/></g>`;
+  }
+  const enc = lu.areas.filter((a) => (a as Enc).enclosed);
+  if (enc.length) {
+    const d = enc.map(ringsD).join('');
+    let trees = '';
+    const R = 1.5 * Math.pow(s, 0.6);
+    const ring = (r: Vec2[]) => {
+      let carry = 8 + 10 * hash2(r[0].x, r[0].y);
+      for (let i = 0; i < r.length; i++) {
+        const a = r[i], b = r[(i + 1) % r.length];
+        const L = Math.hypot(b.x - a.x, b.y - a.y);
+        let t = carry;
+        while (t < L) {
+          const x = a.x + ((b.x - a.x) * t) / L, y = a.y + ((b.y - a.y) * t) / L;
+          const h = hash2(x, y);
+          if (h < 0.42) trees += `<circle cx="${f1(x)}" cy="${f1(y)}" r="${f1(R * (0.75 + 0.6 * h))}"/>`;
+          t += (11 + 24 * hash2(y, x)) * Math.pow(Math.max(1, s), 0.75);
+        }
+        carry = t - L;
+      }
+    };
+    for (const a of enc) { ring(a.poly); if (a.holes) for (const h of a.holes) ring(h); }
+    out += `<g class="lu-hedges"><path d="${d}" fill="none" stroke="${pal.hedge}" stroke-width="${f1(0.95 * Math.pow(s, 0.85))}" stroke-opacity="0.85" stroke-linejoin="round"/>` +
+      `<g fill="${pal.treeFill}" stroke="${pal.treeInk}" stroke-width="${f1(0.4 * s)}" stroke-opacity="0.8">${trees}</g></g>`;
+  }
   return out;
 }
 
