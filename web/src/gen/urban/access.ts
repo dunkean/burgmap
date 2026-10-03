@@ -33,6 +33,8 @@ export const ACC_STATS = { calls: 0, cells: 0, ms: 0, msRaster: 0, msStreet: 0 }
  */
 interface BlockStatic { block: Polygon; streetAt: unknown; cell: number; x0: number; y0: number; w: number; h: number; inB: Uint8Array; streetCell: Uint8Array; near: Uint8Array; streetSeeds: number[] }
 let LAST_BLOCK: BlockStatic | null = null;
+/** Scratch buffers of blockReach (grown on demand). */
+let POOL: { bid: Int32Array; seen: Uint32Array; queue: Int32Array; ep: number } | null = null;
 
 function blockStatic(block: Polygon, streetAt0: StreetAt | ((p: Vec2) => boolean), cell: number): BlockStatic {
   if (LAST_BLOCK && LAST_BLOCK.block === block && LAST_BLOCK.streetAt === streetAt0 && LAST_BLOCK.cell === cell) return LAST_BLOCK;
@@ -113,7 +115,10 @@ export function blockReach(block: Polygon, blds: Polygon[], streetAt0: StreetAt 
   const tA = performance.now();
   const N = w * h;
   // building ids per cell (0 = none; a later footprint overwrites), scanlines over each footprint's own rows
-  const bid = new Int32Array(N);
+  // (pooled buffers: `bid` is cleared cell by cell before returning, `seen` is epoch-stamped)
+  if (!POOL || POOL.bid.length < N) POOL = { bid: new Int32Array(Math.max(N, 1 << 16)), seen: new Uint32Array(Math.max(N, 1 << 16)), queue: new Int32Array(Math.max(N, 1 << 16)), ep: 0 };
+  const pool = POOL;
+  const bid = pool.bid;
   const cellsOf: number[][] = blds.map(() => []);
   const xs: number[] = [];
   blds.forEach((b0, k) => {
@@ -144,8 +149,9 @@ export function blockReach(block: Polygon, blds: Polygon[], streetAt0: StreetAt 
   // flood followed by a scan of the building cells).
   const ok = blds.map(() => false);
   let left = blds.length;
+  const done = (): boolean[] => { for (const own of cellsOf) for (const i of own) bid[i] = 0; ACC_STATS.ms += performance.now() - tA; return ok; };
   cellsOf.forEach((own, k) => { for (const i of own) if (bid[i] === k + 1 && near[i]) { ok[k] = true; left--; break; } });
-  if (left === 0) { ACC_STATS.ms += performance.now() - tA; return ok; }
+  if (left === 0) return done();
   const free = (j: number) => inB[j] === 1 && bid[j] === 0;
   const okN = (j: number) => (inB[j] === 1 ? bid[j] === 0 : streetCell[j] === 1);
   const passable = (j: number): boolean => {
@@ -153,12 +159,12 @@ export function blockReach(block: Polygon, blds: Polygon[], streetAt0: StreetAt 
     return x >= 1 && x < w - 1 && y >= 1 && y < h - 1 && free(j) && okN(j - 1) && okN(j + 1) && okN(j - w) && okN(j + w);
   };
   const settle = (i: number) => { const k = bid[i]; if (k && !ok[k - 1]) { ok[k - 1] = true; left--; } };
-  const seen = new Uint8Array(N);
-  const queue = new Int32Array(N);
+  if (++pool.ep === 0xffffffff) { pool.seen.fill(0); pool.ep = 1; }
+  const ep = pool.ep, seen = pool.seen, queue = pool.queue;
   let qh = 0, qt = 0;
   const visit = (j: number) => {
-    if (seen[j] || !passable(j)) return;
-    seen[j] = 1; queue[qt++] = j;
+    if (seen[j] === ep || !passable(j)) return;
+    seen[j] = ep; queue[qt++] = j;
     const x = j % w;
     const l = x > 0, r = x < w - 1, u = j >= w, d = j + w < N;
     if (l) settle(j - 1);
@@ -182,8 +188,7 @@ export function blockReach(block: Polygon, blds: Polygon[], streetAt0: StreetAt 
     if (i >= w) visit(i - w);
     if (i + w < N) visit(i + w);
   }
-  ACC_STATS.ms += performance.now() - tA;
-  return ok;
+  return done();
 }
 
 /** Side line half-plane of a plot (pointing into the plot). */
