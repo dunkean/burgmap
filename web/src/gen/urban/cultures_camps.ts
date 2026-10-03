@@ -23,6 +23,7 @@ const M: Record<string, MorphologyParams> = {
   oppidum: morph('oppidum', { arch: { typology: 'roundhouse', roof: 'thatch-round', storeys: [1, 1], material: 'wattle' }, density: { core: 45, middle: 45, edge: 45, faubourg: 45, village: 45 } }),
   orcish: morph('orcish', { arch: { typology: 'orc-hut', roof: 'conical', storeys: [1, 1], material: 'hide' }, density: { core: 90, middle: 90, edge: 90, faubourg: 90, village: 90 } }),
   halfling: morph('halfling', { arch: { typology: 'smial', roof: 'dome', storeys: [1, 1], material: 'turf' }, density: { core: 32, middle: 32, edge: 32, faubourg: 32, village: 32 } }),
+  'stilt-town': morph('stilt-town', { arch: { typology: 'stilt-house', roof: 'thatch-round', storeys: [1, 1], material: 'thatch' }, density: { core: 120, middle: 120, edge: 120, faubourg: 120, village: 120 } }),
   'nomad-camp': morph('nomad-camp', { arch: { typology: 'ger', roof: 'dome', storeys: [1, 1], material: 'felt' }, density: { core: 60, middle: 60, edge: 60, faubourg: 60, village: 60 } }),
 };
 Object.assign(MORPHOLOGIES, M);
@@ -39,6 +40,12 @@ const campBase = (id: string, label: string, morphology: string): Omit<Culture, 
 });
 
 export const CAMP_CULTURES: Culture[] = [
+  {
+    ...campBase('stilt-town', 'Stilt town (marsh folk)', 'stilt-town'), fantasy: true,
+    scale: { min: 'hamlet', max: 'town' }, camp: { layout: 'stilts', variant: 'lagoon' }, waterBuild: true,
+    render: { towerShape: 'round', plotLines: true, stilts: true },
+    sitePrefs: { flatness: 1.5, weights: { estuary: 3, harbor: 3, meander: 2, confluence: 2, bridge: 1, plain: 0.4, hilltop: 0, valley: 0.4 } },
+  },
   {
     ...campBase('barbarian', 'Barbarian: Germanic village', 'barbarian'), family: 'barbarian',
     scale: { min: 'hamlet', max: 'village' }, camp: { layout: 'yards', variant: 'germanic' },

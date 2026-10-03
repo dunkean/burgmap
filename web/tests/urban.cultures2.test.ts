@@ -76,6 +76,11 @@ export const SIGNATURES: Record<string, (w: World) => void> = {
     expect(lineKinds(w).has('palisade'), 'orcish: stake palisades').toBe(true);
     expect(w.urban!.landmarks.some((l) => l.kind === 'arena'), 'orcish: arena').toBe(true);
   },
+  'stilt-town': (w) => {
+    const u = w.urban!;
+    expect(arches(w).get('stilt-house') ?? 0, 'stilt town: stilt houses').toBeGreaterThan(5);
+    expect(u.renderHints?.stilts, 'stilt town: boardwalks').toBe(true);
+  },
   'celtic-oppidum': (w) => {
     expect(arches(w).get('roundhouse') ?? 0, 'oppidum: roundhouses').toBeGreaterThan(2);
     expect(lineKinds(w).has('rampart'), 'oppidum: ramparts').toBe(true);
@@ -123,6 +128,7 @@ const CASES: [string, SizeName[]][] = [
   ['orcish', ['hamlet', 'village', 'town']],
   ['halfling', ['hamlet', 'village', 'town']],
   ['celtic-oppidum', ['hamlet', 'village', 'town']],
+  ['stilt-town', ['hamlet', 'village', 'town']],
   ['barbarian', ['hamlet', 'village', 'town']],
   ['barbarian-celtic', ['hamlet', 'village', 'town']],
   ['barbarian-norse', ['hamlet', 'village', 'town']],
@@ -136,7 +142,7 @@ describe('village and camp cultures', () => {
       expect(w.urban!.culture).toBe(culture);
       if (size !== 'hamlet' || culture !== 'barbarian-norse') SIGNATURES[culture]?.(w);
       // above the culture's class (village): a cluster of villages, not a town
-      if (size === 'town' && !['barbarian-norse', 'native-pueblo', 'maya', 'khmer', 'orcish', 'celtic-oppidum'].includes(culture)) expect(Number(w.stats['urban.camps']), 'a cluster of villages').toBeGreaterThan(1);
+      if (size === 'town' && !['barbarian-norse', 'native-pueblo', 'maya', 'khmer', 'orcish', 'celtic-oppidum', 'stilt-town'].includes(culture)) expect(Number(w.stats['urban.camps']), 'a cluster of villages').toBeGreaterThan(1);
     });
   }
 });

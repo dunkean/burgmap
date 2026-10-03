@@ -106,6 +106,8 @@ export interface RenderHints {
   qanats?: boolean;
   /** Lock gates along the canals (gnomish towns). */
   locks?: boolean;
+  /** Stilt town: boardwalks drawn as planks, the lots over the water left unfilled (the water shows). */
+  stilts?: boolean;
 }
 export interface SettlementForm {
   /** Village / hamlet layout: EO rule (street or nucleated village), a walled compact block, a grove, terraces. */
@@ -140,6 +142,11 @@ export interface Culture {
   camp?: CampSpec;
   /** Family of variants shown together in the plan selector (barbarian, native-american). */
   family?: string;
+  /**
+   * Explicit water-allowed flag (URBAN_MORPHOLOGY §3c): blocks, lots and buildings may stand over the water (houses
+   * on piles). Without it the water is always cut out of the partition.
+   */
+  waterBuild?: boolean;
 }
 export interface CultureMix { id: string; t: number; mode: 'phases' | 'sectors' | 'blend' }
 export interface PlanOverride {

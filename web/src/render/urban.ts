@@ -241,8 +241,15 @@ export function urbanLayer(world: World, pal: Palette, u: number, debug: boolean
   const U = pal.urban;
   const lw = (m: number, px: number) => f1(Math.max(m, px * u)); // meters, with a floor in pixels of a 1600 px render
   let s = `<g class="layer-urban" stroke-linejoin="round">` + patterns(pal);
-  // street space: the quarters (blocks are drawn on top, so what remains visible is exactly quarter \ blocks)
-  s += `<path class="u-streets" d="${ub.quarters.map((q) => pathD(q.poly.outer, true)).join('')}" fill="${U.street}" stroke="${U.street}" stroke-width="0.4"/>`;
+  const stilts = !!ub.renderHints?.stilts;
+  // street space: the quarters (blocks are drawn on top, so what remains visible is exactly quarter \ blocks);
+  // a stilt town has no ground: its boardwalks are drawn as planks over the water and the marsh
+  if (stilts) {
+    s += '<g class="u-boardwalks" fill="none" stroke-linecap="butt" stroke-linejoin="round">';
+    for (const st of ub.streets) s += `<path d="${pathD(st.path, false)}" stroke="${pal.bridgeInk}" stroke-width="${f1(Math.max(1.6, st.width + 0.2))}"/>`;
+    for (const st of ub.streets) s += `<path d="${pathD(st.path, false)}" stroke="${pal.bridgeDeck}" stroke-width="${f1(Math.max(1, st.width - 0.7))}"/>`;
+    s += '</g>';
+  } else s += `<path class="u-streets" d="${ub.quarters.map((q) => pathD(q.poly.outer, true)).join('')}" fill="${U.street}" stroke="${U.street}" stroke-width="0.4"/>`;
   const places = ub.parcels.filter((p) => p.use === 'place' || p.use === 'market' || p.use === 'quay' || p.use === 'pier' || p.use === 'slipway' || p.use === 'timber-yard' || p.use === 'mill-yard' || p.use === 'mill' || p.use === 'tannery-yard' || p.use === 'bridge');
   if (places.length) {
     const d = places.map((p) => pathD(p.poly, true)).join('');
@@ -259,7 +266,7 @@ export function urbanLayer(world: World, pal: Palette, u: number, debug: boolean
     s += `<g class="u-churchyard"><path d="${d}" fill="${U.garden}"/><path d="${d}" fill="url(#p-ugrave)"/></g>`;
   }
   const blockD = ub.blocks.filter((_, i) => ub.blockInfo[i]?.kind === 'block').map((b) => pathD(b, true)).concat(ub.parcels.filter((p) => p.use === 'arena-plot' || p.use === 'inn').map((p) => pathD(p.poly, true))).join('');
-  s += `<path class="u-blocks" d="${blockD}" fill="${U.yard}"/>`;
+  if (!stilts) s += `<path class="u-blocks" d="${blockD}" fill="${U.yard}"/>`;
   // meadows inside a block (village greens, thing places, open camp ground): over the yard colour
   const plazas = ub.parcels.filter((p) => p.use === 'plaza');
   if (plazas.length) { const d = plazas.map((p) => pathD(p.poly, true)).join(''); s += `<g class="u-plazas"><path d="${d}" fill="${U.place}"/><path d="${d}" fill="url(#p-upave)"/></g>`; }
@@ -280,7 +287,7 @@ export function urbanLayer(world: World, pal: Palette, u: number, debug: boolean
   const minW = 2.4 * u;
   const wide = mains.filter((st) => st.width < minW);
   if (wide.length) s += `<path class="u-main-streets" d="${wide.map((st) => pathD(st.path, false)).join('')}" fill="none" stroke="${U.street}" stroke-width="${f1(minW)}" stroke-linecap="round" stroke-linejoin="round"/>`;
-  s += `<path class="u-block-edges" d="${ub.blocks.map((b) => pathD(b, true)).join('')}" fill="none" stroke="${U.blockEdge}" stroke-width="${lw(U.blockEdgeW, 0.3)}"/>`;
+  if (!stilts) s += `<path class="u-block-edges" d="${ub.blocks.map((b) => pathD(b, true)).join('')}" fill="none" stroke="${U.blockEdge}" stroke-width="${lw(U.blockEdgeW, 0.3)}"/>`;
   for (const w of ub.walls ?? []) s += wallSvg(w, U.wall, U.wallFill, U.wallScale, U.towerScale);
   s += '</g>';
   return s;

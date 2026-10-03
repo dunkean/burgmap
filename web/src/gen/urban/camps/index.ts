@@ -26,9 +26,10 @@ import { longhouseVillage } from './longhouses';
 import { puebloSettlement } from './pueblo';
 import { ringFort } from './ringfort';
 import { khmerCity } from './khmer';
+import { stiltTown } from './stilts';
 
 export interface CampSpec {
-  layout: 'ring' | 'yards' | 'longhouses' | 'pueblo' | 'ringfort' | 'khmer';
+  layout: 'ring' | 'yards' | 'longhouses' | 'pueblo' | 'ringfort' | 'khmer' | 'stilts';
   variant: string;
 }
 
@@ -69,6 +70,7 @@ function campRadius(spec: CampSpec, pop: number): number {
     case 'pueblo': return 40 + Math.sqrt(pop * 30 / Math.PI) * 1.6;
     case 'khmer': return Math.sqrt((pop / 62) * 1e4) / 2 + 60;
     case 'ringfort': return 50 + Math.sqrt(Math.ceil(Math.min(48, pop / 22) / 4)) * 40;
+    case 'stilts': return Math.max(42, Math.sqrt((pop * 36) / Math.PI)) * 1.3;
     default: return 80;
   }
 }
@@ -130,6 +132,7 @@ function plan(cc: CampCtx, spec: CampSpec, c: Vec2, pop: number, rng: Rng): Camp
     case 'pueblo': return puebloSettlement(cc, c, pop, rng);
     case 'ringfort': return ringFort(cc, c, pop, rng);
     case 'khmer': return khmerCity(cc, c, pop, rng);
+    case 'stilts': return stiltTown(cc, c, pop, rng);
     default: return ringCamp(cc, c, pop, RING_VARIANTS.kraal, rng);
   }
 }
@@ -159,7 +162,8 @@ export function generateCamp(world: World, root: Rng, culture: Culture, pop0: nu
   // the main camp stands on dry ground: beside the stream rather than astride it (a short way leads from the road)
   let main = ctx.center;
   const rDry = r0 * (spec.layout === 'yards' || spec.layout === 'longhouses' ? 1.3 : spec.layout === 'khmer' ? 1.15 : 1.05);
-  if (dryShare(ctx, main, rDry) < 0.97) {
+  // (a stilt town wants the water: it is sited on the shore by its layout)
+  if (!culture.waterBuild && dryShare(ctx, main, rDry) < 0.97) {
     let bs = -Infinity;
     const sr = rng.fork('dry');
     for (let ring = 1; ring <= 10; ring++) for (let k = 0; k < 20; k++) {
@@ -192,7 +196,7 @@ export function generateCamp(world: World, root: Rng, culture: Culture, pop0: nu
     extraLines.push({ kind: 'track', path: [{ x: a.x + ux * ra, y: a.y + uy * ra }, { x: b.x - ux * rb, y: b.y - uy * rb }], width: 2.6 });
   }
   const pop = pops.reduce((s, p) => s + p, 0);
-  const archetype: Archetype = pop < 200 ? 'hamlet' : (spec.layout === 'pueblo' || spec.layout === 'khmer' || spec.variant === 'maya') && pops[0] >= 1200 ? 'town' : 'nucleated-village';
+  const archetype: Archetype = pop < 200 ? 'hamlet' : (spec.layout === 'pueblo' || spec.layout === 'khmer' || spec.layout === 'stilts' || spec.variant === 'maya') && pops[0] >= 1200 ? 'town' : 'nucleated-village';
   const layer = assemble(world, parts, culture, morph.id, pop, archetype, ctx.water);
   layer.lines = [...extraLines, ...(layer.lines ?? [])];
   const stats: Record<string, number | string> = {
