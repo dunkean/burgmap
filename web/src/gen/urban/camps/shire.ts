@@ -76,15 +76,26 @@ export function shireVillage(cc: CampCtx, c0: Vec2, pop: number, rng: Rng): Camp
     const midLen = row.reduce((s, r, i) => s + (i ? Math.abs(th(i) - th(i - 1)) * (r + prev[i]) / 2 : 0), 0);
     cap += Math.floor(midLen / (21 * sk)) * 0.75;
   }
-  const K = R.length - 1;
-  // each band's own span (the inner rows shorter): indices [i0, i1] of the directions
+  let K = R.length - 1;
+  // each band's own span (the inner rows shorter, the outer ones as long as the households need): indices [i0, i1]
   const sp = rng.fork('spans');
   const spans: [number, number][] = [[0, NA - 1]];
+  const bandCap = (b: number, i0: number, i1: number): number => {
+    let L = 0;
+    for (let i = i0 + 1; i <= i1; i++) L += Math.abs(th(i) - th(i - 1)) * (R[b][i] + R[b - 1][i]) / 2;
+    return L / (22 * sk);
+  };
+  let left = nS - 1;
   for (let b = 1; b <= K; b++) {
-    const f = Math.min(1, 0.5 + 0.22 * b) * sp.range(0.85, 1);
-    const half = Math.floor(((NA - 1) / 2) * f);
+    let f = Math.min(1, 0.5 + 0.22 * b) * sp.range(0.85, 1);
     const ctr = Math.round((NA - 1) / 2 + sp.range(-0.12, 0.12) * NA);
-    spans.push([Math.max(0, ctr - half), Math.min(NA - 1, ctr + half)]);
+    const span = (ff: number): [number, number] => { const half = Math.floor(((NA - 1) / 2) * ff); return [Math.max(0, ctr - half), Math.min(NA - 1, ctr + half)]; };
+    // (the last band only as long as the households left: no row of empty gardens)
+    const c = bandCap(b, ...span(f));
+    if (c > left * 1.08) f = Math.max(0.18, f * ((left * 1.08) / c));
+    spans.push(span(f));
+    left -= Math.floor(bandCap(b, ...span(f)));
+    if (left <= 0) { K = b; break; }
   }
   const P = (k: number, i: number) => at(top, th(i), R[k][i]);
   // ---- the quarter: the top (inside the first lane, all round) and the bands, less the water
@@ -109,6 +120,7 @@ export function shireVillage(cc: CampCtx, c0: Vec2, pop: number, rng: Rng): Camp
     streets.push(street(pts, k === K ? 4.2 : lw, k === K ? 2 : 3, k === K ? 'radial' : 'lane'));
   }
   const Rout = Math.max(...R[K]) + lw / 2 + 2;
+  R.length = K + 1;
   const mi = Math.round((NA - 1) / 2);
   const climbPts: Vec2[] = [];
   for (let k = 0; k <= K; k++) climbPts.push(P(k, mi));
