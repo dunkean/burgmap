@@ -132,7 +132,12 @@ GITHUB_TOKEN_FILE=/d/Workspace/dunk_token bash scripts/deploy_pages.sh   # build
    - size and wealth: cottage with a shed up to a large manor farm with barns, dovecote and walled yard;
    - terrain: bank barns on slopes, raised farms on wet ground;
    - orientation toward the track, south-facing yards, and an orchard or garden placed by context.
-7. **Nice to have:** a 3D or roof view from the building `arch`/`roof` metadata (already stored per building), and a JSON import/export round trip for editing.
+7. **Debug and feedback tooling in the UI.**
+   - Show the map coordinates (meters) under the cursor and of the last click.
+   - Let the user drop waypoints or pins with a note.
+   - "Copy link" includes the pins and the current view (e.g. `pins=x,y,note;…&view=cx,cy,scale`).
+   - The bug reporter can then give the seed, options and an exact location. The agent reproduces it with `scripts/preview.ts --crop x,y,w` or `ui_check.mjs` at that view.
+8. **Nice to have:** a 3D or roof view from the building `arch`/`roof` metadata (already stored per building), and a JSON import/export round trip for editing.
 
 ## 8. Working conventions used so far
 
