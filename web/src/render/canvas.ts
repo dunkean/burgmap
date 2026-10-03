@@ -10,11 +10,11 @@
  * Everything DOM-ish is injectable (`CanvasRendererDeps`) so a mock 2D context can drive it in Node.
  */
 import type { World, LandKind, Vec2 } from '../gen/types';
-import { PALETTES, Palette, MapStyle } from './styles';
+import { PALETTES, Palette, MapStyle, ruralInk } from './styles';
 import { renderTerrainRaster } from './raster';
 import { buildScene, Scene, PolyLayer, LineLayer, TextureLayer, textureMarks, LAND_ORDER, WALL_LINE_W, CAMP_FENCE_W } from './scene';
 import { renderView } from '../gen/settlements/merge';
-import { selectLod, lineWidth, Lod, BAND_MIN_EDGE } from './lod';
+import { selectLod, lineWidth, Lod, BAND_MIN_EDGE, WAY_SCALE } from './lod';
 import { View, viewRect, Rect4 } from './view';
 import { Label, placeLabels } from './labels';
 import { buildMapLabels, placeMapLabels, MapLabel, PlacedMapLabel, estimateWidth } from './mapLabels';
@@ -170,6 +170,29 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
   const polyL = (n: string): PolyLayer | undefined => scene.poly.get(n);
   const linesOf = (pred: (l: LineLayer) => boolean): LineLayer[] => scene.lines.filter(pred);
 
+  /**
+   * Land = the map minus the sea and lakes (evenodd): roads, tracks and street strokes are clipped to it, so a stroke
+   * widened to its minimum on-screen width never spills over the water (bridges are drawn afterwards, unclipped).
+   */
+  let landPath: Path2D | null | undefined;
+  function landClip(): Path2D | null {
+    if (landPath !== undefined) return landPath;
+    const ls = ['sea', 'lakes'].map((n) => scene.poly.get(n)).filter((l): l is PolyLayer => !!l);
+    if (!ls.length) return (landPath = null);
+    const p = new P();
+    const m = 50;
+    p.moveTo(-m, -m); p.lineTo(S + m, -m); p.lineTo(S + m, S + m); p.lineTo(-m, S + m); p.closePath();
+    for (const l of ls) for (let i = 0; i < l.polys.length; i++) {
+      for (const r of [l.polys[i], ...(l.holes?.[i] ?? [])]) {
+        if (r.length < 3) continue;
+        p.moveTo(r[0].x, r[0].y);
+        for (let k = 1; k < r.length; k++) p.lineTo(r[k].x, r[k].y);
+        p.closePath();
+      }
+    }
+    return (landPath = p);
+  }
+
   function cached(key: string, make: () => Path2D | null): Path2D | null {
     let p = cache.get(key);
     if (p === undefined) {
@@ -323,9 +346,9 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
     };
     const edge = Math.max(0.5, 0.9 / sc);
     /** Casing + fill for a group of road-like layers (all casings first so junctions merge). */
-    const roadGroup = (ls: LineLayer[], fillMinPx: (l: LineLayer) => number): void => {
+    const roadGroup = (ls: LineLayer[], fillMinPx: (l: LineLayer) => number, edgeK: (l: LineLayer) => number = () => 1): void => {
       if (!ls.length) return;
-      strokeLines(ls, pal.roadEdge, (l) => lw(l.width, fillMinPx(l)) + 2 * edge);
+      strokeLines(ls, pal.roadEdge, (l) => lw(l.width, fillMinPx(l)) + 2 * edge * edgeK(l));
       strokeLines(ls, pal.roadFill, (l) => lw(l.width, fillMinPx(l)));
     };
 
@@ -374,14 +397,15 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
       if ((kind === 'orchard' || kind === 'garden') && lod.strips) strokePolys(name, pal.hedge, lw(0.8, 0.8), 0.7);
     }
     const fu = Math.max(1, u);
-    // field network: ways, headlands, hedgerows (+ trees near)
+    // field network: ways, headlands, hedgerows (+ trees near). Ways and headlands are subtle earth-toned hairlines
+    // (never paper-white bands across the fields), and the ways only show from mid-close zoom on.
     if (luOn && lod.strips) {
-      const hl = linesOf((l) => l.name === 'headlands');
-      strokeLines(hl, pal.roadFill, (l) => lw(l.width * fu, 0.8), 0.45, [], 'butt');
-      strokeLines(hl, pal.furrow, () => lw(0.5 * fu, 0.5), 0.5, [], 'butt');
-      const ways = linesOf((l) => l.name === 'field-ways');
-      strokeLines(ways, pal.roadFill, (l) => lw(l.width * fu, 1.2), 0.7, [], 'butt');
-      if (lod.band >= 2) strokeLines(ways, pal.roadEdge, () => lw(0.7 * fu, 0.6), 0.55, [px(5 * fu), px(3.5 * fu)], 'butt');
+      const rk = ruralInk(pal);
+      strokeLines(linesOf((l) => l.name === 'headlands'), pal.furrow, () => lw(0.6, 0.5), pal.rural.headland, [], 'butt');
+      if (sc >= WAY_SCALE) {
+        const ways = linesOf((l) => l.name === 'field-ways');
+        strokeLines(ways, rk, () => lw(1.4, 0.8), pal.rural.way, lod.band >= 2 ? [px(6), px(4)] : [], 'butt');
+      }
       strokeLines(linesOf((l) => l.name === 'hedges'), pal.hedge, () => lw(0.95 * Math.pow(fu, 0.85), lod.band >= 1 ? 1 : 0.6), 0.85);
       if (lod.band >= 2 && polyL('hedge-trees')) {
         fillPolys('hedge-trees', pal.treeFill);
@@ -428,14 +452,22 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
       fillPolys('farm-buildings', pal.farmRoof);
       strokePolys('farm-buildings', pal.farmInk, lw(0.7, 0.6));
     }
+    // roads, tracks and the street strokes below never spill over the sea or the lakes (bridges come later)
+    const land = landClip();
+    ctx.save();
+    if (land) ctx.clip(land, 'evenodd');
+    // hierarchy: cased major roads; thinner cased minor roads; tracks as thin dashed earth lines from mid zoom only
     const roads = linesOf((l) => l.role === 'road' && l.kind !== 'track' && (lod.minorRoads || l.kind === 'major'));
-    roadGroup(roads, (l) => (l.kind === 'major' ? 1.6 : 1.1));
-    const tracks = linesOf((l) => l.role === 'road' && l.kind === 'track' && lod.minorRoads);
-    strokeLines(tracks, pal.roadEdge, (l) => lw(l.width * 0.5, 1), 0.85, [px(lod.band ? 7 : 5), px(lod.band ? 4 : 3)], 'butt');
+    roadGroup(roads, (l) => (l.kind === 'major' ? 1.6 : 0.8), (l) => (l.kind === 'major' ? 1 : 0.6));
+    const tracks = linesOf((l) => l.role === 'road' && l.kind === 'track' && lod.band >= 1);
+    strokeLines(tracks, ruralInk(pal), () => lw(1.6, 0.9), pal.rural.track, [px(lod.band >= 2 ? 7 : 5), px(lod.band >= 2 ? 4 : 3)], 'butt');
+    ctx.restore();
 
     // 5. urban
     const U = pal.urban;
     const uStreets = linesOf((l) => l.role === 'street');
+    // (village and hamlet streets, layers 'vstreet-*', never get the far-zoom arterial strokes)
+    const isVillage = (l: LineLayer): boolean => l.name.startsWith('vstreet-');
     const mainsOf = (maxRank: number): LineLayer[] => uStreets.filter((l) => Number(l.kind.slice(1, 2)) <= maxRank && !l.kind.endsWith('c'));
     if (lod.densityAlpha > 0) {
       const dimg = getDensity();
@@ -452,7 +484,10 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
     }
     if (!lod.blocks) {
       // far: arterial and primary streets only, as thin cased lines
-      roadGroup(mainsOf(1), (l) => (l.kind.startsWith('r0') ? 1.8 : 1.2));
+      ctx.save();
+      if (land) ctx.clip(land, 'evenodd');
+      roadGroup(mainsOf(1).filter((l) => !isVillage(l)), (l) => (l.kind.startsWith('r0') ? 1.8 : 1.2));
+      ctx.restore();
     } else {
       // street space = the quarters; blocks, places and masses are laid on top
       const stilts = !!world.urban?.renderHints?.stilts;
@@ -637,9 +672,12 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
         if (U.plotLightAlpha > 0) strokePolys('u-plots', U.massEdge, lw(U.plotW, 0.4), U.plotLightAlpha * 0.7);
       }
       // hierarchy: arterial / primary streets keep a legible minimum width in street colour
-      const minPx = (l: LineLayer): number => (l.kind.startsWith('r0') ? 2.6 : l.kind.startsWith('r1') ? 1.8 : 1.0);
+      const minPx = (l: LineLayer): number => (isVillage(l) ? (lod.band >= 2 ? 1.2 : 0.8) : l.kind.startsWith('r0') ? 2.6 : l.kind.startsWith('r1') ? 1.8 : 1.0);
       const thin = mainsOf(lod.band === 1 ? 2 : 1).filter((l) => l.width * sc < minPx(l));
+      ctx.save();
+      if (land && !stilts) ctx.clip(land, 'evenodd');
       strokeLines(thin, U.street, (l) => minPx(l) / sc);
+      ctx.restore();
       if (!stilts) strokePolys('block-edges', U.blockEdge, lw(U.blockEdgeW, 0.3));
       if (polyL('landmarks') && near) strokePolys('landmarks', U.landmark, lw(0.6, 0.6), 0.5, [px(5), px(3)]);
       // zoomed out: the landmark sites (wells, crosses, markets, compounds' named buildings) as a solid outline of at
@@ -876,8 +914,8 @@ function drawMapLabels(ctx: CanvasRenderingContext2D, placed: PlacedMapLabel[], 
         case 'cross': ctx.moveTo(x, y - r * 1.25); ctx.lineTo(x, y + r * 1.25); ctx.moveTo(x - r * 0.85, y - r * 0.3); ctx.lineTo(x + r * 0.85, y - r * 0.3); ctx.lineWidth = 1.6; ctx.stroke(); break;
         case 'tri': ctx.moveTo(x, y - r * 1.1); ctx.lineTo(x + r * 1.1, y + r * 0.8); ctx.lineTo(x - r * 1.1, y + r * 0.8); ctx.closePath(); ctx.fill(); break;
         case 'square': ctx.rect(x - r * 0.9, y - r * 0.9, r * 1.8, r * 1.8); ctx.fill(); break;
-        case 'ring': ctx.arc(x, y, r * 0.85, 0, TAU); ctx.fillStyle = pal.lab.halo; ctx.fill(); ctx.stroke(); break;
-        default: ctx.arc(x, y, r, 0, TAU); ctx.fill(); ctx.strokeStyle = pal.lab.halo; ctx.lineWidth = 1; ctx.stroke();
+        case 'ring': ctx.arc(x, y, r * 0.7, 0, TAU); ctx.stroke(); break;
+        default: ctx.arc(x, y, r * 0.75, 0, TAU); ctx.fill();
       }
     }
   }
@@ -918,7 +956,6 @@ function drawSiteMarker(ctx: CanvasRenderingContext2D, world: World, pal: Palett
   ctx.setLineDash([]); ctx.globalAlpha = 1;
   const r = Math.max(9 * u, 5 / sc);
   ctx.beginPath(); ctx.arc(c.x, c.y, r, 0, TAU);
-  ctx.fillStyle = pal.paper; ctx.globalAlpha = 0.85; ctx.fill(); ctx.globalAlpha = 1;
   ctx.strokeStyle = pal.ink; ctx.lineWidth = Math.max(1.6 * u, 1.2 / sc); ctx.stroke();
   ctx.beginPath(); ctx.arc(c.x, c.y, r * 0.38, 0, TAU); ctx.fillStyle = pal.ink; ctx.fill();
 }

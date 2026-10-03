@@ -65,8 +65,8 @@ export function labelsSvg(world: World, pal: Palette, measure?: Measure, legend 
         case 'cross': body += `<path d="M${f1(X)} ${f1(Y - R * 1.25)}V${f1(Y + R * 1.25)}M${f1(X - R * 0.85)} ${f1(Y - R * 0.3)}H${f1(X + R * 0.85)}" stroke="${c}" stroke-width="${f1(1.6 * k)}" fill="none"/>`; break;
         case 'tri': body += `<path d="M${f1(X)} ${f1(Y - R * 1.1)}L${f1(X + R * 1.1)} ${f1(Y + R * 0.8)}L${f1(X - R * 1.1)} ${f1(Y + R * 0.8)}Z" fill="${c}"/>`; break;
         case 'square': body += `<rect x="${f1(X - R * 0.9)}" y="${f1(Y - R * 0.9)}" width="${f1(R * 1.8)}" height="${f1(R * 1.8)}" fill="${c}"/>`; break;
-        case 'ring': body += `<circle cx="${f1(X)}" cy="${f1(Y)}" r="${f1(R * 0.85)}" fill="${pal.lab.halo}" stroke="${c}" stroke-width="${f1(1.1 * k)}"/>`; break;
-        default: body += `<circle cx="${f1(X)}" cy="${f1(Y)}" r="${f1(R)}" fill="${c}" stroke="${pal.lab.halo}" stroke-width="${f1(1 * k)}"/>`;
+        case 'ring': body += `<circle cx="${f1(X)}" cy="${f1(Y)}" r="${f1(R * 0.7)}" fill="none" stroke="${c}" stroke-width="${f1(1.1 * k)}"/>`; break;
+        default: body += `<circle cx="${f1(X)}" cy="${f1(Y)}" r="${f1(R * 0.75)}" fill="${c}"/>`;
       }
     }
   });

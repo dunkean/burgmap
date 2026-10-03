@@ -1,6 +1,6 @@
 import type { World, LandArea, LandKind } from '../gen/types';
 import type { Vec2 } from '../gen/core/geom';
-import type { Palette } from './styles';
+import { type Palette, ruralInk } from './styles';
 import { f1, pathD } from './util';
 
 /** Land-use tints multiply over the hillshaded terrain so relief stays readable under them (browsers; resvg falls back to plain alpha). Dark styles blend normally. */
@@ -143,12 +143,13 @@ function fieldNetwork(world: World, pal: Palette, s: number): string {
   const ways = lu.ways ?? [];
   if (ways.length) {
     const d = ways.map((w) => pathD(w, false)).join('');
-    out += `<g class="lu-ways" fill="none" stroke-linecap="butt" stroke-linejoin="round"><path d="${d}" stroke="${pal.roadFill}" stroke-width="${f1(2.6 * s)}" stroke-opacity="0.7"/><path d="${d}" stroke="${pal.roadEdge}" stroke-width="${f1(0.7 * s)}" stroke-opacity="0.55" stroke-dasharray="${f1(5 * s)} ${f1(3.5 * s)}"/></g>`;
+    // subtle earth-toned dashed hairlines, never paper-white bands across the fields
+    out += `<g class="lu-ways" fill="none" stroke-linecap="butt" stroke-linejoin="round"><path d="${d}" stroke="${ruralInk(pal)}" stroke-width="${f1(Math.max(1.4, 0.55 * s))}" stroke-opacity="${pal.rural.way}" stroke-dasharray="${f1(4 * s)} ${f1(2.5 * s)}"/></g>`;
   }
   const hl = lu.headlands ?? [];
   if (hl.length) {
     const d = hl.map((w) => pathD(w, false)).join('');
-    out += `<g class="lu-headlands" fill="none"><path d="${d}" stroke="${pal.roadFill}" stroke-width="${f1(1.5 * s)}" stroke-opacity="0.45"/><path d="${d}" stroke="${pal.furrow}" stroke-width="${f1(0.5 * s)}" stroke-opacity="0.5"/></g>`;
+    out += `<g class="lu-headlands" fill="none"><path d="${d}" stroke="${pal.furrow}" stroke-width="${f1(Math.max(0.6, 0.4 * s))}" stroke-opacity="${pal.rural.headland}"/></g>`;
   }
   const enc = lu.areas.filter((a) => (a as Enc).enclosed);
   if (enc.length) {
@@ -212,11 +213,12 @@ export function roadsLayer(world: World, pal: Palette, u: number): string {
   for (const k of kinds) {
     const d = by(k);
     if (!d) continue;
-    const w = k === 'major' ? 8 : k === 'minor' ? 5 : 3;
+    // hierarchy: cased major roads, thinner minor roads, tracks as thin dashed earth lines
+    const w = k === 'major' ? 8 : k === 'minor' ? 3.6 : 3;
     if (k === 'track') {
-      out += `<path d="${d}" stroke="${pal.roadEdge}" stroke-width="${f1(Math.max(1.6, w * 0.5 * s))}" stroke-dasharray="${f1(7 * s)} ${f1(4 * s)}" stroke-linecap="butt" opacity="0.85"/>`;
+      out += `<path d="${d}" stroke="${ruralInk(pal)}" stroke-width="${f1(Math.max(1.6, 0.6 * s))}" stroke-dasharray="${f1(6 * s)} ${f1(3.5 * s)}" stroke-linecap="butt" stroke-opacity="${pal.rural.track}"/>`;
     } else {
-      out += `<path d="${d}" stroke="${pal.roadEdge}" stroke-width="${f1(w * s + 2 * edge)}"/>`;
+      out += `<path d="${d}" stroke="${pal.roadEdge}" stroke-width="${f1(w * s + 2 * edge * (k === 'major' ? 1 : 0.6))}"/>`;
       out += `<path d="${d}" stroke="${pal.roadFill}" stroke-width="${f1(w * s)}"/>`;
     }
   }
@@ -243,7 +245,7 @@ export function siteLayer(world: World, pal: Palette, u: number, debug: boolean)
   const c = site.center;
   let out = `<g class="layer-site" fill="none">`;
   for (const p of world.landuse?.reserve ?? []) out += `<path d="${pathD(p, true)}" stroke="${pal.ink}" stroke-width="${f1(1.5 * u)}" stroke-dasharray="${f1(9 * u)} ${f1(6 * u)}" opacity="0.7"/>`;
-  out += `<circle cx="${f1(c.x)}" cy="${f1(c.y)}" r="${f1(9 * u)}" fill="${pal.paper}" fill-opacity="0.85" stroke="${pal.ink}" stroke-width="${f1(1.6 * u)}"/>`;
+  out += `<circle cx="${f1(c.x)}" cy="${f1(c.y)}" r="${f1(9 * u)}" fill="none" stroke="${pal.ink}" stroke-width="${f1(1.6 * u)}"/>`;
   out += `<circle cx="${f1(c.x)}" cy="${f1(c.y)}" r="${f1(3.4 * u)}" fill="${pal.ink}"/>`;
   if (debug) {
     const mk = (p: Vec2 | undefined, label: string) => {
