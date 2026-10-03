@@ -43,12 +43,14 @@ export class GuidanceField {
   P: MorphologyParams | null = null;
   /** Contour direction at the site (terrain-oriented lattices: terraces). */
   terrainAngle = 0;
+  /** Direction to the open water from the site (lattices whose ribs run down to the harbour). */
+  waterAngle = 0;
 
   /** Base angle θ of the cross-field at p (the field is defined modulo 90°). */
   angle(p: Vec2): number {
     const P = this.P ?? this.ctx.params;
     const nz = ((P.fieldNoise * Math.PI) / 180) * this.noise.fbm(p.x / P.fieldWavelength, p.y / P.fieldWavelength, 2);
-    if (P.streetOp === 'grid') return (P.orientation === 'cardinal' ? 0 : P.orientation === 'terrain' ? this.terrainAngle : this.gridAngle) + nz + P.gridSkew * this.noise.fbm(p.x / 600 + 9, p.y / 600 - 3, 2);
+    if (P.streetOp === 'grid') return (P.orientation === 'cardinal' ? 0 : P.orientation === 'terrain' ? this.terrainAngle : P.orientation === 'water' ? this.waterAngle : this.gridAngle) + nz + P.gridSkew * this.noise.fbm(p.x / 600 + 9, p.y / 600 - 3, 2);
     // terraces (dwarven holds): streets cut along the local contours where the ground slopes, straight rows
     // across the site's contour direction where it is flat; the other family climbs (ramps, stairs)
     if (P.contourFollow) return this.localContour(p, P.contourFollow);

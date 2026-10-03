@@ -670,6 +670,73 @@ function sahelCompound(pl: Plot, cov: number, P: MorphologyParams, rng: Rng): Ar
 }
 const polysOverlap = (a: Polygon, b: Polygon): boolean => a.some((q) => pointInRing(b, q)) || b.some((q) => pointInRing(a, q));
 
+// ---------------------------------------------------------------- Hanseatic gabled house (Dielenhaus) and Gang
+/**
+ * Hanseatic merchant house on a narrow deep lot: the gabled front house (the Diele, the tall hall of the ground
+ * floor, and the lofts above) 14–20 m deep over the whole frontage, a rear wing (Flügel) along one side line, the
+ * yard behind. Every fifth lot carries a Gang instead: a 1.3 m alley through the front house to a row of one-room
+ * cottages (Buden) along it in the back yard. Wide lots hold two houses side by side.
+ */
+function giebelhaus(pl: Plot, cov: number, P: MorphologyParams, rng: Rng): ArchBldg[] {
+  const f = frame(pl);
+  if (!f) return [];
+  const { W, D } = f;
+  const ori = Math.atan2(f.n.y, f.n.x);
+  const conv = isConvex(pl.poly, 1e-3);
+  const sideHP = (k: number): HalfPlane => {
+    const sd = k === 0 ? pl.sideA : pl.sideB;
+    const tw = k === 0 ? f.t : { x: -f.t.x, y: -f.t.y };
+    let m = { x: -sd.d.y, y: sd.d.x };
+    if (m.x * tw.x + m.y * tw.y < 0) m = { x: -m.x, y: -m.y };
+    return { p: sd.p, n: m };
+  };
+  const piece = (d0: number, d1: number, side?: { k: number; w: number; off?: number }): Polygon | null => {
+    const hps: HalfPlane[] = [{ p: { x: f.fa.x + f.n.x * d0, y: f.fa.y + f.n.y * d0 }, n: f.n }, { p: { x: f.fa.x + f.n.x * d1, y: f.fa.y + f.n.y * d1 }, n: { x: -f.n.x, y: -f.n.y } }];
+    if (side) {
+      const h = sideHP(side.k), o = side.off ?? 0;
+      hps.push({ p: { x: h.p.x + h.n.x * o, y: h.p.y + h.n.y * o }, n: h.n }, { p: { x: h.p.x + h.n.x * (o + side.w), y: h.p.y + h.n.y * (o + side.w) }, n: { x: -h.n.x, y: -h.n.y } });
+    }
+    let best: Polygon | null = null;
+    for (const r of clipPlot(pl.poly, hps, conv)) { const c = cleanRing(r, 0.005, 0.5, 0.002, false); if (c.length >= 3 && (!best || area(c) > area(best))) best = c; }
+    return best && area(best) > 6 ? best : null;
+  };
+  const out: ArchBldg[] = [];
+  const put = (poly: Polygon | null, arch: string, kind: Bldg['kind'], storeys: number) => {
+    if (poly && shapeOf(poly).w >= MIN_BW - 0.6) out.push({ poly, kind, arch, roof: 'gable', material: P.arch.material, storeys, orientation: ori });
+  };
+  const hd = Math.min(D - 0.5, rng.range(15, 21));
+  const tall = (pl.wealth ?? 0.4) > 0.5 ? rng.int(4, 5) : rng.int(3, 4);
+  // a Gang: the alley along side A through to the back, the Buden in a row along it
+  const gang = (pl.order % 4 === 2 || rng.chance(Math.max(0, cov - 0.75))) && D > hd + 10 && W >= 5.4 && cov > 0.6;
+  if (gang) {
+    const gw = 1.3;
+    put(piece(0, hd, { k: 0, w: W - gw, off: gw }), 'giebelhaus', 'house', tall);
+    const bw = Math.min(W - gw - 0.2, rng.range(3.6, 4.4));
+    for (let d = hd + 1.5; d + 4 <= D - 0.8; d += 4.4) {
+      const b = piece(d, d + 4, { k: 0, w: bw, off: gw });
+      if (b && shapeOf(b).w >= 3.2) out.push({ poly: b, kind: 'back', arch: 'gang-bude', roof: 'gable', material: P.arch.material, storeys: 1, orientation: ori, ring: true });
+    }
+    pl.gated = true;
+    return out;
+  }
+  if (W > 13) {
+    // two houses side by side
+    // (both strips measured from the same side line: disjoint on a fanned lot too)
+    put(piece(0, hd, { k: 0, w: W / 2 }), 'giebelhaus', 'house', tall);
+    put(piece(0, hd * rng.range(0.85, 1), { k: 0, w: W, off: W / 2 }), 'giebelhaus', 'house', tall - 1);
+  } else put(piece(0, hd), 'giebelhaus', 'house', tall);
+  // the rear wing (Flügel) along one side, a passage (the Diele's back door) beside it to the yard
+  const wEnd = Math.min(D - 1, hd + rng.range(10, 18) * (0.6 + cov * 0.6));
+  if (cov > 0.5 && D > hd + 6 && W >= 6) {
+    const k = rng.chance(0.5) ? 0 : 1;
+    put(piece(hd, wEnd, { k, w: Math.max(3.9, Math.min(W - 1.6, rng.range(4.2, 5.2))) }), 'fluegel', 'rear', tall - 1);
+  }
+  // a back house (Hinterhaus) at the end of deep lots
+  if (cov > 0.7 && D > wEnd + 8) put(piece(D - rng.range(6, 8), D - 0.5), 'hinterhaus', 'back', 2);
+  pl.gated = true;
+  return out;
+}
+
 // ---------------------------------------------------------------- Inca kancha
 /**
  * Kancha: a walled rectangular compound of single-room houses set along the inside of its wall around a central
@@ -819,6 +886,7 @@ function buildOnRaw(pl: Plot, cov: number, P: MorphologyParams, rng: Rng, hint?:
     case 'venetian': return venetian(pl, cov, P, rng, hint);
     case 'konak': return konak(pl, cov, P, rng);
     case 'sahelCompound': return sahelCompound(pl, cov, P, rng);
+    case 'giebelhaus': return giebelhaus(pl, cov, P, rng);
     default: {
       const ori = Math.atan2(pl.nrm.y, pl.nrm.x);
       return buildPlot(pl, cov, P, rng, hint).map((b) => (b.kind === 'garden' ? b : {

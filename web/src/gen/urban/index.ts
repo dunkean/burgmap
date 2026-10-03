@@ -47,6 +47,7 @@ import { registerVenice, lagoonWaterways, reserveArsenal } from './venice';
 import { registerPersian, bazaarRoofs, qanats } from './persian';
 import { registerOttoman } from './ottoman';
 import { registerSahel } from './sahel';
+import { registerHanse } from './hanse';
 import { siteCastle, type CastlePlan } from './m4/castle';
 import { reserveCastle, type M4State } from './m4/reserve';
 import { reserveCathedral, reservePalace, reserveMonasteries } from './m4/catalogue';
@@ -92,7 +93,21 @@ export function mainRoadAngle(world: World): number {
 }
 
 let TERRAIN_ANGLE = 0;
-const orientAngle = (o: EnclosureSpec['orientation'] | NucleusSpec['orientation'], main: number) => (o === 'cardinal' ? 0 : o === 'qibla' ? QIBLA : o === 'terrain' ? TERRAIN_ANGLE : main);
+let WATER_ANGLE = 0;
+const orientAngle = (o: EnclosureSpec['orientation'] | NucleusSpec['orientation'], main: number) => (o === 'cardinal' ? 0 : o === 'qibla' ? QIBLA : o === 'terrain' ? TERRAIN_ANGLE : o === 'water' ? WATER_ANGLE : main);
+
+/** Direction (radians) from p to the nearest open water (the first ring of samples that meets it), else downhill. */
+export function waterAngle(ctx: { isWater: (p: Vec2) => boolean }, p: Vec2, contour: number): number {
+  for (let r = 40; r <= 1600; r += 30) {
+    let sx = 0, sy = 0, n = 0;
+    for (let k = 0; k < 48; k++) {
+      const a = (k / 48) * 2 * Math.PI;
+      if (ctx.isWater({ x: p.x + Math.cos(a) * r, y: p.y + Math.sin(a) * r })) { sx += Math.cos(a); sy += Math.sin(a); n++; }
+    }
+    if (n && Math.hypot(sx, sy) > 1e-6) return Math.atan2(sy, sx);
+  }
+  return contour + Math.PI / 2;
+}
 
 /** Contour direction (radians) at p: perpendicular to the gradient of the height field smoothed over ~120 m. */
 export function contourAngle(world: World, p: Vec2): number {
@@ -121,6 +136,7 @@ const L2_SITES: Record<string, 'power' | 'worship' | 'market' | 'civic' | 'activ
   maidan: 'market', 'friday-mosque': 'worship', caravanserai: 'market', 'chahar-bagh': 'civic',
   mescit: 'worship', kulliye: 'worship', 'ulu-cami': 'worship', bedesten: 'market',
   'mud-mosque': 'worship', 'sahel-mosque': 'worship', 'sahel-palace': 'power',
+  'hall-church': 'worship', rathaus: 'civic',
   'aztec-precinct': 'worship', 'calpulli-temple': 'worship', tecpan: 'power', tianguis: 'market',
 };
 /** Parcel uses of the open port pieces. */
@@ -176,6 +192,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   const ctx = makeCtx(world, params, 2.6 * Math.sqrt(estArea / Math.PI) + 450);
   const mainAngle = mainRoadAngle(world);
   TERRAIN_ANGLE = contourAngle(world, world.site!.center);
+  WATER_ANGLE = waterAngle(ctx, world.site!.center, TERRAIN_ANGLE);
   const terrainAngle = TERRAIN_ANGLE;
   const streets = new Streets();
   registerM4();
@@ -188,6 +205,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   registerPersian();
   registerOttoman();
   registerSahel();
+  registerHanse();
   const flags = m4Flags(opts, culture, pop, archetype, rng.fork('m4'));
   const sites: UrbanSite[] = [];
   const lotData = new Map<string, unknown>();
@@ -419,6 +437,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   const nucleus = prim.market ? polygonCentroid(prim.market) : ctx.center;
   const field = new GuidanceField(ctx, nucleus, streets, mainAngle, rng.fork('field'));
   field.terrainAngle = terrainAngle;
+  field.waterAngle = WATER_ANGLE;
   // (the first street cut at level 2: lagoon canals are level-2 cuts only)
   const l2First = streets.list.length;
   const pieces: Piece[][] = prim.quarters.map(() => []);
@@ -428,7 +447,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     prim.quarters.forEach((q, qi) => {
       if (done[qi]) return;
       if (q.kind === 'quarter' && !q.lp.lab.some((l) => l >= 0 && streets.connected.has(l))) return;
-      pieces[qi] = splitQuarter(ctx, q, qi, streets, field, { nucleus, gridAngle: mainAngle, terrainAngle }, rng.fork('q:' + qi));
+      pieces[qi] = splitQuarter(ctx, q, qi, streets, field, { nucleus, gridAngle: mainAngle, terrainAngle, waterAngle: WATER_ANGLE }, rng.fork('q:' + qi));
       done[qi] = true;
       progress = true;
     });
@@ -584,7 +603,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   // landmark lots claimed at level 2 (see above) are filled here
   // with a cathedral close the market church is a parish church (one cathedral per town)
   const hasClose = sites.some((x) => x.kind === 'cathedral-close');
-  carved.forEach((b, bi) => { if (b.compound && b.compound !== 'embedded-church' && !compoundOf[bi]) claim(bi, hasClose && b.compound === 'church' ? 'parish-church' : b.compound, b.compound === 'great-mosque' ? QIBLA : blockMorph[bi].orientation === 'cardinal' ? 0 : blockMorph[bi].orientation === 'terrain' ? terrainAngle : mainAngle); });
+  carved.forEach((b, bi) => { if (b.compound && b.compound !== 'embedded-church' && !compoundOf[bi]) claim(bi, hasClose && b.compound === 'church' ? 'parish-church' : b.compound, b.compound === 'great-mosque' ? QIBLA : blockMorph[bi].orientation === 'cardinal' ? 0 : blockMorph[bi].orientation === 'terrain' ? terrainAngle : blockMorph[bi].orientation === 'water' ? WATER_ANGLE : mainAngle); });
 
   // ---- level 3: plots (by the block's plot operator)
   const encRingsF = eplan.enclosure.map((ph) => ph.outer);

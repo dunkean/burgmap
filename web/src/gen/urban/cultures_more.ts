@@ -97,6 +97,21 @@ M['sahel-town'] = morph('sahel-town', MORPHOLOGIES['medina'], {
   density: { core: 240, middle: 190, edge: 140, faubourg: 80, village: 50 },
   arch: { typology: 'sudano-sahelian-house', roof: 'flat', storeys: [1, 2], material: 'mud' },
 });
+// ---------------------------------------------------------------- Hanseatic town
+M['hanseatic'] = morph('hanseatic', MORPHOLOGIES['bastide'], {
+  // ribs: streets straight down the slope to the harbour every ~75 m, long streets along the ridge every ~220 m
+  streets: ['radials', 'grid'], closeOp: 'none', buildingOp: 'giebelhaus', orientation: 'water',
+  gridSpacing: [76, 220], gridSkew: 0.07, fieldNoise: 3, curvature: 0.12,
+  growth: { road: 0.12, water: 0.5, noise: 0.16, wavelength: 360, elongation: 0.15, wet: 0.4, bipolar: 0 },
+  blockSize: { core: [6000, 16000], middle: [6000, 17000], edge: [7000, 18000], faubourg: [5000, 14000], village: [7000, 20000] },
+  minBlock: 900, minWidth: 26, widthByRank: [9, 7.5, 5.5, 3.4, 2.5], gatePlaces: 0.2, crossPlaces: 0,
+  frontage: { core: [5.5, 8], middle: [6, 8.5], edge: [6.5, 10], faubourg: [7, 12], village: [16, 32] },
+  plotDepth: { core: [28, 40], middle: [28, 42], edge: [30, 46], faubourg: [26, 44], village: [36, 60] },
+  coverage: { core: [0.82, 0.92], middle: [0.74, 0.85], edge: [0.62, 0.74], faubourg: [0.45, 0.6], village: [0.15, 0.3] },
+  wideLotChance: 0.1, deepFill: true, plotTilt: 1,
+  density: { core: 190, middle: 160, edge: 120, faubourg: 60, village: 35 },
+  arch: { typology: 'giebelhaus', roof: 'gable', storeys: [3, 5], material: 'brick' },
+});
 Object.assign(MORPHOLOGIES, M);
 }
 
@@ -210,5 +225,24 @@ export const MORE_CULTURES: Culture[] = [
     render: { towerShape: 'square', compoundWalls: true },
     scale: { min: 'hamlet', max: 'city' },
     sitePrefs: { flatness: 2, weights: { meander: 2, confluence: 2, bridge: 1.6, plain: 1.6, estuary: 1, harbor: 0.6, hilltop: 0, valley: 0.5 } },
+  },
+  {
+    id: 'hanseatic', label: 'Hanseatic port (Lubeck)',
+    nucleus: { kind: 'market', shape: 'rect', area: [2500, 9000], compound: false, ring: 7, orientation: 'water' },
+    core: { morphology: 'hanseatic', enclosure: { shape: 'organic', wall: 'auto', fossil: 'street', towers: 'square' } },
+    ring: { morphology: 'hanseatic', enclosure: { shape: 'organic', wall: 'auto', fossil: 'street', towers: 'square' } },
+    phaseCount: [[0, 1], [9000, 2]],
+    faubourg: 'european-organic', faubShare: [0.1, 0.08],
+    landmarks: [
+      { role: 'worship', kind: 'hall-church', place: 'adjacent-nucleus', area: [2500, 12000], minPop: 1500 },
+      { role: 'civic', kind: 'rathaus', place: 'adjacent-nucleus', area: [1200, 6000], minPop: 2500 },
+      { role: 'extra', kind: 'hall-church', place: 'spread', area: [2000, 9000], minPop: 6000, perPop: 5000, sep: 350 },
+    ],
+    village: { form: 'auto', morphology: 'hanseatic' },
+    hamlet: { form: 'auto' },
+    m4: { castle: 'none', cathedral: null, palace: null, monastery: 'monastery', marketHall: false, arena: 0, shanty: 'zone' },
+    render: { towerShape: 'square' },
+    scale: { min: 'hamlet', max: 'metropolis' },
+    sitePrefs: { flatness: 1.2, weights: { harbor: 3, estuary: 3, bridge: 1.2, confluence: 1.2, plain: 0.8, hilltop: 0.4, valley: 0.5 } },
   },
 ];
