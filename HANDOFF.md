@@ -92,6 +92,13 @@ GITHUB_TOKEN_FILE=/d/Workspace/dunk_token bash scripts/deploy_pages.sh   # build
   - Mixing by phase, sector or blend.
 - **Options:** custom map size (600 m – 40 km), population (10 – 5 M), settlements (auto / counts / list with click-to-place), sprawl factor (0.5–2), castles (0–3), walls (none, single, double), suburbs, shanty towns, site type.
 - **Landmarks:** castle, cathedral close, palace, monasteries, parish churches, places, port with quays, shipyard, rope walk, bridges every 250–500 m, mills, nuisance trades, arena.
+- **Last session before the pause:**
+  - UI bug-report tooling: cursor coordinates, pins with notes, "Copy link" carrying pins and view, "Copy bug report";
+  - farmstead variety: 23 types by culture and site, cottage to manor (`landuse/farms.ts`);
+  - small bridges for minor streets over streams (`urban/streambridges.ts`), with bridge `kind`/`arch`;
+  - weak cultures overhauled: Germanic, Norse, Celtic, Maya, Khmer, oppidum, shire, Native American, orc camp, shanties, Inca terraces;
+  - population caps removed from every culture;
+  - legend fixed.
 - **Bug-fix pass at the pause:**
   - crash on large coastal maps (`boundedCost` mixed float32 and float64, fixed and fuzzed);
   - settlements sparser: 136 → 28 on a 20 km map;
@@ -112,8 +119,15 @@ GITHUB_TOKEN_FILE=/d/Workspace/dunk_token bash scripts/deploy_pages.sh   # build
 
 ## 7. What is left (priority order)
 
-0. **Bugs in `BUGS.md`** (repo root, maintained by the user) come first.
-
+0. **Bugs in `BUGS.md`** (repo root, maintained by the user) come first. Open entries at the pause:
+   - overlapping or odd buildings where two zones meet without a street (medieval organic);
+   - biomes (desert, forest…), a new feature;
+   - Chinese: moats cut through everything and should be a well-designed option; some quarters are empty and identical;
+   - Japanese and Roman core (`seed=p4uefz&size=city`): empty areas stuck to the city;
+   - Venetian: some rivers connect to nothing;
+   - stilt town: builds over rivers; it should adapt to relief and water;
+   - a green line between some fields is too visible;
+   - terrace lines are still not pretty.
 1. **Megacity leftovers.** Done at the pause:
    - polygonal eccentric walls and asymmetric successive enceintes;
    - fused towns with real presence;
@@ -141,17 +155,17 @@ GITHUB_TOKEN_FILE=/d/Workspace/dunk_token bash scripts/deploy_pages.sh   # build
    - PNG export still stalls the page 0.3–0.9 s;
    - optional WebGL for live views of over 100 k inhabitants;
    - optional Rust/WASM raster for huge exports. Measurements showed neither is needed for normal use.
-6. **Farmstead variety.** Farmsteads scattered over the map all look the same. Vary them by:
+6. **Farmstead variety** (done: `landuse/farms.ts`; farms on 10 km maps raised to about 26). Farmsteads scattered over the map all look the same. Vary them by:
    - culture and region: courtyard farm (Vierkanthof), longère, Einhaus/longhouse, L- or U-yard, scattered buildings around a yard;
    - size and wealth: cottage with a shed up to a large manor farm with barns, dovecote and walled yard;
    - terrain: bank barns on slopes, raised farms on wet ground;
    - orientation toward the track, south-facing yards, and an orchard or garden placed by context.
-7. **Debug and feedback tooling in the UI.** DONE (cursor coordinates in meters, pins with notes, `pins=`/`view=` in the link, "Copy bug report"; see `BUGS.md` and `web/src/ui/share.ts`). Original brief:
+7. **Debug and feedback tooling in the UI** — DONE (cursor coordinates in meters, pins with notes, `pins=`/`view=` in the link, "Copy bug report"; see `BUGS.md` and `web/src/ui/share.ts`). Original brief:
    - Show the map coordinates (meters) under the cursor and of the last click.
    - Let the user drop waypoints or pins with a note.
    - "Copy link" includes the pins and the current view (e.g. `pins=x,y,note;…&view=cx,cy,scale`).
    - The bug reporter can then give the seed, options and an exact location. The agent reproduces it with `scripts/preview.ts --crop x,y,w` or `ui_check.mjs` at that view.
-8. **Small bridges in town** (the bug-fix agent did not get to it). Today only main streets bridge rivers. In towns, secondary streets and lanes should also cross small rivers and streams with small bridges or footbridges:
+8. **Small bridges in town** (done: `urban/streambridges.ts`; fords are hard to see). Today only main streets bridge rivers. In towns, secondary streets and lanes should also cross small rivers and streams with small bridges or footbridges:
    - several per stream inside the town, at street continuations;
    - a plank footbridge for lanes and a stone arch for streets;
    - the street network on both banks stays connected.

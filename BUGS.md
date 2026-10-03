@@ -28,3 +28,5 @@ Agents: fix entries in order, then mark each one fixed with the commit hash (e.g
 - Idem "North Ring": il faut arreter de copier le meme style poru les villages périphérique. comme les tribus. Soit y a de la diversité, soit y en a qu'un seul, idem pour Kraal, Native American → fixed in d48b251, 87065a2
 - Maya city, rendu horrible - rien de va. cest pas fini ni testé comme boulot Idem pour Khmer, Celtic oppidum, Halfling Shire, Native Americans (les deux) → fixed in 4d99db4, 415772a, 87065a2, d9294b9
 - orcish war camp merite une meilleur texture sous les tentes → fixed in 264fc02
+- Entre certains champs y a un trait vert, c'est pas beau et trop visible.
+- Les traits de terrasses sont pas jolis non 
