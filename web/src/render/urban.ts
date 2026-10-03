@@ -144,7 +144,7 @@ function buildingsSvg(ub: NonNullable<World['urban']>, U: Palette['urban'], lw: 
 const GROUND_USES = new Set(['bailey', 'causeway', 'ghat', 'castle-honmaru', 'compound:castle-honmaru', 'bailey-gate', 'esplanade']);
 /** Fences of camps and villages (width m): byre, yard, pen and orda fences, palisade lines inside a village. */
 const CAMP_FENCES: Record<string, number> = { 'kraal-fence': 1.1, 'yard-fence': 0.45, 'pen-fence': 0.5, 'orda-fence': 0.8, palisade: 1.2 };
-const WALL_LINES: Record<string, number> = { 'zigzag-wall': 2.4, 'canal-wall': 1, 'pyramid-step': 0.5, 'stall-row': 2.2,  'compound-wall': 1, 'citadel-wall': 2.4, 'stone-wall': 1.8, prakara: 1.6, 'ward-wall': 1.8 };
+const WALL_LINES: Record<string, number> = { stands: 2.4, dome: 0.6, gallery: 2.2, 'zigzag-wall': 2.4, 'canal-wall': 1, 'pyramid-step': 0.5, 'stall-row': 2.2,  'compound-wall': 1, 'citadel-wall': 2.4, 'stone-wall': 1.8, prakara: 1.6, 'ward-wall': 1.8 };
 
 /** Compound grounds, water pieces (moats, tanks) and the moat outside the town wall (drawn under the buildings). */
 function cultureUnderlay(ub: NonNullable<World['urban']>, pal: Palette, lw: (m: number, px: number) => string): string {
@@ -161,7 +161,7 @@ function cultureUnderlay(ub: NonNullable<World['urban']>, pal: Palette, lw: (m: 
   const ditch = ub.parcels.filter((p) => p.use === 'ditch');
   if (ditch.length) s += `<path class="u-ditch" d="${ditch.map((p) => pathD(p.poly, true)).join('')}" fill="${U.garden}" stroke="${U.plotLine}" stroke-width="${lw(0.3, 0.12)}"/><path d="${ditch.map((p) => pathD(p.poly, true)).join('')}" fill="url(#p-ugarden)"/>`;
   // chinampas: the canals between the strips, the strips themselves (and canals down the lanes)
-  const chW = ub.landmarks.filter((l) => l.kind === 'chinampa-canal');
+  const chW = ub.landmarks.filter((l) => l.kind === 'chinampa-canal' || l.kind === 'baray' || l.kind === 'pond');
   if (chW.length) s += `<path class="u-chinampa-canals" d="${chW.map((l) => pathD(l.poly, true)).join('')}" fill="${pal.riverFill}"/>`;
   const chF = ub.landmarks.filter((l) => l.kind === 'chinampa');
   if (chF.length) { const d = chF.map((l) => pathD(l.poly, true)).join(''); s += `<g class="u-chinampas"><path d="${d}" fill="${U.garden}" stroke="${pal.waterEdge}" stroke-width="${lw(0.3, 0.15)}"/><path d="${d}" fill="url(#p-ugarden)"/></g>`; }
@@ -178,7 +178,7 @@ function cultureUnderlay(ub: NonNullable<World['urban']>, pal: Palette, lw: (m: 
   if (cem.length) s += `<path d="${cem.map((l) => pathD(l.poly, true)).join('')}" fill="${U.garden}"/><path d="${cem.map((l) => pathD(l.poly, true)).join('')}" fill="url(#p-ugrave)"/>`;
   const water = (ub.water ?? []).map((w) => pathD(w.outer, true)).join('');
   if (water) s += `<path class="u-water" d="${water}" fill="${pal.riverFill}" stroke="${pal.waterEdge}" stroke-width="${lw(0.5, 0.3)}"/>`;
-  const bases = ub.landmarks.filter((l) => l.kind === 'tenshu-base');
+  const bases = ub.landmarks.filter((l) => l.kind === 'tenshu-base' || l.kind === 'mebon');
   if (bases.length) s += `<path d="${bases.map((l) => pathD(l.poly, true)).join('')}" fill="${U.wallFill}" stroke="${U.wall}" stroke-width="${lw(0.4, 0.2)}"/>`;
   return s;
 }
@@ -251,7 +251,7 @@ export function urbanLayer(world: World, pal: Palette, u: number, debug: boolean
   if (meadows.length) { const d = meadows.map((p) => pathD(p.poly, true)).join(''); s += `<g class="u-meadows"><path d="${d}" fill="${U.garden}"/><path d="${d}" fill="url(#p-ugarden)" opacity="0.45"/></g>`; }
   if (ub.backLand.length) {
     const d = ub.backLand.map(phD).join('');
-    s += `<g class="u-gardens"><path d="${d}" fill="${U.garden}"/><path d="${d}" fill="url(#p-ugarden)"/></g>`;
+    s += `<g class="u-gardens"><path d="${d}" fill="${U.garden}"/><path d="${d}" fill="url(#${ub.renderHints?.graves ? 'p-ugrave' : 'p-ugarden'})"/></g>`;
   }
   // plot hairlines first: the buildings cover them, so they read on yards and gardens only (cadastre style)
   const plotD = ub.renderHints?.plotLines === false ? '' : ub.parcels.filter((p) => p.use === 'plot').map((p) => pathD(p.poly, true)).join('');

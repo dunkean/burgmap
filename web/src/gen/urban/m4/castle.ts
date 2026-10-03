@@ -23,12 +23,13 @@ import { area, pointInRing, distToRing, convexHull, orientPos, inscribed, cleanR
 import { disk } from '../../geo/offset';
 import { outsetConvex } from '../streetops';
 import { kasbah, type CompoundCtx } from '../compounds';
+import { kremlinInterior } from '../russian';
 import { TAU, wetFraction, fracInside, clearOfLines, inMP, rectAt, frameAt, scalePoly } from './lots';
 import { Mask } from './site';
 import { samplePoly, LineIndex } from './lots';
 import { emptyOut, pieces, splitLine, largest, alongEdge, placeRect, minus, inter, fits, type Out } from './kit';
 
-export type CastleVariant = 'castle' | 'kasbah' | 'motte' | 'inca-fortress';
+export type CastleVariant = 'castle' | 'kasbah' | 'motte' | 'inca-fortress' | 'kremlin';
 /** Debug counters of the castle siting (rejections by reason). */
 export const CASTLE_DBG: Record<string, number> = {};
 const why = (k: string) => { CASTLE_DBG[k] = (CASTLE_DBG[k] ?? 0) + 1; };
@@ -58,6 +59,7 @@ export function castleArea(variant: CastleVariant, pop: number, rng: Rng): numbe
   if (variant === 'motte') return 1100 * j;
   if (variant === 'kasbah') return Math.min(26000, 6000 + pop * 0.4) * j;
   if (variant === 'inca-fortress') return Math.min(42000, 9000 + pop * 0.5) * j;
+  if (variant === 'kremlin') return Math.min(150000, 20000 + pop * 2) * j;
   return Math.min(22000, 2600 + pop * 0.36) * j;
 }
 
@@ -150,13 +152,14 @@ export function siteCastle(ctx: UrbanCtx, inp: CastleSiteIn, rng: Rng): CastlePl
   const R = Math.sqrt(A / Math.PI);
   const encR = Math.sqrt(mpArea(inp.enclosure) / Math.PI);
   if (encR < 2.2 * R) { why('small'); return null; }
-  const ditch = inp.variant === 'kasbah' || inp.variant === 'inca-fortress' ? 0 : inp.variant === 'motte' ? 7 : rng.range(9, 13);
-  const espl = inp.variant === 'kasbah' ? rng.range(12, 18) : inp.variant === 'motte' ? 8 : inp.variant === 'inca-fortress' ? rng.range(10, 16) : Math.min(38, rng.range(16, 24) + R * 0.12);
+  const ditch = inp.variant === 'kasbah' || inp.variant === 'inca-fortress' ? 0 : inp.variant === 'motte' ? 7 : inp.variant === 'kremlin' ? rng.range(12, 16) : rng.range(9, 13);
+  const espl = inp.variant === 'kasbah' ? rng.range(12, 18) : inp.variant === 'motte' ? 8 : inp.variant === 'inca-fortress' ? rng.range(10, 16) : inp.variant === 'kremlin' ? rng.range(34, 52) : Math.min(38, rng.range(16, 24) + R * 0.12);
   const core = inp.phases.length > 1 ? inp.phases[0].region : [];
   const roads = new LineIndex(inp.roads.map((path) => ({ path, hw: 5 })));
   // local relief statistics
   const ring2 = (p: Vec2, r: number): number => { let s = 0; for (let k = 0; k < 12; k++) s += ctx.heightAt({ x: p.x + Math.cos((k / 12) * TAU) * r, y: p.y + Math.sin((k / 12) * TAU) * r }); return s / 12; };
-  const nSides = inp.variant === 'kasbah' ? 4 : inp.variant === 'motte' ? 8 : rng.int(5, 8);
+  // (a kremlin: a triangle or a quadrilateral on its spur between the rivers)
+  const nSides = inp.variant === 'kasbah' ? 4 : inp.variant === 'motte' ? 8 : inp.variant === 'kremlin' ? rng.int(3, 4) : rng.int(5, 8);
   const a0 = rng.range(0, TAU);
   const cands: Vec2[] = [];
   const L = ring.length;
@@ -298,6 +301,7 @@ export function buildCastle(B: Polygon, cx: CompoundCtx): Out {
   let tMax = 0;
   for (const q of Cin) tMax = Math.max(tMax, (q.x - g.p.x) * u.x + (q.y - g.p.y) * u.y);
   const twoBaileys = plan.variant === 'castle' && area(Cin) > 4200;
+  const kremlin = plan.variant === 'kremlin';
   let outerB: Polygon | null = null, innerB: Polygon = Cin;
   if (twoBaileys) {
     const f = cx.rng.range(0.42, 0.55);
@@ -328,7 +332,7 @@ export function buildCastle(B: Polygon, cx: CompoundCtx): Out {
   let keep: Polygon | null = null;
   const round = plan.variant === 'motte' || cx.rng.chance(0.3);
   const ins = inscribed(inner, [], 1).c;
-  for (let k = 0.25; k <= 1.0001 && !keep; k += 0.15) {
+  for (let k = 0.25; k <= 1.0001 && !keep && !kremlin; k += 0.15) {
     const c = { x: far.x + (ins.x - far.x) * k, y: far.y + (ins.y - far.y) * k };
     const cand = round ? orientPos(disk(c, K / 2, 16)) : rectAt(c, ang, -K / 2, K / 2, -K / 2, K / 2);
     if (fits(inner, cand, 2.5)) keep = cand;
@@ -354,6 +358,10 @@ export function buildCastle(B: Polygon, cx: CompoundCtx): Out {
     }
     return bi;
   };
+  if (kremlin) {
+    kremlinInterior(inner, out, iInner, g.p, cx.rng);
+    out.landmarks.push({ kind: 'kremlin', poly: plan.C });
+  }
   if (plan.variant === 'castle') {
     const e = curtainEdge(inner);
     if (e >= 0) bld(alongEdge(orientPos(inner), e, cx.rng.range(9, 12), cx.rng.range(24, 36), 2.5), iInner, 'great-hall', 2);

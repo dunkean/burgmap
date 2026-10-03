@@ -6,7 +6,7 @@ import { makeOptions, SizeName, Options } from '../src/gen/options';
 import { mixFromString } from '../src/gen/urban/culture';
 import { checkWorld } from './urbanCheck';
 
-export interface CultureCase { label: string; culture: string; mix?: string; relief?: Options['relief'] }
+export interface CultureCase { label: string; culture: string; mix?: string; relief?: Options['relief']; /** Seeds of this case (default SEEDS). */ seeds?: string[] }
 
 /** Every preset (the fantasy ones on their preferred ground) and the two mixes required by M3b. */
 export const CULTURE_CASES: CultureCase[] = [
@@ -19,8 +19,11 @@ export const CULTURE_CASES: CultureCase[] = [
   { label: 'indian-temple', culture: 'indian-temple' },
   { label: 'elven', culture: 'elven' },
   { label: 'dwarven', culture: 'dwarven', relief: 'mountains' },
-  { label: 'inca', culture: 'inca' },
-  { label: 'aztec', culture: 'aztec' },
+  // (the cultures added by the second culture pass: two seeds each, the suite stays near its time budget)
+  { label: 'inca', culture: 'inca', seeds: ['1', '2'] },
+  { label: 'aztec', culture: 'aztec', seeds: ['1', '2'] },
+  { label: 'russian-kremlin', culture: 'russian-kremlin', seeds: ['1', '2'] },
+  { label: 'necropolis', culture: 'necropolis', seeds: ['1', '2'] },
   { label: 'roman-core+european-organic', culture: 'roman-core', mix: 'european-organic:0.6:phases' },
   { label: 'medina+bastide', culture: 'medina', mix: 'bastide:0.45:phases' },
 ];
@@ -99,6 +102,15 @@ export function expectSignature(c: CultureCase, w: World): void {
       expect(compounds.has('aztec-precinct'), 'aztec: ceremonial precinct').toBe(true);
       expect(has('templo-mayor'), 'aztec: Templo Mayor').toBe(true);
       expect((u.lines ?? []).some((l) => l.kind === 'canal'), 'aztec: canals').toBe(true);
+      break;
+    case 'russian-kremlin':
+      expect(has('izba'), 'russian: log houses in yards').toBe(true);
+      expect(has('orthodox-church'), 'russian: domed parish churches').toBe(true);
+      expect((u.sites ?? []).some((st) => st.kind === 'kremlin'), 'russian: kremlin').toBe(true);
+      break;
+    case 'necropolis':
+      expect(has('mausoleum') || has('tholos'), 'necropolis: tombs').toBe(true);
+      expect(has('great-mausoleum'), 'necropolis: mortuary temple').toBe(true);
       break;
     case 'roman-core': case 'roman-core+european-organic':
       expect(u.landmarks.some((l) => l.kind === 'forum'), 'roman: forum').toBe(true);

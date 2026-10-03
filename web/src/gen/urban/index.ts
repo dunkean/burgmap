@@ -40,6 +40,8 @@ import type { UrbanBuilding, PolyH, UrbanParcel, UrbanSite, UrbanWall } from '..
 import { m4Flags, registerM4 } from './m4/index';
 import { registerInca, andenes, canals } from './inca';
 import { registerAztec, streetCanals, chinampas } from './aztec';
+import { registerRussian } from './russian';
+import { registerFantasy } from './fantasy';
 import { siteCastle, type CastlePlan } from './m4/castle';
 import { reserveCastle, type M4State } from './m4/reserve';
 import { reserveCathedral, reservePalace, reserveMonasteries } from './m4/catalogue';
@@ -62,7 +64,7 @@ export interface UrbanDebug { quarters: { poly: Polygon; phase: number; lab: num
 const MARKET_AREA = (pop: number): number => (pop < 1200 ? 0 : Math.min(10000, 1800 + pop * 0.3));
 /** Qibla from the Maghreb, roughly east-south-east (map angle, y down). */
 const QIBLA = 0.2;
-const NUCLEUS_COMPOUND: Record<string, string> = { mosque: 'great-mosque', castle: 'castle', temple: 'hindu-temple', grove: 'grove', 'drum-tower': 'drum-tower', ushnu: 'inca-plaza', precinct: 'aztec-precinct' };
+const NUCLEUS_COMPOUND: Record<string, string> = { mosque: 'great-mosque', castle: 'castle', temple: 'hindu-temple', grove: 'grove', 'drum-tower': 'drum-tower', ushnu: 'inca-plaza', precinct: 'aztec-precinct', mortuary: 'mortuary-temple' };
 
 /** A point strictly inside a polygon (centroid when inside, else the inscribed-circle center). */
 export function interiorPoint(p: Polygon): Vec2 {
@@ -108,6 +110,7 @@ const L2_SITES: Record<string, 'power' | 'worship' | 'market' | 'civic' | 'activ
   hospital: 'civic', kasbah: 'power', 'great-mosque': 'worship', yamen: 'power', 'chinese-temple': 'worship', 'walled-market': 'market',
   'jp-temple': 'worship', 'hindu-temple': 'worship', palace: 'power', basilica: 'civic', 'roman-temple': 'worship', castle: 'power', hammam: 'civic',
   'inca-temple': 'worship', 'inca-palace': 'power', 'inca-plaza': 'civic',
+  'orthodox-church': 'worship', 'mortuary-temple': 'worship', 'charnel-house': 'civic',
   'aztec-precinct': 'worship', 'calpulli-temple': 'worship', tecpan: 'power', tianguis: 'market',
 };
 /** Parcel uses of the open port pieces. */
@@ -168,6 +171,8 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   registerM4();
   registerInca();
   registerAztec();
+  registerRussian();
+  registerFantasy();
   const flags = m4Flags(opts, culture, pop, archetype, rng.fork('m4'));
   const sites: UrbanSite[] = [];
   const lotData = new Map<string, unknown>();
@@ -799,9 +804,14 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   if (hints.compoundWalls) {
     plots.forEach((pl, pi) => {
       const op = plotMorph[pi].buildingOp;
-      if ((op !== 'yashiki' && op !== 'pavilionCompound' && op !== 'kancha') || !plotBld[pi].length) return;
+      if ((op !== 'yashiki' && op !== 'pavilionCompound' && op !== 'kancha' && op !== 'yardHouse') || !plotBld[pi].length) return;
       const p = pl.poly;
       const fm = { x: (pl.front[0].x + pl.front[1].x) / 2, y: (pl.front[0].y + pl.front[1].y) / 2 };
+      if (op === 'yardHouse') {
+        // the dvor's fence: the lot line, open at the yard gate beside the izba
+        for (const w of openRing(orientPos(p), [{ p: fm, width: 3.2 }])) lines.push({ kind: 'yard-fence', path: w, width: 0.45 });
+        return;
+      }
       if (op === 'kancha') {
         // the kancha wall: the whole lot line, with the single gate in the middle of the street side
         for (const w of openRing(orientPos(p), [{ p: fm, width: 3.4 }])) lines.push({ kind: 'compound-wall', path: w, width: 1 });
@@ -964,7 +974,9 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     }).filter((w): w is UrbanWall => !!w).concat(listsW ? outerWalls() : []).concat(extraWalls.map((w, wi): UrbanWall => {
       // castle curtains: the stretches lying on the town wall are drawn by the town wall
       const townIdx = new LineIndex(prim.walls.map((tw) => ({ path: tw.ring.concat([tw.ring[0]]), hw: 0 })));
-      const skip = (q: Vec2) => townIdx.dist(q, 3) < 1.5 || ctx.isWater(q);
+      // (a kremlin's brick curtain is drawn whole, over the posad's timber wall where they meet)
+      const ownCurtain = w.role === 'castle' && castlesAll.some((cp) => cp.variant === 'kremlin');
+      const skip = (q: Vec2) => (!ownCurtain && townIdx.dist(q, 3) < 1.5) || ctx.isWater(q);
       const wf = wallFeatures(w.ring, w.gates, rng.fork('xwall:' + wi), ctx.isWater, skip, 40);
       return { path: w.ring, closed: true, towers: wf.towers, gates: w.gates.map((g) => g.p), thickness: 3.2, gateInfo: w.gates, pieces: wf.pieces, gateTowers: wf.gateTowers, towerScale: wf.towerScale.map((x) => x * 1.15), curtains: wf.curtains, towerShape: castleTower(culture.id), role: w.role === 'castle' ? 'castle' : 'quarter' };
     })),

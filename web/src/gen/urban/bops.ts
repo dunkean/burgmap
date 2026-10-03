@@ -116,8 +116,9 @@ function courtyardHouse(pl: Plot, P: MorphologyParams, rng: Rng, cov = 0.93, sub
   // an oversized lot (a block that could not be cut into houses: one street side only, along water or a wall):
   // courtyard houses along its street front, the land behind them stays a garden (never one solid block)
   const amax = P.houseArea[pl.zone]?.[1] ?? 600;
-  if (!sub && !f && A > 2.6 * amax) return [{ poly: pl.poly, kind: 'garden' }];
-  if (!sub && f && A > 2.6 * amax) {
+  const big = Math.max(2.6 * amax, 2500);
+  if (!sub && !f && A > big) return [{ poly: pl.poly, kind: 'garden' }];
+  if (!sub && f && A > big) {
     const conv = isConvex(pl.poly, 1e-3);
     const dBand = Math.min(f.D, Math.max(14, Math.sqrt(amax) * 1.15));
     const n = Math.max(1, Math.round(f.W / Math.max(10, Math.sqrt(amax) * 1.1)));
@@ -453,6 +454,86 @@ function machiya(pl: Plot, cov: number, P: MorphologyParams, rng: Rng): ArchBldg
   return out;
 }
 
+// ---------------------------------------------------------------- Russian yard house (izba and dvor)
+/**
+ * A posad lot: the izba (log house) gable end to the street on one side of the frontage, the yard gate beside it,
+ * the barn and sheds along the other side line, the bathhouse (banya) at the back of the yard, the kitchen garden
+ * behind. Coverage only sets how many outbuildings there are: the yard and the garden always stay open.
+ */
+function yardHouse(pl: Plot, cov: number, P: MorphologyParams, rng: Rng): ArchBldg[] {
+  const f = frame(pl);
+  if (!f) return [];
+  const { W, D } = f;
+  const conv = isConvex(pl.poly, 1e-3);
+  const sideHP = (k: number): HalfPlane => {
+    const s = k === 0 ? pl.sideA : pl.sideB;
+    const tw = k === 0 ? f.t : { x: -f.t.x, y: -f.t.y };
+    let m = { x: -s.d.y, y: s.d.x };
+    if (m.x * tw.x + m.y * tw.y < 0) m = { x: -m.x, y: -m.y };
+    return { p: s.p, n: m };
+  };
+  const piece = (d0: number, d1: number, side?: { k: number; w: number; off?: number }): Polygon | null => {
+    const hps: HalfPlane[] = [{ p: { x: f.fa.x + f.n.x * d0, y: f.fa.y + f.n.y * d0 }, n: f.n }, { p: { x: f.fa.x + f.n.x * d1, y: f.fa.y + f.n.y * d1 }, n: { x: -f.n.x, y: -f.n.y } }];
+    if (side) {
+      const h = sideHP(side.k), o = side.off ?? 0;
+      hps.push({ p: { x: h.p.x + h.n.x * o, y: h.p.y + h.n.y * o }, n: h.n }, { p: { x: h.p.x + h.n.x * (o + side.w), y: h.p.y + h.n.y * (o + side.w) }, n: { x: -h.n.x, y: -h.n.y } });
+    }
+    let best: Polygon | null = null;
+    for (const r of clipPlot(pl.poly, hps, conv)) { const c = cleanRing(r, 0.005, 0.5, 0.002, false); if (c.length >= 3 && (!best || area(c) > area(best))) best = c; }
+    return best && area(best) > 6 ? best : null;
+  };
+  const ori = Math.atan2(f.n.y, f.n.x);
+  const out: ArchBldg[] = [];
+  const put = (poly: Polygon | null, arch: string, kind: Bldg['kind'], storeys: number, roof: ArchSpec['roof'] = 'gable') => {
+    if (poly && shapeOf(poly).w >= MIN_BW && shapeOf(poly).asp <= MAX_ASPECT) out.push({ poly, kind, arch, roof, material: P.arch.material, storeys, orientation: ori });
+  };
+  const k = rng.chance(0.5) ? 0 : 1;
+  const wI = Math.min(W * 0.48, rng.range(6.5, 8.5));
+  const dI = Math.min(D * 0.4, rng.range(9, 12.5));
+  if (wI < MIN_BW || dI < MIN_BW) return out;
+  // the izba, a little back from the street on one side (a two-storey house for the richer lots)
+  const rich = (pl.wealth ?? 0.3) > 0.55;
+  put(piece(0.8, 0.8 + dI, { k, w: wI, off: 0.6 }), 'izba', 'house', rich ? 2 : 1);
+  // a second house or a shop on the street for wide lots
+  if (W > 2 * wI + 6 && rng.chance(0.4 + 0.4 * cov)) put(piece(0.8, 0.8 + rng.range(7, 9), { k: 1 - k, w: rng.range(5.5, 7), off: 0.6 }), 'izba', 'house', 1);
+  // outbuildings: barn and sheds along the other side line, the banya at the back of the yard
+  const yEnd = Math.min(D - 4, dI + rng.range(16, 24));
+  const nOut = cov > 0.3 ? 2 : 1;
+  if (yEnd > dI + 8) put(piece(dI + 4, Math.min(yEnd, dI + 4 + rng.range(8, 14)), { k: 1 - k, w: Math.min(W * 0.35, rng.range(5, 6.5)), off: 0.5 }), 'barn', 'back', 1);
+  if (nOut > 1 && yEnd > dI + 12) put(piece(yEnd - 4.6, yEnd, { k, w: 4.6, off: 1.2 }), 'banya', 'back', 1);
+  // the kitchen garden behind the yard
+  if (D - yEnd > 6) { const g = piece(yEnd + 1, D); if (g) out.push({ poly: g, kind: 'garden' }); }
+  pl.gated = true;
+  return out;
+}
+
+// ---------------------------------------------------------------- necropolis tombs
+/**
+ * A tomb lot: a mausoleum (square house-tomb with its inner cella), a round tholos, or an obelisk over the family
+ * graves; set back from the street on its lot's axis, the rest of the lot graves (drawn as the burial ground).
+ */
+function tomb(pl: Plot, P: MorphologyParams, rng: Rng): ArchBldg[] {
+  const f = frame(pl);
+  if (!f) return [];
+  const A = area(pl.poly);
+  const ins = inscribed(pl.poly, [], 0.3);
+  const ori = Math.atan2(f.n.y, f.n.x);
+  const out: ArchBldg[] = [];
+  const kind = A > 160 ? (rng.chance(0.7) ? 'mausoleum' : 'tholos') : A > 70 ? (rng.chance(0.5) ? 'tholos' : 'mausoleum') : 'obelisk';
+  const s = kind === 'obelisk' ? 2.4 : Math.min(ins.r * 1.5, Math.sqrt(A) * rng.range(0.32, 0.45));
+  if (s < 2.2 || ins.r < 1.6) return [{ poly: pl.poly, kind: 'garden' }];
+  const c = ins.c;
+  const ca = Math.cos(ori), sa = Math.sin(ori);
+  const sq = (h: number): Polygon => orientPos([[-h, -h], [h, -h], [h, h], [-h, h]].map(([u, v]) => ({ x: c.x + u * ca - v * sa, y: c.y + u * sa + v * ca })));
+  const poly = kind === 'tholos' ? orientPos(disk(c, s / 2, 16)) : sq(s / 2);
+  if (!polyInside(pl.poly, poly) || pl.poly.some((q) => pointInRing(poly, q))) return [{ poly: pl.poly, kind: 'garden' }];
+  out.push({ poly, kind: kind === 'obelisk' ? 'back' : 'house', arch: kind, roof: kind === 'tholos' ? 'dome' : kind === 'obelisk' ? 'pyramidal' : 'hip', material: 'stone', storeys: kind === 'obelisk' ? 4 : 1, orientation: ori, ring: true });
+  // the graves: the whole lot is burial ground (the garden pass draws it, under the tomb)
+  out.push({ poly: pl.poly, kind: 'garden' });
+  void P;
+  return out;
+}
+
 // ---------------------------------------------------------------- Inca kancha
 /**
  * Kancha: a walled rectangular compound of single-room houses set along the inside of its wall around a central
@@ -597,6 +678,8 @@ function buildOnRaw(pl: Plot, cov: number, P: MorphologyParams, rng: Rng, hint?:
     case 'treeHouse': return treeHouse(pl, P, rng);
     case 'hall': return hall(pl, P, rng);
     case 'kancha': return kancha(pl, P, rng);
+    case 'yardHouse': return yardHouse(pl, cov, P, rng);
+    case 'tomb': return tomb(pl, P, rng);
     default: {
       const ori = Math.atan2(pl.nrm.y, pl.nrm.x);
       return buildPlot(pl, cov, P, rng, hint).map((b) => (b.kind === 'garden' ? b : {

@@ -63,6 +63,23 @@ export const SIGNATURES: Record<string, (w: World) => void> = {
     expect(a.get('maya-house') ?? 0, 'maya: houselots').toBeGreaterThan(3);
     expect((a.get('great-pyramid') ?? 0) + (a.get('temple-pyramid') ?? 0), 'maya: temple pyramids').toBeGreaterThan(0);
   },
+  khmer: (w) => {
+    const u = w.urban!;
+    expect(u.blockInfo.some((b) => b.compound === 'temple-mountain'), 'khmer: temple-mountain at the centre').toBe(true);
+    expect(arches(w).get('stilt-house') ?? 0, 'khmer: stilt houses').toBeGreaterThan(5);
+    expect(lineKinds(w).has('moat'), 'khmer: moat').toBe(true);
+    expect(u.landmarks.filter((l) => l.kind === 'pond').length, 'khmer: ponds').toBeGreaterThan(3);
+  },
+  orcish: (w) => {
+    const a = arches(w);
+    expect((a.get('orc-hut') ?? 0) + (a.get('orc-longhut') ?? 0), 'orcish: huts').toBeGreaterThan(5);
+    expect(lineKinds(w).has('palisade'), 'orcish: stake palisades').toBe(true);
+    expect(w.urban!.landmarks.some((l) => l.kind === 'arena'), 'orcish: arena').toBe(true);
+  },
+  'celtic-oppidum': (w) => {
+    expect(arches(w).get('roundhouse') ?? 0, 'oppidum: roundhouses').toBeGreaterThan(2);
+    expect(lineKinds(w).has('rampart'), 'oppidum: ramparts').toBe(true);
+  },
   'nomad-camp': (w) => {
     const a = arches(w);
     expect(a.get('ger') ?? 0, 'nomad: gers').toBeGreaterThan(8);
@@ -97,6 +114,9 @@ const CASES: [string, SizeName[]][] = [
   ['native-pueblo', ['hamlet', 'village', 'town', 'city']],
   ['norse-ringfort', ['hamlet', 'village', 'town']],
   ['maya', ['hamlet', 'village', 'town', 'city']],
+  ['khmer', ['hamlet', 'village', 'town', 'city']],
+  ['orcish', ['hamlet', 'village', 'town']],
+  ['celtic-oppidum', ['hamlet', 'village', 'town']],
   ['barbarian', ['hamlet', 'village', 'town']],
   ['barbarian-celtic', ['hamlet', 'village', 'town']],
   ['barbarian-norse', ['hamlet', 'village', 'town']],
@@ -110,7 +130,7 @@ describe('village and camp cultures', () => {
       expect(w.urban!.culture).toBe(culture);
       if (size !== 'hamlet' || culture !== 'barbarian-norse') SIGNATURES[culture]?.(w);
       // above the culture's class (village): a cluster of villages, not a town
-      if (size === 'town' && !['barbarian-norse', 'native-pueblo', 'maya'].includes(culture)) expect(Number(w.stats['urban.camps']), 'a cluster of villages').toBeGreaterThan(1);
+      if (size === 'town' && !['barbarian-norse', 'native-pueblo', 'maya', 'khmer', 'orcish', 'celtic-oppidum'].includes(culture)) expect(Number(w.stats['urban.camps']), 'a cluster of villages').toBeGreaterThan(1);
     });
   }
 });

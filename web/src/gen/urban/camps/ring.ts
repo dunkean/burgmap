@@ -22,11 +22,11 @@ import type { CampCtx } from './index';
 import { downhill } from './index';
 import {
   snapRing, CampOut, emptyCamp, street, at, normA, circlePts, annulus, carveBlocks, pathRibbons, cutByCells, FrontIndex, hut, rect,
-  fits, fitIn, openRing,
+  fits, fitIn, openRing, hachures,
 } from './kit';
 
 export interface RingVariant {
-  id: 'kraal' | 'tipi' | 'nomad';
+  id: 'kraal' | 'tipi' | 'nomad' | 'orc';
   /** Inhabitants per dwelling. */
   per: number;
   hutR: Range;
@@ -46,6 +46,9 @@ const ringN = (r: number) => Math.max(48, Math.min(360, Math.round((2 * Math.PI 
 export const RING_VARIANTS: Record<string, RingVariant> = {
   kraal: { id: 'kraal', per: 4.5, hutR: [2.5, 3.1], arc: [9, 10.5], depth: 9.5, pathW: 3, entW: 4.5, gap: 22, radius: (p) => 22 + Math.sqrt(p * 9 / Math.PI) + Math.sqrt((p / 4.5) * 9.75 * 12.5 / Math.PI) },
   tipi: { id: 'tipi', per: 7.5, hutR: [2.3, 3.0], arc: [9, 12], depth: 10, pathW: 4, entW: 6, gap: 36, radius: (p) => 34 + ((p / 7.5) * 10.5) / (2 * Math.PI * 0.9 * (p > 520 ? 2 : 1)) },
+  // orcish war camp grown into a town: rings of sharpened-stake palisades, huts packed anyhow, the arena and the
+  // warlord's hall on its mound at the centre
+  orc: { id: 'orc', per: 11, hutR: [2.2, 4.4], arc: [11, 17], depth: 17, pathW: 3.5, entW: 6, gap: 0, radius: (p) => 45 + Math.sqrt((p / 11) * 14 * 20.5 / Math.PI) },
   nomad: { id: 'nomad', per: 5.5, hutR: [2.6, 3.4], arc: [10.5, 12.5], depth: 10.5, pathW: 3.5, entW: 6, gap: 0, radius: (p) => 30 + Math.sqrt((p / 5.5) * 11.5 * 14 / Math.PI) },
 };
 
@@ -73,11 +76,12 @@ export function ringCamp(cc: CampCtx, c: Vec2, pop: number, v: RingVariant, rng:
   let alpha: number;
   if (v.id === 'tipi') alpha = 0;
   else if (v.id === 'nomad') alpha = Math.PI / 2;
+  else if (v.id === 'orc') alpha = cc.main ? cc.roadAngle : rng.range(0, 2 * Math.PI);
   else alpha = downhill(ctx, c, 40) ?? (cc.main ? cc.roadAngle : rng.range(0, 2 * Math.PI));
   // irregular outline: one low-frequency warp of the polar radius shared by every ring (an oval, slightly lobed
   // homestead; a near-perfect camp circle), so rows stay parallel and the wedges stay exact rays
   const wr = rng.fork('warp');
-  const ecc = v.id === 'kraal' ? (pop > 300 ? wr.range(0.08, 0.15) : wr.range(0.04, 0.08)) : v.id === 'tipi' ? wr.range(0.015, 0.035) : wr.range(0.03, 0.06);
+  const ecc = v.id === 'kraal' ? (pop > 300 ? wr.range(0.08, 0.15) : wr.range(0.04, 0.08)) : v.id === 'tipi' ? wr.range(0.015, 0.035) : v.id === 'orc' ? wr.range(0.1, 0.2) : wr.range(0.03, 0.06);
   const ph2 = alpha + wr.range(-0.4, 0.4), ph3 = wr.range(0, 2 * Math.PI), a3 = wr.range(0.01, 0.025);
   const W = (t: number): number => 1 + ecc * Math.cos(2 * (t - ph2)) + a3 * Math.cos(3 * t + ph3);
   const P = (t: number, r: number): Vec2 => at(c, t, r * W(t));
@@ -90,6 +94,7 @@ export function ringCamp(cc: CampCtx, c: Vec2, pop: number, v: RingVariant, rng:
   let Rc: number;
   if (v.id === 'kraal') Rc = Math.max(10, Math.sqrt((pop * 0.8 * 9) / Math.PI));
   else if (v.id === 'nomad') Rc = Math.min(30, 15 + pop / 90);
+  else if (v.id === 'orc') Rc = Math.min(70, 26 + pop / 60);
   else {
     // one great circle (two rows for the largest camps): the circle's radius follows from the lodge count
     const rows = N > 160 ? 3 : N > 70 ? 2 : 1;
@@ -126,6 +131,8 @@ export function ringCamp(cc: CampCtx, c: Vec2, pop: number, v: RingVariant, rng:
   const rho0 = rows[0].a - v.pathW / 2;
   const radials: { ang: number; w: number; main: boolean }[] = [{ ang: alpha, w: v.entW, main: true }];
   if (v.id === 'nomad') for (const d of [1, 2, 3]) radials.push({ ang: alpha + (d * Math.PI) / 2, w: v.pathW + 0.5, main: false });
+  // (orc camps: crooked lanes at irregular angles)
+  if (v.id === 'orc') { const nr = 2 + Math.floor(rng.fork('lanes').range(0, 3)); for (let d = 1; d <= nr; d++) radials.push({ ang: alpha + (d * 2 * Math.PI) / (nr + 1) + rng.fork('l' + d).range(-0.3, 0.3), w: v.pathW, main: false }); }
   const radialStreets = radials.map((r) => street([P(r.ang, Rout + 6), P(r.ang, rho0)], r.w, r.main ? 1 : 3, r.main ? 'radial' : 'lane'));
   out.streets.push(...radialStreets);
   const rb = pathRibbons(radialStreets);
@@ -198,24 +205,35 @@ export function ringCamp(cc: CampCtx, c: Vec2, pop: number, v: RingVariant, rng:
       const great = k === 0 && Math.abs(normA(th - topAng + Math.PI) - Math.PI) < (Math.PI / row.n) * 1.05;
       let r = pr.range(v.hutR[0], v.hutR[1]) * (great ? 1.45 : 1);
       const placed: Polygon[] = [];
-      const shape = (q: Vec2, s: number): Polygon => (v.id === 'tipi' ? tipi(q, r * s, 0) : hut(q, r * s, 14, th));
+      const longHut = v.id === 'orc' && pr.chance(0.35);
+      const shape = (q: Vec2, s: number): Polygon => (v.id === 'tipi' ? tipi(q, r * s, 0) : longHut ? rect(q, th + Math.PI / 2 + pr.range(-0.5, 0.5), r * 2.6 * s, r * 1.3 * s) : hut(q, r * s, v.id === 'orc' ? 7 : 14, th + (v.id === 'orc' ? pr.range(0, 1) : 0)));
       let fp: Polygon | null = null;
       for (let tries = 0; tries < 3 && !fp; tries++) {
-        const q = P(th, row.a + 1 + r + pr.range(0, v.id === 'kraal' ? 1.2 : 0.6));
+        const q = P(th + (v.id === 'orc' ? pr.range(-0.3, 0.3) / Math.max(4, row.n / 6) : 0), row.a + 1 + r + pr.range(0, v.id === 'kraal' ? 1.2 : v.id === 'orc' ? 4 : 0.6));
         const cand = shape(q, 1);
         fp = fits(pc.poly, cand, [], 0.5, 0) ? cand : fitIn(pc.poly, shape, [], { margin: 0.5, gap: 0, minScale: 0.75, step: 2 });
         if (!fp) r *= 0.85;
       }
       if (!fp) { out.parcels[pi].use = 'green'; continue; }
       placed.push(fp);
-      const arch = v.id === 'kraal' ? (great ? 'great-hut' : 'beehive-hut') : v.id === 'tipi' ? 'tipi' : 'ger';
-      const roof = v.id === 'tipi' ? 'conical' : v.id === 'kraal' ? 'thatch-round' : 'dome';
-      const material = v.id === 'tipi' ? 'hide' : v.id === 'kraal' ? 'thatch' : 'felt';
+      const arch = v.id === 'kraal' ? (great ? 'great-hut' : 'beehive-hut') : v.id === 'tipi' ? 'tipi' : v.id === 'orc' ? (longHut ? 'orc-longhut' : 'orc-hut') : 'ger';
+      const roof = v.id === 'tipi' ? 'conical' : v.id === 'kraal' ? 'thatch-round' : v.id === 'orc' ? 'conical' : 'dome';
+      const material = v.id === 'tipi' ? 'hide' : v.id === 'kraal' ? 'thatch' : v.id === 'orc' ? 'hide' : 'felt';
       out.buildings.push({ poly: fp, kind: 'house', parcel: pi, arch, roof, storeys: 1, material, orientation: v.id === 'tipi' ? 0 : th + Math.PI });
       // outbuildings: a raised granary behind the kraal hut, a cart or store tent behind the ger
       if (v.id === 'kraal' && pr.chance(great ? 1 : 0.55)) {
         const g = fitIn(pc.poly, (q, s) => hut(q, 1.3 * s, 8), placed, { margin: 0.4, gap: 0.8, minScale: 0.85, cands: [P(th + pr.range(-0.04, 0.04), row.a + v.depth - 1.9), P(th + 0.06, row.a + v.depth - 1.9), P(th - 0.06, row.a + v.depth - 1.9)] });
         if (g) { placed.push(g); out.buildings.push({ poly: g, kind: 'outbuilding', parcel: pi, arch: 'raised-granary', roof: 'thatch-round', storeys: 1, material: 'thatch' }); }
+      }
+      if (v.id === 'orc') {
+        // more huts thrown up anywhere in the lot, sheds, pits: packed anyhow
+        const bbx = { lo: row.a + 1, hi: row.a + v.depth - 1 };
+        for (let j = 0; j < 4; j++) {
+          const q = P(th + pr.range(-0.5, 0.5) * (2 * Math.PI / row.n), pr.range(bbx.lo, bbx.hi));
+          const kind = pr.float();
+          const g = fitIn(pc.poly, (q2, s) => (kind < 0.45 ? hut(q2, pr.range(2, 3.4) * s, 7, pr.range(0, 1)) : kind < 0.75 ? rect(q2, pr.range(0, 3), pr.range(5, 8) * s, pr.range(3.2, 4.4) * s) : hut(q2, pr.range(1.35, 1.8) * Math.max(0.9, s), 6)), placed, { margin: 0.4, gap: 0.7, minScale: 0.75, cands: [q] });
+          if (g) { placed.push(g); out.buildings.push({ poly: g, kind: kind < 0.75 ? 'house' : 'outbuilding', parcel: pi, arch: kind < 0.45 ? 'orc-hut' : kind < 0.75 ? 'orc-longhut' : pr.pick(['smoke-pit', 'war-pen', 'hide-shed']), roof: 'conical', storeys: 1, material: 'hide' }); }
+        }
       }
       if (v.id === 'nomad' && pr.chance(0.45)) {
         const g = fitIn(pc.poly, (q, s) => rect(q, th + Math.PI / 2, 3.4 * s, 2.2 * s), placed, { margin: 0.4, gap: 0.8, minScale: 0.9, cands: [P(th, row.a + v.depth - 1.8)] });
@@ -250,6 +268,38 @@ export function ringCamp(cc: CampCtx, c: Vec2, pop: number, v: RingVariant, rng:
       }
       out.sites.push({ id: 'cattle-kraal', kind: 'cattle-kraal', role: 'civic', lot: b, anchor: c });
       out.landmarks.push({ kind: 'cattle-kraal', poly: b });
+    } else if (v.id === 'orc') {
+      // the arena (a sand ring with its stake fence and stands) and the warlord's hall on its mound beside it
+      out.blocks.push({ poly: b, kind: 'compound', compound: 'warlord-mound', quarter: 0 });
+      out.parcels.push({ poly: b, use: 'place', block: bi });
+      const pi = out.parcels.length - 1;
+      const ar = Math.max(8, Rc * 0.36);
+      const ac = at(c, alpha, Rc * 0.38);
+      const arena = orientPos(circlePts(ac, ar, 28));
+      if (arena.every((q) => pointInRing(b, q))) {
+        out.lines.push({ kind: 'palisade', path: arena.concat([arena[0]]), width: 1.2 }, { kind: 'stands', path: orientPos(circlePts(ac, ar + 2.2, 28)).concat([orientPos(circlePts(ac, ar + 2.2, 28))[0]]), width: 2.4 });
+        out.landmarks.push({ kind: 'arena', poly: arena });
+      }
+      const mc = at(c, alpha + Math.PI, Rc * 0.4);
+      const mr = Math.max(9, Rc * 0.3);
+      const mound = orientPos(circlePts(mc, mr, 24));
+      if (mound.every((q) => pointInRing(b, q))) {
+        out.lines.push(...hachures(mound, 2, 2.6, -1));
+        const hall = fitIn(b, (q, s) => rect(q, alpha + Math.PI / 2, mr * 1.3 * s, mr * 0.7 * s), [], { margin: 2, gap: 0, minScale: 0.6, cands: [mc] });
+        if (hall) {
+          out.buildings.push({ poly: hall, kind: 'landmark', parcel: pi, arch: 'warlord-hall', roof: 'gable', storeys: 1, material: 'timber' });
+          out.landmarks.push({ kind: 'warlord-hall', poly: hall });
+        }
+      }
+      // totems and war banners round the open ground
+      const tr = rng.fork('totems');
+      for (let k = 0; k < 6; k++) {
+        const q = at(c, tr.range(0, 2 * Math.PI), Rc * tr.range(0.55, 0.85));
+        const tq = rect(q, tr.range(0, 3), 2.3, 2.3);
+        if (tq.every((x) => pointInRing(b, x)) && !out.buildings.some((o) => o.parcel === pi && o.poly.some((x) => pointInRing(tq, x) || tq.some((y) => pointInRing(o.poly, y))))) out.buildings.push({ poly: tq, kind: 'landmark', parcel: pi, arch: 'totem', roof: 'none', storeys: 1, material: 'wood' });
+      }
+      out.sites.push({ id: 'warlord', kind: 'warlord-hall', role: 'power', lot: b, anchor: c });
+      out.squares.push(b);
     } else if (v.id === 'tipi') {
       out.blocks.push({ poly: b, kind: 'block', quarter: 0 });
       out.parcels.push({ poly: b, use: 'commons', block: bi });
@@ -293,6 +343,16 @@ export function ringCamp(cc: CampCtx, c: Vec2, pop: number, v: RingVariant, rng:
     const R = Rout + 1.6;
     const fence = wring(R, ringN(R));
     out.lines.push(...openRing(fence, [{ p: P(alpha, R), width: v.entW + 1.5 }]).map((pl) => ({ kind: 'thorn-fence', path: pl, width: 2.2 })));
+  }
+  // orc palisades: round the camp and between the oldest rings (the camp grew ring by ring), stakes pointing out
+  if (v.id === 'orc') {
+    const rings2 = [Rout + 2, ...rows.slice(1).filter((_, k) => k % 2 === 1).map((row) => row.a - v.pathW - 0.8)];
+    for (const R of rings2) {
+      const fence = wring(R, ringN(R));
+      const gaps = radials.map((rd) => ({ p: P(rd.ang, R), width: rd.w + 2 }));
+      for (const pl of openRing(fence, gaps)) out.lines.push({ kind: 'palisade', path: pl, width: 1.3 });
+      out.lines.push(...hachures(fence, 1.6, 1.8, -1, (q) => gaps.some((g) => dist(g.p, q) < g.width)));
+    }
   }
   // horse herds of a Plains camp graze outside the circle, away from the opening
   if (v.id === 'tipi' && cc.main) {

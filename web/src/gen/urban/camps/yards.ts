@@ -33,7 +33,7 @@ import type { CompoundOut } from '../compounds';
 import { placeRect } from '../m4/kit';
 
 export interface YardVariant {
-  id: 'germanic' | 'celtic' | 'norse' | 'maya';
+  id: 'germanic' | 'celtic' | 'norse' | 'maya' | 'oppidum';
   /** Inhabitants per farmstead. */
   per: number;
   yardA: Range;
@@ -48,6 +48,7 @@ const yardRadius = (per: number, yardA: Range, occ: number) => (pop: number): nu
 export const YARD_VARIANTS: Record<string, YardVariant> = {
   germanic: { id: 'germanic', per: 11, yardA: [1300, 2400], pathW: 3.4, occupancy: 1, radius: yardRadius(11, [1300, 2400], 1) },
   celtic: { id: 'celtic', per: 7, yardA: [650, 1300], pathW: 2.8, occupancy: 1, radius: yardRadius(7, [650, 1300], 1) },
+  oppidum: { id: 'oppidum', per: 10, yardA: [1400, 2800], pathW: 3.2, occupancy: 0.8, radius: yardRadius(10, [1400, 2800], 0.8) },
   maya: { id: 'maya', per: 7, yardA: [1000, 1900], pathW: 2.8, occupancy: 0.55, radius: yardRadius(7, [1000, 1900], 0.55) },
   norse: { id: 'norse', per: 14, yardA: [2600, 5200], pathW: 3.2, occupancy: 0.32, radius: yardRadius(14, [2600, 5200], 0.32) },
 };
@@ -93,7 +94,26 @@ export function yardsVillage(cc: CampCtx, c: Vec2, pop: number, v: YardVariant, 
   const ang = v.id === 'germanic' ? cc.roadAngle + sr.range(-0.3, 0.3) : sr.range(0, Math.PI);
   const nz = new Noise2D(sr.fork('noise'));
   const wob = (t: number) => (v.id === 'celtic' ? 0.04 : 0.08) * nz.noise(Math.cos(t) * 1.3 + 5, Math.sin(t) * 1.3 + 5);
-  const outline = ellipse(c, R * Math.sqrt(aspect), R / Math.sqrt(aspect), ang, 96, wob);
+  // the enclosure line at offset `off` outward: an oval (or circle) for a village; for an oppidum the brow of its
+  // hill (the line where the ground falls away, smoothed), so the ramparts follow the contours
+  let ringAt = (off: number): Polygon => ringAt(off);
+  if (v.id === 'oppidum') {
+    const N = 72, hc = ctx.heightAt(c);
+    const raw: number[] = [];
+    for (let k = 0; k < N; k++) {
+      const th = (k / N) * 2 * Math.PI;
+      let r = 1.5 * R;
+      for (let s2 = 0.6 * R; s2 <= 1.5 * R; s2 += 6) if (ctx.heightAt({ x: c.x + Math.cos(th) * s2, y: c.y + Math.sin(th) * s2 }) < hc - 6) { r = s2; break; }
+      raw.push(r);
+    }
+    let rad = raw;
+    for (let pass = 0; pass < 3; pass++) rad = rad.map((_, k) => (rad[(k + N - 1) % N] + 2 * rad[k] + rad[(k + 1) % N]) / 4);
+    const A0 = (rad.reduce((a, r) => a + r * r, 0) * Math.PI) / N;
+    const kk = Math.sqrt((Math.PI * R * R) / A0);
+    rad = rad.map((r) => r * kk);
+    ringAt = (off: number): Polygon => orientPos(rad.map((r, k) => { const th = (k / N) * 2 * Math.PI; return { x: c.x + Math.cos(th) * (r + off), y: c.y + Math.sin(th) * (r + off) }; }));
+  }
+  const outline = ringAt(0);
   // ---- seeds and relaxed Voronoi cells
   const nCells = Math.max(4, Math.round((v.occupancy < 1 ? nFarm / v.occupancy : nFarm + 2) * 1));
   let seeds = seedsIn(outline, nCells, rng.fork('seeds'));
@@ -171,7 +191,7 @@ export function yardsVillage(cc: CampCtx, c: Vec2, pop: number, v: YardVariant, 
     gates = [{ p: { x: c.x + Math.cos(a0) * lo, y: c.y + Math.sin(a0) * lo }, dir: { x: -Math.cos(a0), y: -Math.sin(a0) }, road: -1 }];
   }
   // (at most three gates, spread apart)
-  gates = gates.filter((g, i) => gates.slice(0, i).every((o) => dist(o.p, g.p) > 40)).slice(0, v.id === 'celtic' ? 2 : 3);
+  gates = gates.filter((g, i) => gates.slice(0, i).every((o) => dist(o.p, g.p) > 40)).slice(0, v.id === 'celtic' ? 2 : v.id === 'oppidum' ? 4 : 3);
   const inNodes = nodes.map((_, i) => adj[i].length > 0);
   const nearestNode = (p: Vec2, pred: (i: number) => boolean = () => true): number => {
     let bi = -1, bd = Infinity;
@@ -272,7 +292,7 @@ export function yardsVillage(cc: CampCtx, c: Vec2, pop: number, v: YardVariant, 
     polylines.push({ pts: [n, { x: gl.gate.x + ux * 6, y: gl.gate.y + uy * 6 }], main: true });
   }
   // (maya: the main ways are the sacbeob, broad white causeways from the core)
-  const streets: UrbanStreet[] = polylines.filter((p) => p.pts.length >= 2).map((p) => street(p.pts, p.main ? (v.id === 'maya' ? 8 : v.pathW + 1.2) : v.pathW, p.main ? 1 : 3, p.main ? 'radial' : 'lane'));
+  const streets: UrbanStreet[] = polylines.filter((p) => p.pts.length >= 2).map((p) => street(p.pts, p.main ? (v.id === 'maya' ? 8 : v.id === 'oppidum' ? 7 : v.pathW + 1.2) : v.pathW, p.main ? 1 : 3, p.main ? 'radial' : 'lane'));
   if (!streets.some((s) => s.role === 'radial') && streets.length) { streets[0].role = 'radial'; streets[0].rank = 1; streets[0].kind = 'main'; }
   out.streets.push(...streets);
   const rib = pathRibbons(streets);
@@ -330,6 +350,7 @@ export function yardsVillage(cc: CampCtx, c: Vec2, pop: number, v: YardVariant, 
       const isCentre = pc.tag === centreCell;
       if (isCentre && v.id === 'germanic') { out.parcels.push({ poly: pc.poly, use: 'meadow', block: bi }); out.squares.push(pc.poly); continue; }
       if (core.has(pc.tag)) { plazaGroup(out, pc.poly, bi, isCentre, c, rng.fork('plaza:' + pc.tag)); continue; }
+      if (isCentre && v.id === 'oppidum') { sanctuary(out, pc.poly, bi); continue; }
       if (!occ.has(pc.tag) || fr.len < 3.2 || area(pc.poly) < 160) { out.parcels.push({ poly: pc.poly, use: 'garden', block: bi }); continue; }
       out.parcels.push({ poly: pc.poly, use: 'plot', block: bi });
       if (isCentre || (v.id === 'germanic' && chief.length === 0 && touchesCell(pc.tag, centreCell, edges))) chief.push(pi);
@@ -342,25 +363,26 @@ export function yardsVillage(cc: CampCtx, c: Vec2, pop: number, v: YardVariant, 
     const gs = gateLinks.map((g) => ({ p: g.gate, width: v.pathW + 2.5 }));
     const wf = wallFeatures(outline, gs, rng.fork('pal'), ctx.isWater, () => false, 1e9);
     out.walls.push({ path: outline, closed: true, towers: [], gates: gs.map((g) => g.p), thickness: 1.1, gateInfo: gateLinks.map((g) => ({ p: g.gate, dir: g.dir, width: v.pathW + 2.5 })), pieces: wf.pieces, gateTowers: wf.gateTowers, towerScale: [], curtains: [], towerShape: 'square', role: 'town' });
-    const ditch = ellipse(c, R * Math.sqrt(aspect) + 6, R / Math.sqrt(aspect) + 6, ang, 96, wob);
+    const ditch = ringAt(6);
     out.lines.push(...openRing(ditch, gateLinks.map((g) => ({ p: nearestOn(ditch, g.gate), width: v.pathW + 4 }))).map((pl) => ({ kind: 'ditch', path: pl, width: 4 })));
     out.outline.push(ditch);
-  } else if (v.id === 'celtic') {
-    // earthen rampart on the outline, its ditch outside; a second bank and ditch for a hillfort-size village
-    const banks = pop > 260 ? 2 : 1;
+  } else if (v.id === 'celtic' || v.id === 'oppidum') {
+    // earthen rampart on the outline, its ditch outside; a second bank and ditch for a hillfort-size village, three
+    // for an oppidum (the murus gallicus and its outworks)
+    const banks = v.id === 'oppidum' ? (pop > 2500 ? 3 : 2) : pop > 260 ? 2 : 1;
     for (let k = 0; k < banks; k++) {
       const off = k * 14 + 3.5;
-      const ring = k === 0 ? outline : ellipse(c, R * Math.sqrt(aspect) + off, R / Math.sqrt(aspect) + off, ang, 96, wob);
-      const ringB = k === 0 ? ellipse(c, R * Math.sqrt(aspect) + 3.5, R / Math.sqrt(aspect) + 3.5, ang, 96, wob) : ring;
+      const ring = k === 0 ? outline : ringAt(off);
+      const ringB = k === 0 ? ringAt(3.5) : ring;
       const gaps = gateLinks.map((g) => ({ p: nearestOn(ringB, g.gate), width: v.pathW + 3 }));
       for (const pl of openRing(ringB, gaps)) out.lines.push({ kind: 'rampart', path: pl, width: 6 });
-      const ditch = ellipse(c, R * Math.sqrt(aspect) + off + 6.5, R / Math.sqrt(aspect) + off + 6.5, ang, 96, wob);
+      const ditch = ringAt(off + 6.5);
       for (const pl of openRing(ditch, gateLinks.map((g) => ({ p: nearestOn(ditch, g.gate), width: v.pathW + 3 })))) out.lines.push({ kind: 'ditch', path: pl, width: 3.5 });
-      const outerFace = ellipse(c, R * Math.sqrt(aspect) + off + 3, R / Math.sqrt(aspect) + off + 3, ang, 96, wob);
+      const outerFace = ringAt(off + 3);
       out.lines.push(...hachures(outerFace, 2.4, 2.2, -1, (p) => gateLinks.some((g) => dist(g.gate, p) < v.pathW + 5 + off)));
-      if (k === banks - 1) out.outline.push(ellipse(c, R * Math.sqrt(aspect) + off + 9, R / Math.sqrt(aspect) + off + 9, ang, 96, wob));
+      if (k === banks - 1) out.outline.push(ringAt(off + 9));
     }
-    out.sites.push({ id: 'ringfort', kind: pop > 260 ? 'hillfort' : 'ringfort', role: 'power', lot: outline, anchor: c });
+    out.sites.push({ id: 'ringfort', kind: v.id === 'oppidum' ? 'oppidum' : pop > 260 ? 'hillfort' : 'ringfort', role: 'power', lot: outline, anchor: c });
   }
   void inscribed; void obb; void ringSamples; void rect;
   return out;
@@ -407,7 +429,7 @@ function farmstead(out: CampOut, pi: number, yard: Polygon, v: YardVariant, chie
     }
     return;
   }
-  if (v.id === 'celtic') {
+  if (v.id === 'celtic' || v.id === 'oppidum') {
     const R0 = chief ? r.range(7, 9) : Math.min(7, Math.max(4.2, Math.sqrt(A) * 0.17 + r.range(-0.6, 0.6)));
     const main = fitIn(yard, (q, s) => hut(q, R0 * s, 16), placed, { margin: 1.6, gap: 0, minScale: 0.65 });
     if (!main) return;
@@ -418,6 +440,13 @@ function farmstead(out: CampOut, pi: number, yard: Polygon, v: YardVariant, chie
     const ng = 1 + (r.chance(0.5) ? 1 : 0) + (chief ? 2 : 0);
     for (let k = 0; k < ng; k++) { const g = fitIn(yard, (q, s) => rect(q, long, 2.8 * s, 2.8 * s), placed, { margin: 1, gap: 1.5, minScale: 0.85 }); if (g) push(g, 'outbuilding', 'four-post-granary', 'gable', 'timber'); }
     for (let k = 0; k < (chief ? 4 : 2); k++) { const g = fitIn(yard, (q, s) => hut(q, 1.15 * s, 8), placed, { margin: 1, gap: 1.2, minScale: 0.95 }); if (g) push(g, 'pit', 'storage-pit', 'none', 'earth'); }
+    // oppidum yards: a rectangular timber hall or workshop (smith, potter, mint) on the street front, the yard fenced
+    if (v.id === 'oppidum' && frontMid) {
+      const o2 = obb(yard);
+      const wk = fitIn(yard, (q, s) => rect(q, Math.atan2(o2.u.y, o2.u.x), r.range(9, 14) * s, r.range(6, 7.5) * s), placed, { margin: 1.2, gap: 2, minScale: 0.75, cands: [{ x: frontMid.x + (o2.c.x - frontMid.x) * 0.3, y: frontMid.y + (o2.c.y - frontMid.y) * 0.3 }] });
+      if (wk) push(wk, 'house', r.pick(['workshop', 'workshop', 'forge', 'timber-hall']), 'gable', 'timber');
+    }
+    if (v.id === 'oppidum') for (const pl of openRing(yard, frontMid ? [{ p: frontMid, width: 3 }] : [])) out.lines.push({ kind: 'yard-fence', path: pl, width: 0.45 });
     return;
   }
   // longhouse: germanic roughly east–west (with the yard's axis when it is narrow), norse along the yard
@@ -494,4 +523,22 @@ function plazaGroup(out: CampOut, poly: Polygon, bi: number, main: boolean, cent
   for (const b of tmp.buildings) out.buildings.push({ ...b, parcel: pi });
   out.lines.push(...tmp.lines);
   out.landmarks.push(...tmp.landmarks);
+}
+
+/** The sanctuary of an oppidum: a square ditched enclosure (Viereckschanze) with its square temple (fanum). */
+function sanctuary(out: CampOut, poly: Polygon, bi: number): void {
+  const pi = out.parcels.length;
+  out.parcels.push({ poly, use: 'compound:sanctuary', block: bi });
+  const ins = inscribed(poly, [], 0.5);
+  const h = Math.min(32, ins.r * 0.78);
+  if (h < 8) return;
+  const sqr = (k: number): Polygon => rect(ins.c, 0, 2 * h * k, 2 * h * k);
+  out.lines.push({ kind: 'ditch', path: sqr(1).concat([sqr(1)[0]]), width: 2.5 });
+  const cella = sqr(0.18), gal = sqr(0.34);
+  if (gal.every((q) => pointInRing(poly, q))) {
+    out.buildings.push({ poly: gal, kind: 'landmark', parcel: pi, arch: 'fanum', roof: 'pyramidal', material: 'timber', storeys: 1 });
+    out.lines.push({ kind: 'pyramid-step', path: cella.concat([cella[0]]), width: 0.6 });
+    out.landmarks.push({ kind: 'sanctuary', poly: sqr(1) });
+  }
+  out.sites.push({ id: 'sanctuary', kind: 'sanctuary', role: 'worship', lot: poly, anchor: ins.c });
 }

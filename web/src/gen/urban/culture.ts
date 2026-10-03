@@ -42,7 +42,7 @@ export interface EnclosureSpec {
 }
 export interface SectorSpec { morphology: MorphRef; share: number; culture?: string }
 export interface PhaseSpec { morphology: MorphRef; enclosure: EnclosureSpec; share?: number; sectors?: SectorSpec[]; culture?: string }
-export type NucleusKind = 'market' | 'forum' | 'mosque' | 'drum-tower' | 'castle' | 'temple' | 'grove' | 'ushnu' | 'precinct' | 'none';
+export type NucleusKind = 'market' | 'forum' | 'mosque' | 'drum-tower' | 'castle' | 'temple' | 'grove' | 'ushnu' | 'precinct' | 'mortuary' | 'none';
 export interface NucleusSpec {
   kind: NucleusKind;
   shape: 'hull' | 'rect' | 'square' | 'circle';
@@ -95,6 +95,8 @@ export interface RenderHints {
   streetCanals?: boolean;
   /** Chinampa field strips between canals round the town (and into shallow water). */
   chinampas?: boolean;
+  /** Back land and lot grounds drawn as graves (a necropolis). */
+  graves?: boolean;
 }
 export interface SettlementForm {
   /** Village / hamlet layout: EO rule (street or nucleated village), a walled compact block, a grove, terraces. */

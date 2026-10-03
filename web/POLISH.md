@@ -47,8 +47,14 @@ Each culture gets a `scale` range: the settlement classes it can produce. [x] `s
     - [x] `aztec` (aztec.ts): cardinal grid with canals down every second lane, walled ceremonial precinct (twin-stair Templo Mayor, round temple, lesser pyramids, ballcourt, tzompantli, calmecac), calpulli ward temples, tecpan, tianguis, chinampas on wetland and shallow water.
     - [x] `maya` (camps/yards.ts): dispersed houselots on platforms among fields, sacbeob from the core, plaza groups (twin temple pyramids, stelae, palace acropolis, ballcourts); grows to a city.
     - [x] `norse-ringfort` (camps/ringfort.ts): Trelleborg circle, rampart and ditch, four gates, axial streets, longhouse squares.
-    - [ ] Khmer, Byzantine, Russian kremlin, Venetian, Persian, Ottoman, Sahel, Hanseatic, Celtic oppidum, Korean: not shipped yet.
-  - [ ] Remaining fantasy presets from §3c: halfling, orcish, gnomish, stilt-town, wizard city, necropolis.
+    - [x] `khmer` (camps/khmer.ts): moated square, axial avenues to the temple-mountain with its galleries, royal palace and terrace, dyke grid of stilt houses with ponds, barays with mebon.
+    - [x] `russian-kremlin` (russian.ts, kremlin castle variant, yardHouse operator): triangular kremlin with cathedral square, bell tower and terem; posad of log houses in fenced yards behind a timber wall; domed parish churches.
+    - [x] `celtic-oppidum` (camps/yards.ts): hill-brow ramparts (two or three banks and ditches), fenced yards of roundhouses and workshops, paved main street, square sanctuary.
+    - [ ] Byzantine, Venetian, Persian, Ottoman, Sahel, Hanseatic, Korean: not shipped yet.
+  - [~] Remaining fantasy presets from §3c: halfling, orcish, gnomish, stilt-town, wizard city, necropolis.
+    - [x] `orcish` (camps/ring.ts): stake-palisade rings, huts packed anyhow, arena, warlord's hall on its mound, totems.
+    - [x] `necropolis` (cultures_cities.ts, tomb operator, fantasy.ts): walled cardinal grid of tomb lots (mausolea, tholoi, obelisks over the graves), processional avenue to the great stepped mausoleum, charnel houses.
+    - [ ] halfling, gnomish, stilt-town, wizard city: not shipped yet.
 
 ## Global settlement parameter
 - [x] **Sprawl / density factor** (`sprawl` ∈ 0.5 … 2, default 1). It multiplies the extent for a given population, lowers coverage, loosens plots, makes gardens more frequent and spreads faubourgs and suburbs. Below 1 it gives a compact dense town. It must interact with the culture defaults (a medina stays dense relative to its own baseline). Expose it in the UI and the URL. (Done: `applySprawl` in morphology.ts scales densities, coverage, infill, plot sizes, blocks, gaps and courtyards per culture; faubourg share and spread; camps loosen their rows and yards. Plan panel slider, `sprawl=` in the URL, tests/urban.sprawl.test.ts.)

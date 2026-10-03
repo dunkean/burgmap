@@ -15,7 +15,7 @@ export type StreetOpId =
   | 'radials' | 'rings' | 'organicInfill' | 'grid' | 'axis' | 'gateToGate' | 'culDeSacTree' | 'closes'
   | 'wardWalls' | 'defensiveKinks' | 'ribbon' | 'spiral' | 'switchbacks' | 'extraRadials';
 export type PlotOpId = 'burgage' | 'courtyard' | 'siheyuan' | 'machiya' | 'compound' | 'garden';
-export type BuildingOpId = 'streetFrontRow' | 'courtyardHouse' | 'shopRow' | 'pavilionCompound' | 'yashiki' | 'machiya' | 'detached' | 'treeHouse' | 'hall' | 'longhouse' | 'kancha';
+export type BuildingOpId = 'streetFrontRow' | 'courtyardHouse' | 'shopRow' | 'pavilionCompound' | 'yashiki' | 'machiya' | 'detached' | 'treeHouse' | 'hall' | 'longhouse' | 'kancha' | 'yardHouse' | 'tomb';
 export type RoofKind = 'gable' | 'hip' | 'flat' | 'dome' | 'pyramidal' | 'pagoda' | 'thatch-round' | 'none' | 'tiled-hip' | 'conical' | 'barrel' | 'terraced';
 export type Material = 'timber' | 'stone' | 'brick' | 'mud' | 'wood' | 'paper-wood' | 'living-wood' | 'rock' | 'thatch' | 'hide' | 'felt' | 'bark' | 'adobe' | 'turf' | 'earth' | 'wattle';
 /** Architecture of a building type (metadata for later rendering / 3D). */
@@ -276,10 +276,11 @@ export function applySprawl(m: MorphologyParams, sprawl: number): MorphologyPara
     infill: per(m.infill, (v) => Math.max(0, Math.min(1, v * (1 - 0.3 * f)))),
     frontage: per(m.frontage, (r) => rng(r, 1 + 0.32 * f, 3.5)),
     plotDepth: per(m.plotDepth, (r) => rng(r, 1 + 0.22 * f, 8)),
-    blockSize: per(m.blockSize, (r) => rng(r, 1 + 0.45 * f, 300)),
+    // (a compact town keeps its blocks and courtyard lots nearly as they are: more of every lot is built)
+    blockSize: per(m.blockSize, (r) => rng(r, 1 + (f > 0 ? 0.45 : 0.1) * f, 300)),
     sideGap: per(m.sideGap, (r) => (f > 0 ? [r[0] + 0.8 * f, r[1] + 1.8 * f] : [r[0] * (1 + f), r[1] * (1 + 0.7 * f)])),
     setback: per(m.setback, (r) => (f > 0 ? [r[0] + 0.6 * f, r[1] + 2 * f] : [r[0] * (1 + f), r[1] * (1 + 0.7 * f)])),
-    houseArea: per(m.houseArea, (r) => rng(r, 1 + 0.25 * f, 30)),
+    houseArea: per(m.houseArea, (r) => rng(r, 1 + (f > 0 ? 0.25 : 0.12) * f, 30)),
   };
 }
 

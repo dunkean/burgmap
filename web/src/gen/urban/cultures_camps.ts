@@ -19,6 +19,9 @@ const M: Record<string, MorphologyParams> = {
   pueblo: morph('pueblo', { arch: { typology: 'pueblo-room', roof: 'terraced', storeys: [1, 5], material: 'adobe' }, density: { core: 250, middle: 250, edge: 250, faubourg: 250, village: 250 } }),
   'norse-ringfort': morph('norse-ringfort', { arch: { typology: 'longhouse', roof: 'gable', storeys: [1, 1], material: 'timber' }, density: { core: 60, middle: 60, edge: 60, faubourg: 60, village: 60 } }),
   maya: morph('maya', { arch: { typology: 'maya-house', roof: 'thatch-round', storeys: [1, 1], material: 'wattle' }, density: { core: 40, middle: 40, edge: 40, faubourg: 40, village: 40 } }),
+  khmer: morph('khmer', { arch: { typology: 'stilt-house', roof: 'gable', storeys: [1, 1], material: 'wood' }, density: { core: 62, middle: 62, edge: 62, faubourg: 62, village: 62 } }),
+  oppidum: morph('oppidum', { arch: { typology: 'roundhouse', roof: 'thatch-round', storeys: [1, 1], material: 'wattle' }, density: { core: 45, middle: 45, edge: 45, faubourg: 45, village: 45 } }),
+  orcish: morph('orcish', { arch: { typology: 'orc-hut', roof: 'conical', storeys: [1, 1], material: 'hide' }, density: { core: 90, middle: 90, edge: 90, faubourg: 90, village: 90 } }),
   'nomad-camp': morph('nomad-camp', { arch: { typology: 'ger', roof: 'dome', storeys: [1, 1], material: 'felt' }, density: { core: 60, middle: 60, edge: 60, faubourg: 60, village: 60 } }),
 };
 Object.assign(MORPHOLOGIES, M);
@@ -61,6 +64,24 @@ export const CAMP_CULTURES: Culture[] = [
     scale: { min: 'hamlet', max: 'city' }, camp: { layout: 'yards', variant: 'maya' },
     render: { towerShape: 'square', plotLines: false },
     sitePrefs: { flatness: 1.2, weights: { plain: 1.6, hilltop: 1.2, valley: 1, harbor: 0.3 } },
+  },
+  {
+    // (Angkor Thom: the moated square, the temple-mountain at the crossing of the avenues, the barays)
+    ...campBase('khmer', 'Khmer city (Angkor)', 'khmer'),
+    scale: { min: 'hamlet', max: 'metropolis' }, camp: { layout: 'khmer', variant: 'angkor' },
+    render: { towerShape: 'square', plotLines: true },
+    sitePrefs: { flatness: 2.4, weights: { plain: 2.5, bridge: 1, hilltop: 0, valley: 0.5, harbor: 0.2 } },
+  },
+  {
+    // (Bibracte, Manching: the hilltop town of the late Iron Age)
+    ...campBase('celtic-oppidum', 'Celtic oppidum', 'oppidum'),
+    scale: { min: 'hamlet', max: 'town' }, camp: { layout: 'yards', variant: 'oppidum' },
+    sitePrefs: { flatness: 0.4, weights: { hilltop: 3, valley: 0.8, plain: 0.5, harbor: 0.2, estuary: 0.2 } },
+  },
+  {
+    ...campBase('orcish', 'Orcish war camp', 'orcish'), fantasy: true,
+    scale: { min: 'hamlet', max: 'town' }, camp: { layout: 'ring', variant: 'orc' },
+    sitePrefs: { flatness: 0.8, weights: { hilltop: 1.6, valley: 1.2, plain: 1, harbor: 0.3 } },
   },
   {
     ...campBase('kraal', 'Kraal (African homestead)', 'kraal'),

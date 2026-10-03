@@ -472,7 +472,7 @@ export function createCanvasRenderer(canvas: CanvasLike, world: World, style: Ma
       // urban water (moats, tanks, mill races) and the moat line outside a planned town's wall
       strokeLines(linesOf((l) => l.role === 'uline' && (l.kind === 'moat' || l.kind === 'canal')), pal.riverFill, (l) => lw(l.width, 1));
       if (polyL('u-water')) { fillPolys('u-water', pal.riverFill); strokePolys('u-water', pal.riverEdge, lw(0.5, 0.4)); }
-      paved('u-backland', U.garden, gardenPat);
+      paved('u-backland', U.garden, world.urban?.renderHints?.graves ? gravePat : gardenPat);
       // building masses (courtyards are holes -> evenodd), with a soft drop shadow when zoomed in
       const masses = polyL('u-masses');
       if (lod.buildings && masses) {
@@ -533,7 +533,7 @@ export function createCanvasRenderer(canvas: CanvasLike, world: World, style: Ma
       // plan lines: walls of compounds and wards, quay edges, terraces, hedges, footpaths
       {
         const ul = (kinds: string[]) => linesOf((l) => l.role === 'uline' && kinds.includes(l.kind));
-        strokeLines(ul(['compound-wall', 'ward-wall', 'citadel-wall', 'stone-wall', 'prakara', 'barbican', 'quay-edge', 'zigzag-wall', 'canal-wall', 'stall-row']), U.wall, (l) => lw(l.width * 0.9, 0.8), 1, [], 'butt');
+        strokeLines(ul(['compound-wall', 'ward-wall', 'citadel-wall', 'stone-wall', 'prakara', 'barbican', 'quay-edge', 'zigzag-wall', 'canal-wall', 'stall-row', 'gallery', 'dome']), U.wall, (l) => lw(l.width * 0.9, 0.8), 1, [], 'butt');
         strokeLines(ul(['terrace']), U.massEdge, (l) => lw(l.width * 0.6, 0.7));
         if (near) strokeLines(ul(['hachure']), U.massEdge, (l) => lw(l.width, 0.4), 0.7);
         strokeLines(ul(['hedge']), '#5f7a3a', (l) => lw(l.width, 1));

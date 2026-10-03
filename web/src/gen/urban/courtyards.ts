@@ -12,7 +12,7 @@ import type { Rng } from '../core/rng';
 import type { MorphologyParams, Zone } from './morphology';
 import type { Streets } from './streets';
 import type { Plot, PlotResult } from './plots';
-import { area, obb, orientPos, distToSeg, interiorAngle, segSegT, pointInRing, isSimple } from '../geo/poly';
+import { area, obb, orientPos, distToSeg, interiorAngle, segSegT, pointInRing, isSimple, inscribed } from '../geo/poly';
 import { stitchUnion } from '../geo/stitch';
 import { splitByChord, lpoly } from '../geo/split';
 import { shapeOf } from './buildings';
@@ -168,7 +168,8 @@ export function cutCourtyards(block: Polygon, bi: number, zone: Zone, P: Morphol
     }
     return s2;
   };
-  const okF = plots.map((p) => ribbonLen(p.poly) >= 3.3);
+  // (a lot narrower than 2.2 m, a sliver along a block edge, joins its neighbour too)
+  const okF = plots.map((p) => ribbonLen(p.poly) >= 3.3 && inscribed(p.poly, [], 0.1).r * 2 >= 2.2);
   for (let i = 0; i < plots.length; i++) {
     if (okF[i] || !plots[i]) continue;
     let best = -1, bl = 0;
