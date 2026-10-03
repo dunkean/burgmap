@@ -144,7 +144,7 @@ function buildingsSvg(ub: NonNullable<World['urban']>, U: Palette['urban'], lw: 
 const GROUND_USES = new Set(['bailey', 'causeway', 'ghat', 'castle-honmaru', 'compound:castle-honmaru', 'bailey-gate', 'esplanade']);
 /** Fences of camps and villages (width m): byre, yard, pen and orda fences, palisade lines inside a village. */
 const CAMP_FENCES: Record<string, number> = { 'kraal-fence': 1.1, 'yard-fence': 0.45, 'pen-fence': 0.5, 'orda-fence': 0.8, palisade: 1.2 };
-const WALL_LINES: Record<string, number> = { 'zigzag-wall': 2.4, 'canal-wall': 1,  'compound-wall': 1, 'citadel-wall': 2.4, 'stone-wall': 1.8, prakara: 1.6, 'ward-wall': 1.8 };
+const WALL_LINES: Record<string, number> = { 'zigzag-wall': 2.4, 'canal-wall': 1, 'pyramid-step': 0.5, 'stall-row': 2.2,  'compound-wall': 1, 'citadel-wall': 2.4, 'stone-wall': 1.8, prakara: 1.6, 'ward-wall': 1.8 };
 
 /** Compound grounds, water pieces (moats, tanks) and the moat outside the town wall (drawn under the buildings). */
 function cultureUnderlay(ub: NonNullable<World['urban']>, pal: Palette, lw: (m: number, px: number) => string): string {
@@ -160,6 +160,13 @@ function cultureUnderlay(ub: NonNullable<World['urban']>, pal: Palette, lw: (m: 
   if (garth.length) s += `<path d="${garth.map((l) => pathD(l.poly, true)).join('')}" fill="${U.garden}" stroke="${U.plotLine}" stroke-width="${lw(0.25, 0.1)}"/>`;
   const ditch = ub.parcels.filter((p) => p.use === 'ditch');
   if (ditch.length) s += `<path class="u-ditch" d="${ditch.map((p) => pathD(p.poly, true)).join('')}" fill="${U.garden}" stroke="${U.plotLine}" stroke-width="${lw(0.3, 0.12)}"/><path d="${ditch.map((p) => pathD(p.poly, true)).join('')}" fill="url(#p-ugarden)"/>`;
+  // chinampas: the canals between the strips, the strips themselves (and canals down the lanes)
+  const chW = ub.landmarks.filter((l) => l.kind === 'chinampa-canal');
+  if (chW.length) s += `<path class="u-chinampa-canals" d="${chW.map((l) => pathD(l.poly, true)).join('')}" fill="${pal.riverFill}"/>`;
+  const chF = ub.landmarks.filter((l) => l.kind === 'chinampa');
+  if (chF.length) { const d = chF.map((l) => pathD(l.poly, true)).join(''); s += `<g class="u-chinampas"><path d="${d}" fill="${U.garden}" stroke="${pal.waterEdge}" stroke-width="${lw(0.3, 0.15)}"/><path d="${d}" fill="url(#p-ugarden)"/></g>`; }
+  const canalsL = (ub.lines ?? []).filter((l) => l.kind === 'canal');
+  for (const l of canalsL) s += `<path d="${pathD(l.path, false)}" fill="none" stroke="${pal.riverFill}" stroke-width="${f1(l.width ?? 2)}" stroke-linecap="round" stroke-linejoin="round"/>`;
   // cornfields round a native village: corn hills in rows
   const corn = ub.landmarks.filter((l) => l.kind === 'cornfield' || l.kind === 'terrace-field');
   if (corn.length) {
@@ -182,7 +189,7 @@ function cultureOverlay(ub: NonNullable<World['urban']>, pal: Palette, lw: (m: n
   let s = '';
   const byKind = new Map<string, string[]>();
   for (const l of ub.lines ?? []) {
-    if (l.kind === 'moat') continue;
+    if (l.kind === 'moat' || l.kind === 'canal') continue;
     const k = l.kind;
     if (!byKind.has(k)) byKind.set(k, []);
     byKind.get(k)!.push(pathD(l.path, !!l.closed));
@@ -238,6 +245,8 @@ export function urbanLayer(world: World, pal: Palette, u: number, debug: boolean
   const blockD = ub.blocks.filter((_, i) => ub.blockInfo[i]?.kind === 'block').map((b) => pathD(b, true)).concat(ub.parcels.filter((p) => p.use === 'arena-plot' || p.use === 'inn').map((p) => pathD(p.poly, true))).join('');
   s += `<path class="u-blocks" d="${blockD}" fill="${U.yard}"/>`;
   // meadows inside a block (village greens, thing places, open camp ground): over the yard colour
+  const plazas = ub.parcels.filter((p) => p.use === 'plaza');
+  if (plazas.length) { const d = plazas.map((p) => pathD(p.poly, true)).join(''); s += `<g class="u-plazas"><path d="${d}" fill="${U.place}"/><path d="${d}" fill="url(#p-upave)"/></g>`; }
   const meadows = ub.parcels.filter((p) => p.use === 'meadow');
   if (meadows.length) { const d = meadows.map((p) => pathD(p.poly, true)).join(''); s += `<g class="u-meadows"><path d="${d}" fill="${U.garden}"/><path d="${d}" fill="url(#p-ugarden)" opacity="0.45"/></g>`; }
   if (ub.backLand.length) {

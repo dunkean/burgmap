@@ -8,10 +8,10 @@
 import type { Vec2, Polygon, Polyline } from '../../core/geom';
 import { dist, polygonCentroid } from '../../core/geom';
 import type { UrbanStreet, UrbanLine, UrbanWall, UrbanSite, PolyH, UrbanBlockInfo, UrbanBuilding, UrbanParcel, StreetRole } from '../../types';
-import { MultiPoly, differenceS, intersectionS, intersection, unionS, mpArea } from '../../geo/bool';
-import { area, orientPos, pointInRing, distToRing, distToSeg, inscribed, cleanRing, bboxOf, interiorAngle } from '../../geo/poly';
+import { MultiPoly, differenceS, intersectionS, intersection, union, unionS, unionMany, mpArea } from '../../geo/bool';
+import { area, orientPos, pointInRing, distToRing, distToSeg, inscribed, cleanRing, bboxOf, interiorAngle, isSimple } from '../../geo/poly';
 import { ribbon } from '../../geo/offset';
-import { polyInside } from '../../geo/split';
+import { polyInside, isConvex, clipHalfPlaneConvex } from '../../geo/split';
 import { GridIndex } from '../../geo/spatial';
 import { truncateAcute } from '../blocks';
 
@@ -71,19 +71,37 @@ export function annulus(c: Vec2, r0: number, r1: number, n = 96): PolyH {
   return { outer: orientPos(circlePts(c, r1, n)), holes: [orientPos(circlePts(c, r0, n))] };
 }
 
-/** Cuts a polygon with holes into simple polygons (a cut line through each hole). */
+/**
+ * Cuts a polygon with holes into simple polygons: vertical slabs whose boundaries pass through every hole (each hole
+ * is opened by the line through its centroid), so no piece keeps a hole, however many there are.
+ */
 export function splitHoles(ph: PolyH, depth = 0): Polygon[] {
-  if (!ph.holes.length || depth > 6) return [ph.outer];
-  const h = ph.holes[0];
-  const hc = polygonCentroid(h);
+  if (!ph.holes.length || depth > 3) return [ph.outer];
   const bb = bboxOf(ph.outer);
-  const big = Math.max(bb.x1 - bb.x0, bb.y1 - bb.y0) * 3 + 10;
-  // a vertical cut through the hole: the two half-planes as big rectangles
-  const left: Polygon = [{ x: hc.x - big, y: hc.y - big }, { x: hc.x, y: hc.y - big }, { x: hc.x, y: hc.y + big }, { x: hc.x - big, y: hc.y + big }];
-  const right: Polygon = [{ x: hc.x, y: hc.y - big }, { x: hc.x + big, y: hc.y - big }, { x: hc.x + big, y: hc.y + big }, { x: hc.x, y: hc.y + big }];
+  // (a hole left after the first pass is cut a little off its centroid line)
+  const xs = [...new Set(ph.holes.map((h) => Math.round((polygonCentroid(h).x + depth * 0.37) * 1000) / 1000))].sort((a, b) => a - b);
+  const bounds = [bb.x0 - 10, ...xs, bb.x1 + 10];
   const out: Polygon[] = [];
-  for (const half of [left, right]) for (const piece of intersectionS([ph], half)) out.push(...splitHoles(piece, depth + 1));
+  for (let i = 0; i + 1 < bounds.length; i++) {
+    const a = bounds[i], b = bounds[i + 1];
+    if (b - a < 1e-6) continue;
+    const slab: Polygon = [{ x: a, y: bb.y0 - 10 }, { x: b, y: bb.y0 - 10 }, { x: b, y: bb.y1 + 10 }, { x: a, y: bb.y1 + 10 }];
+    for (const piece of intersectionS([ph], slab)) {
+      // (a hole whose centroid line misses it: a further split of that piece)
+      if (piece.holes.length) out.push(...splitHoles({ outer: piece.outer, holes: piece.holes }, depth + 1));
+      else out.push(piece.outer);
+    }
+  }
   return out;
+}
+
+/** A ring on the 1 mm grid of the snapped booleans (quarters: their blocks then never stick out of them). */
+export function snapRing(p: Polygon): Polygon {
+  // (through the boolean engine once: its ring cleanup — vertices with a turn under 0.5° dropped — is then already
+  // applied, so the blocks cut from the quarter keep exactly its boundary)
+  const u = unionS([{ outer: orientPos(p.map((q) => ({ x: Math.round(q.x * 1000) / 1000, y: Math.round(q.y * 1000) / 1000 }))), holes: [] }]);
+  if (!u.length) return orientPos(p);
+  return u.reduce((a, b) => (area(b.outer) > area(a.outer) ? b : a)).outer;
 }
 
 /** A polygon is a valid partition piece: no vertex angle < 13°, width ≥ 2.2 m. */
@@ -106,20 +124,25 @@ export function pieces(m: MultiPoly, minA = 6): Polygon[] {
 /** Blocks of a quarter: the quarter minus the street ribbons (and the water), as simple, well-shaped polygons. */
 export function carveBlocks(quarter: Polygon, cuts: MultiPoly, water: MultiPoly): Polygon[] {
   let m: MultiPoly = [{ outer: quarter, holes: [] }];
-  if (cuts.length) m = differenceS(m, cuts);
-  if (water.length) m = differenceS(m, water);
+  // (the cuts unioned first, in batches: polygon-clipping is far more robust on one clean operand than on many
+  // overlapping ribbons, and a failure would fall back to a coarse 5 cm grid)
+  if (cuts.length) m = differenceS(m, cuts.length > 1 ? unionMany(cuts.map((ph) => [ph] as MultiPoly), 16, true) : cuts);
+  if (water.length) m = differenceS(m, ...water.map((ph) => [ph] as MultiPoly));
   // (spikes left where path ribbons meet or graze the outline are cut off at 1.5 m width)
-  return pieces(m, 20).map((p) => (goodShape(p, 2.5) ? p : orientPos(truncateAcute(p, (14 * Math.PI) / 180, 1.5)))).filter((p) => p.length >= 3 && goodShape(p, 2.5));
+  const out = pieces(m, 40).map((p) => (goodShape(p, 2.5) ? p : orientPos(truncateAcute(p, (14 * Math.PI) / 180, 1.5)))).filter((p) => p.length >= 3 && goodShape(p, 2.5));
+  // (a boolean that fell back to its coarse grid may leave a block a few cm out of its quarter: clipped back)
+  return out.flatMap((p) => (p.every((q) => pointInRing(quarter, q) || distToRing(quarter, q) < 0.002) ? [p] : pieces(intersectionS(p, quarter), 40).filter((x) => goodShape(x, 2.5))));
 }
 
 /** Street ribbons of open paths (closed rings are given as annuli by their layouts). */
+/** Street ribbons of open paths, one polygon per path (not unioned: booleans take them as a list). */
 export function pathRibbons(list: UrbanStreet[]): MultiPoly {
   const rb: MultiPoly = [];
   for (const s of list) {
     const r = ribbon(s.path, s.widths ?? s.width);
     if (r.length >= 3) rb.push({ outer: r, holes: [] });
   }
-  return rb.length ? unionS(rb) : [];
+  return rb;
 }
 
 /**
@@ -132,10 +155,34 @@ export function cutByCells(block: Polygon, cells: { poly: Polygon; tag: number }
   for (const c of cells) {
     const cb = bboxOf(c.poly);
     if (cb.x0 > bb.x1 || cb.x1 < bb.x0 || cb.y0 > bb.y1 || cb.y1 < bb.y0) continue;
-    for (const p of pieces(intersection(block, c.poly), 0.05)) out.push({ poly: p, tag: c.tag });
+    // convex cells: the block clipped by the cell's half-planes (exact and cheap); a concave cell takes a boolean
+    if (isConvex(c.poly, 1e-9)) {
+      const r = clipConvexCell(block, c.poly);
+      if (r.length >= 3 && area(r) > 0.05) for (const p of pieces(resolveRing(r), 0.05)) out.push({ poly: p, tag: c.tag });
+    } else for (const p of pieces(intersectionS(block, c.poly), 0.05)) out.push({ poly: p, tag: c.tag });
   }
   out = mergeSmall(out);
   return out;
+}
+
+/** Sutherland–Hodgman: a polygon (any) clipped by a convex polygon (CCW). */
+function clipConvexCell(subject: Polygon, clip: Polygon): Polygon {
+  let poly = subject;
+  const C = orientPos(clip);
+  for (let i = 0; i < C.length && poly.length; i++) {
+    const a = C[i], b = C[(i + 1) % C.length];
+    // inward normal of a CCW ring: left of a→b
+    poly = clipHalfPlaneConvex(poly, a, { x: -(b.y - a.y), y: b.x - a.x });
+  }
+  // (on the 1 mm grid of the snapped booleans: neighbouring pieces and later unions share their vertices exactly)
+  return poly.map((q) => ({ x: Math.round(q.x * 1000) / 1000, y: Math.round(q.y * 1000) / 1000 }));
+}
+
+/** A clipped ring may hold zero-width bridges (several parts of a concave block): resolved into its parts. */
+function resolveRing(r: Polygon): MultiPoly {
+  const c = orientPos(cleanRing(r, 0.005, 0.01, Infinity, false));
+  if (c.length < 3) return [];
+  return isSimple(c) ? [{ outer: c, holes: [] }] : unionS([{ outer: c, holes: [] }]);
 }
 
 /** Length of the boundary of `a` lying on `b`'s boundary (within 2 cm). */
@@ -159,13 +206,23 @@ export function sharedLen(a: Polygon, b: Polygon): number {
  */
 export function mergeSmall<T extends { poly: Polygon }>(list: T[], minA = 14): T[] {
   const out = list.slice();
+  // (badness cached per piece: the shape test runs a pole of inaccessibility)
+  const badMap = new Map<T, boolean>();
+  const bad = (x: T): boolean => { let b = badMap.get(x); if (b === undefined) { b = area(x.poly) < minA || !goodShape(x.poly, 2.2); badMap.set(x, b); } return b; };
   const kept = new Set<T>();
   for (let guard = 0; guard < 300; guard++) {
-    const i = out.findIndex((x) => !kept.has(x) && (area(x.poly) < minA || !goodShape(x.poly, 2.2)));
+    const i = out.findIndex((x) => !kept.has(x) && bad(x));
     if (i < 0) break;
     const me = out[i];
+    const mb = bboxOf(me.poly);
     let bj = -1, bl = 0.05;
-    out.forEach((o, j) => { if (j !== i) { const l = sharedLen(me.poly, o.poly); if (l > bl) { bl = l; bj = j; } } });
+    out.forEach((o, j) => {
+      if (j === i) return;
+      const ob = bboxOf(o.poly);
+      if (ob.x0 > mb.x1 + 0.1 || ob.x1 < mb.x0 - 0.1 || ob.y0 > mb.y1 + 0.1 || ob.y1 < mb.y0 - 0.1) return;
+      const l = sharedLen(me.poly, o.poly);
+      if (l > bl) { bl = l; bj = j; }
+    });
     const u = bj >= 0 ? unionS(out[bj].poly, me.poly) : [];
     if (bj >= 0 && u.length === 1 && !u[0].holes.length) {
       const merged = { ...out[bj], poly: orientPos(cleanRing(u[0].outer, 0.01, 0.01, Infinity, false)) };

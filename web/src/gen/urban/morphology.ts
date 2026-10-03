@@ -118,6 +118,10 @@ export interface MorphologyParams {
   courtyardMin: number;
   /** Plots run back to back to the medial line of every block whatever the coverage (hutong, machiya rows). */
   deepFill?: boolean;
+  /** Faubourg plots widen and thin out away from the enclosure (false: continuous rows along the roads, machi). */
+  faubFade?: boolean;
+  /** Organic splitting guided by the local contours (0–1): terraces cut along the slope, ramps across it. */
+  contourFollow?: number;
   /** Gross densities (inhabitants per ha) per zone, used to size phase regions. */
   density: Record<Zone, number>;
 }

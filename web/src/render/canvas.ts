@@ -464,10 +464,13 @@ export function createCanvasRenderer(canvas: CanvasLike, world: World, style: Ma
       paved('u-yards', U.garden, gravePat);
       fillPolys('u-blocks', U.yard);
       paved('u-meadows', U.garden, gardenPat, 0.45);
+      paved('u-plazas', U.place, pave);
       const cornPat = near ? getPattern(ctx, 'corn', 3, 3, 12, (c, k) => { c.globalAlpha = 0.6; c.fillStyle = U.gardenInk; c.beginPath(); c.arc(1.5 * k, 1.5 * k, 0.45 * k, 0, TAU); c.fill(); }) : null;
       paved('u-cornfields', pal.land.field, cornPat);
+      if (polyL('u-chinampa-canals')) fillPolys('u-chinampa-canals', pal.riverFill);
+      paved('u-chinampas', U.garden, gardenPat);
       // urban water (moats, tanks, mill races) and the moat line outside a planned town's wall
-      strokeLines(linesOf((l) => l.role === 'uline' && l.kind === 'moat'), pal.riverFill, (l) => lw(l.width, 1));
+      strokeLines(linesOf((l) => l.role === 'uline' && (l.kind === 'moat' || l.kind === 'canal')), pal.riverFill, (l) => lw(l.width, 1));
       if (polyL('u-water')) { fillPolys('u-water', pal.riverFill); strokePolys('u-water', pal.riverEdge, lw(0.5, 0.4)); }
       paved('u-backland', U.garden, gardenPat);
       // building masses (courtyards are holes -> evenodd), with a soft drop shadow when zoomed in
@@ -530,11 +533,12 @@ export function createCanvasRenderer(canvas: CanvasLike, world: World, style: Ma
       // plan lines: walls of compounds and wards, quay edges, terraces, hedges, footpaths
       {
         const ul = (kinds: string[]) => linesOf((l) => l.role === 'uline' && kinds.includes(l.kind));
-        strokeLines(ul(['compound-wall', 'ward-wall', 'citadel-wall', 'stone-wall', 'prakara', 'barbican', 'quay-edge', 'zigzag-wall', 'canal-wall']), U.wall, (l) => lw(l.width * 0.9, 0.8), 1, [], 'butt');
+        strokeLines(ul(['compound-wall', 'ward-wall', 'citadel-wall', 'stone-wall', 'prakara', 'barbican', 'quay-edge', 'zigzag-wall', 'canal-wall', 'stall-row']), U.wall, (l) => lw(l.width * 0.9, 0.8), 1, [], 'butt');
         strokeLines(ul(['terrace']), U.massEdge, (l) => lw(l.width * 0.6, 0.7));
         if (near) strokeLines(ul(['hachure']), U.massEdge, (l) => lw(l.width, 0.4), 0.7);
         strokeLines(ul(['hedge']), '#5f7a3a', (l) => lw(l.width, 1));
         strokeLines(ul(['andene']), U.wall, (l) => lw(l.width * 0.7, 0.5), 0.55);
+        if (near) strokeLines(ul(['pyramid-step']), U.landmarkEdge, (l) => lw(l.width, 0.4), 0.9);
         // camps and villages: thorn fences, byre / yard / pen fences, earthen ramparts and ditches
         strokeLines(ul(['rampart']), U.garden, (l) => lw(l.width, 1.4), 0.9);
         strokeLines(ul(['ditch']), U.wall, (l) => lw(l.width, 0.9), 0.35);

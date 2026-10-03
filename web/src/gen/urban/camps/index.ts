@@ -24,9 +24,10 @@ import { ringCamp, RING_VARIANTS } from './ring';
 import { yardsVillage, YARD_VARIANTS } from './yards';
 import { longhouseVillage } from './longhouses';
 import { puebloSettlement } from './pueblo';
+import { ringFort } from './ringfort';
 
 export interface CampSpec {
-  layout: 'ring' | 'yards' | 'longhouses' | 'pueblo';
+  layout: 'ring' | 'yards' | 'longhouses' | 'pueblo' | 'ringfort';
   variant: string;
 }
 
@@ -65,6 +66,7 @@ function campRadius(spec: CampSpec, pop: number): number {
     case 'yards': return YARD_VARIANTS[spec.variant]?.radius(pop) ?? 80;
     case 'longhouses': return 30 + Math.sqrt(pop * 22 / Math.PI) * 1.15;
     case 'pueblo': return 40 + Math.sqrt(pop * 30 / Math.PI) * 1.6;
+    case 'ringfort': return 50 + Math.sqrt(Math.ceil(Math.min(48, pop / 22) / 4)) * 40;
     default: return 80;
   }
 }
@@ -124,6 +126,7 @@ function plan(cc: CampCtx, spec: CampSpec, c: Vec2, pop: number, rng: Rng): Camp
     case 'yards': return yardsVillage(cc, c, pop, YARD_VARIANTS[spec.variant] ?? YARD_VARIANTS.germanic, rng);
     case 'longhouses': return longhouseVillage(cc, c, pop, rng);
     case 'pueblo': return puebloSettlement(cc, c, pop, rng);
+    case 'ringfort': return ringFort(cc, c, pop, rng);
     default: return ringCamp(cc, c, pop, RING_VARIANTS.kraal, rng);
   }
 }

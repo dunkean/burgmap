@@ -14,6 +14,7 @@ import type { Rng } from '../../core/rng';
 import { area, orientPos, pointInRing, inscribed } from '../../geo/poly';
 import { MultiPoly, differenceS, intersectionS } from '../../geo/bool';
 import type { CampCtx } from './index';
+import { snapRing } from './kit';
 import { CampOut, emptyCamp, street, ellipse, carveBlocks, pathRibbons, cutByCells, FrontIndex, apsidal, hut, fitIn, rect, pieces } from './kit';
 import { wallFeatures } from '../walls';
 import { Noise2D } from '../../core/noise';
@@ -33,7 +34,7 @@ export function longhouseVillage(cc: CampCtx, c: Vec2, pop: number, rng: Rng): C
   const ang = -Math.PI / 4 + sr.range(-0.35, 0.35);
   const nz = new Noise2D(sr.fork('noise'));
   const wob = (t: number) => 0.05 * nz.noise(Math.cos(t) * 1.2 + 3, Math.sin(t) * 1.2 + 3);
-  const oval = ellipse(c, a, b, ang, 96, wob);
+  const oval = snapRing(ellipse(c, a, b, ang, 96, wob));
   out.quarters.push(oval);
   const ca = Math.cos(ang), sa = Math.sin(ang);
   const U = (p: Vec2) => (p.x - c.x) * ca + (p.y - c.y) * sa;

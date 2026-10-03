@@ -183,7 +183,10 @@ export function buildScene(world: World, tileSize = TILE_SIZE): Scene {
     addPoly('u-yards', parcelsOf(['church']));
     addPoly('u-blocks', ur.blocks.filter((_, i) => ur.blockInfo[i]?.kind === 'block'));
     addPoly('u-meadows', parcelsOf(['meadow']));
+    addPoly('u-plazas', parcelsOf(['plaza']));
     addPoly('u-cornfields', ur.landmarks.filter((l) => l.kind === 'cornfield' || l.kind === 'terrace-field').map((l) => l.poly));
+    addPoly('u-chinampa-canals', ur.landmarks.filter((l) => l.kind === 'chinampa-canal').map((l) => l.poly));
+    addPoly('u-chinampas', ur.landmarks.filter((l) => l.kind === 'chinampa').map((l) => l.poly));
     addPoly('block-edges', ur.blocks);
     addH('u-backland', ur.backLand);
     addH('u-masses', ur.masses);

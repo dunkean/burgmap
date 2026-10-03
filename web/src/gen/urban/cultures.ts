@@ -69,10 +69,13 @@ M['jp-samurai'] = morph('jp-samurai', EO, {
 });
 M['jp-merchant'] = morph('jp-merchant', MORPHOLOGIES['bastide'], {
   streets: ['radials', 'defensiveKinks', 'grid'], closeOp: 'none', plotOp: 'machiya', buildingOp: 'machiya', kinks: 1,
-  gridSpacing: [120, 120], gridSkew: 0.02, blockSize: { core: [9000, 15000], middle: [9000, 15000], edge: [9000, 15000], faubourg: [4000, 12000] },
+  // (machiwari: blocks of ~66 × 120 m, machiya lots back to back on both long sides, 25–35 m deep)
+  gridSpacing: [66, 120], gridSkew: 0.02, blockSize: { core: [5000, 9000], middle: [5000, 9000], edge: [5000, 9500], faubourg: [4000, 10000] },
   minWidth: 30, widthByRank: [9, 7, 5.5, 3.6, 2.5],
-  frontage: { core: [4.5, 7], middle: [4.5, 7.5], edge: [5, 8], faubourg: [6, 10] }, plotDepth: { core: [22, 34], middle: [22, 36], edge: [24, 38] },
-  coverage: { core: [0.72, 0.82], middle: [0.7, 0.8], edge: [0.62, 0.74] }, footprintConformity: { core: 0.5, middle: 0.5, edge: 0.5 },
+  // (machi: continuous machiya rows along every merchant street, also along the roads out of town)
+  frontage: { core: [4.5, 7], middle: [4.5, 7.5], edge: [5, 8], faubourg: [5, 8.5] }, plotDepth: { core: [22, 34], middle: [22, 36], edge: [24, 38], faubourg: [20, 32] },
+  coverage: { core: [0.72, 0.82], middle: [0.7, 0.8], edge: [0.66, 0.76], faubourg: [0.62, 0.72] }, footprintConformity: { core: 0.5, middle: 0.5, edge: 0.5 },
+  deepFill: true, faubFade: false, wideLotChance: 0.06,
   density: { core: 190, middle: 180, edge: 150 },
   arch: { typology: 'machiya', roof: 'gable', storeys: [2, 2], material: 'wood' },
 });
@@ -99,7 +102,8 @@ M['elven'] = morph('elven', EO, {
 });
 
 M['dwarven'] = morph('dwarven', MORPHOLOGIES['bastide'], {
-  streets: ['switchbacks', 'grid'], closeOp: 'none', plotOp: 'burgage', buildingOp: 'hall', orientation: 'terrain', gatesOnly: true,
+  // terraces cut along the contours (straight rows where the ground is flat), ramps climbing between them
+  streets: ['switchbacks', 'grid'], streetOp: 'organic', contourFollow: 1, curvature: 0.45, fieldRandom: 0, closeOp: 'none', plotOp: 'burgage', buildingOp: 'hall', orientation: 'terrain', gatesOnly: true,
   gridSpacing: [46, 150], gridSkew: 0, fieldNoise: 0, blockSize: { core: [1200, 3500], middle: [1200, 3500], edge: [1200, 3500], faubourg: [3000, 9000] },
   minBlock: 400, minWidth: 14, widthByRank: [9, 7, 4, 3, 2.5],
   frontage: { core: [9, 17], middle: [9, 17], edge: [10, 18] }, plotDepth: { core: [18, 30], middle: [18, 30], edge: [18, 30] },
@@ -291,7 +295,8 @@ const BASE_CULTURES: Culture[] = [
     hamlet: { form: 'walled', morphology: 'dwarven', enclosure: { shape: 'rect', wall: 'none', fossil: 'none', orientation: 'terrain' } },
     m4: { castle: 'none', cathedral: null, palace: null, monastery: null, marketHall: false, arena: 0, shanty: 'gecekondu', port: false },
     render: { towerShape: 'square', terraces: true },
-    sitePrefs: { mountainFace: 1, weights: { valley: 2, hilltop: 1.5, plain: 0.3 } },
+    // (a hold is cut into a mountain face: the steepest site the map offers, never the open plain if avoidable)
+    sitePrefs: { mountainFace: 2, weights: { valley: 2.5, hilltop: 1.8, plain: 0.08, harbor: 0.2, estuary: 0.2 } },
   },
 ];
 

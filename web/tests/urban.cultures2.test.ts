@@ -52,6 +52,17 @@ export const SIGNATURES: Record<string, (w: World) => void> = {
     // terraces: several storey levels
     expect(new Set(w.urban!.buildings.filter((b) => b.arch === 'pueblo-room').map((b) => b.storeys)).size, 'pueblo: terraced').toBeGreaterThan(1);
   },
+  'norse-ringfort': (w) => {
+    const a = arches(w);
+    expect(a.get('longhouse') ?? 0, 'ring fort: longhouses round the courtyards').toBeGreaterThan(3);
+    expect(lineKinds(w).has('rampart'), 'ring fort: circular rampart').toBe(true);
+    expect(w.urban!.streets.filter((s) => s.role === 'radial').length, 'ring fort: two axial streets gate to gate').toBeGreaterThanOrEqual(2);
+  },
+  maya: (w) => {
+    const a = arches(w);
+    expect(a.get('maya-house') ?? 0, 'maya: houselots').toBeGreaterThan(3);
+    expect((a.get('great-pyramid') ?? 0) + (a.get('temple-pyramid') ?? 0), 'maya: temple pyramids').toBeGreaterThan(0);
+  },
   'nomad-camp': (w) => {
     const a = arches(w);
     expect(a.get('ger') ?? 0, 'nomad: gers').toBeGreaterThan(8);
@@ -84,6 +95,8 @@ const CASES: [string, SizeName[]][] = [
   ['nomad-camp', ['hamlet', 'village', 'town']],
   ['native-iroquoian', ['hamlet', 'village', 'town']],
   ['native-pueblo', ['hamlet', 'village', 'town', 'city']],
+  ['norse-ringfort', ['hamlet', 'village', 'town']],
+  ['maya', ['hamlet', 'village', 'town', 'city']],
   ['barbarian', ['hamlet', 'village', 'town']],
   ['barbarian-celtic', ['hamlet', 'village', 'town']],
   ['barbarian-norse', ['hamlet', 'village', 'town']],
@@ -97,7 +110,7 @@ describe('village and camp cultures', () => {
       expect(w.urban!.culture).toBe(culture);
       if (size !== 'hamlet' || culture !== 'barbarian-norse') SIGNATURES[culture]?.(w);
       // above the culture's class (village): a cluster of villages, not a town
-      if (size === 'town' && culture !== 'barbarian-norse' && culture !== 'native-pueblo') expect(Number(w.stats['urban.camps']), 'a cluster of villages').toBeGreaterThan(1);
+      if (size === 'town' && !['barbarian-norse', 'native-pueblo', 'maya'].includes(culture)) expect(Number(w.stats['urban.camps']), 'a cluster of villages').toBeGreaterThan(1);
     });
   }
 });

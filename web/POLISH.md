@@ -12,6 +12,7 @@ Status: [ ] open · [~] in progress · [x] done
 - [x] Castle count option; walls none / single / double.
 
 ## Cultures: next polish agent
+- [x] Residual review (cultures agent 2): Japanese merchant fabric = continuous machiya rows (machiwari blocks, deep fill, rows also along the roads out of town, kura and ura-nagaya behind); Roman core dark polygon (an unsplittable lot along the river was one building: now courtyard houses along its street front, garden behind); medina patios 14–24 % of the lot; dwarven: mountain-face site preference and terraces cut along the local contours (`contourFollow`).
 - [x] Japanese (jōkamachi): the overall plan is nice, but some quarters are piles of rectangles. Merchant blocks need machiya rows along the street with gardens and storehouses (kura) behind. Samurai lots: walled yashiki with a garden.
 - [x] Dwarven: towns are empty. Fill the terraces with halls, workshops, forges, dwellings cut into the slope, and real density. Use a mountain flank when available.
 - [x] Medina: hard to read. Houses must show inner courtyards (patio holes) systematically, blank outer walls, and entrances from derbs. Souk lanes need small shop cells. Coverage stays high, but the courtyards must be visible.
@@ -42,7 +43,11 @@ Each culture gets a `scale` range: the settlement classes it can produce. [x] `s
     - a great central plaza (haukaypata), ushnu platform, temple (Coricancha-like), fortress on the hill (Sacsayhuamán-like zigzag walls);
     - agricultural terraces on the slopes around;
     - canalized streams through the town.
-  - [ ] Remaining historical presets from URBAN_MORPHOLOGY §3b, by priority: Aztec, Maya, Khmer, Byzantine, Russian kremlin, Venetian, Persian, Ottoman, Sahel, Hanseatic, Norse ring fort, Celtic oppidum, Korean.
+  - [~] Remaining historical presets from URBAN_MORPHOLOGY §3b, by priority: Aztec, Maya, Khmer, Byzantine, Russian kremlin, Venetian, Persian, Ottoman, Sahel, Hanseatic, Norse ring fort, Celtic oppidum, Korean.
+    - [x] `aztec` (aztec.ts): cardinal grid with canals down every second lane, walled ceremonial precinct (twin-stair Templo Mayor, round temple, lesser pyramids, ballcourt, tzompantli, calmecac), calpulli ward temples, tecpan, tianguis, chinampas on wetland and shallow water.
+    - [x] `maya` (camps/yards.ts): dispersed houselots on platforms among fields, sacbeob from the core, plaza groups (twin temple pyramids, stelae, palace acropolis, ballcourts); grows to a city.
+    - [x] `norse-ringfort` (camps/ringfort.ts): Trelleborg circle, rampart and ditch, four gates, axial streets, longhouse squares.
+    - [ ] Khmer, Byzantine, Russian kremlin, Venetian, Persian, Ottoman, Sahel, Hanseatic, Celtic oppidum, Korean: not shipped yet.
   - [ ] Remaining fantasy presets from §3c: halfling, orcish, gnomish, stilt-town, wizard city, necropolis.
 
 ## Global settlement parameter

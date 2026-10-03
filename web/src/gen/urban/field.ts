@@ -32,6 +32,9 @@ export class GuidanceField {
     const P = this.P ?? this.ctx.params;
     const nz = ((P.fieldNoise * Math.PI) / 180) * this.noise.fbm(p.x / P.fieldWavelength, p.y / P.fieldWavelength, 2);
     if (P.streetOp === 'grid') return (P.orientation === 'cardinal' ? 0 : P.orientation === 'terrain' ? this.terrainAngle : this.gridAngle) + nz + P.gridSkew * this.noise.fbm(p.x / 600 + 9, p.y / 600 - 3, 2);
+    // terraces (dwarven holds): streets cut along the local contours where the ground slopes, straight rows
+    // across the site's contour direction where it is flat; the other family climbs (ramps, stairs)
+    if (P.contourFollow) return this.localContour(p, P.contourFollow);
     const dx = p.x - this.nucleus.x, dy = p.y - this.nucleus.y;
     const r = Math.hypot(dx, dy);
     // spiral twist: both families rotate with the distance angle (log-spiral streets)
@@ -64,6 +67,33 @@ export class GuidanceField {
     th = Math.atan2(cy, cx) / 4;
     // near the nucleus the radial field is singular: fade the noise in with distance
     return th + nz * (0.5 + 0.5 * smoothstep(r, 20, 120));
+  }
+
+  /**
+   * Terrain-oriented lattices (terraces cut along the contours): the contour direction of the ground smoothed over
+   * ~70 m at p where the slope is felt, the site's contour direction on flat ground (blended in 4θ space).
+   */
+  localContour(p: Vec2, k = 1): number {
+    const g = this.ctx.terrain.height;
+    let gx = 0, gy = 0;
+    const R = 70;
+    for (let k = 0; k < 12; k++) {
+      const a = (k / 12) * TAU, dx = Math.cos(a), dy = Math.sin(a);
+      const ix = Math.min(g.w - 1, Math.max(0, Math.floor((p.x + dx * R) / g.cell))), iy = Math.min(g.h - 1, Math.max(0, Math.floor((p.y + dy * R) / g.cell)));
+      const h = g.data[iy * g.w + ix];
+      gx += dx * h; gy += dy * h;
+    }
+    // (12 samples at R: the gradient magnitude is |Σ h d| / (6 R))
+    const sl = Math.hypot(gx, gy) / (6 * R);
+    if (sl < 1e-6) return this.terrainAngle;
+    const tc = Math.atan2(gy, gx) + Math.PI / 2;
+    const w = k * smoothstep(sl, 0.02, 0.06);
+    const cx = (1 - w) * Math.cos(4 * this.terrainAngle) + w * Math.cos(4 * tc), cy = (1 - w) * Math.sin(4 * this.terrainAngle) + w * Math.sin(4 * tc);
+    // (back to an angle near the local contour, modulo 90°)
+    const th = Math.atan2(cy, cx) / 4;
+    let d = th - tc;
+    d = ((d % (Math.PI / 2)) + Math.PI * 0.75) % (Math.PI / 2) - Math.PI / 4;
+    return tc + d;
   }
 
   /**

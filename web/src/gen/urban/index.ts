@@ -39,6 +39,7 @@ import { polyInside } from '../geo/split';
 import type { UrbanBuilding, PolyH, UrbanParcel, UrbanSite, UrbanWall } from '../types';
 import { m4Flags, registerM4 } from './m4/index';
 import { registerInca, andenes, canals } from './inca';
+import { registerAztec, streetCanals, chinampas } from './aztec';
 import { siteCastle, type CastlePlan } from './m4/castle';
 import { reserveCastle, type M4State } from './m4/reserve';
 import { reserveCathedral, reservePalace, reserveMonasteries } from './m4/catalogue';
@@ -61,7 +62,7 @@ export interface UrbanDebug { quarters: { poly: Polygon; phase: number; lab: num
 const MARKET_AREA = (pop: number): number => (pop < 1200 ? 0 : Math.min(10000, 1800 + pop * 0.3));
 /** Qibla from the Maghreb, roughly east-south-east (map angle, y down). */
 const QIBLA = 0.2;
-const NUCLEUS_COMPOUND: Record<string, string> = { mosque: 'great-mosque', castle: 'castle', temple: 'hindu-temple', grove: 'grove', 'drum-tower': 'drum-tower', ushnu: 'inca-plaza' };
+const NUCLEUS_COMPOUND: Record<string, string> = { mosque: 'great-mosque', castle: 'castle', temple: 'hindu-temple', grove: 'grove', 'drum-tower': 'drum-tower', ushnu: 'inca-plaza', precinct: 'aztec-precinct' };
 
 /** A point strictly inside a polygon (centroid when inside, else the inscribed-circle center). */
 export function interiorPoint(p: Polygon): Vec2 {
@@ -107,6 +108,7 @@ const L2_SITES: Record<string, 'power' | 'worship' | 'market' | 'civic' | 'activ
   hospital: 'civic', kasbah: 'power', 'great-mosque': 'worship', yamen: 'power', 'chinese-temple': 'worship', 'walled-market': 'market',
   'jp-temple': 'worship', 'hindu-temple': 'worship', palace: 'power', basilica: 'civic', 'roman-temple': 'worship', castle: 'power', hammam: 'civic',
   'inca-temple': 'worship', 'inca-palace': 'power', 'inca-plaza': 'civic',
+  'aztec-precinct': 'worship', 'calpulli-temple': 'worship', tecpan: 'power', tianguis: 'market',
 };
 /** Parcel uses of the open port pieces. */
 const LOT_USE: Record<string, string> = { 'm4-quay': 'quay', 'm4-pier': 'pier', 'm4-slipway': 'slipway', 'm4-green': 'green', 'm4-bridge-houses': 'bridge' };
@@ -165,6 +167,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   const streets = new Streets();
   registerM4();
   registerInca();
+  registerAztec();
   const flags = m4Flags(opts, culture, pop, archetype, rng.fork('m4'));
   const sites: UrbanSite[] = [];
   const lotData = new Map<string, unknown>();
@@ -601,7 +604,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     }
     const tb0 = performance.now();
     // faubourgs: plots widen along the ribbon (continuous rows at the gate, wider lots further out)
-    const fade = b.zone === 'faubourg' ? faubFade(interiorPoint(b.poly)) : 0;
+    const fade = b.zone === 'faubourg' && P.faubFade !== false ? faubFade(interiorPoint(b.poly)) : 0;
     const Pb = fade > 0 ? { ...P, frontage: { ...P.frontage, faubourg: [P.frontage.faubourg[0] * (1 + 0.9 * fade), P.frontage.faubourg[1] * (1 + 1.3 * fade)] as [number, number] } } : P;
     const r = Pb.plotOp === 'courtyard' || P.plotOp === 'compound' ? cutCourtyards(b.poly, bi, b.zone, P, streets, br)
       : P.plotOp === 'garden' ? { plots: [], back: [b.poly] }
@@ -830,15 +833,16 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   }
   // ---- terraces (dwarven): retaining walls along the contour-parallel streets, hachured on the downhill side
   if (hints.terraces) {
-    const ca = Math.cos(terrainAngle), sa = Math.sin(terrainAngle);
-    // downhill normal: the side where the height decreases
-    const probe = (p: Vec2, s2: number) => ctx.heightAt({ x: p.x - sa * s2, y: p.y + ca * s2 });
     for (const st of streets.list) {
       if (!st.ribbon || st.rank > 3 || st.role === 'close' || st.path.length < 2) continue;
       const a = st.path[0], b = st.path[st.path.length - 1];
       const L = dist(a, b);
-      if (L < 20 || Math.abs(((b.x - a.x) * ca + (b.y - a.y) * sa) / L) < 0.94) continue;
       const m = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      // (the terraces follow the local contour: streets along it get their retaining wall)
+      const lc = field.localContour(m);
+      const ca = Math.cos(lc), sa = Math.sin(lc);
+      const probe = (p: Vec2, s2: number) => ctx.heightAt({ x: p.x - sa * s2, y: p.y + ca * s2 });
+      if (L < 20 || Math.abs(((b.x - a.x) * ca + (b.y - a.y) * sa) / L) < 0.94) continue;
       const down = probe(m, 8) < probe(m, -8) ? 1 : -1;
       const nx = -sa * down, ny = ca * down;
       const hw = st.widths[0] / 2;
@@ -864,6 +868,13 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     for (const f of an.fields) landmarks.push({ kind: 'terrace-field', poly: f });
   }
   if (hints.canals) lines.push(...canals(ctx, prim.footprint));
+  // ---- Aztec: canals down the lanes, chinampas round the city
+  if (hints.streetCanals) lines.push(...streetCanals(streets));
+  if (hints.chinampas && archetype !== 'hamlet') {
+    const ch = chinampas(ctx, prim.footprint, (world.roads ?? []).map((r) => r.path), Math.min(320, 50 + Math.sqrt(pop) * 1.6));
+    for (const w of ch.water) landmarks.push({ kind: 'chinampa-canal', poly: w });
+    for (const f of ch.strips) landmarks.push({ kind: 'chinampa', poly: f });
+  }
   // ---- elven canopy: trees over the town, clear of the houses
   const trees: UrbanTree[] = [...compoundTrees];
   if (hints.canopy) {

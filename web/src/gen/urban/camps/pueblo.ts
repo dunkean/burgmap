@@ -14,9 +14,10 @@ import type { Vec2, Polygon } from '../../core/geom';
 import { dist } from '../../core/geom';
 import type { Rng } from '../../core/rng';
 import { orientPos, pointInRing, area, distToSeg, inscribed } from '../../geo/poly';
-import { MultiPoly, unionS, differenceS } from '../../geo/bool';
+import { MultiPoly, unionS, unionMany, differenceS } from '../../geo/bool';
 import type { CampCtx } from './index';
 import { segCrossesRing } from '../../geo/split';
+import { snapRing } from './kit';
 import { CampOut, emptyCamp, street, pathRibbons, hut, fitIn, pieces, carveBlocks } from './kit';
 
 interface Frame { o: Vec2; ang: number }
@@ -279,11 +280,11 @@ export function puebloSettlement(cc: CampCtx, c: Vec2, pop: number, rng: Rng): C
   const rib = pathRibbons(streets);
   // ---- quarter: the houses and the paths (and a 6 m apron round each house)
   const aprons: MultiPoly = houses.map((x) => ({ outer: x.h.outline, holes: [] }));
-  let q = unionS(aprons, rib);
+  let q = unionMany([...aprons.map((ph) => [ph] as MultiPoly), ...rib.map((ph) => [ph] as MultiPoly)], 16, true);
   if (ctx.water.length) q = differenceS(q, ctx.water);
   // (land enclosed by the ways stays in the quarter: a green when large, open ground when small)
   const holes = q.flatMap((ph) => ph.holes).filter((h) => area(h) > 1500);
-  const quarters = pieces(q.map((ph) => ({ outer: ph.outer, holes: [] })), 50);
+  const quarters = pieces(q.map((ph) => ({ outer: ph.outer, holes: [] })), 50).map(snapRing);
   out.quarters.push(...quarters);
   out.outline.push(...quarters);
   for (const h of holes) {

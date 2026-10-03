@@ -17,6 +17,8 @@ const M: Record<string, MorphologyParams> = {
   'barbarian-norse': morph('barbarian-norse', { arch: { typology: 'longhouse', roof: 'gable', storeys: [1, 1], material: 'turf' }, density: { core: 25, middle: 25, edge: 25, faubourg: 25, village: 25 } }),
   'iroquoian': morph('iroquoian', { arch: { typology: 'longhouse', roof: 'barrel', storeys: [1, 1], material: 'bark' }, density: { core: 160, middle: 160, edge: 160, faubourg: 160, village: 160 } }),
   pueblo: morph('pueblo', { arch: { typology: 'pueblo-room', roof: 'terraced', storeys: [1, 5], material: 'adobe' }, density: { core: 250, middle: 250, edge: 250, faubourg: 250, village: 250 } }),
+  'norse-ringfort': morph('norse-ringfort', { arch: { typology: 'longhouse', roof: 'gable', storeys: [1, 1], material: 'timber' }, density: { core: 60, middle: 60, edge: 60, faubourg: 60, village: 60 } }),
+  maya: morph('maya', { arch: { typology: 'maya-house', roof: 'thatch-round', storeys: [1, 1], material: 'wattle' }, density: { core: 40, middle: 40, edge: 40, faubourg: 40, village: 40 } }),
   'nomad-camp': morph('nomad-camp', { arch: { typology: 'ger', roof: 'dome', storeys: [1, 1], material: 'felt' }, density: { core: 60, middle: 60, edge: 60, faubourg: 60, village: 60 } }),
 };
 Object.assign(MORPHOLOGIES, M);
@@ -47,6 +49,18 @@ export const CAMP_CULTURES: Culture[] = [
     ...campBase('barbarian-norse', 'Barbarian: Norse farmstead cluster', 'barbarian-norse'), family: 'barbarian',
     scale: { min: 'hamlet', max: 'village' }, camp: { layout: 'yards', variant: 'norse' },
     sitePrefs: { weights: { harbor: 2, estuary: 1.6, plain: 1, hilltop: 0.4 } },
+  },
+  {
+    ...campBase('norse-ringfort', 'Norse ring fortress (Trelleborg)', 'norse-ringfort'),
+    scale: { min: 'hamlet', max: 'village' }, camp: { layout: 'ringfort', variant: 'trelleborg' },
+    sitePrefs: { flatness: 1.4, weights: { harbor: 1.4, estuary: 1.4, plain: 1.5, hilltop: 0.5 } },
+  },
+  {
+    // (Tikal, Copán, Caracol: a garden city; the dispersed houselots grow to a city of tens of thousands)
+    ...campBase('maya', 'Maya city (ceremonial core, sacbeob)', 'maya'),
+    scale: { min: 'hamlet', max: 'city' }, camp: { layout: 'yards', variant: 'maya' },
+    render: { towerShape: 'square', plotLines: false },
+    sitePrefs: { flatness: 1.2, weights: { plain: 1.6, hilltop: 1.2, valley: 1, harbor: 0.3 } },
   },
   {
     ...campBase('kraal', 'Kraal (African homestead)', 'kraal'),

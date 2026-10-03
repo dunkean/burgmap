@@ -17,11 +17,11 @@ import { dist } from '../../core/geom';
 import type { Rng } from '../../core/rng';
 import type { Range } from '../morphology';
 import { area, orientPos, pointInRing, inscribed } from '../../geo/poly';
-import { unionS, MultiPoly } from '../../geo/bool';
+import { unionMany, MultiPoly } from '../../geo/bool';
 import type { CampCtx } from './index';
 import { downhill } from './index';
 import {
-  CampOut, emptyCamp, street, at, normA, circlePts, annulus, carveBlocks, pathRibbons, cutByCells, FrontIndex, hut, rect,
+  snapRing, CampOut, emptyCamp, street, at, normA, circlePts, annulus, carveBlocks, pathRibbons, cutByCells, FrontIndex, hut, rect,
   fits, fitIn, openRing,
 } from './kit';
 
@@ -111,7 +111,7 @@ export function ringCamp(cc: CampCtx, c: Vec2, pop: number, v: RingVariant, rng:
   // a nearly empty outer row is folded into the others (denser rows rather than a scatter)
   if (rows.length > 1 && rows[rows.length - 1].n < 6) { const last = rows.pop()!; rows[rows.length - 1].n += last.n; }
   const Rout = rows[rows.length - 1].a + v.depth;
-  const quarter = wring(Rout, ringN(Rout));
+  const quarter = snapRing(wring(Rout, ringN(Rout)));
   out.quarters.push(quarter);
   out.outline.push(wring(Rout + (v.id === 'kraal' ? 4 : 2), ringN(Rout)));
   // ---- paths: one ring path inside each row, the entrance (and the lanes of a nomad camp)
@@ -129,7 +129,7 @@ export function ringCamp(cc: CampCtx, c: Vec2, pop: number, v: RingVariant, rng:
   const radialStreets = radials.map((r) => street([P(r.ang, Rout + 6), P(r.ang, rho0)], r.w, r.main ? 1 : 3, r.main ? 'radial' : 'lane'));
   out.streets.push(...radialStreets);
   const rb = pathRibbons(radialStreets);
-  const allCuts = rb.length ? unionS(cuts, rb) : unionS(cuts);
+  const allCuts = unionMany([...cuts.map((ph) => [ph]), ...rb.map((ph) => [ph])], 16, true);
   const blocks = carveBlocks(quarter, allCuts, ctx.water);
   const front = new FrontIndex(out.streets);
   // ---- the centre block and the row blocks

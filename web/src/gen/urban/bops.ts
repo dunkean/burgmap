@@ -110,9 +110,42 @@ function rectIn(pl: Plot, f: { fa: Vec2; t: Vec2; n: Vec2 }, u0: number, u1: num
  * The street walls are blank; the house is entered through a bent passage (skifa): in from the lane beside the
  * patio, a turn, then into the patio, so that the patio is never seen from the lane.
  */
-function courtyardHouse(pl: Plot, P: MorphologyParams, rng: Rng, cov = 0.93): ArchBldg[] {
+function courtyardHouse(pl: Plot, P: MorphologyParams, rng: Rng, cov = 0.93, sub = false): ArchBldg[] {
   const f = frame(pl);
   const A = area(pl.poly);
+  // an oversized lot (a block that could not be cut into houses: one street side only, along water or a wall):
+  // courtyard houses along its street front, the land behind them stays a garden (never one solid block)
+  const amax = P.houseArea[pl.zone]?.[1] ?? 600;
+  if (!sub && !f && A > 2.6 * amax) return [{ poly: pl.poly, kind: 'garden' }];
+  if (!sub && f && A > 2.6 * amax) {
+    const conv = isConvex(pl.poly, 1e-3);
+    const dBand = Math.min(f.D, Math.max(14, Math.sqrt(amax) * 1.15));
+    const n = Math.max(1, Math.round(f.W / Math.max(10, Math.sqrt(amax) * 1.1)));
+    const out: ArchBldg[] = [];
+    for (let i = 0; i < n; i++) {
+      const s0 = (f.W * i) / n, s1 = (f.W * (i + 1)) / n;
+      const p0 = { x: f.fa.x + f.t.x * s0, y: f.fa.y + f.t.y * s0 }, p1 = { x: f.fa.x + f.t.x * s1, y: f.fa.y + f.t.y * s1 };
+      const hps: HalfPlane[] = [
+        { p: { x: f.fa.x - f.n.x * 0.5, y: f.fa.y - f.n.y * 0.5 }, n: f.n },
+        { p: { x: f.fa.x + f.n.x * dBand, y: f.fa.y + f.n.y * dBand }, n: { x: -f.n.x, y: -f.n.y } },
+        ...(i > 0 ? [{ p: p0, n: f.t }] : []),
+        ...(i < n - 1 ? [{ p: p1, n: { x: -f.t.x, y: -f.t.y } }] : []),
+      ];
+      let best: Polygon | null = null;
+      for (const r of clipPlot(pl.poly, hps, conv)) { const c = cleanRing(r, 0.005, 0.5, 0.002, false); if (c.length >= 3 && (!best || area(c) > area(best))) best = c; }
+      if (!best || area(best) < 60) continue;
+      const fa = i > 0 ? p0 : pl.front[0], fb = i < n - 1 ? p1 : pl.front[1];
+      const subPl: Plot = { ...pl, poly: orientPos(best), front: [fa, fb], sideA: { p: fa, d: pl.nrm }, sideB: { p: fb, d: pl.nrm } };
+      out.push(...courtyardHouse(subPl, P, rng, cov, true).filter((b) => polyInside(pl.poly, b.poly)));
+    }
+    // the land behind the houses: a garden (orchard, vegetable plots)
+    for (const r of clipPlot(pl.poly, [{ p: { x: f.fa.x + f.n.x * (dBand + 0.01), y: f.fa.y + f.n.y * (dBand + 0.01) }, n: f.n }], isConvex(pl.poly, 1e-3))) {
+      const c = cleanRing(r, 0.005, 0.5, 0.002, false);
+      if (c.length >= 3 && area(c) > 30) out.push({ poly: c, kind: 'garden' });
+    }
+    pl.gated = true;
+    return out;
+  }
   const okShape = (p: Polygon) => { const s = shapeOf(p); return s.w >= MIN_BW && s.asp <= MAX_ASPECT; };
   // (a lot too small or too thin for a patio is built whole; long ones are cut into rooms later)
   const solid = (): ArchBldg[] => (shapeOf(pl.poly).w >= MIN_BW ? [tag({ poly: pl.poly, kind: 'house' }, P.arch, rng)] : []);
@@ -370,6 +403,13 @@ function machiya(pl: Plot, cov: number, P: MorphologyParams, rng: Rng): ArchBldg
     const h = sideHP(1);
     return [...hp, { p: { x: h.p.x + h.n.x * roji, y: h.p.y + h.n.y * roji }, n: h.n }];
   };
+  if (W > 22) {
+    // an over-wide lot (a long street front left in one piece): a row of machiya fronts 6–9 m wide
+    const n = Math.max(2, Math.round(W / rng.range(6.5, 9)));
+    const hd = Math.min(D - 0.5, rng.range(8, 11));
+    for (let i = 0; i < n; i++) put(piece(0, hd, { k: 0, w: W / n, off: (i * W) / n }), 'machiya', 'house', 2);
+    return out;
+  }
   if (W > 12) {
     // a wide merchant lot (odana): a deep front range, then a storehouse range across a court
     const hd = Math.min(D - 0.5, rng.range(10, 13));
@@ -399,9 +439,16 @@ function machiya(pl: Plot, cov: number, P: MorphologyParams, rng: Rng): ArchBldg
     }
   }
   put(house, 'machiya', 'house', rng.chance(0.3) ? 1 : 2);
-  // the kura at the back of the lot, against one side line
+  // the kura behind the back garden, against one side line (at most ~32 m from the street: on a deep lot the rest
+  // is the back of the cho, where the back tenements stand)
   const kd = rng.range(5.5, 7), kw = Math.min(W - 0.6, rng.range(4.6, 5.5));
-  if (D - kd - 1 > backEnd + 2 && kw >= 3.6) put(piece(D - 0.8 - kd, D - 0.8, { k: 0, w: kw, off: 0.3 }), 'kura', 'back', 2);
+  const kEnd = Math.min(D - 0.8, Math.max(backEnd + 4 + kd, rng.range(24, 32)));
+  if (kEnd - kd > backEnd + 2 && kw >= 3.6) put(piece(kEnd - kd, kEnd, { k: 0, w: kw, off: 0.3 }), 'kura', 'back', 2);
+  // ura-nagaya: on a deep lot, a back tenement row along the other side line, reached by the lot's alley
+  if (D - kEnd > 14 && W >= MIN_BW + 0.5 && cov > 0.55) {
+    const nw = Math.min(W - 1.4, rng.range(4.6, 5.6));
+    put(piece(kEnd + 2.5, Math.min(D - 1.2, kEnd + 2.5 + rng.range(14, 24)), { k: 1, w: nw, off: 0.2 }), 'nagaya', 'back', 1);
+  }
   void P;
   return out;
 }

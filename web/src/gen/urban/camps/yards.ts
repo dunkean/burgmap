@@ -18,18 +18,22 @@ import { dist, polygonCentroid } from '../../core/geom';
 import type { Rng } from '../../core/rng';
 import type { Range } from '../morphology';
 import type { UrbanStreet } from '../../types';
-import { area, orientPos, pointInRing, inscribed, obb, bboxOf } from '../../geo/poly';
-import { unionS, intersectionS, MultiPoly } from '../../geo/bool';
+import { area, orientPos, pointInRing, inscribed, obb, bboxOf, distToRing } from '../../geo/poly';
+import { unionS, intersectionS, differenceS, difference, unionMany, MultiPoly } from '../../geo/bool';
 import { Noise2D } from '../../core/noise';
 import type { CampCtx } from './index';
 import {
-  CampOut, emptyCamp, street, ellipse, carveBlocks, pathRibbons, cutByCells, FrontIndex, hut, rect, apsidal, bowSided,
+  snapRing, CampOut, emptyCamp, street, ellipse, carveBlocks, pathRibbons, mergeSmall, cutByCells, FrontIndex, hut, rect, apsidal, bowSided,
   fitIn, openRing, roadCrossings, hachures, pieces, ringSamples,
 } from './kit';
 import { wallFeatures } from '../walls';
+import { MinHeap } from '../../core/pq';
+import { pyramid } from '../aztec';
+import type { CompoundOut } from '../compounds';
+import { placeRect } from '../m4/kit';
 
 export interface YardVariant {
-  id: 'germanic' | 'celtic' | 'norse';
+  id: 'germanic' | 'celtic' | 'norse' | 'maya';
   /** Inhabitants per farmstead. */
   per: number;
   yardA: Range;
@@ -44,6 +48,7 @@ const yardRadius = (per: number, yardA: Range, occ: number) => (pop: number): nu
 export const YARD_VARIANTS: Record<string, YardVariant> = {
   germanic: { id: 'germanic', per: 11, yardA: [1300, 2400], pathW: 3.4, occupancy: 1, radius: yardRadius(11, [1300, 2400], 1) },
   celtic: { id: 'celtic', per: 7, yardA: [650, 1300], pathW: 2.8, occupancy: 1, radius: yardRadius(7, [650, 1300], 1) },
+  maya: { id: 'maya', per: 7, yardA: [1000, 1900], pathW: 2.8, occupancy: 0.55, radius: yardRadius(7, [1000, 1900], 0.55) },
   norse: { id: 'norse', per: 14, yardA: [2600, 5200], pathW: 3.2, occupancy: 0.32, radius: yardRadius(14, [2600, 5200], 0.32) },
 };
 
@@ -55,11 +60,20 @@ function seedsIn(ring: Polygon, n: number, rng: Rng): Vec2[] {
   const A = area(ring);
   const d0 = Math.sqrt(A / n) * 0.8;
   const pts: Vec2[] = [];
+  // (a hash grid of cell d0: only the 3 × 3 neighbouring cells are tested)
+  const grid = new Map<number, Vec2[]>();
+  const key = (ix: number, iy: number) => ix * 100003 + iy;
   for (let tries = 0; tries < n * 60 && pts.length < n; tries++) {
     const p = { x: rng.range(bb.x0, bb.x1), y: rng.range(bb.y0, bb.y1) };
     if (!pointInRing(ring, p)) continue;
-    if (pts.some((q) => dist(q, p) < d0)) continue;
+    const ix = Math.floor(p.x / d0), iy = Math.floor(p.y / d0);
+    let near = false;
+    for (let dx = -1; dx <= 1 && !near; dx++) for (let dy = -1; dy <= 1 && !near; dy++) for (const q of grid.get(key(ix + dx, iy + dy)) ?? []) if (dist(q, p) < d0) { near = true; break; }
+    if (near) continue;
     pts.push(p);
+    const k = key(ix, iy);
+    if (!grid.has(k)) grid.set(k, []);
+    grid.get(k)!.push(p);
   }
   return pts;
 }
@@ -96,7 +110,9 @@ export function yardsVillage(cc: CampCtx, c: Vec2, pop: number, v: YardVariant, 
     });
     vor = Delaunay.from(seeds.map((p) => [p.x, p.y] as [number, number])).voronoi(box);
   }
-  const cells: Polygon[] = seeds.map((_, i) => orientPos((vor.cellPolygon(i) ?? []).slice(0, -1).map(([x, y]) => ({ x, y }))));
+  // (cells snapped to the boolean grid, 1 mm: the pieces cut from neighbouring cells keep identical shared edges)
+  const mm = (v: number) => Math.round(v * 1000) / 1000;
+  const cells: Polygon[] = seeds.map((_, i) => orientPos((vor.cellPolygon(i) ?? []).slice(0, -1).map(([x, y]) => ({ x: mm(x), y: mm(y) }))));
   // ---- which cells are farmsteads (norse: a scattered subset, nearest the centre first with gaps)
   const occ = new Set<number>();
   const order = seeds.map((p, i) => ({ i, d: dist(p, c) + rng.fork('occ:' + i).range(0, R * 0.9) })).sort((a, b) => a.d - b.d);
@@ -109,6 +125,13 @@ export function yardsVillage(cc: CampCtx, c: Vec2, pop: number, v: YardVariant, 
   // the centre: the thing place (germanic), the chief's roundhouse yard (celtic), the hall farm (norse)
   const centreCell = seeds.reduce((bi, p, i) => (dist(p, c) < dist(seeds[bi], c) ? i : bi), 0);
   occ.add(centreCell);
+  // maya: the ceremonial core, plaza groups on the cells round the centre
+  const core = new Set<number>();
+  if (v.id === 'maya') {
+    const Rc = 40 + Math.sqrt(pop) * 1.3;
+    seeds.forEach((p, i) => { if (dist(p, c) < Rc) { core.add(i); occ.add(i); } });
+    core.add(centreCell);
+  }
   // ---- the graph of cell edges
   const nodes: Vec2[] = [];
   const nodeKey = new Map<string, number>();
@@ -134,7 +157,7 @@ export function yardsVillage(cc: CampCtx, c: Vec2, pop: number, v: YardVariant, 
     }
   });
   // usable edges: inside, between two cells, at least one of them a farmstead
-  const usable = edges.map((e) => e.inside && e.cells.length === 2 && (v.id === 'norse' || e.cells.some((ci) => occ.has(ci))));
+  const usable = edges.map((e) => e.inside && e.cells.length === 2 && (v.id === 'norse' || v.id === 'maya' || e.cells.some((ci) => occ.has(ci))));
   const adj: number[][] = nodes.map(() => []);
   edges.forEach((e, i) => { if (usable[i]) { adj[e.a].push(i); adj[e.b].push(i); } });
   // ---- gates: where the roads cross the outline (or toward the main road)
@@ -162,14 +185,15 @@ export function yardsVillage(cc: CampCtx, c: Vec2, pop: number, v: YardVariant, 
   const dij = (src: number): { prev: number[]; d: number[] } => {
     const d = nodes.map(() => Infinity), prev = nodes.map(() => -1), done = nodes.map(() => false);
     d[src] = 0;
-    for (;;) {
-      let u = -1, bd = Infinity;
-      for (let i = 0; i < nodes.length; i++) if (!done[i] && d[i] < bd) { bd = d[i]; u = i; }
-      if (u < 0) break;
+    const heap = new MinHeap<number>();
+    heap.push(src, 0);
+    while (heap.size) {
+      const u = heap.pop()!;
+      if (done[u]) continue;
       done[u] = true;
       for (const ei of adj[u]) {
         const e = edges[ei], w = e.a === u ? e.b : e.a;
-        if (d[u] + wgt[ei] < d[w]) { d[w] = d[u] + wgt[ei]; prev[w] = ei; }
+        if (d[u] + wgt[ei] < d[w]) { d[w] = d[u] + wgt[ei]; prev[w] = ei; heap.push(w, d[w]); }
       }
     }
     return { prev, d };
@@ -200,21 +224,25 @@ export function yardsVillage(cc: CampCtx, c: Vec2, pop: number, v: YardVariant, 
     for (const ei of [...tree]) if (find(edges[ei].a) !== root) tree.delete(ei);
   }
   // prune: a leaf edge goes unless it is the only ≥ 4 m frontage of a farmstead or part of a main path
-  const frontCount = (ci: number): number => { let n = 0; for (const ei of tree) if (edges[ei].len >= 4 && edges[ei].cells.includes(ci)) n++; return n; };
-  const deg = (u: number): number => { let n = 0; for (const ei of adj[u]) if (tree.has(ei)) n++; return n; };
-  for (let changed = true, guard = 0; changed && guard < 50; guard++) {
-    changed = false;
-    for (const ei of [...tree]) {
-      if (mainEdges.has(ei)) continue;
-      const e = edges[ei];
-      if (deg(e.a) > 1 && deg(e.b) > 1) continue;
-      const needed = e.len >= 4 && e.cells.some((ci) => occ.has(ci) && frontCount(ci) <= 1);
-      if (!needed) { tree.delete(ei); changed = true; }
-    }
+  const degA = new Int32Array(nodes.length);
+  const cnt = new Int32Array(cells.length);
+  for (const ei of tree) { const e = edges[ei]; degA[e.a]++; degA[e.b]++; if (e.len >= 4) for (const ci of e.cells) cnt[ci]++; }
+  const isLeaf = (ei: number) => degA[edges[ei].a] <= 1 || degA[edges[ei].b] <= 1;
+  const stack = [...tree].filter(isLeaf).reverse();
+  while (stack.length) {
+    const ei = stack.pop()!;
+    if (!tree.has(ei) || mainEdges.has(ei) || !isLeaf(ei)) continue;
+    const e = edges[ei];
+    if (e.len >= 4 && e.cells.some((ci) => occ.has(ci) && cnt[ci] <= 1)) continue;
+    tree.delete(ei);
+    degA[e.a]--; degA[e.b]--;
+    if (e.len >= 4) for (const ci of e.cells) cnt[ci]--;
+    for (const u of [e.a, e.b]) if (degA[u] === 1) for (const x of adj[u]) if (tree.has(x)) stack.push(x);
   }
+  const deg = (u: number): number => degA[u];
   // a few loops (paths meeting again round a yard), never along the outline
   const lr = rng.fork('loops');
-  for (const ei of idx) if (!tree.has(ei) && lr.chance(v.id === 'norse' ? 0.04 : 0.26) && deg(edges[ei].a) > 0 && deg(edges[ei].b) > 0 && edges[ei].len > 6) tree.add(ei);
+  for (const ei of idx) if (!tree.has(ei) && lr.chance(v.id === 'norse' ? 0.04 : 0.26) && deg(edges[ei].a) > 0 && deg(edges[ei].b) > 0 && edges[ei].len > 6) { tree.add(ei); degA[edges[ei].a]++; degA[edges[ei].b]++; }
   // ---- chain the tree edges into path polylines (through the degree-2 nodes)
   const used = new Set<number>();
   const polylines: { pts: Vec2[]; main: boolean }[] = [];
@@ -243,40 +271,71 @@ export function yardsVillage(cc: CampCtx, c: Vec2, pop: number, v: YardVariant, 
     const ux = (gl.gate.x - n.x) / L, uy = (gl.gate.y - n.y) / L;
     polylines.push({ pts: [n, { x: gl.gate.x + ux * 6, y: gl.gate.y + uy * 6 }], main: true });
   }
-  const streets: UrbanStreet[] = polylines.filter((p) => p.pts.length >= 2).map((p) => street(p.pts, p.main ? v.pathW + 1.2 : v.pathW, p.main ? 1 : 3, p.main ? 'radial' : 'lane'));
+  // (maya: the main ways are the sacbeob, broad white causeways from the core)
+  const streets: UrbanStreet[] = polylines.filter((p) => p.pts.length >= 2).map((p) => street(p.pts, p.main ? (v.id === 'maya' ? 8 : v.pathW + 1.2) : v.pathW, p.main ? 1 : 3, p.main ? 'radial' : 'lane'));
   if (!streets.some((s) => s.role === 'radial') && streets.length) { streets[0].role = 'radial'; streets[0].rank = 1; streets[0].kind = 'main'; }
   out.streets.push(...streets);
   const rib = pathRibbons(streets);
-  // ---- the quarter: the whole outline (germanic, celtic); the farmsteads and their tracks (norse)
-  let quarters: Polygon[];
-  if (v.id === 'norse') {
-    const occCells: MultiPoly = [...occ].map((ci) => ({ outer: cells[ci], holes: [] }));
-    let q = unionS(occCells, rib);
-    q = q.length ? intersectionS(q, outline) : q;
-    quarters = pieces(q, 400).filter((p) => streets.some((s) => s.path.some((pt) => pointInRing(p, pt))));
-  } else quarters = [outline];
-  out.quarters.push(...quarters);
-  out.outline.push(...quarters);
-  const front = new FrontIndex(out.streets);
-  const cellList = cells.map((poly, tag) => ({ poly, tag }));
-  // ---- blocks and yards
-  const chief: number[] = [];
-  quarters.forEach((Q, qi) => {
-    for (const b of carveBlocks(Q, rib, ctx.water)) {
-      const bi = out.blocks.length;
-      out.blocks.push({ poly: b, kind: 'block', quarter: qi });
-      for (const pc of cutByCells(b, cellList)) {
-        const pi = out.parcels.length;
-        const fr = front.frontage(pc.poly);
-        const isCentre = pc.tag === centreCell;
-        if (isCentre && v.id === 'germanic') { out.parcels.push({ poly: pc.poly, use: 'meadow', block: bi }); out.squares.push(pc.poly); continue; }
-        if (!occ.has(pc.tag) || fr.len < 3.2 || area(pc.poly) < 160) { out.parcels.push({ poly: pc.poly, use: v.id === 'norse' ? 'garden' : 'garden', block: bi }); continue; }
-        out.parcels.push({ poly: pc.poly, use: 'plot', block: bi });
-        if (isCentre || (v.id === 'germanic' && chief.length === 0 && touchesCell(pc.tag, centreCell, edges))) chief.push(pi);
-        farmstead(out, pi, pc.poly, v, chief.includes(pi), fr.mid, rng.fork('farm:' + bi + ':' + pc.tag));
+  // ---- quarters and blocks. A nucleated village: the whole outline is one quarter, cut by its paths into blocks,
+  // the blocks by the yard cells. A scatter of farms (norse, maya): every farm cell is a quarter of its own (cut by
+  // the paths crossing it) and every path ribbon is a quarter of street space: no union of thousands of pieces.
+  const ribList = rib.map((ph) => ({ ph, bb: bboxOf(ph.outer) }));
+  const near = <T extends { bb: { x0: number; y0: number; x1: number; y1: number } }>(list: T[], bb: { x0: number; y0: number; x1: number; y1: number }, pad = 1): T[] => list.filter((r) => !(r.bb.x0 > bb.x1 + pad || r.bb.x1 < bb.x0 - pad || r.bb.y0 > bb.y1 + pad || r.bb.y1 < bb.y0 - pad));
+  const waterList = ctx.water.map((ph) => ({ ph, bb: bboxOf(ph.outer) }));
+  const minusWater = (m: MultiPoly, bb: ReturnType<typeof bboxOf>): MultiPoly => { const wn = near(waterList, bb).map((w) => [w.ph] as MultiPoly); return wn.length && m.length ? differenceS(m, ...wn) : m; };
+  const blockList: { poly: Polygon; bb: ReturnType<typeof bboxOf>; bi: number; parts: { poly: Polygon; tag: number }[] }[] = [];
+  const sparse = v.id === 'norse' || v.id === 'maya';
+  if (sparse) {
+    for (const ci of occ) {
+      const cb = bboxOf(cells[ci]);
+      for (const P of pieces(minusWater(intersectionS(cells[ci], outline), cb), 150)) {
+        const Q = snapRing(P);
+        const qi = out.quarters.length;
+        out.quarters.push(Q);
+        out.outline.push(Q);
+        for (const blk of carveBlocks(Q, near(ribList, cb).map((r) => r.ph), [])) {
+          const bi = out.blocks.length;
+          out.blocks.push({ poly: blk, kind: 'block', quarter: qi });
+          blockList.push({ poly: blk, bb: bboxOf(blk), bi, parts: [{ poly: blk, tag: ci }] });
+        }
       }
     }
-  });
+    // the paths across the fields: street space of their own
+    for (const r of ribList) for (const P of pieces(minusWater(intersectionS([r.ph], outline), r.bb), 4)) { const Q = snapRing(P); out.quarters.push(Q); }
+  } else {
+    const quarters = (ctx.water.length ? pieces(differenceS([{ outer: outline, holes: [] }], ctx.water), 400) : [outline]).map(snapRing);
+    const cellList = cells.map((poly, tag) => ({ poly, tag })).filter((x) => x.poly.length >= 3);
+    quarters.forEach((Q) => {
+      const qi = out.quarters.length;
+      out.quarters.push(Q);
+      out.outline.push(Q);
+      const qbb = bboxOf(Q);
+      for (const blk of carveBlocks(Q, near(ribList, qbb).map((r) => r.ph), near(waterList, qbb).map((r) => r.ph))) {
+        const bi = out.blocks.length;
+        out.blocks.push({ poly: blk, kind: 'block', quarter: qi });
+        blockList.push({ poly: blk, bb: bboxOf(blk), bi, parts: cutByCells(blk, cellList) });
+      }
+    });
+  }
+  const front = new FrontIndex(out.streets);
+  const chief: number[] = [];
+  for (const blk of blockList) {
+    const bi = blk.bi;
+    // (whatever of the block no cell piece covers stays open ground: the block is exactly its parcels)
+    const A = area(blk.poly), S = blk.parts.reduce((a, p) => a + area(p.poly), 0);
+    if (S < A * 0.997) for (const q of pieces(blk.parts.length ? difference([{ outer: blk.poly, holes: [] }], ...blk.parts.map((p) => [{ outer: p.poly, holes: [] }] as MultiPoly)) : [{ outer: blk.poly, holes: [] }], 0.5)) blk.parts.push({ poly: q, tag: -1 });
+    for (const pc of mergeSmall(blk.parts)) {
+      const pi = out.parcels.length;
+      const fr = front.frontage(pc.poly);
+      const isCentre = pc.tag === centreCell;
+      if (isCentre && v.id === 'germanic') { out.parcels.push({ poly: pc.poly, use: 'meadow', block: bi }); out.squares.push(pc.poly); continue; }
+      if (core.has(pc.tag)) { plazaGroup(out, pc.poly, bi, isCentre, c, rng.fork('plaza:' + pc.tag)); continue; }
+      if (!occ.has(pc.tag) || fr.len < 3.2 || area(pc.poly) < 160) { out.parcels.push({ poly: pc.poly, use: 'garden', block: bi }); continue; }
+      out.parcels.push({ poly: pc.poly, use: 'plot', block: bi });
+      if (isCentre || (v.id === 'germanic' && chief.length === 0 && touchesCell(pc.tag, centreCell, edges))) chief.push(pi);
+      farmstead(out, pi, pc.poly, v, chief.includes(pi), fr.mid, rng.fork('farm:' + bi + ':' + pc.tag));
+    }
+  }
   // ---- the enclosure
   if (v.id === 'germanic') {
     // palisade (a light wall without towers), the ditch outside it
@@ -332,6 +391,22 @@ function farmstead(out: CampOut, pi: number, yard: Polygon, v: YardVariant, chie
     placed.push(poly);
     out.buildings.push({ poly, kind, parcel: pi, arch, roof, storeys: 1, material, orientation });
   };
+  if (v.id === 'maya') {
+    // a houselot (solar): two to four rooms on low platforms round a patio, the house garden round them
+    const ins = inscribed(yard, [], 0.5).c;
+    const sp = r.range(6.5, 8.5);
+    const n = r.int(2, 4);
+    const sides: [number, number, number][] = [[0, -sp, 0], [sp, 0, Math.PI / 2], [0, sp, 0], [-sp, 0, Math.PI / 2]];
+    for (const [dx, dy, a] of sides.slice(0, n)) {
+      const g = fitIn(yard, (q, s2) => rect(q, a, r.range(7, 10) * s2, 4.2 * s2), placed, { margin: 1.5, gap: 1.2, minScale: 0.75, cands: [{ x: ins.x + dx, y: ins.y + dy }] });
+      if (g) push(g, 'house', 'maya-house', 'thatch-round', 'wattle', a);
+    }
+    if (placed.length) {
+      const pf = rect(ins, 0, 2 * sp + 8, 2 * sp + 8);
+      if (pf.every((q) => pointInRing(yard, q))) out.lines.push({ kind: 'platform', path: pf.concat([pf[0]]), width: 0.6 });
+    }
+    return;
+  }
   if (v.id === 'celtic') {
     const R0 = chief ? r.range(7, 9) : Math.min(7, Math.max(4.2, Math.sqrt(A) * 0.17 + r.range(-0.6, 0.6)));
     const main = fitIn(yard, (q, s) => hut(q, R0 * s, 16), placed, { margin: 1.6, gap: 0, minScale: 0.65 });
@@ -375,4 +450,48 @@ function farmstead(out: CampOut, pi: number, yard: Polygon, v: YardVariant, chie
   // the yard fence, open at the path
   const gate = frontMid ? [{ p: frontMid, width: 3 }] : [];
   for (const pl of openRing(yard, gate)) out.lines.push({ kind: 'yard-fence', path: pl, width: 0.45 });
+}
+
+/** A plaza group of the Maya ceremonial core: an open plaza with its temple pyramid (or palace ranges, a ballcourt). */
+function plazaGroup(out: CampOut, poly: Polygon, bi: number, main: boolean, centre: Vec2, r: Rng): void {
+  const pi = out.parcels.length;
+  out.parcels.push({ poly, use: 'plaza', block: bi });
+  if (main) out.squares.push(poly);
+  const tmp: CompoundOut = { parcels: [{ poly, use: 'place' }], buildings: [], lines: [], water: [], landmarks: [] };
+  const ins = inscribed(poly, [], 0.5);
+  const toC = Math.atan2(centre.y - ins.c.y, centre.x - ins.c.x);
+  const kind = main ? 'temple' : r.pick(['temple', 'temple', 'palace', 'ballcourt']);
+  const clear = (g: Polygon) => !tmp.buildings.some((b) => b.poly.some((q) => pointInRing(g, q)) || g.some((q) => pointInRing(b.poly, q)));
+  if (kind === 'temple') {
+    // the temple pyramid on the side away from the centre, facing the plaza (the great one east of the main plaza)
+    const h = Math.max(6, Math.min(main ? 24 : 15, ins.r * (main ? 0.5 : 0.6)));
+    const pc = main ? { x: ins.c.x + ins.r * 0.45, y: ins.c.y } : { x: ins.c.x - Math.cos(toC) * ins.r * 0.3, y: ins.c.y - Math.sin(toC) * ins.r * 0.3 };
+    const T = pyramid(tmp, poly, pc, 0, h, main ? 'great-pyramid' : 'temple-pyramid', main ? Math.PI : toC, false);
+    if (T) tmp.landmarks.push({ kind: 'maya-temple', poly: T });
+    // the great plaza: a second temple facing the first across it (Tikal's Temples I and II)
+    if (main) {
+      const T2 = pyramid(tmp, poly, { x: ins.c.x - ins.r * 0.5, y: ins.c.y }, 0, h * 0.8, 'temple-pyramid', 0, false);
+      if (T2) tmp.landmarks.push({ kind: 'maya-temple', poly: T2 });
+    }
+    for (let k = 0; k < (main ? 3 : 1); k++) {
+      const st = placeRect(poly, { x: ins.c.x - ins.r * 0.2, y: ins.c.y + (k - 1) * 6 }, 0, 1.15, 1.15, 1);
+      if (st && clear(st)) tmp.buildings.push({ poly: st, kind: 'landmark', parcel: 0, arch: 'stela', roof: 'none', material: 'stone', storeys: 1 });
+    }
+  } else if (kind === 'palace') {
+    // range buildings round a courtyard (acropolis)
+    const s = Math.min(16, ins.r * 0.7);
+    for (const [dx, dy, a] of [[0, -s, 0], [0, s, 0], [-s, 0, Math.PI / 2], [s, 0, Math.PI / 2]] as [number, number, number][]) {
+      const g = placeRect(poly, { x: ins.c.x + dx, y: ins.c.y + dy }, a, s * 0.75, 2.6, 1);
+      if (g && clear(g)) tmp.buildings.push({ poly: g, kind: 'landmark', parcel: 0, arch: 'palace-range', roof: 'flat', material: 'stone', storeys: 1 });
+    }
+  } else {
+    const L = Math.min(30, ins.r * 1.2);
+    for (const sg of [-1, 1]) {
+      const g = placeRect(poly, { x: ins.c.x, y: ins.c.y + sg * 6 }, 0, L / 2, 2.5, 1);
+      if (g && clear(g)) tmp.buildings.push({ poly: g, kind: 'landmark', parcel: 0, arch: 'ballcourt-range', roof: 'flat', material: 'stone', storeys: 1 });
+    }
+  }
+  for (const b of tmp.buildings) out.buildings.push({ ...b, parcel: pi });
+  out.lines.push(...tmp.lines);
+  out.landmarks.push(...tmp.landmarks);
 }
