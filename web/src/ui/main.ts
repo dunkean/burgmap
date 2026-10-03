@@ -438,7 +438,7 @@ function commit(mode: 'push' | 'replace' | 'none', displayOnly = false): void {
     if (q !== location.search) (mode === 'push' ? history.pushState : history.replaceState).call(history, null, '', q);
   }
   if (!displayOnly && genKey() !== lastGenKey) schedule();
-  else if (currentWorld && displayOnly) rerender(true);
+  else if (displayOnly && (currentWorld || backend)) rerender(true); // worker mode has no currentWorld: the backend still needs the display options
 }
 
 registry.onChange((c, kind) => {
