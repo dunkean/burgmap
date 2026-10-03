@@ -16,7 +16,7 @@ Agents: fix entries in order, then mark each one fixed with the commit hash (e.g
 - La légende n'apparait plus → fixed in 2f65f13
 - Les shanty towns doivent avoir des formes de maison/tentes plus réalistes → fixed in 264fc02
 - Quand il n'y a pas de rue qui séparent des zones de batiments, la jointure entre les zones produit des batiments qui s'overlap parfois ou qui on des formes vraiment bizarres. Il faut ptet merge les zones avant de mettre les batiments ou trouver une heuristique pour adapter la forme ou eviter l'overlap. (testé en "medieval organic") → fixed in 0b8b5b9 (seed=p4uefz, size=city: retain earlier riverbank districts in later enclosures; quarters and buildings in separate blocks no longer overlap)
-- Il faut ajouter des biomes (désert, foret, etc.)
+- Il faut ajouter des biomes (désert, foret, etc.) → fixed in 1508eb4 (six selectable biomes; climate/water-aware land use, SVG/Canvas palettes, share links and visual/UI checks)
 - les douves autour de "chinese walled city" en bleu, coupent tout n'importe comment. D'ailleurs douves devrait être une option mais bien pensée. La c'est un polygone border bleu qui entoure géométriquement la ville au dessus de tout les autres objets. Autre choses, certains quartier en "chinese" sont quasi vide et identiques, c'est bizarre.
 - "japanese castle town" (seed=p4uefz&size=city&culture=japanese-jokamachi&legend=1): j'ai des surface totalement vide (que relief) collées à la ville. Est-ce normal ? (idem en seed=p4uefz&size=city&culture=roman-core&legend=1 et peut être d'autres)
 - En mode inca, le rendu des terrasses est dégueulasse. Il faut le revoir → fixed in 84543a1, 9980f54

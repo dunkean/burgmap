@@ -46,8 +46,6 @@ web/
   tests/
 ```
 
-## Coordinates & units
-
 ## Biomes
 
 `gen/biomes.ts` defines `temperate`, `forest`, `desert`, `steppe`, `tropical` and `tundra` climates. `Options.biome` is optional: existing links and the default temperate generator retain their output. The biome selector is a generation control and round-trips through `biome=` in links and exports.

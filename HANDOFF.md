@@ -121,7 +121,7 @@ GITHUB_TOKEN_FILE=/d/Workspace/dunk_token bash scripts/deploy_pages.sh   # build
 
 0. **Bugs in `BUGS.md`** (repo root, maintained by the user) come first. Open entries at the pause:
    - overlapping or odd buildings where two zones meet without a street (medieval organic) → fixed in 0b8b5b9; see continuation notes below;
-   - biomes (desert, forest…), a new feature;
+   - biomes (desert, forest…) → implemented in 1508eb4;
    - Chinese: moats cut through everything and should be a well-designed option; some quarters are empty and identical;
    - Japanese and Roman core (`seed=p4uefz&size=city`): empty areas stuck to the city;
    - Venetian: some rivers connect to nothing;
@@ -185,5 +185,6 @@ GITHUB_TOKEN_FILE=/d/Workspace/dunk_token bash scripts/deploy_pages.sh   # build
 - First open bug fixed in `0b8b5b9`: `seed=p4uefz&size=city&culture=european-organic` produced 124 building overlaps. Filtering small fortified-region components removed older riverbank districts from the latest enclosure, so faubourgs claimed already-built land. Later phases now retain components containing earlier-phase land.
 - Regression suite: `tests/urban.phaseboundaries.test.ts` checks phase nesting and disjoint quarters/buildings across blocks. It failed before the fix with 56,483 m² of older districts outside the last phase, and passes afterward.
 - Validation: 50 tests passed across the regression, determinism, town/city invariants, and selected Chinese/Japanese/Roman/Medina town suites and mixes; typecheck and build passed. The full suite was not run. Town seeds 1, 4, and 6 retain byte-identical urban layers against the handoff. Before/after PNG crops were inspected in `web/out/seams/` (ignored).
-- Next open entry, in user priority order: biomes. The other open entries in `BUGS.md` remain pending.
+- Biomes implemented in `1508eb4`: six climate presets, water-constrained desert farms/crops, wooded clearings and treeless tundra; default temperate output preserved. The biome control and share links work in the browser, the shared palette reaches both renderers, and all six previews in `web/out/biomes/` were inspected. Typecheck/build, biome/core/Canvas/fields/legend/share suites passed.
+- `ROADMAP.md` tracks the full requested completion scope. Next open entry, in user priority order: Chinese moats and sparse/repetitive wards. The other open entries in `BUGS.md` remain pending.
 - Pre-existing untracked `web/scripts/repro_culture.mjs` and `web/scripts/repro_race.mjs` were preserved.
