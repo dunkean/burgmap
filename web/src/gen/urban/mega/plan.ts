@@ -11,7 +11,7 @@
  * quarters tile the land with no gap and no overlap, and every quarter edge knows the street it lies on.
  */
 import type { Vec2, Polygon, Polyline } from '../../core/geom';
-import { dist, polygonCentroid, polygonArea, simplify, resample, chaikin, polylineLength } from '../../core/geom';
+import { dist, polygonCentroid, polygonArea, simplify, polylineLength } from '../../core/geom';
 import { Rng } from '../../core/rng';
 import { Noise2D } from '../../core/noise';
 import type { World, UrbanLayer, UrbanStreet, UrbanWall, UrbanSite, UrbanLine, UrbanZone, PolyH, StreetRole } from '../../types';
@@ -904,7 +904,6 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
         quays.push(run);
         lines.push({ kind: 'quay-edge', path: run, width: 1.1 });
       }
-      void s0;
     }
     const ports = quarters.filter((q) => q.district === 'port');
     if (ports.length) {
@@ -1080,4 +1079,3 @@ function fillPoly(cov: Float32Array, w: number, cell: number, poly: Polygon, f: 
   }
 }
 
-void resample; void chaikin;
