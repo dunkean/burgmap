@@ -737,6 +737,50 @@ function giebelhaus(pl: Plot, cov: number, P: MorphologyParams, rng: Rng): ArchB
   return out;
 }
 
+// ---------------------------------------------------------------- Korean hanok
+/**
+ * Hanok in its walled lot, round the madang (the bare court): a commoner's house is a giwa- or thatch-roofed ㄱ (an
+ * L of the main hall and one wing) at the back of the court; a yangban house is a ㅁ: the gate range (haengnang)
+ * on the lane with the gate in it, the men's hall (sarangchae) and the women's hall (anchae) at the back, wings
+ * between them; a ㄷ (no front range) between the two.
+ */
+function hanok(pl: Plot, cov: number, P: MorphologyParams, rng: Rng): ArchBldg[] {
+  const f = frame(pl);
+  if (!f) return [];
+  const us = usable(pl, f);
+  if (!us) return [];
+  const { u0, u1, D } = us;
+  const W = u1 - u0;
+  const ori = Math.atan2(f.n.y, f.n.x);
+  const rich = (pl.wealth ?? 0.4) > 0.5 && W >= 15 && D >= 18;
+  const roof: ArchSpec['roof'] = rich || (pl.wealth ?? 0.4) > 0.35 ? 'tiled-hip' : 'thatch-round';
+  const mat = roof === 'tiled-hip' ? 'wood' : 'thatch';
+  const out: ArchBldg[] = [];
+  const put = (poly: Polygon | null, arch: string, kind: Bldg['kind']) => {
+    if (poly) out.push({ poly, kind, arch, roof, material: mat, storeys: 1, orientation: ori });
+  };
+  const m = 0.8; // eaves clear of the lot wall
+  const bd = Math.min(rng.range(5, 6.5), D * 0.3);
+  const back0 = Math.min(D - m - bd, Math.max(bd + 6, D * rng.range(0.55, 0.75)));
+  // the main hall across the back of the court
+  put(rectIn(pl, f, u0 + m, u1 - m, back0, back0 + bd, 20), rich ? 'anchae' : 'hanok', 'house');
+  const left = rng.chance(0.5);
+  const ww = Math.min(W * 0.32, rng.range(4.4, 5.2));
+  const front0 = rich ? m + 4.8 + 0.01 : Math.max(m + 2.5, back0 - rng.range(7, 11));
+  // the wing(s) down the side(s) of the court
+  put(rectIn(pl, f, left ? u0 + m : u1 - m - ww, left ? u0 + m + ww : u1 - m, front0, back0 - 0.01, 12), rich ? 'sarangchae' : 'hanok-wing', 'rear');
+  if (rich || (W > 16 && cov > 0.5 && rng.chance(0.5))) put(rectIn(pl, f, left ? u1 - m - ww : u0 + m, left ? u1 - m : u0 + m + ww, front0, back0 - 0.01, 12), 'hanok-wing', 'rear');
+  // the gate range on the lane (ㅁ), the gate (3 m) in it
+  if (rich) {
+    const g = (u0 + u1) / 2;
+    put(rectIn(pl, f, u0 + m, g - 1.5, m, m + 4.8, 10), 'haengnang', 'house');
+    put(rectIn(pl, f, g + 1.5, u1 - m, m, m + 4.8, 10), 'haengnang', 'house');
+  }
+  pl.gated = true;
+  void P;
+  return out;
+}
+
 // ---------------------------------------------------------------- Inca kancha
 /**
  * Kancha: a walled rectangular compound of single-room houses set along the inside of its wall around a central
@@ -887,6 +931,7 @@ function buildOnRaw(pl: Plot, cov: number, P: MorphologyParams, rng: Rng, hint?:
     case 'konak': return konak(pl, cov, P, rng);
     case 'sahelCompound': return sahelCompound(pl, cov, P, rng);
     case 'giebelhaus': return giebelhaus(pl, cov, P, rng);
+    case 'hanok': return hanok(pl, cov, P, rng);
     default: {
       const ori = Math.atan2(pl.nrm.y, pl.nrm.x);
       return buildPlot(pl, cov, P, rng, hint).map((b) => (b.kind === 'garden' ? b : {

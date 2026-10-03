@@ -48,6 +48,8 @@ import { registerPersian, bazaarRoofs, qanats } from './persian';
 import { registerOttoman } from './ottoman';
 import { registerSahel } from './sahel';
 import { registerHanse } from './hanse';
+import { registerKorea } from './korea';
+import { reserveLevel1 } from './level1';
 import { siteCastle, type CastlePlan } from './m4/castle';
 import { reserveCastle, type M4State } from './m4/reserve';
 import { reserveCathedral, reservePalace, reserveMonasteries } from './m4/catalogue';
@@ -137,6 +139,7 @@ const L2_SITES: Record<string, 'power' | 'worship' | 'market' | 'civic' | 'activ
   mescit: 'worship', kulliye: 'worship', 'ulu-cami': 'worship', bedesten: 'market',
   'mud-mosque': 'worship', 'sahel-mosque': 'worship', 'sahel-palace': 'power',
   'hall-church': 'worship', rathaus: 'civic',
+  'korean-palace': 'power', jongmyo: 'worship', hyanggyo: 'civic', 'korean-temple': 'worship',
   'aztec-precinct': 'worship', 'calpulli-temple': 'worship', tecpan: 'power', tianguis: 'market',
 };
 /** Parcel uses of the open port pieces. */
@@ -206,6 +209,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   registerOttoman();
   registerSahel();
   registerHanse();
+  registerKorea();
   const flags = m4Flags(opts, culture, pop, archetype, rng.fork('m4'));
   const sites: UrbanSite[] = [];
   const lotData = new Map<string, unknown>();
@@ -387,6 +391,8 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
       const ai = { avoid: ci.avoid, nucleus: ci.nucleus, roads: nonTrack, bridges: world.bridges ?? [], lines: siteLines };
       if (flags.arena) tm('arena', () => push(reserveArena(st, api, ai)));
       if (culture.m4?.arsenal && archetype === 'town' && pop >= 8000) tm('arsenal', () => push(reserveArsenal(st, api, ci.avoid.slice(), ci.nucleus)));
+      // large precincts claimed at level 1 (a palace at the north end of the axis)
+      for (const lm of plan.landmarks) if (lm.level1 && archetype === 'town' && pop >= lm.minPop) tm('l1', () => push(reserveLevel1(st, api, ci.avoid.slice(), ci.nucleus, lm, 0)));
       if (flags.activities && archetype === 'town') {
         tm('activities', () => {
           tm('tannery', () => { for (const l of reserveTanneries(st, api, ai)) push(l); });
@@ -490,7 +496,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     const lmList = [...plan.landmarks];
     if (flags.suburbs === 'many' && archetype === 'town' && plan.culture.id !== 'medina') lmList.push({ role: 'extra', kind: 'parish-church', place: 'suburb', area: [700, 5000], minPop: 0, count: Math.max(1, suburbPts.length + (outerPhase ? 2 : 1)), sep: 200, culture: culture.id });
     for (const lm of lmList) {
-      if (pop < lm.minPop) continue;
+      if (pop < lm.minPop || lm.level1) continue;
       // the kasbah is the culture's castle: sited at level 1 by the castle rule (or switched off)
       if (lm.kind === 'kasbah' && (castle || opts.castle === 'no')) continue;
       if (lm.kind === 'hospital' && (!flags.activities || archetype !== 'town')) continue;
@@ -849,7 +855,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   if (hints.compoundWalls) {
     plots.forEach((pl, pi) => {
       const op = plotMorph[pi].buildingOp;
-      if ((op !== 'yashiki' && op !== 'pavilionCompound' && op !== 'kancha' && op !== 'yardHouse' && op !== 'sahelCompound') || !plotBld[pi].length) return;
+      if ((op !== 'yashiki' && op !== 'pavilionCompound' && op !== 'kancha' && op !== 'yardHouse' && op !== 'sahelCompound' && op !== 'hanok') || !plotBld[pi].length) return;
       const p = pl.poly;
       const fm = { x: (pl.front[0].x + pl.front[1].x) / 2, y: (pl.front[0].y + pl.front[1].y) / 2 };
       if (op === 'yardHouse') {
@@ -857,7 +863,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
         for (const w of openRing(orientPos(p), [{ p: fm, width: 3.2 }])) lines.push({ kind: 'yard-fence', path: w, width: 0.45 });
         return;
       }
-      if (op === 'kancha' || op === 'sahelCompound') {
+      if (op === 'kancha' || op === 'sahelCompound' || op === 'hanok') {
         // the kancha wall: the whole lot line, with the single gate in the middle of the street side
         for (const w of openRing(orientPos(p), [{ p: fm, width: 3.4 }])) lines.push({ kind: 'compound-wall', path: w, width: 1 });
         return;

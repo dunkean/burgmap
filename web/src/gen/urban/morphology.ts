@@ -15,7 +15,7 @@ export type StreetOpId =
   | 'radials' | 'rings' | 'organicInfill' | 'grid' | 'axis' | 'gateToGate' | 'culDeSacTree' | 'closes'
   | 'wardWalls' | 'defensiveKinks' | 'ribbon' | 'spiral' | 'switchbacks' | 'extraRadials';
 export type PlotOpId = 'burgage' | 'courtyard' | 'siheyuan' | 'machiya' | 'compound' | 'garden';
-export type BuildingOpId = 'streetFrontRow' | 'courtyardHouse' | 'shopRow' | 'pavilionCompound' | 'yashiki' | 'machiya' | 'detached' | 'treeHouse' | 'hall' | 'longhouse' | 'kancha' | 'yardHouse' | 'tomb' | 'venetian' | 'konak' | 'sahelCompound' | 'giebelhaus';
+export type BuildingOpId = 'streetFrontRow' | 'courtyardHouse' | 'shopRow' | 'pavilionCompound' | 'yashiki' | 'machiya' | 'detached' | 'treeHouse' | 'hall' | 'longhouse' | 'kancha' | 'yardHouse' | 'tomb' | 'venetian' | 'konak' | 'sahelCompound' | 'giebelhaus' | 'hanok';
 export type RoofKind = 'gable' | 'hip' | 'flat' | 'dome' | 'pyramidal' | 'pagoda' | 'thatch-round' | 'none' | 'tiled-hip' | 'conical' | 'barrel' | 'terraced';
 export type Material = 'timber' | 'stone' | 'brick' | 'mud' | 'wood' | 'paper-wood' | 'living-wood' | 'rock' | 'thatch' | 'hide' | 'felt' | 'bark' | 'adobe' | 'turf' | 'earth' | 'wattle';
 /** Architecture of a building type (metadata for later rendering / 3D). */

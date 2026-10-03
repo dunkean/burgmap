@@ -112,6 +112,20 @@ M['hanseatic'] = morph('hanseatic', MORPHOLOGIES['bastide'], {
   density: { core: 190, middle: 160, edge: 120, faubourg: 60, village: 35 },
   arch: { typology: 'giebelhaus', roof: 'gable', storeys: [3, 5], material: 'brick' },
 });
+// ---------------------------------------------------------------- Korean town
+M['korean'] = morph('korean', EO_BASE, {
+  // the cardinal main streets (the axis to the palace, the east-west Jongno), winding lanes between walled hanok lots
+  streets: ['axis', 'organicInfill', 'closes'], buildingOp: 'hanok', plotOp: 'burgage', orientation: 'cardinal', extraRadials: false,
+  curvature: 0.7, fieldNoise: 20, fieldRandom: 0.55, contourBlend: 0.5, deadEndRatio: 0.5, gatePlaces: 0.2, crossPlaces: 0.1, ringGaps: 3,
+  blockSize: { core: [3500, 9000], middle: [4500, 12000], edge: [5000, 14000], faubourg: [5000, 14000], village: [7000, 20000] },
+  minWidth: 22, widthByRank: [14, 7, 4.2, 3, 2.4],
+  frontage: { core: [14, 22], middle: [15, 24], edge: [16, 26], faubourg: [16, 26], village: [20, 34] },
+  plotDepth: { core: [20, 30], middle: [22, 32], edge: [22, 34], faubourg: [22, 34], village: [26, 40] },
+  coverage: { core: [0.5, 0.6], middle: [0.45, 0.55], edge: [0.38, 0.5], faubourg: [0.32, 0.45], village: [0.2, 0.35] },
+  footprintConformity: { core: 0, middle: 0, edge: 0, faubourg: 0, village: 0 },
+  density: { core: 150, middle: 120, edge: 90, faubourg: 60, village: 35 },
+  arch: { typology: 'hanok', roof: 'tiled-hip', storeys: [1, 1], material: 'wood' },
+});
 Object.assign(MORPHOLOGIES, M);
 }
 
@@ -244,5 +258,26 @@ export const MORE_CULTURES: Culture[] = [
     render: { towerShape: 'square' },
     scale: { min: 'hamlet', max: 'metropolis' },
     sitePrefs: { flatness: 1.2, weights: { harbor: 3, estuary: 3, bridge: 1.2, confluence: 1.2, plain: 0.8, hilltop: 0.4, valley: 0.5 } },
+  },
+  {
+    id: 'korean', label: 'Korean walled town (Hanyang)',
+    nucleus: { kind: 'market', shape: 'rect', area: [1500, 5000], compound: false, ring: 9, orientation: 'cardinal' },
+    core: { morphology: 'korean', enclosure: { shape: 'organic', wall: 'auto', fossil: 'street', towers: 'square' } },
+    ring: { morphology: 'korean', enclosure: { shape: 'organic', wall: 'auto', fossil: 'street', towers: 'square' } },
+    phaseCount: [[0, 1], [12000, 2]],
+    faubourg: 'korean', faubShare: [0.15, 0.12],
+    landmarks: [
+      { role: 'power', kind: 'korean-palace', place: 'axis-north', area: [12000, 70000], minPop: 3000, level1: true },
+      { role: 'worship', kind: 'jongmyo', place: 'east', area: [3000, 14000], minPop: 6000 },
+      { role: 'civic', kind: 'hyanggyo', place: 'west', area: [2000, 8000], minPop: 1500 },
+      { role: 'extra', kind: 'korean-temple', place: 'edge', area: [2000, 9000], minPop: 2500, count: 1 },
+    ],
+    village: { form: 'auto', morphology: 'korean' },
+    hamlet: { form: 'auto', morphology: 'korean' },
+    m4: { castle: 'none', cathedral: null, palace: null, monastery: null, marketHall: false, arena: 0, shanty: 'riverbank', activities: false },
+    render: { towerShape: 'square', compoundWalls: true },
+    scale: { min: 'hamlet', max: 'metropolis' },
+    // pungsu (baesanimsu): the mountain behind on the north, the water in front on the south
+    sitePrefs: { flatness: 1, hillSide: 'N', waterSide: 'S', weights: { valley: 2.2, bridge: 1.6, meander: 1.4, plain: 1, hilltop: 0.2, harbor: 0.6 } },
   },
 ];
