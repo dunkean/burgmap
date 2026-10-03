@@ -148,12 +148,21 @@ export function buildField(ctx: UrbanCtx, rng: Rng, steepMax = 0.2, blocked?: Ui
   const wl = G.wavelength;
   const ang = mainRoadAngleCtx(ctx);
   const ea = Math.cos(ang), eb = Math.sin(ang);
-  for (let i = 0; i < N; i++) {
+  // the field before the steepness / blocked masks depends on the context and the stream only: computed once
+  // (the planner asks again with other steepness limits and blocked cells)
+  let bm = BASE_CACHE.get(ctx);
+  if (!bm) { bm = new Map(); BASE_CACHE.set(ctx, bm); }
+  let base = bm.get(rng.seedKey);
+  if (base) {
+    f.set(base);
+    for (let i = 0; i < N; i++) if ((slopeS[i] > 0.3 && slopeL[i] > steepMax) || (blocked && blocked[i])) f[i] = Infinity;
+  }
+  if (!base) for (let i = 0; i < N; i++) {
     const x = ((i % n) + 0.5) * cell, y = (((i / n) | 0) + 0.5) * cell;
     const c = site.cost.data[i];
     const border = x < 0.03 * S || y < 0.03 * S || x > 0.97 * S || y > 0.97 * S;
     const steep = slopeS[i] > 0.3;
-    if (terrain.water[i] || !isFinite(c) || border || (steep && slopeL[i] > steepMax) || (blocked && blocked[i])) { f[i] = Infinity; continue; }
+    if (terrain.water[i] || !isFinite(c) || border) { f[i] = Infinity; continue; }
     let k = 1 + G.noise * noise.fbm(x / wl, y / wl, 2);
     if (dRoad) k *= 1 - G.road * Math.exp(-dRoad[i] / 55);
     // the waterfront attracts, but wet low ground (floodplain, marsh) repels
@@ -166,6 +175,10 @@ export function buildField(ctx: UrbanCtx, rng: Rng, steepMax = 0.2, blocked?: Ui
       k *= 1 - G.elongation * 0.45 * along * along;
     }
     f[i] = c * k + 40 * Math.max(0, (steep ? slopeL[i] : slopeS[i]) - 0.1);
+  }
+  if (!base) {
+    bm.set(rng.seedKey, f.slice());
+    for (let i = 0; i < N; i++) if ((slopeS[i] > 0.3 && slopeL[i] > steepMax) || (blocked && blocked[i])) f[i] = Infinity;
   }
   // bipolar growth: a second nucleus (a burg across the river, an abbey or castle burg) whose region merges
   if (G.bipolar && rng.fork('bipolar').chance(G.bipolar)) {
@@ -188,6 +201,8 @@ export function buildField(ctx: UrbanCtx, rng: Rng, steepMax = 0.2, blocked?: Ui
 }
 
 const FIELD_CACHE = new WeakMap<UrbanCtx, Map<string, PhaseField>>();
+/** buildField before its masks, per context and stream key. */
+const BASE_CACHE = new WeakMap<UrbanCtx, Map<string, Float32Array>>();
 /** Rasters that depend on the terrain only (shared by every settlement of a map; never mutated). */
 const TERRAIN_CACHE = new WeakMap<object, Map<string, Float32Array>>();
 function terrainRaster(terrain: UrbanCtx['terrain'], key: string, make: () => Float32Array): Float32Array {
@@ -252,20 +267,25 @@ export function phaseField(ctx: UrbanCtx, f: Float32Array): PhaseField {
     }
   }
   if (pass(start)) {
+    // (the levels are exact minimax values of f — no arithmetic — so any processing order gives the same lv)
+    const ok = new Uint8Array(N);
+    for (let i = 0; i < N; i++) if (pass(i)) ok[i] = 1;
     const heap = new MinHeap<number>();
     lv[start] = isFinite(f[start]) ? f[start] : 0;
     heap.push(start, lv[start]);
+    const DX = D8.map((d) => d[0]), DY = D8.map((d) => d[1]);
     while (heap.size) {
       const key = heap.peekKey();
       const c = heap.pop()!;
       if (key > lv[c]) continue;
       const x0 = c % n, y0 = (c / n) | 0;
-      for (const [dx, dy] of D8) {
-        const x = x0 + dx, y = y0 + dy;
+      for (let k = 0; k < 8; k++) {
+        const x = x0 + DX[k], y = y0 + DY[k];
         if (x < 0 || y < 0 || x >= n || y >= n) continue;
         const j = y * n + x;
-        if (!pass(j)) continue;
-        const l = Math.max(key, isFinite(f[j]) ? f[j] : key);
+        if (!ok[j]) continue;
+        const fj = f[j];
+        const l = fj > key && fj !== Infinity ? fj : key;
         if (l < lv[j]) { lv[j] = l; heap.push(j, l); }
       }
     }
@@ -278,23 +298,6 @@ export function phaseField(ctx: UrbanCtx, f: Float32Array): PhaseField {
 /** Buildable area (m²) of the nucleus component. */
 export const componentArea = (fld: PhaseField, cell: number): number => fld.sorted.length * cell * cell;
 
-/** Bounding box (cells) of the finite cells of a phase field (cached per field array). */
-const FINITE_BOX = new WeakMap<Float32Array, { x0: number; y0: number; x1: number; y1: number } | null>();
-function finiteBox(f: Float32Array, n: number): { x0: number; y0: number; x1: number; y1: number } | null {
-  if (FINITE_BOX.has(f)) return FINITE_BOX.get(f)!;
-  let x0 = n, y0 = n, x1 = -1, y1 = -1;
-  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
-    if (!isFinite(f[y * n + x])) continue;
-    if (x < x0) x0 = x;
-    if (x > x1) x1 = x;
-    if (y < y0) y0 = y;
-    if (y > y1) y1 = y;
-  }
-  const bb = x1 < 0 ? null : { x0, y0, x1, y1 };
-  FINITE_BOX.set(f, bb);
-  return bb;
-}
-
 export function regionForArea(ctx: UrbanCtx, fld: PhaseField, targetArea: number, closing = 0): MultiPoly {
   const { f, lv, sorted } = fld;
   const thr = thresholdFor(sorted, ctx.cell, targetArea);
@@ -302,22 +305,32 @@ export function regionForArea(ctx: UrbanCtx, fld: PhaseField, targetArea: number
   const cap = thr * 1.6 + 120;
   const rad = Math.max(1, Math.round(22 / cell));
   const rad2 = Math.max(1, Math.round(12 / cell));
-  // Exact window. Everything below only varies near the finite cells A of f: v is the constant -cap elsewhere,
-  // a 2-pass box blur of radius r reaches 2r cells, `inside` ⊂ A, d1 ≤ closing only within closing/cell of A,
-  // and `ind` is 0 beyond that. With a margin M ≥ 4r + 1 (blur), > closing/cell + 1 (d1: cells outside the window
-  // are farther than `closing` from every source, so every d1 ≤ closing is found through window cells), and
-  // ≥ closing/cell + 4r2 + 1 (second blur), each window cell gets the same value as on the whole grid; the
-  // window border cells are `outside` sources for d2 on both, which seals d2 inside the window. Cells outside
-  // the window would only hold constants (no isoline). On the whole map (main town) the window is the grid.
-  const bb = finiteBox(f, n) ?? { x0: 0, y0: 0, x1: n - 1, y1: n - 1 };
-  const M = Math.max(4 * rad + 1, closing > 0 ? Math.floor(closing / cell) + 4 * rad2 + 3 : 0) + 2;
+  // cells below the threshold but outside the nucleus component are lifted to their spill level (≥ thr)
+  const fx = (i: number) => (f[i] < thr && !(lv[i] < thr) ? lv[i] : f[i]);
+  // Exact window. Let A = {cells with a finite level x < cap}: v is the constant -cap outside A, so the 2-pass box
+  // blur (radius r) only varies within 2r of A, and so does v' (b, or min(b, -cap) = -cap off the field); since
+  // cap > thr (levels are ≥ 0), `inside` and the isoline stay within 2r of A, d1 ≤ closing only within
+  // closing/cell more, and `ind` is 0 beyond that. With a margin M from A's box ≥ 4r + 1 (blur), and
+  // ≥ 2r + closing/cell + 4r2 + 3 (cells outside the window are farther than `closing` from every source, so
+  // every d1 ≤ closing is found through window cells; the window border cells are `outside` sources for d2 on
+  // both, which seals d2 inside the window; second blur), each window cell gets the same value as on the whole
+  // grid, and cells outside the window would only hold constants (no isoline).
+  let bx0 = n, by0 = n, bx1 = -1, by1 = -1;
+  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+    const xv = fx(y * n + x);
+    if (!(xv < cap)) continue;
+    if (x < bx0) bx0 = x;
+    if (x > bx1) bx1 = x;
+    if (y < by0) by0 = y;
+    if (y > by1) by1 = y;
+  }
+  const bb = bx1 < 0 ? { x0: 0, y0: 0, x1: n - 1, y1: n - 1 } : { x0: bx0, y0: by0, x1: bx1, y1: by1 };
+  const M = Math.max(4 * rad + 1, closing > 0 ? 2 * rad + Math.floor(closing / cell) + 4 * rad2 + 3 : 0) + 2;
   const wx0 = Math.max(0, bb.x0 - M), wy0 = Math.max(0, bb.y0 - M), wx1 = Math.min(n - 1, bb.x1 + M), wy1 = Math.min(n - 1, bb.y1 + M);
   const W = wx1 - wx0 + 1, H = wy1 - wy0 + 1, WN = W * H;
   const win = { x0: wx0, y0: wy0, w: W, h: H };
   const gi = (k: number) => (wy0 + ((k / W) | 0)) * n + wx0 + (k % W);
   const v = new Float32Array(WN);
-  // cells below the threshold but outside the nucleus component are lifted to their spill level (≥ thr)
-  const fx = (i: number) => (f[i] < thr && !(lv[i] < thr) ? lv[i] : f[i]);
   for (let k = 0; k < WN; k++) { const x = fx(gi(k)); v[k] = -(isFinite(x) ? Math.min(x, cap) : cap); }
   // smooth the field so that enclosures are smooth, compact curves (not cell-scale wiggles)
   const b = blurGrid({ w: W, h: H, cell, data: v }, rad, 2).data;
