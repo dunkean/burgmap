@@ -362,17 +362,31 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
       multiply(true);
       fillPolys(name, pal.land[kind], kind === 'forest' ? 0.7 : luAlpha);
       if (kind === 'field' && lod.strips) {
-        if (pal.stripAlpha[0] > 0) fillPolys('stripA', pal.stripA, pal.stripAlpha[0]);
-        if (pal.stripAlpha[1] > 0) fillPolys('stripB', pal.stripB, pal.stripAlpha[1]);
+        const mk = [0.5, 0.75, 0.3, 0.9];
+        for (let k = 0; k < 4; k++) if (pal.stripAlpha[k & 1] > 0) fillPolys('stripT' + k, k & 1 ? pal.stripB : pal.stripA, Math.min(1, pal.stripAlpha[k & 1] * mk[k]));
       }
       multiply(false);
       if (kind === 'field' && lod.strips && lod.band >= 2) {
-        strokePolys('stripA', pal.furrow, lw(0.28, 0.5), pal.furrowAlpha * 0.85);
-        strokePolys('stripB', pal.furrow, lw(0.28, 0.5), pal.furrowAlpha * 0.85);
+        for (let k = 0; k < 4; k++) strokePolys('stripT' + k, pal.furrow, lw(0.28 * Math.max(1, u), 0.5), pal.furrowAlpha * 0.85);
       }
+      if (kind === 'field' && lod.strips) strokePolys('furlong-edges', pal.furrow, lw(0.45 * Math.max(1, u), 0.6), 0.55);
       if (kind === 'forest' && lod.strips) strokePolys(name, pal.treeInk, lw(0.7, 0.8), pal.tex.forest ? 0.5 : 0.35);
       if ((kind === 'orchard' || kind === 'garden') && lod.strips) strokePolys(name, pal.hedge, lw(0.8, 0.8), 0.7);
-      if (kind === 'field' && lod.band >= 2 && pal.hedgeOn) strokePolys(name, pal.hedge, lw(0.9, 0.9), 0.75, [px(4 * 1.3), px(1.6)]);
+    }
+    const fu = Math.max(1, u);
+    // field network: ways, headlands, hedgerows (+ trees near)
+    if (luOn && lod.strips) {
+      const hl = linesOf((l) => l.name === 'headlands');
+      strokeLines(hl, pal.roadFill, (l) => lw(l.width * fu, 0.8), 0.45, [], 'butt');
+      strokeLines(hl, pal.furrow, () => lw(0.5 * fu, 0.5), 0.5, [], 'butt');
+      const ways = linesOf((l) => l.name === 'field-ways');
+      strokeLines(ways, pal.roadFill, (l) => lw(l.width * fu, 1.2), 0.7, [], 'butt');
+      if (lod.band >= 2) strokeLines(ways, pal.roadEdge, () => lw(0.7 * fu, 0.6), 0.55, [px(5 * fu), px(3.5 * fu)], 'butt');
+      strokeLines(linesOf((l) => l.name === 'hedges'), pal.hedge, () => lw(0.95 * Math.pow(fu, 0.85), lod.band >= 1 ? 1 : 0.6), 0.85);
+      if (lod.band >= 2 && polyL('hedge-trees')) {
+        fillPolys('hedge-trees', pal.treeFill);
+        strokePolys('hedge-trees', pal.treeInk, lw(0.4 * fu, 0.5), 0.8);
+      }
     }
     // textures (procedural marks, visible tiles only, cached per tile)
     if (lod.textures && luOn) {

@@ -13,6 +13,35 @@ import { TileIndex, boxesOf, chunkPolyline } from './tileindex';
 
 export const TILE_SIZE = 250;
 
+const hash2 = (x: number, y: number): number => {
+  let h = Math.imul(Math.round(x * 7) ^ 0x9e3779b1, 0x85ebca6b) ^ Math.imul(Math.round(y * 7) + 0x7f4a7c15, 0xc2b2ae35);
+  h = Math.imul(h ^ (h >>> 15), 0x2c1b3c6d);
+  return ((h ^ (h >>> 12)) >>> 0) / 4294967296;
+};
+/** Hedgerow trees along a ring (same placement rule as render/landuse.ts), as small octagons. */
+function hedgeTrees(r: Polygon, u: number, out: Polygon[]): void {
+  const s = Math.max(1, u);
+  const R = 1.5 * Math.pow(s, 0.6);
+  let carry = 8 + 10 * hash2(r[0].x, r[0].y);
+  for (let i = 0; i < r.length; i++) {
+    const a = r[i], b = r[(i + 1) % r.length];
+    const L = Math.hypot(b.x - a.x, b.y - a.y);
+    let t = carry;
+    while (t < L) {
+      const x = a.x + ((b.x - a.x) * t) / L, y = a.y + ((b.y - a.y) * t) / L;
+      const h = hash2(x, y);
+      if (h < 0.42) {
+        const rr = R * (0.75 + 0.6 * h);
+        const o: Vec2[] = [];
+        for (let k = 0; k < 8; k++) o.push({ x: x + rr * Math.cos((k * Math.PI) / 4), y: y + rr * Math.sin((k * Math.PI) / 4) });
+        out.push(o);
+      }
+      t += (11 + 24 * hash2(y, x)) * Math.pow(Math.max(1, s), 0.75);
+    }
+    carry = t - L;
+  }
+}
+
 export interface PolyLayer {
   name: string;
   polys: Polygon[];
@@ -143,13 +172,25 @@ export function buildScene(world0: World, tileSize = TILE_SIZE): Scene {
   const textures: TextureLayer[] = [];
   const lu = world.landuse;
   if (lu) {
-    const stripA: Polygon[] = [], stripB: Polygon[] = [];
+    const tones: Polygon[][] = [[], [], [], []];
+    const open: Polygon[] = [], open_h: (Polygon[] | undefined)[] = [];
+    const enclosed: Polyline[] = [];
+    const trees: Polygon[] = [];
+    let fi = 0;
     const byKind = new Map<LandKind, { poly: Polygon; holes?: Polygon[] }[]>();
     for (const a of lu.areas) {
       let l = byKind.get(a.kind);
       if (!l) byKind.set(a.kind, (l = []));
       l.push({ poly: a.poly, holes: a.holes });
-      if (a.kind === 'field' && a.strips) a.strips.forEach((s, i) => (i & 1 ? stripB : stripA).push(s));
+      if (a.kind === 'field') {
+        if ((a as { enclosed?: boolean }).enclosed) {
+          for (const r of [a.poly, ...(a.holes ?? [])]) { enclosed.push([...r, r[0]]); hedgeTrees(r, S / 1600, trees); }
+        } else { open.push(a.poly); open_h.push(a.holes); }
+        if (a.strips && a.stripAngle !== undefined) {
+          a.strips.forEach((s, i) => tones[(i * 5 + fi * 3 + (i >> 2)) & 3].push(s));
+          fi++;
+        }
+      }
     }
     for (const kind of LAND_ORDER) {
       const l = byKind.get(kind);
@@ -160,12 +201,15 @@ export function buildScene(world0: World, tileSize = TILE_SIZE): Scene {
         textures.push({ kind, areas, index: new TileIndex(S, tileSize, boxesOf(areas.map((a) => a.poly)), 'overlap') });
       }
     }
-    addPoly('stripA', stripA);
-    addPoly('stripB', stripB);
+    tones.forEach((t, k) => addPoly('stripT' + k, t));
+    addPoly('furlong-edges', open, open_h);
+    addPoly('hedge-trees', trees);
+    addLines('hedges', 'field', 'hedge', 1, enclosed);
     addPoly('farm-yards', lu.farmsteads.map((f) => f.yard));
     addPoly('farm-buildings', lu.farmsteads.flatMap((f) => f.buildings));
     addLines('farm-drives', 'drive', 'drive', 2, lu.farmsteads.map((f) => f.drive));
-    addLines('field-ways', 'drive', 'drive', 2.2, (lu as { ways?: Polyline[] }).ways ?? []);
+    addLines('field-ways', 'field', 'way', 2.6, (lu as { ways?: Polyline[] }).ways ?? []);
+    addLines('headlands', 'field', 'headland', 1.5, (lu as { headlands?: Polyline[] }).headlands ?? []);
   }
 
   // regional roads
