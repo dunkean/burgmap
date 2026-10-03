@@ -206,7 +206,7 @@ export interface PrimaryInput {
   /** Nucleus shape (default: the European market hull, or a road-oriented rectangle for grids). */
   nucleus?: { shape: 'hull' | 'rect' | 'square' | 'circle'; area: number; angle: number; ring: number };
   /** axis: four half-axes from the nucleus to the boundary of `extent` (rank 0); roads stop at that boundary. */
-  axis?: { angle: number; extent: MultiPoly; width: number };
+  axis?: { angle: number; extent: MultiPoly; width: number; count?: number };
   /** Region in which the roads follow the lattice (planned grid core). */
   gridCore?: MultiPoly | null;
   /** gateToGate: wiggle of the road spines (m). */
@@ -347,7 +347,7 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
   if (inp.axis) {
     // the axes span the whole planned enclosure (crossing a river on bridges)
     const hull = convexHull(inp.axis.extent.flatMap((ph) => ph.outer));
-    if (hull.length >= 3) for (const ax of axisLines(ctx.center, inp.axis.angle, orientPos(hull), market)) {
+    if (hull.length >= 3) for (const ax of axisLines(ctx.center, inp.axis.angle, orientPos(hull), market, inp.axis.count ?? 4)) {
       const id = streets.add(ax.line, inp.axis.width, 0, 'radial', 1);
       radials.push(id); radialLines.push(ax.line);
       axisEnds.push(ax.end);

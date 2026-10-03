@@ -42,7 +42,7 @@ export interface EnclosureSpec {
 }
 export interface SectorSpec { morphology: MorphRef; share: number; culture?: string }
 export interface PhaseSpec { morphology: MorphRef; enclosure: EnclosureSpec; share?: number; sectors?: SectorSpec[]; culture?: string }
-export type NucleusKind = 'market' | 'forum' | 'mosque' | 'drum-tower' | 'castle' | 'temple' | 'grove' | 'ushnu' | 'precinct' | 'mortuary' | 'maidan' | 'mud-mosque' | 'none';
+export type NucleusKind = 'market' | 'forum' | 'mosque' | 'drum-tower' | 'castle' | 'temple' | 'grove' | 'ushnu' | 'precinct' | 'mortuary' | 'maidan' | 'mud-mosque' | 'wizard-tower' | 'none';
 export interface NucleusSpec {
   kind: NucleusKind;
   shape: 'hull' | 'rect' | 'square' | 'circle';

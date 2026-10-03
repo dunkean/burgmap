@@ -72,7 +72,7 @@ export interface UrbanDebug { quarters: { poly: Polygon; phase: number; lab: num
 const MARKET_AREA = (pop: number): number => (pop < 1200 ? 0 : Math.min(10000, 1800 + pop * 0.3));
 /** Qibla from the Maghreb, roughly east-south-east (map angle, y down). */
 const QIBLA = 0.2;
-const NUCLEUS_COMPOUND: Record<string, string> = { mosque: 'great-mosque', castle: 'castle', temple: 'hindu-temple', grove: 'grove', 'drum-tower': 'drum-tower', ushnu: 'inca-plaza', precinct: 'aztec-precinct', mortuary: 'mortuary-temple', maidan: 'maidan', 'mud-mosque': 'mud-mosque' };
+const NUCLEUS_COMPOUND: Record<string, string> = { mosque: 'great-mosque', castle: 'castle', temple: 'hindu-temple', grove: 'grove', 'drum-tower': 'drum-tower', ushnu: 'inca-plaza', precinct: 'aztec-precinct', mortuary: 'mortuary-temple', maidan: 'maidan', 'mud-mosque': 'mud-mosque', 'wizard-tower': 'wizard-tower' };
 
 /** A point strictly inside a polygon (centroid when inside, else the inscribed-circle center). */
 export function interiorPoint(p: Polygon): Vec2 {
@@ -140,6 +140,7 @@ const L2_SITES: Record<string, 'power' | 'worship' | 'market' | 'civic' | 'activ
   'mud-mosque': 'worship', 'sahel-mosque': 'worship', 'sahel-palace': 'power',
   'hall-church': 'worship', rathaus: 'civic',
   'korean-palace': 'power', jongmyo: 'worship', hyanggyo: 'civic', 'korean-temple': 'worship',
+  'wizard-tower': 'power', 'mage-tower': 'civic', 'arcane-garden': 'civic', observatory: 'civic',
   'aztec-precinct': 'worship', 'calpulli-temple': 'worship', tecpan: 'power', tianguis: 'market',
 };
 /** Parcel uses of the open port pieces. */
@@ -329,18 +330,18 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     if (A > 0) nucleusIn = { shape: nucleusSpec.shape, area: A, angle: orientAngle(nucleusSpec.orientation, mainAngle), ring: nucleusSpec.ring };
   }
   // ---- axes and centred gates (planned towns): the regional roads are led to the gates
-  let axisIn: { angle: number; extent: MultiPoly; width: number } | undefined;
+  let axisIn: { angle: number; extent: MultiPoly; width: number; count?: number } | undefined;
   const axisPhase = eplan.phases.reduce((k, _ph, i) => ((phaseMorphs[i]?.streets.includes('axis')) ? i : k), -1);
   if (axisPhase >= 0 && archetype !== 'hamlet' && archetype !== 'street-village') {
     const m = phaseMorphs[axisPhase];
     const extent = eplan.phases[axisPhase].region;
     const angle = m.orientation === 'cardinal' ? 0 : mainAngle;
-    axisIn = { angle, extent, width: m.widthByRank[0] * m.widthScale };
+    axisIn = { angle, extent, width: m.widthByRank[0] * m.widthScale, count: m.axisCount ?? 4 };
     let big = extent[0];
     for (const ph of extent) if (areaOf(ph.outer) > areaOf(big.outer)) big = ph;
     if (big) {
       const hull = convexHull(big.outer);
-      const ends = axisLines(ctx.center, angle, big.outer, null).map((a) => ({ p: a.end, dir: a.dir }));
+      const ends = axisLines(ctx.center, angle, big.outer, null, m.axisCount ?? 4).map((a) => ({ p: a.end, dir: a.dir }));
       if (ends.length) {
         const newPaths = approachGates(roads.map((r) => r.path), hull, ends, ctx.center, 30, ctx.isWater);
         roads = roads.map((r, i) => ({ ...r, path: newPaths[i] }));

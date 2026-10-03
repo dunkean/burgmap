@@ -126,6 +126,8 @@ export interface MorphologyParams {
   contourBlend?: number;
   /** Cuts at least this long (m) take rank 2 whatever their level (lagoon towns: the canals between the islands). */
   longCut?: number;
+  /** axis: number of axes through the nucleus (4: the cardinal cross; 8: the ley lines of a wizard city). */
+  axisCount?: number;
   /** Gross densities (inhabitants per ha) per zone, used to size phase regions. */
   density: Record<Zone, number>;
 }

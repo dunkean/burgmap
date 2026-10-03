@@ -126,6 +126,19 @@ M['korean'] = morph('korean', EO_BASE, {
   density: { core: 150, middle: 120, edge: 90, faubourg: 60, village: 35 },
   arch: { typology: 'hanok', roof: 'tiled-hip', storeys: [1, 1], material: 'wood' },
 });
+// ---------------------------------------------------------------- Wizard city (fantasy)
+M['wizard'] = morph('wizard', EO_BASE, {
+  // concentric rings round the great tower, eight radial avenues on the ley lines, geometric sectors between them
+  streets: ['axis', 'rings', 'organicInfill'], orientation: 'cardinal', axisCount: 8, ringSpacing: 72, extraRadials: false,
+  curvature: 1, fieldNoise: 1, fieldRandom: 0, ringGaps: 0, deadEndRatio: 0, gatePlaces: 0, crossPlaces: 0.5, placeThreshold: 700,
+  blockSize: { core: [2500, 6000], middle: [3000, 8000], edge: [3500, 9000], faubourg: [4000, 12000], village: [5000, 15000] },
+  widthByRank: [11, 7, 4.6, 3.2, 2.5], widthJitter: 0, plotTilt: 0,
+  frontage: { core: [7, 11], middle: [8, 12], edge: [9, 14], faubourg: [9, 14], village: [16, 30] },
+  coverage: { core: [0.78, 0.88], middle: [0.66, 0.78], edge: [0.52, 0.64], faubourg: [0.4, 0.55], village: [0.15, 0.3] },
+  footprintConformity: { core: 0.95, middle: 0.9, edge: 0.85, faubourg: 0.6, village: 0.3 },
+  density: { core: 160, middle: 120, edge: 90, faubourg: 55, village: 35 },
+  arch: { typology: 'mage-quarter-house', roof: 'hip', storeys: [2, 4], material: 'stone' },
+});
 Object.assign(MORPHOLOGIES, M);
 }
 
@@ -279,5 +292,27 @@ export const MORE_CULTURES: Culture[] = [
     scale: { min: 'hamlet', max: 'metropolis' },
     // pungsu (baesanimsu): the mountain behind on the north, the water in front on the south
     sitePrefs: { flatness: 1, hillSide: 'N', waterSide: 'S', weights: { valley: 2.2, bridge: 1.6, meander: 1.4, plain: 1, hilltop: 0.2, harbor: 0.6 } },
+  },
+  {
+    id: 'wizard-city', label: 'Wizard city', fantasy: true,
+    nucleus: { kind: 'wizard-tower', shape: 'circle', area: [3500, 16000], compound: true, ring: 9, orientation: 'cardinal' },
+    core: { morphology: 'wizard', enclosure: { shape: 'circle', wall: 'wall', fossil: 'street', towers: 'round' } },
+    ring: { morphology: 'wizard', enclosure: { shape: 'circle', wall: 'wall', fossil: 'street', towers: 'round' } },
+    phaseCount: [[0, 1], [6000, 2], [25000, 3]],
+    faubourg: 'european-organic', faubShare: [0.05, 0.05],
+    landmarks: [
+      { role: 'civic', kind: 'mage-tower', place: 'spread', area: [600, 3500], minPop: 600, perPop: 1500, sep: 160 },
+      { role: 'extra', kind: 'arcane-garden', place: 'edge', area: [3000, 12000], minPop: 2000 },
+      { role: 'worship', kind: 'observatory', place: 'east', area: [1500, 6000], minPop: 3000 },
+    ],
+    village: {
+      form: 'walled', morphology: 'wizard', enclosure: { shape: 'circle', wall: 'none', fossil: 'none' },
+      nucleus: { kind: 'wizard-tower', shape: 'circle', area: [900, 2000], compound: true, ring: 6, orientation: 'cardinal' },
+    },
+    hamlet: { form: 'auto', morphology: 'wizard' },
+    m4: { castle: 'none', cathedral: null, palace: null, monastery: null, marketHall: false, arena: 0, port: true, activities: false },
+    render: { towerShape: 'round' },
+    scale: { min: 'hamlet', max: 'metropolis' },
+    sitePrefs: { flatness: 2, weights: { plain: 2, hilltop: 1.5, valley: 0.6, harbor: 0.6 } },
   },
 ];

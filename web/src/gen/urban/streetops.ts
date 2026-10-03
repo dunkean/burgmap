@@ -83,10 +83,10 @@ function rayRing(c: Vec2, u: Vec2, ring: Polygon, far = 1e4): number | null {
  * The four half-axes of a planned town (cardo / decumanus, Chinese N–S axis and E–W avenue, gopuram streets):
  * straight lines from the nucleus polygon (or the centre) to the enclosure along angle + k·90°.
  */
-export function axisLines(center: Vec2, angle: number, ring: Polygon, nucleus: Polygon | null): { line: Polyline; dir: Vec2; end: Vec2 }[] {
+export function axisLines(center: Vec2, angle: number, ring: Polygon, nucleus: Polygon | null, count = 4): { line: Polyline; dir: Vec2; end: Vec2 }[] {
   const out: { line: Polyline; dir: Vec2; end: Vec2 }[] = [];
-  for (let k = 0; k < 4; k++) {
-    const a = angle + (k * Math.PI) / 2;
+  for (let k = 0; k < count; k++) {
+    const a = angle + (k * 2 * Math.PI) / count;
     const u = { x: Math.cos(a), y: Math.sin(a) };
     const L = rayRing(center, u, ring);
     if (L === null || L < 30) continue;

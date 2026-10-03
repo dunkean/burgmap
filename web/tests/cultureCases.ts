@@ -32,6 +32,7 @@ export const CULTURE_CASES: CultureCase[] = [
   { label: 'sahel', culture: 'sahel', seeds: ['1', '2'] },
   { label: 'hanseatic', culture: 'hanseatic', seeds: ['1', '2'] },
   { label: 'korean', culture: 'korean', seeds: ['1', '2'] },
+  { label: 'wizard-city', culture: 'wizard-city', seeds: ['1', '2'] },
   { label: 'roman-core+european-organic', culture: 'roman-core', mix: 'european-organic:0.6:phases' },
   { label: 'medina+bastide', culture: 'medina', mix: 'bastide:0.45:phases' },
 ];
@@ -160,6 +161,11 @@ export function expectSignature(c: CultureCase, w: World): void {
       expect(has('hanok') || has('anchae'), 'korean: hanok').toBe(true);
       expect(has('throne-hall'), 'korean: the palace and its throne hall').toBe(true);
       expect(u.streets.filter((s) => s.role === 'radial' && s.rank === 0).length, 'korean: the cardinal main streets').toBeGreaterThan(1);
+      break;
+    case 'wizard-city':
+      expect(has('great-tower'), 'wizard: the great tower').toBe(true);
+      expect(u.streets.filter((s) => s.role === 'radial' && s.rank === 0).length, 'wizard: radial ley avenues').toBeGreaterThanOrEqual(6);
+      expect((arch.get('ley-obelisk') ?? 0), 'wizard: obelisks on the ley lines').toBeGreaterThan(3);
       break;
     case 'roman-core': case 'roman-core+european-organic':
       expect(u.landmarks.some((l) => l.kind === 'forum'), 'roman: forum').toBe(true);
