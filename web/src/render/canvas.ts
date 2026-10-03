@@ -13,6 +13,7 @@ import { bridgeShapes, isKinded, type BridgeShapes } from './townbridges';
 import type { World, LandKind, Vec2 } from '../gen/types';
 import { Palette, MapStyle, ruralInk } from './styles';
 import { biomePalette } from './biomes';
+import { fieldHedgeStyle } from './hedges';
 import { renderTerrainRaster } from './raster';
 import { buildScene, Scene, PolyLayer, LineLayer, TextureLayer, textureMarks, LAND_ORDER, WALL_LINE_W, CAMP_FENCE_W, FENCE_STYLE } from './scene';
 import { renderView } from '../gen/settlements/merge';
@@ -408,10 +409,13 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
         const ways = linesOf((l) => l.name === 'field-ways');
         strokeLines(ways, rk, () => lw(1.4, 0.8), pal.rural.way, lod.band >= 2 ? [px(6), px(4)] : [], 'butt');
       }
-      strokeLines(linesOf((l) => l.name === 'hedges'), pal.hedge, () => lw(0.95 * Math.pow(fu, 0.85), lod.band >= 1 ? 1 : 0.6), 0.85);
-      if (lod.band >= 2 && polyL('hedge-trees')) {
-        fillPolys('hedge-trees', pal.treeFill);
-        strokePolys('hedge-trees', pal.treeInk, lw(0.4 * fu, 0.5), 0.8);
+      if (pal.hedgeOn) {
+        const hedge = fieldHedgeStyle(pal, u);
+        strokeLines(linesOf((l) => l.name === 'hedges'), hedge.color, () => lw(hedge.width, 0.35), hedge.alpha * Math.min(1, sc / 0.3));
+        if (lod.band >= 2 && polyL('hedge-trees')) {
+          fillPolys('hedge-trees', pal.treeFill, 0.75);
+          strokePolys('hedge-trees', pal.treeInk, lw(0.3 * fu, 0.35), 0.5);
+        }
       }
     }
     // textures (procedural marks, visible tiles only, cached per tile)

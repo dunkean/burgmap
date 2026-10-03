@@ -1,6 +1,7 @@
 import { isKinded } from './townbridges';
 import type { World, LandArea, LandKind, Farmstead } from '../gen/types';
 import { farmRidges } from './farms';
+import { fieldHedges, fieldHedgeStyle } from './hedges';
 import type { Vec2 } from '../gen/core/geom';
 import { type Palette, ruralInk } from './styles';
 import { f1, pathD } from './util';
@@ -131,12 +132,6 @@ export function landuseLayer(world: World, pal: Palette, u: number): string {
 type Enc = LandArea & { enclosed?: boolean };
 type Net = { ways?: Vec2[][]; headlands?: Vec2[][] };
 
-const hash2 = (x: number, y: number): number => {
-  let h = Math.imul(Math.round(x * 7) ^ 0x9e3779b1, 0x85ebca6b) ^ Math.imul(Math.round(y * 7) + 0x7f4a7c15, 0xc2b2ae35);
-  h = Math.imul(h ^ (h >>> 15), 0x2c1b3c6d);
-  return ((h ^ (h >>> 12)) >>> 0) / 4294967296;
-};
-
 /** Field ways (cart tracks), narrow headlands and the hedgerows of the closes, with an occasional tree. */
 function fieldNetwork(world: World, pal: Palette, s: number): string {
   const lu = world.landuse as (World['landuse'] & Net) | undefined;
@@ -153,29 +148,12 @@ function fieldNetwork(world: World, pal: Palette, s: number): string {
     const d = hl.map((w) => pathD(w, false)).join('');
     out += `<g class="lu-headlands" fill="none"><path d="${d}" stroke="${pal.furrow}" stroke-width="${f1(Math.max(0.6, 0.4 * s))}" stroke-opacity="${pal.rural.headland}"/></g>`;
   }
-  const enc = lu.areas.filter((a) => (a as Enc).enclosed);
-  if (enc.length) {
-    const d = enc.map(ringsD).join('');
-    let trees = '';
-    const R = 1.5 * Math.pow(s, 0.6);
-    const ring = (r: Vec2[]) => {
-      let carry = 8 + 10 * hash2(r[0].x, r[0].y);
-      for (let i = 0; i < r.length; i++) {
-        const a = r[i], b = r[(i + 1) % r.length];
-        const L = Math.hypot(b.x - a.x, b.y - a.y);
-        let t = carry;
-        while (t < L) {
-          const x = a.x + ((b.x - a.x) * t) / L, y = a.y + ((b.y - a.y) * t) / L;
-          const h = hash2(x, y);
-          if (h < 0.42) trees += `<circle cx="${f1(x)}" cy="${f1(y)}" r="${f1(R * (0.75 + 0.6 * h))}"/>`;
-          t += (11 + 24 * hash2(y, x)) * Math.pow(Math.max(1, s), 0.75);
-        }
-        carry = t - L;
-      }
-    };
-    for (const a of enc) { ring(a.poly); if (a.holes) for (const h of a.holes) ring(h); }
-    out += `<g class="lu-hedges"><path d="${d}" fill="none" stroke="${pal.hedge}" stroke-width="${f1(0.95 * Math.pow(s, 0.85))}" stroke-opacity="0.85" stroke-linejoin="round"/>` +
-      `<g fill="${pal.treeFill}" stroke="${pal.treeInk}" stroke-width="${f1(0.4 * s)}" stroke-opacity="0.8">${trees}</g></g>`;
+  if (pal.hedgeOn) {
+    const hedges = fieldHedges(lu.areas, s), style = fieldHedgeStyle(pal, s);
+    const d = hedges.lines.map((line) => pathD(line, false)).join('');
+    const trees = hedges.trees.map(({ center: p, radius }) => `<circle cx="${f1(p.x)}" cy="${f1(p.y)}" r="${f1(radius)}"/>`).join('');
+    out += `<g class="lu-hedges"><path d="${d}" fill="none" stroke="${style.color}" stroke-width="${f1(style.width)}" stroke-opacity="${style.alpha}" stroke-linecap="round"/>` +
+      `<g fill="${pal.treeFill}" fill-opacity="0.75" stroke="${pal.treeInk}" stroke-width="${f1(0.3 * s)}" stroke-opacity="0.5">${trees}</g></g>`;
   }
   return out;
 }
