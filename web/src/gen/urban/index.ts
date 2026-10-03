@@ -45,6 +45,7 @@ import { registerFantasy } from './fantasy';
 import { registerByzantine, stairLanes } from './byzantine';
 import { registerVenice, lagoonWaterways, reserveArsenal } from './venice';
 import { registerPersian, bazaarRoofs, qanats } from './persian';
+import { registerOttoman } from './ottoman';
 import { siteCastle, type CastlePlan } from './m4/castle';
 import { reserveCastle, type M4State } from './m4/reserve';
 import { reserveCathedral, reservePalace, reserveMonasteries } from './m4/catalogue';
@@ -117,6 +118,7 @@ const L2_SITES: Record<string, 'power' | 'worship' | 'market' | 'civic' | 'activ
   'byz-church': 'worship', 'byz-metropolis': 'worship', 'byz-monastery': 'worship',
   campo: 'worship', 'doge-basilica': 'worship', 'doge-palace': 'power', arsenal: 'civic',
   maidan: 'market', 'friday-mosque': 'worship', caravanserai: 'market', 'chahar-bagh': 'civic',
+  mescit: 'worship', kulliye: 'worship', 'ulu-cami': 'worship', bedesten: 'market',
   'aztec-precinct': 'worship', 'calpulli-temple': 'worship', tecpan: 'power', tianguis: 'market',
 };
 /** Parcel uses of the open port pieces. */
@@ -182,6 +184,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   registerByzantine();
   registerVenice();
   registerPersian();
+  registerOttoman();
   const flags = m4Flags(opts, culture, pop, archetype, rng.fork('m4'));
   const sites: UrbanSite[] = [];
   const lotData = new Map<string, unknown>();

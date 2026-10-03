@@ -55,6 +55,24 @@ M['persian-bazaar'] = morph('persian-bazaar', MORPHOLOGIES['medina-souk'], {
   streets: ['gateToGate', 'organicInfill'], spineAmp: 8, widthByRank: [7, 5, 3.4, 2.6, 2.2],
   arch: { typology: 'bazaar-shop', roof: 'dome', storeys: [1, 1], material: 'brick' },
 });
+// ---------------------------------------------------------------- Ottoman town
+M['ottoman'] = morph('ottoman', EO_BASE, {
+  // the mahalle: winding streets and many dead ends (cikmaz) following the slope, wooden houses with gardens
+  streets: ['radials', 'organicInfill', 'closes'], buildingOp: 'konak', contourBlend: 0.6, extraRadials: true, curvature: 0.8, fieldNoise: 24, fieldRandom: 0.55,
+  gatePlaces: 0.15, crossPlaces: 0.2, ringGaps: 3, deadEndRatio: 0.6, slitDepth: 0.6, placeThreshold: 500,
+  blockSize: { core: [2500, 7000], middle: [3500, 10000], edge: [4500, 13000], faubourg: [4500, 13000], village: [7000, 20000] },
+  minWidth: 18, widthByRank: [6.5, 5, 3.6, 2.8, 2.3],
+  frontage: { core: [8, 13], middle: [9, 15], edge: [10, 17], faubourg: [10, 18], village: [16, 32] },
+  plotDepth: { core: [18, 30], middle: [22, 36], edge: [24, 42], faubourg: [24, 42], village: [30, 55] },
+  coverage: { core: [0.55, 0.68], middle: [0.45, 0.58], edge: [0.38, 0.5], faubourg: [0.32, 0.45], village: [0.15, 0.3] },
+  density: { core: 150, middle: 110, edge: 85, faubourg: 55, village: 32 },
+  arch: { typology: 'ottoman-wooden-house', roof: 'tiled-hip', storeys: [2, 3], material: 'wood' },
+});
+M['ottoman-carsi'] = morph('ottoman-carsi', MORPHOLOGIES['medina-souk'], {
+  // the carsi: rows of small shops (dukkan) along the market streets round the bedesten and the hans
+  streets: ['radials', 'organicInfill'], widthByRank: [6.5, 5, 3.4, 2.6, 2.2], fieldRandom: 0.4,
+  arch: { typology: 'dukkan-shop', roof: 'tiled-hip', storeys: [1, 2], material: 'wood' },
+});
 Object.assign(MORPHOLOGIES, M);
 }
 
@@ -124,5 +142,28 @@ export const MORE_CULTURES: Culture[] = [
     render: { towerShape: 'round', bazaarRoof: true, qanats: true },
     scale: { min: 'hamlet', max: 'megacity' },
     sitePrefs: { flatness: 1.6, hillSide: 'N', weights: { plain: 2, valley: 1.4, bridge: 1.6, hilltop: 0.2, harbor: 0.3, estuary: 0.3 } },
+  },
+  {
+    id: 'ottoman', label: 'Ottoman town (Bursa)',
+    nucleus: { kind: 'market', shape: 'hull', area: [800, 3500], compound: false, ring: 5 },
+    core: { morphology: 'ottoman-carsi', share: 0.08, enclosure: { shape: 'organic', wall: 'none', fossil: 'none' } },
+    ring: { morphology: 'ottoman', enclosure: { shape: 'organic', wall: 'none', fossil: 'none' } },
+    phaseCount: [[0, 2], [7000, 3]],
+    faubourg: 'ottoman', faubShare: [0.12, 0.12],
+    landmarks: [
+      { role: 'worship', kind: 'ulu-cami', place: 'adjacent-nucleus', area: [1500, 7000], minPop: 2500 },
+      { role: 'market', kind: 'bedesten', place: 'near-nucleus', area: [700, 2500], minPop: 3000 },
+      { role: 'extra', kind: 'caravanserai', place: 'near-nucleus', area: [1200, 4500], minPop: 3000, count: 1 },
+      // (a mahalle every ~600 inhabitants, each round its mescit)
+      { role: 'civic', kind: 'mescit', place: 'spread', area: [300, 2200], minPop: 150, perPop: 600, sep: 110 },
+      { role: 'power', kind: 'kulliye', place: 'edge', area: [7000, 30000], minPop: 4000, count: 1, sep: 400 },
+      { role: 'extra', kind: 'hammam', place: 'near-nucleus', area: [500, 3000], minPop: 1500 },
+    ],
+    village: { form: 'auto', morphology: 'ottoman' },
+    hamlet: { form: 'auto', morphology: 'ottoman' },
+    m4: { castle: 'castle', cathedral: null, palace: null, monastery: null, marketHall: false, arena: 0, shanty: 'gecekondu', activities: false },
+    render: { towerShape: 'round' },
+    scale: { min: 'hamlet', max: 'metropolis' },
+    sitePrefs: { flatness: 0.8, hillSide: 'S', weights: { valley: 2, hilltop: 1.2, bridge: 1.4, plain: 1, harbor: 1.2 } },
   },
 ];

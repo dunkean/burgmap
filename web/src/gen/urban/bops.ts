@@ -572,6 +572,54 @@ function venetian(pl: Plot, cov: number, P: MorphologyParams, rng: Rng, hint?: C
   }));
 }
 
+// ---------------------------------------------------------------- Ottoman konak
+/**
+ * Ottoman wooden house (Safranbolu, Bursa): the house on the street front over most of the frontage (its upper
+ * floor jettied over the street: the cikma, read as a small step of the front), the garden gate beside it, an L wing
+ * along the side line on the wider lots, the kitchen or a shed at the back of the garden; the garden behind.
+ */
+function konak(pl: Plot, cov: number, P: MorphologyParams, rng: Rng): ArchBldg[] {
+  const f = frame(pl);
+  if (!f) return [];
+  const us = usable(pl, f);
+  if (!us) return [];
+  const { u0, u1, D } = us;
+  const W = u1 - u0;
+  const ori = Math.atan2(f.n.y, f.n.x);
+  const out: ArchBldg[] = [];
+  const put = (poly: Polygon | null, arch: string, kind: Bldg['kind'], storeys: number) => {
+    if (poly) out.push({ poly, kind, arch, roof: P.arch.roof, material: P.arch.material, storeys, orientation: ori });
+  };
+  const gate = W > 9 ? rng.range(2.4, 3.4) : 0;
+  const left = rng.chance(0.5);
+  const a0 = left ? u0 + 0.2 : u0 + gate, a1 = left ? u1 - gate : u1 - 0.2;
+  const hd = Math.min(D - 1, rng.range(8, 11));
+  // the jettied front: the upper storey over part of the front (one footprint with a stepped front)
+  const ground = rectIn(pl, f, a0, a1, 0.6, hd, 25);
+  if (!ground) return out;
+  let house = ground;
+  if (a1 - a0 > 8 && rng.chance(0.55)) {
+    const cikma = rectIn(pl, f, a0 + (a1 - a0) * rng.range(0.25, 0.4), a1 - (a1 - a0) * rng.range(0.1, 0.25), 0.05, 0.7, 1);
+    if (cikma) { const u = union(ground, cikma); if (u.length === 1 && !u[0].holes.length && polyInside(pl.poly, u[0].outer)) house = cleanRing(u[0].outer, 0.005, 0.5, 0.002, false); }
+  }
+  put(house, 'ottoman-wooden-house', 'house', (pl.wealth ?? 0.4) > 0.5 ? 3 : 2);
+  // the L wing along the side away from the gate (the haremlik) on wide, deep lots
+  if (W >= 13 && D > hd + 10 && cov > 0.45 && rng.chance(0.6)) {
+    const ww = Math.min(W * 0.42, rng.range(5, 6.5));
+    put(rectIn(pl, f, left ? u0 + 0.2 : u1 - 0.2 - ww, left ? u0 + 0.2 + ww : u1 - 0.2, hd, Math.min(D - 1, hd + rng.range(7, 11)), 20), 'ottoman-house-wing', 'rear', 2);
+  }
+  // the kitchen or a shed against the back of the garden
+  if (D > hd + 16) {
+    const sw = Math.min(W * 0.5, rng.range(4.6, 6)), sd = rng.range(4.6, 5.6);
+    put(rectIn(pl, f, left ? u1 - 0.3 - sw : u0 + 0.3, left ? u1 - 0.3 : u0 + 0.3 + sw, D - 0.5 - sd, D - 0.5, 15), 'mutfak-kitchen', 'back', 1);
+  }
+  // the garden behind the house (drawn under the wing and the kitchen)
+  const g = D > hd + 6 ? rectIn(pl, f, u0 + 0.3, u1 - 0.3, hd + 0.4, D - 0.3, 20) : null;
+  if (g) out.push({ poly: g, kind: 'garden' });
+  pl.gated = true;
+  return out;
+}
+
 // ---------------------------------------------------------------- Inca kancha
 /**
  * Kancha: a walled rectangular compound of single-room houses set along the inside of its wall around a central
@@ -719,6 +767,7 @@ function buildOnRaw(pl: Plot, cov: number, P: MorphologyParams, rng: Rng, hint?:
     case 'yardHouse': return yardHouse(pl, cov, P, rng);
     case 'tomb': return tomb(pl, P, rng);
     case 'venetian': return venetian(pl, cov, P, rng, hint);
+    case 'konak': return konak(pl, cov, P, rng);
     default: {
       const ori = Math.atan2(pl.nrm.y, pl.nrm.x);
       return buildPlot(pl, cov, P, rng, hint).map((b) => (b.kind === 'garden' ? b : {
