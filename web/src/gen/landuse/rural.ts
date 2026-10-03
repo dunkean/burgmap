@@ -8,8 +8,9 @@ import { Vec2, Polygon, Polyline, chaikin, simplify, polygonArea, polygonCentroi
 import { distanceField, forCellsNearPolyline, smoothstep } from '../core/field';
 import { marchingSquares } from '../terrain/contour';
 import { rasterizePolys } from '../geo/raster';
+import { unionS } from '../geo/bool';
 import { partitionRegion, pruneWays, FieldCtx, FieldNet } from './fields';
-import type { World, LandArea, LandKind, Farmstead, LandUseLayer } from '../types';
+import type { World, LandArea, LandKind, Farmstead, LandUseLayer, PolyH } from '../types';
 import { FARM_SIZES, farmSize, farmType, layoutFarm, placeFarm, frameOf, segRectDist, type FarmContext, type LocalFarm } from './farms';
 import { biomeName, biomeLandKind } from '../biomes';
 
@@ -151,7 +152,8 @@ export function generateRural(world: World, root: Rng, mainRoads?: number, strip
   const costC = site.cost.data;
   const reserve = new Uint8Array(N);
   const uDist = new Float32Array(N);
-  const foot = world.urban?.footprintH ?? [];
+  const builtFoot = world.urban?.footprintH ?? [];
+  const foot = world.urban?.ruralReserve?.length ? unionS(builtFoot, world.urban.ruralReserve) : builtFoot;
   if (foot.length) {
     const rings: Polygon[] = [];
     for (const ph of foot) { rings.push(ph.outer); for (const hl of ph.holes) rings.push(hl); }
@@ -175,9 +177,10 @@ export function generateRural(world: World, root: Rng, mainRoads?: number, strip
     for (const st of secondary) {
       const k = Lm / ringScale(st.population);
       const rings: Polygon[] = [];
-      if (st.detail === 'farmstead') rings.push(circleRing(st.center, 20));
-      else if (st.urban?.footprintH.length) for (const ph of st.urban.footprintH) { rings.push(ph.outer); for (const hl of ph.holes) rings.push(hl); }
-      else if (st.extent.length >= 3) rings.push(st.extent);
+      let ownFoot: PolyH[] = st.detail === 'farmstead' ? [{ outer: circleRing(st.center, 20), holes: [] }]
+        : st.urban?.footprintH.length ? st.urban.footprintH : st.extent.length >= 3 ? [{ outer: st.extent, holes: [] }] : [];
+      if (st.urban?.ruralReserve?.length) ownFoot = unionS(ownFoot, st.urban.ruralReserve);
+      for (const ph of ownFoot) rings.push(ph.outer, ...ph.holes);
       if (!rings.length) continue;
       rasterizePolys(rings, n, n, cell, own);
       let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;

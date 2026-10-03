@@ -19,6 +19,7 @@ Procedural generator of pre-modern settlements in their landscape. From a seed (
   - Plots are burgage strips.
   - Built density follows the burgage cycle.
   - Walls are polygonal, with towers and gates.
+  - Wet moats are optional (Auto / On / Off), follow the real enclosure on suitable low ground, and leave dry gate crossings.
   - Faubourgs grow along the roads.
   - Each town has parish churches and places.
 - **Planning cultures**, recognisable from the plan alone:

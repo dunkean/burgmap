@@ -128,7 +128,7 @@ function trimPolygon(pg: Ring[], sb: Box): Ring[] | null {
   return out;
 }
 
-function run(op: 'union' | 'intersection' | 'difference', a: Operand, rest: Operand[], snapped = false): MultiPoly {
+function run(op: 'union' | 'intersection' | 'difference', a: Operand, rest: Operand[], snapped = false, failClosed = false): MultiPoly {
   let ga = toGeom(a);
   let gr = rest.map(toGeom).filter((g) => g.length);
   if (snapped) { ga = snapGeom(ga); gr = gr.map(snapGeom); }
@@ -159,6 +159,7 @@ function run(op: 'union' | 'intersection' | 'difference', a: Operand, rest: Oper
     // retry on coarser snapping (polygon-clipping can fail on nearly coincident edges)
     const q = (g: Geom): Geom => g.map((pg) => pg.map((r) => r.map(([x, y]) => [Math.round(x * 20) / 20, Math.round(y * 20) / 20] as [number, number])));
     try { return fromGeom(f(q(ga), ...gr.map(q)), 0.01, true); } catch {
+      if (failClosed) return [];
       if (op === 'union') return fromGeom(ga).concat(...gr.map((g) => fromGeom(g)));
       return op === 'difference' ? fromGeom(ga) : [];
     }
@@ -183,6 +184,8 @@ export function resolve(p: Polygon): MultiPoly {
 }
 export const intersectionS = (a: Operand, ...rest: Operand[]): MultiPoly => run('intersection', a, rest, true);
 export const differenceS = (a: Operand, ...rest: Operand[]): MultiPoly => run('difference', a, rest, true);
+/** Added water must disappear if clipping fails, rather than covering protected roads or dry land. */
+export const differenceSafeS = (a: Operand, ...rest: Operand[]): MultiPoly => run('difference', a, rest, true, true);
 
 export const mpArea = (m: MultiPoly): number => m.reduce((s, ph) => s + area(ph.outer) - ph.holes.reduce((t, h) => t + area(h), 0), 0);
 

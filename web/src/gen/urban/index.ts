@@ -29,10 +29,10 @@ import { blockReach, carvePassage, makeStreetAt, splitLong, frontRangeDepth, sha
 import { GridIndex } from '../geo/spatial';
 import { wallFeatures } from './walls';
 import { buildCompound, pickBlock, ClaimBlock } from './compounds';
-import { approachGates, axisLines, outsetConvex } from './streetops';
+import { approachGates, axisLines } from './streetops';
 import { distToRing, pointInRing, area as areaOf, inscribed, convexHull, distToSeg, segSegT, bboxOf, orientPos } from '../geo/poly';
 import { openRing } from './camps/kit';
-import { outerRing } from './m4/castle';
+import { offsetCurtain, moatBand, moatReserve } from './moat';
 import { unionMany } from '../geo/bool';
 import { StreetGraph } from '../geo/graph';
 import { polyInside } from '../geo/split';
@@ -356,6 +356,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   const coreM = phaseMorphs[0];
   const prim = buildPrimary(ctx, {
     phases: eplan.phases, enclosure: eplan.enclosure, walled: eplan.walled, faubourg: faub.region, roads,
+    moat: world.options.moat, customaryMoat: !!culture.render?.moat, moatWallOffset: listsW,
     marketArea, mainAngle, extraRadials: extraRadials && !allStreetOps.has('spiral'), faubZone,
     nucleus: nucleusIn, axis: axisIn,
     gridCore: phaseMorphs.length > 1 && phaseMorphs[0].streetOp === 'grid' && !axisIn ? eplan.phases[0].region : null,
@@ -569,6 +570,13 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   const blockPts = carved.map((b) => interiorPoint(b.poly));
   const holdsBlock = (ph: { outer: Polygon; holes: Polygon[] }) => blockPts.some((p) => pointInRing(ph.outer, p) && !ph.holes.some((h) => pointInRing(h, p)));
   prim.walls = prim.walls.filter((w) => holdsBlock({ outer: w.ring, holes: [] }));
+  let defensiveReserve: MultiPoly = [];
+  if (prim.moat.length) {
+    const curtains = listsW ? prim.walls.flatMap((w) => { const out = offsetCurtain(w, listsW); return out ? [out] : []; }) : prim.walls;
+    prim.moat = curtains.length ? intersectionS(prim.moat, moatBand(curtains)) : [];
+    defensiveReserve = moatReserve(curtains);
+    if (!defensiveReserve.length) prim.moat = [];
+  }
   prim.footprint = prim.footprint.filter(holdsBlock);
   for (const ph of eplan.phases) ph.region = ph.region.filter(holdsBlock);
   const urbanized = new Set(carved.map((b) => b.quarter));
@@ -585,7 +593,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   const landmarks: UrbanLayer['landmarks'] = [];
   const parcels: UrbanParcel[] = [];
   const buildings: UrbanBuilding[] = [];
-  const waterPieces: PolyH[] = [];
+  const waterPieces: PolyH[] = prim.moat.slice();
   const compoundOf: (string | undefined)[] = carved.map(() => undefined);
   const perBlock: Polygon[][] = carved.map(() => []);
   const cxFor = (bi: number, ang: number) => ({ angle: ang, pop, rng: rng.fork('cmp:' + bi), center: ctx.center, data: carved[bi].lot ? lotData.get(carved[bi].lot!) : undefined });
@@ -899,11 +907,6 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
       }
     });
   }
-  if (hints.moat && prim.walls.length) {
-    // one moat around the whole (planned, convex) enclosure
-    const off = outsetConvex(convexHull(prim.walls.flatMap((w) => w.ring)), 12);
-    if (off.length >= 3) lines.push({ kind: 'moat', path: off, closed: true, width: 9 });
-  }
   // ---- terraces (dwarven): retaining walls along the contour-parallel streets, hachured on the downhill side
   if (hints.terraces) {
     for (const st of streets.list) {
@@ -999,17 +1002,12 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   const outerWalls = (): UrbanWall[] => {
     const out: UrbanWall[] = [];
     prim.walls.forEach((w, wi) => {
-      const ring = outerRing(w.ring, listsW);
-      if (!ring) return;
+      const curtain = offsetCurtain(w, listsW);
+      if (!curtain) return;
+      const ring = curtain.ring;
       const gates: { p: Vec2; dir: Vec2; width: number }[] = [];
-      for (const g of w.gates) {
-        // the road leaves the inner gate outward (−dir): the outer gate is where that line meets the outer ring
-        let best: Vec2 | null = null, bd = Infinity;
-        for (let k = 0; k < ring.length; k++) {
-          const r = segSegT(g.p, { x: g.p.x - g.dir.x * (listsW * 4 + 40), y: g.p.y - g.dir.y * (listsW * 4 + 40) }, ring[k], ring[(k + 1) % ring.length]);
-          if (r) { const q = { x: g.p.x - g.dir.x * (listsW * 4 + 40) * r.t, y: g.p.y - g.dir.y * (listsW * 4 + 40) * r.t }; const d = dist(q, g.p); if (d < bd) { bd = d; best = q; } }
-        }
-        if (!best) continue;
+      for (const g of curtain.gates) {
+        const best = g.p;
         gates.push({ p: best, dir: g.dir, width: g.width });
         const t = { x: -g.dir.y, y: g.dir.x }, o = { x: -g.dir.x, y: -g.dir.y }, hw = g.width / 2 + 4.5, dp = 11;
         lines.push({ kind: 'barbican', path: [
@@ -1031,6 +1029,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   const layer: UrbanLayer = {
     footprint: prim.footprint.map((p) => p.outer),
     footprintH: toPH(prim.footprint),
+    ...(prim.moat.length ? { ruralReserve: defensiveReserve } : {}),
     streets: layerStreets,
     blocks: carved.map((b) => b.poly), parcels, buildings,
     walls: prim.walls.map((w, wi): UrbanWall | null => {
@@ -1058,6 +1057,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     backLand: parcels.filter((p) => p.use === 'garden').map((p) => p.poly).concat(plotGardens).map((p) => ({ outer: p, holes: [] })),
     culture: culture.id, cultures: plan.cultures.map((c) => c.id), renderHints: { ...hints, towerShape },
     lines, trees, water: waterPieces,
+    ...(prim.moat.length ? { moats: prim.moat } : {}),
     sites, quays,
   };
   const debug: UrbanDebug = { quarters: prim.quarters.map((q) => ({ poly: q.lp.pts, phase: q.phase, lab: q.lp.lab })) };

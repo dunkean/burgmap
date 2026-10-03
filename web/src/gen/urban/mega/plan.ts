@@ -34,6 +34,7 @@ import { ribbon } from '../../geo/offset';
 import type { MacroPlan, MacroQuarter, MacroStreet, MacroNucleus, MacroDistrict, MacroWant } from './types';
 import { fitRings, segKey } from './rings';
 import { DEFAULT_M4 } from '../m4/index';
+import { planMoat, naturalBank, moatReserve } from '../moat';
 
 const TAU = Math.PI * 2;
 const TMP = -999;
@@ -785,7 +786,12 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
   // ---- cells: the graph's faces, minus the water
   pruneDangling(g);
   const faces = labelledFaces(g);
-  const water = ctx.water;
+  const outerWall = standing.size ? rings[Math.max(...standing) - 1] : null;
+  const moatWalls = outerWall ? [{ ring: outerWall, gates: [] }] : [];
+  let moat = planMoat(ctx, moatWalls, [...mstreets, ...roadsIn.map((r) => ({ path: r.path, widths: r.path.map(() => r.width) }))], [], world.options.moat, !!culture.render.moat);
+  const defensiveLand = moat.length ? moatReserve(moatWalls) : [];
+  if (!defensiveLand.length) moat = [];
+  const water = [...ctx.water, ...defensiveLand];
   const waterBB = water.map((ph) => bboxOf(ph.outer));
   let cells: LPoly[] = [];
   for (const f of faces) {
@@ -1083,11 +1089,16 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
   }
   // ports: quarters along wide water inside or near the walls; their water edges become quays
   {
+    const onNaturalBank = moat.length ? naturalBank(ctx.water) : null;
     const nW = Math.max(1, Math.round(nR / 2));
     for (const q of quarters) {
       if (q.kind !== 'quarter' || (q.district !== 'town' && q.district !== 'old-town' && q.district !== 'suburb')) continue;
+      const wetEdge = q.pts.map((a, i) => {
+        const b = q.pts[(i + 1) % q.pts.length];
+        return q.lab[i] === LAB_WATER && (!onNaturalBank || onNaturalBank({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }));
+      });
       let wetL = 0;
-      for (let i = 0; i < q.pts.length; i++) if (q.lab[i] === LAB_WATER) wetL += dist(q.pts[i], q.pts[(i + 1) % q.pts.length]);
+      for (let i = 0; i < q.pts.length; i++) if (wetEdge[i]) wetL += dist(q.pts[i], q.pts[(i + 1) % q.pts.length]);
       if (wetL < 140) continue;
       if (q.phase > nR) {
         if (q.phase === nR + 1 && wetL > 220) {
@@ -1103,15 +1114,15 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
       q.district = 'port';
       // runs of water edges → quay streets
       const n = q.pts.length;
-      let s0 = q.lab.findIndex((l, i) => l === LAB_WATER && q.lab[(i - 1 + n) % n] !== LAB_WATER);
+      const s0 = wetEdge.findIndex((wet, i) => wet && !wetEdge[(i - 1 + n) % n]);
       if (s0 < 0) continue; // all water edges: an island quarter, no quay
       for (let k = 0; k < n; k++) {
         const i = (s0 + k) % n;
-        if (q.lab[i] !== LAB_WATER || q.lab[(i - 1 + n) % n] === LAB_WATER) continue;
+        if (!wetEdge[i] || wetEdge[(i - 1 + n) % n]) continue;
         const run: Vec2[] = [q.pts[i]];
         const idxs: number[] = [];
         let j = i;
-        while (q.lab[j] === LAB_WATER && idxs.length < n) { idxs.push(j); run.push(q.pts[(j + 1) % n]); j = (j + 1) % n; }
+        while (wetEdge[j] && idxs.length < n) { idxs.push(j); run.push(q.pts[(j + 1) % n]); j = (j + 1) % n; }
         if (polylineLength(run) < 60) continue;
         const id = addStreet(run, 10, 2, 'quay', q.phase);
         mstreetsObj.add(run, run.map(() => 10), 2, 'quay', q.phase, true);
@@ -1219,9 +1230,11 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
   // ---- bridges where the arterials cross the water (rivers, canals; not the open sea)
   const bridges: { a: Vec2; b: Vec2; width: number }[] = [];
   {
+    const bridgeWater = ctx.water;
+    const bridgeWaterBB = bridgeWater.map((ph) => bboxOf(ph.outer));
     const wseg = new GridIndex<{ a: Vec2; b: Vec2 }>(60);
-    for (const ph of water) for (const r of [ph.outer, ...ph.holes]) for (let i = 0; i < r.length; i++) wseg.insertSeg(r[i], r[(i + 1) % r.length], { a: r[i], b: r[(i + 1) % r.length] });
-    const inWater = (p: Vec2) => water.some((ph, i) => p.x >= waterBB[i].x0 && p.x <= waterBB[i].x1 && p.y >= waterBB[i].y0 && p.y <= waterBB[i].y1 && pointInRing(ph.outer, p) && !ph.holes.some((h) => pointInRing(h, p)));
+    for (const ph of bridgeWater) for (const r of [ph.outer, ...ph.holes]) for (let i = 0; i < r.length; i++) wseg.insertSeg(r[i], r[(i + 1) % r.length], { a: r[i], b: r[(i + 1) % r.length] });
+    const inWater = (p: Vec2) => bridgeWater.some((ph, i) => p.x >= bridgeWaterBB[i].x0 && p.x <= bridgeWaterBB[i].x1 && p.y >= bridgeWaterBB[i].y0 && p.y <= bridgeWaterBB[i].y1 && pointInRing(ph.outer, p) && !ph.holes.some((h) => pointInRing(h, p)));
     // (a bridge crosses a river: about as long as the river is wide there, never along it, never over a lake)
     const rv = new GridIndex<{ p: Vec2; w: number }>(120);
     for (const r of world.terrain.rivers) r.path.forEach((p, i) => rv.insertBox(p.x, p.y, p.x, p.y, { p, w: Math.max(2.5, r.width[i] ?? 2.5) + 2 }));
@@ -1277,7 +1290,7 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
   lap('bridges');
 
   // ---- the layer
-  const footprintH: PolyH[] = differenceS(outer, water).map((ph) => ({ outer: ph.outer, holes: ph.holes }));
+  const footprintH: PolyH[] = differenceS(outer, water);
   const layerStreets: UrbanStreet[] = mstreets.filter((s) => s.widths[0] > 0).map((s) => ({
     path: s.path, width: s.widths[0], widths: s.widths, kind: s.rank <= 1 ? 'main' : 'street', rank: s.rank, role: s.role, phase: s.phase,
   }));
@@ -1289,13 +1302,15 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
   const marketQ = quarters.find((q) => q.kind === 'market' && q.nucleus === 0);
   const layer: UrbanLayer = {
     footprint: footprintH.map((p) => p.outer), footprintH,
+    ...(defensiveLand.length ? { ruralReserve: defensiveLand } : {}),
+    ...(moat.length ? { moats: moat } : {}),
     streets: layerStreets, blocks: [], parcels: [], buildings: [], walls, landmarks: [], squares: marketQ ? [marketQ.pts] : [],
     archetype: 'town', population: pop, morphology: coreM.id,
     phases: rings.map((r, i) => ({ id: i + 1, kind: i === 0 ? 'core' : i === nR ? 'faubourg' : 'ring', zone: zoneOf(i + 1), region: [{ outer: r, holes: [] }], walled: standing.has(i + 1), fossil: i + 1 < nR && !standing.has(i + 1) })),
     quarters: quarters.map((q) => ({ poly: { outer: q.pts, holes: [] }, phase: q.phase, zone: q.zone, streetSpace: [] })),
     blockInfo: [], masses: [], backLand: [],
     culture: culture.id, cultures: plan.cultures.map((x) => x.id), renderHints: { ...plan.render, towerShape },
-    lines, trees: [], water: canals.map((cn) => ({ outer: ribbon(cn.path, cn.w), holes: [] })), sites, quays,
+    lines, trees: [], water: [...moat, ...canals.map((cn) => ({ outer: ribbon(cn.path, cn.w), holes: [] }))], sites, quays,
     macro, densityGrid: { cell: dcell, w: dw, cov, max: dmax },
   };
   const stats: Record<string, number | string> = {

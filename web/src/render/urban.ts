@@ -194,8 +194,8 @@ function cultureUnderlay(ub: NonNullable<World['urban']>, pal: Palette, lw: (m: 
   }
   const cem = ub.landmarks.filter((l) => l.kind === 'cemetery');
   if (cem.length) s += `<path d="${cem.map((l) => pathD(l.poly, true)).join('')}" fill="${U.garden}"/><path d="${cem.map((l) => pathD(l.poly, true)).join('')}" fill="url(#p-ugrave)"/>`;
-  const water = (ub.water ?? []).map((w) => pathD(w.outer, true)).join('');
-  if (water) s += `<path class="u-water" d="${water}" fill="${pal.riverFill}" stroke="${pal.waterEdge}" stroke-width="${lw(0.5, 0.3)}"/>`;
+  // Separate pieces paint their union: a shared evenodd path would punch a hole at every overlap.
+  for (const water of ub.water ?? []) s += `<path class="u-water" d="${phD(water)}" fill-rule="evenodd" fill="${pal.riverFill}" stroke="${pal.waterEdge}" stroke-width="${lw(0.5, 0.3)}"/>`;
   const bases = ub.landmarks.filter((l) => l.kind === 'tenshu-base' || l.kind === 'mebon');
   if (bases.length) s += `<path d="${bases.map((l) => pathD(l.poly, true)).join('')}" fill="${U.wallFill}" stroke="${U.wall}" stroke-width="${lw(0.4, 0.2)}"/>`;
   return s;

@@ -592,7 +592,7 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
       paved('u-chinampas', U.garden, gardenPat);
       // urban water (moats, tanks, mill races) and the moat line outside a planned town's wall
       strokeLines(linesOf((l) => l.role === 'uline' && (l.kind === 'moat' || l.kind === 'canal')), pal.riverFill, (l) => lw(l.width, 1));
-      if (polyL('u-water')) { fillPolys('u-water', pal.riverFill); strokePolys('u-water', pal.riverEdge, lw(0.5, 0.4)); }
+      if (polyL('u-water')) { fillPolys('u-water', pal.riverFill, 1, 'nonzero'); strokePolys('u-water', pal.riverEdge, lw(0.5, 0.4)); }
       // compound grounds, mosque courts (sahn), cloister garths, ditch parcels, cemeteries, castle bases
       fillPolys('u-grounds', U.place);
       if (polyL('u-sahn')) { paved('u-sahn', U.place, pave); strokePolys('u-sahn', U.plotLine, lw(0.2, 0.3)); }

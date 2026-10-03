@@ -52,6 +52,12 @@ web/
 
 Rural classification combines the selected biome with water distance, height above water, slope, soil variation and settlement access. Desert fields and oasis groves require nearby water; woodland/tropical clearings shrink around settlements; steppe keeps riverine groves; tundra is treeless. Farm lots in deserts require water access. `render/biomes.ts` supplies a shared, immutable palette to both renderers and their terrain/legend layers. `scripts/biome_previews.ts` renders the six landscapes for visual checks.
 
+## Wet moats
+
+`urban/moat.ts` reserves a wet ditch 8–19 m outside the actual curtain, including the external curtain of a double enceinte. `Options.moat` (`moat=auto|yes|no`) is a generation control; Auto enables suitable Chinese sites. Water distance, height above water and slope limit the ditch; rejected terrain cells, roads, gates, barbicans and prior landmark lots remain dry. A failed water clipping operation drops its result rather than flooding protected land.
+
+`UrbanLayer.moats` distinguishes defensive water from tanks and mill races, which all share `water`. The optional `ruralReserve` keeps ditch/berm land out of rural lots without enlarging the built-up `footprintH`. Macro quarters exclude the defensive reserve; bridges and navigable banks still use natural water. SVG paints water pieces separately with holes, while Canvas uses opposite hole winding and nonzero fill so overlaps stay wet.
+
 ## Coordinates & units
 
 - World units are **meters**. Map is a square `[0, mapSize]²` with origin top-left, y down (SVG convention).

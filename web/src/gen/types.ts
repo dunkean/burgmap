@@ -236,6 +236,8 @@ export interface UrbanLayer {
   backLand: PolyH[];
   /** Footprint with holes (exact), rural land use is excluded from it. */
   footprintH: PolyH[];
+  /** Unbuilt defensive land (moats and berms), excluded from rural lots separately from the urban footprint. */
+  ruralReserve?: PolyH[];
   // ---- culture (M3b), additive
   /** Culture preset id, the cultures present (mixes) and render hints. */
   culture?: string;
@@ -245,6 +247,8 @@ export interface UrbanLayer {
   trees?: UrbanTree[];
   /** Water pieces of the plan (moats, tanks, ponds) — parcels of use 'moat' / 'tank' are also listed here. */
   water?: PolyH[];
+  /** Defensive ditch water, also included in water; retained separately from ponds and mill races. */
+  moats?: PolyH[];
   // ---- landmarks, activities, port, suburbs (M4), additive
   sites?: UrbanSite[];
   /** Stone quay edges (straight segments on the shoreline). */

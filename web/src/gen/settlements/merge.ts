@@ -14,6 +14,8 @@ export function mergeUrban(layers: UrbanLayer[]): UrbanLayer | undefined {
     ...layers[0],
     footprint: [], streets: [], blocks: [], parcels: [], buildings: [], walls: [], landmarks: [], squares: [],
     quarters: [], blockInfo: [], masses: [], backLand: [], footprintH: [], lines: [], trees: [], water: [], sites: [], quays: [],
+    ...(layers.some((u) => u.moats?.length) ? { moats: [] } : {}),
+    ...(layers.some((u) => u.ruralReserve?.length) ? { ruralReserve: [] } : {}),
   };
   for (const u of layers) {
     const b0 = m.blocks.length, p0 = m.parcels.length, q0 = m.quarters.length;
@@ -33,6 +35,8 @@ export function mergeUrban(layers: UrbanLayer[]): UrbanLayer | undefined {
     m.lines!.push(...(u.lines ?? []));
     m.trees!.push(...(u.trees ?? []));
     m.water!.push(...(u.water ?? []));
+    if (u.moats?.length) m.moats!.push(...u.moats);
+    if (u.ruralReserve?.length) m.ruralReserve!.push(...u.ruralReserve);
     m.sites!.push(...(u.sites ?? []));
     m.quays!.push(...(u.quays ?? []));
   }

@@ -9,7 +9,7 @@ import type { Rng } from '../core/rng';
 import type { UrbanCtx } from './context';
 import type { PhasePlan } from './phases';
 import type { Zone, MorphologyParams } from './morphology';
-import { MultiPoly, unionS as union, intersectionS as intersection, differenceS as difference, mpArea } from '../geo/bool';
+import { MultiPoly, unionS as union, intersectionS as intersection, differenceS as difference, differenceSafeS, mpArea } from '../geo/bool';
 import { area, pointInRing, distToRing, convexHull, orientPos, cleanRing, segSegT } from '../geo/poly';
 import { ribbon } from '../geo/offset';
 import { LPoly, insidePieces } from '../geo/split';
@@ -18,6 +18,8 @@ import { Streets, LAB_OPEN, LAB_WALL, LAB_WATER, jitterWidths } from './streets'
 import { wiggle, crank, axisLines, spiralArm, outsetConvex, resampleAt } from './streetops';
 import { disk } from '../geo/offset';
 import { openHoles } from './plots';
+import { planMoat, offsetCurtain } from './moat';
+import type { Tri } from '../options';
 
 export interface Quarter {
   lp: LPoly; phase: number; zone: Zone; age: number; kind: 'quarter' | 'market' | 'place' | 'lot';
@@ -51,6 +53,7 @@ export interface Primary {
   market: Polygon | null;
   radials: number[];
   walls: WallLine[];
+  moat: MultiPoly;
   footprint: MultiPoly;
   /** Street id of the ring around the market (-1 if none). */
   marketStreet: number;
@@ -195,6 +198,9 @@ export interface PrimaryInput {
   phases: PhasePlan[];
   enclosure: MultiPoly;
   walled: boolean;
+  moat?: Tri;
+  customaryMoat?: boolean;
+  moatWallOffset?: number;
   faubourg: MultiPoly;
   roads: { path: Polyline; major: boolean }[];
   marketArea: number;
@@ -620,6 +626,8 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
       walls.push({ ring, gates });
     }
   }
+  const moatWalls = inp.moatWallOffset ? walls.flatMap((w) => { const out = offsetCurtain(w, inp.moatWallOffset!); return out ? [out] : []; }) : walls;
+  const moat = planMoat(ctx, moatWalls, [...streets.list, ...inp.roads.map((r) => ({ path: r.path, widths: r.path.map(() => r.major ? 10 : 6) }))], lots.map((l) => l.poly), inp.moat, inp.customaryMoat);
   // ---- quarters: phase bands minus the market, cut by the radials
   const cutters: Polygon[] = [];
   // (the ramp's cutter overshoots its ends by 0.5 m: a ramp led exactly onto the wall must still cut the band
@@ -703,6 +711,10 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
     }
     footprint = union(footprint, ...lots.map((l) => l.poly));
   }
+  // Reserve the ditch before blocks and plots, including any faubourg pieces outside the curtain.
+  if (moat.length) {
+    for (const b of bands) b.mp = differenceSafeS(b.mp, moat);
+  }
   // label sources
   const src = new GridIndex<{ a: Vec2; b: Vec2; lab: number }>(20);
   for (const st of streets.list) for (let i = 1; i < st.path.length; i++) src.insertSeg(st.path[i - 1], st.path[i], { a: st.path[i - 1], b: st.path[i], lab: st.id });
@@ -748,7 +760,7 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
     }
   }
   if (market) quarters.push({ lp: { pts: market, lab: market.map(() => marketStreet) }, phase: 1, zone: 'core', age: 1, kind: 'market' });
-  return { quarters, market, radials, walls, footprint, marketStreet };
+  return { quarters, market, radials, walls, moat, footprint, marketStreet };
 }
 
 const mid = (a: Vec2, b: Vec2): Vec2 => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });

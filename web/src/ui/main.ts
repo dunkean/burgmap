@@ -92,7 +92,7 @@ registry.add(seedControl);
 // map extent (preset or custom), population slider and the settlement system (M3c)
 const settlUI = initSettlementsUI(registry, () => opts);
 registry.add(selectControl(reliefEl, 'relief', (v) => v as Options['relief']));
-registry.add(selectControl(biomeEl, 'biome', (v) => biomeName(v)));
+registry.add({ ...selectControl(biomeEl, 'biome', (v) => biomeName(v)), write: (o) => { biomeEl.value = biomeName(o.biome); } });
 registry.add(selectControl(coastEl, 'coast', (v) => v as Options['coast']));
 registry.add(selectControl(riverEl, 'river', (v) => v as Options['river']));
 registry.add(selectControl(roadsEl, 'roads', (v) => Number(v)));
@@ -115,6 +115,7 @@ registry.add(checkControl($<HTMLInputElement>('legend'), 'legend', true));
   const tri: [string, string][] = [['auto', 'Auto'], ['yes', 'On'], ['no', 'Off']];
   const rows: [keyof Options, string, [string, string][]][] = [
     ['walls', 'Town wall', [['auto', 'Auto'], ['none', 'None (open town)'], ['single', 'Single curtain'], ['double', 'Double enceinte']]],
+    ['moat', 'Wet moat (where terrain permits)', tri],
     ['castles', 'Castles', [['auto', 'Auto'], ['0', 'None'], ['1', '1'], ['2', '2'], ['3', '3']]],
     ['cathedral', 'Cathedral close', tri],
     ['palace', 'Palace', tri],
@@ -133,7 +134,7 @@ registry.add(checkControl($<HTMLInputElement>('legend'), 'legend', true));
     sel.id = id;
     fillSelect(sel, items, String(opts[key] ?? 'auto'));
     slot.append(lab, sel);
-    registry.add(selectControl(sel, key, (v) => v as never));
+    registry.add({ ...selectControl(sel, key, (v) => v as never), write: (o) => { sel.value = String(o[key] ?? 'auto'); } });
   }
   // sprawl: the same population on more or less land (0.5 compact … 2 loose), relative to the plan's baseline
   const lab = document.createElement('label');

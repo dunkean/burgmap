@@ -62,6 +62,8 @@ export interface Options {
   seaLevel?: number;
   // Placeholders for later stages
   walls: WallsOpt;
+  /** Wet ditch outside the curtain; auto follows the culture and local water supply. */
+  moat?: Tri;
   /** Castle count (M4): overrides `castle` when not 'auto'. */
   castles?: CastlesOpt;
   /** Castle / citadel on the most defensible spot at the town edge (auto: town and larger, sometimes a village motte). */
@@ -278,6 +280,7 @@ export function toQuery(o: Options): string {
   const keys = ['size', 'relief', 'coast', 'river', 'walls', 'castle', 'roads', 'style', 'culture', 'population'] as const;
   for (const k of keys) if (o[k] !== DEFAULTS[k]) p.set(k, String(o[k]));
   if (o.biome && o.biome !== 'temperate') p.set('biome', o.biome);
+  if (o.moat && o.moat !== 'auto') p.set('moat', o.moat);
   for (const [k, q] of LANDMARK_TOGGLES) if (o[k] && o[k] !== 'auto') p.set(q, String(o[k]));
   if (o.suburbs && o.suburbs !== 'auto') p.set('suburbs', o.suburbs);
   if (o.castles && o.castles !== 'auto') p.set('castles', o.castles);
@@ -318,6 +321,7 @@ export function fromQuery(q: string | URLSearchParams): Options {
   o.river = oneOf(p.get('river'), RIVERS, DEFAULTS.river);
   o.siteType = oneOf(p.get('site'), SITE_TYPES, 'auto');
   o.walls = oneOf(p.get('walls'), WALLS, DEFAULTS.walls);
+  if (p.has('moat')) o.moat = oneOf(p.get('moat'), TRIS, 'auto');
   o.castles = oneOf(p.get('castles'), CASTLES, 'auto');
   o.castle = oneOf(p.get('castle'), TRIS, DEFAULTS.castle);
   for (const [k, q] of LANDMARK_TOGGLES) o[k] = oneOf(p.get(q), TRIS, 'auto');
@@ -364,6 +368,7 @@ export function applyOverride(o: Options, k: string, v: string): void {
   const rec = o as unknown as Record<string, unknown>;
   if (k === 'roads' || k === 'seaLevel' || k === 'population' || k === 'heightScale' || k === 'importSea' || k === 'mapSize' || k === 'sprawl' || k === 'eagerPop') rec[k] = Number(v);
   else if (k === 'biome') o.biome = biomeName(v);
+  else if (k === 'moat') o.moat = oneOf(v, TRIS, 'auto');
   else if (k === 'settlements' || k === 'settl') o.settlements = settlementsFromString(v);
   else if (k === 'contours' || k === 'landuse' || k === 'labels' || k === 'legend') rec[k] = v === '1' || v === 'true';
   else if (k === 'mix' || k === 'cultureMix') o.cultureMix = mixFromString(v);

@@ -9,7 +9,7 @@ import { renderView } from '../gen/settlements/merge';
 import { seaWithIslands } from './util';
 import { farmPlots, farmRidges, treePolys } from './farms';
 import { offsetRibbon, polygonCentroid } from '../gen/core/geom';
-import { pointInRing } from '../gen/geo/poly';
+import { pointInRing, orientPos } from '../gen/geo/poly';
 import { TileIndex, boxesOf, chunkPolyline } from './tileindex';
 
 export const TILE_SIZE = 250;
@@ -334,7 +334,8 @@ export function buildScene(world0: World, tileSize = TILE_SIZE): Scene {
     // landmark buildings (keeps, halls, temples, minarets...), urban water (moats, tanks, mill races) and the plan
     // lines (compound and ward walls, moats, quay edges, terraces, hedges, footpaths)
     addPoly('u-lmb', ur.buildings.filter((b) => b.kind === 'landmark' && b.poly.length >= 3).map((b) => b.poly));
-    addPoly('u-water', (ur.water ?? []).map((w) => w.outer));
+    // Nonzero fill combines overlapping pieces while preserving oppositely wound holes.
+    addH('u-water', (ur.water ?? []).map((ph) => ({ outer: orientPos(ph.outer), holes: ph.holes.map((h) => orientPos(h).slice().reverse()) })));
     {
       const byLine = new Map<string, Polyline[]>();
       for (const l of ur.lines ?? []) {
