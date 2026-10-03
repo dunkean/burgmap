@@ -63,7 +63,7 @@ export function dispersedFarms(cc: CampCtx, c: Vec2, statuses: Status[], o: Disp
     const r = o.radius(s, pr);
     let best: Vec2 | null = null, bs = -Infinity;
     const first = !placed.length;
-    const tries = first ? 1 : 90;
+    const tries = first ? 1 : statuses.length > 60 ? 50 : 90;
     for (let t = 0; t < tries + (first ? 40 : 0); t++) {
       const p = first && t === 0 ? c : at(c, pr.range(0, 2 * Math.PI), (first ? pr.range(0, 0.25) : Math.sqrt(pr.float())) * o.spread);
       if (placed.some((q) => dist(q.p, p) < q.r + r + o.gap)) continue;

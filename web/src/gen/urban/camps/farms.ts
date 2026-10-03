@@ -99,43 +99,46 @@ export function fillFarm(out: CampOut, pi: number, yard: Polygon, st: Status, o:
   if (st === 0) out.landmarks.push({ kind: arch, poly: house });
   byreMarks(out, house, hAng, byre);
   const span = Math.sqrt(A);
+  // (the large Norse homefields: the 24 deepest candidates are enough room to search)
+  const nc = o.kind === 'norse' ? 24 : undefined;
   // a second dwelling (the chief's retainers, a large farm's old couple), a byre or barn of its own (norse)
   const n2 = st === 0 ? 2 : st === 1 ? (r.chance(0.6) ? 1 : 0) : st === 2 && r.chance(0.25) ? 1 : 0;
   for (let k = 0; k < n2; k++) {
     const L2 = r.range(9, 15), W2 = r.range(4.6, 5.6);
     const a2 = hAng + (r.chance(0.5) ? Math.PI / 2 : 0) + r.range(-0.1, 0.1);
-    const g = fitIn(yard, (q, s) => (o.kind === 'norse' ? bowSided(q, a2, L2 * s, W2, 0.12) : roundedRect(q, a2, L2 * s, W2, 1.2)), placed, { margin: 1.4, gap: 3, minScale: 0.7 });
+    const g = fitIn(yard, (q, s) => (o.kind === 'norse' ? bowSided(q, a2, L2 * s, W2, 0.12) : roundedRect(q, a2, L2 * s, W2, 1.2)), placed, { margin: 1.4, gap: 3, minScale: 0.7, nc });
     if (g) push(g, 'house', o.kind === 'norse' ? 'byre' : 'small-house', 'gable', o.kind === 'norse' ? 'turf' : 'thatch', a2);
   }
   // granaries on four or six posts
   const nG = [r.int(4, 6), r.int(2, 3), r.int(1, 2), r.int(0, 1)][st];
   for (let k = 0; k < nG; k++) {
-    const gs = r.range(2.4, 3.4), ga = hAng + r.range(-0.08, 0.08);
-    const g = fitIn(yard, (q, s) => rect(q, ga, gs * s, (gs * s) * r.range(0.85, 1.2)), placed, { margin: 1, gap: 1.8, minScale: 0.85, step: 2.5 });
+    const gs = r.range(2.6, 3.4), ga = hAng + r.range(-0.08, 0.08), gk = r.range(0.9, 1.2);
+    const g = fitIn(yard, (q, s) => rect(q, ga, gs * s, gs * s * gk), placed, { margin: 1, gap: 1.8, minScale: 0.85, step: 2.5, nc });
     if (g) push(g, 'outbuilding', 'granary-on-posts', 'gable', 'timber');
   }
   // sunken huts (weaving, storage) or pit houses
   const nS = [r.int(3, 5), r.int(1, 3), r.int(1, 2), r.int(0, 1)][st];
   for (let k = 0; k < nS; k++) {
     const a = hAng + r.range(-0.4, 0.4);
-    const g = fitIn(yard, (q, s) => rect(q, a, r.range(3.4, 4.6) * s, r.range(2.6, 3.2) * s), placed, { margin: 1, gap: 2.2, minScale: 0.85, step: 2.5 });
+    const sl = r.range(3.4, 4.6), sw = r.range(2.8, 3.2);
+    const g = fitIn(yard, (q, s) => rect(q, a, sl * s, sw * s), placed, { margin: 1, gap: 2.2, minScale: 0.85, step: 2.5, nc });
     if (g) push(g, 'outbuilding', o.kind === 'norse' ? 'pit-house' : 'sunken-hut', 'gable', 'timber');
   }
   // a smithy (norse, the larger farms)
   if (o.kind === 'norse' && st <= 1) {
-    const g = fitIn(yard, (q, s) => hut(q, 2.6 * s, 7, r.range(0, 1)), placed, { margin: 1.2, gap: 3, minScale: 0.85 });
+    const g = fitIn(yard, (q, s) => hut(q, 2.6 * s, 7, r.range(0, 1)), placed, { margin: 1.2, gap: 3, minScale: 0.85, nc });
     if (g) push(g, 'outbuilding', 'smithy', 'gable', 'stone');
   }
   // a fenced pen and a kitchen garden in the larger yards
   if (st <= 2 && A > 900 && r.chance(st <= 1 ? 0.8 : 0.45)) {
     const pw = Math.min(16, span * 0.35), ph = Math.min(11, span * 0.25);
     const pa = hAng + (r.chance(0.5) ? 0 : Math.PI / 2);
-    const pen = fitIn(yard, (q, s) => rect(q, pa, pw * s, ph * s), placed, { margin: 1.2, gap: 2.5, minScale: 0.6 });
+    const pen = fitIn(yard, (q, s) => rect(q, pa, pw * s, ph * s), placed, { margin: 1.2, gap: 2.5, minScale: 0.6, nc });
     if (pen) { out.lines.push({ kind: 'pen-fence', path: pen.concat([pen[0]]), width: 0.4 }); placed.push(pen); }
   }
   if (A > 700 && r.chance(0.55)) {
     const gw = r.range(7, 12), gh = r.range(5, 8);
-    const bed = fitIn(yard, (q, s) => rect(q, hAng, gw * s, gh * s), placed, { margin: 1.5, gap: 2, minScale: 0.6 });
+    const bed = fitIn(yard, (q, s) => rect(q, hAng, gw * s, gh * s), placed, { margin: 1.5, gap: 2, minScale: 0.6, nc });
     if (bed) { out.landmarks.push({ kind: 'garden-bed', poly: bed }); placed.push(bed); }
   }
   // the way from the gate to the house, and the trampled yard round the buildings

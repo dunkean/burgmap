@@ -386,11 +386,16 @@ export function bowSided(c: Vec2, ang: number, L: number, W: number, bow = 0.22)
 }
 
 /** Inside the lot with a margin, and clear of the other footprints by `gap`. */
-export function fits(lot: Polygon, fp: Polygon, others: Polygon[], margin: number, gap: number): boolean {
-  if (!polyInside(lot, fp)) return false;
-  for (const q of fp) if (distToRing(lot, q) < margin) return false;
+const BBOX = new WeakMap<Polygon, ReturnType<typeof bboxOf>>();
+export function fits(lot: Polygon, fp: Polygon, others: Polygon[], margin: number, gap: number, inLot = false): boolean {
+  if (!inLot) {
+    if (!polyInside(lot, fp)) return false;
+    for (const q of fp) if (distToRing(lot, q) < margin) return false;
+  }
+  const fb = bboxOf(fp);
   for (const o of others) {
-    const ob = bboxOf(o), fb = bboxOf(fp);
+    let ob = BBOX.get(o);
+    if (!ob) { ob = bboxOf(o); BBOX.set(o, ob); }
     if (fb.x0 > ob.x1 + gap || fb.x1 < ob.x0 - gap || fb.y0 > ob.y1 + gap || fb.y1 < ob.y0 - gap) continue;
     for (const q of fp) if (pointInRing(o, q) || distToRing(o, q) < gap) return false;
     for (const q of o) if (pointInRing(fp, q)) return false;
@@ -405,9 +410,10 @@ export function fits(lot: Polygon, fp: Polygon, others: Polygon[], margin: numbe
  * first, then a grid), shrinking down to `minScale`. Returns the first footprint that fits.
  */
 const FIT_CANDS = new WeakMap<Polygon, Map<number, Vec2[]>>();
-export function fitIn(lot: Polygon, build: (c: Vec2, s: number) => Polygon, others: Polygon[], o: { margin?: number; gap?: number; minScale?: number; cands?: Vec2[]; step?: number } = {}): Polygon | null {
+export function fitIn(lot: Polygon, build: (c: Vec2, s: number) => Polygon, others: Polygon[], o: { margin?: number; gap?: number; minScale?: number; cands?: Vec2[]; step?: number; /** Only the n deepest default candidates. */ nc?: number } = {}): Polygon | null {
   const margin = o.margin ?? 1, gap = o.gap ?? 1.5, minS = o.minScale ?? 0.7;
   let cands: Vec2[];
+  let depths: number[] | null = null;
   if (o.cands) cands = o.cands.slice();
   else {
     // the default candidates depend on the lot and the step only (a yard is filled by many calls): kept per lot
@@ -431,17 +437,33 @@ export function fitIn(lot: Polygon, build: (c: Vec2, s: number) => Polygon, othe
       grid.sort((a, b) => depth.get(b)! - depth.get(a)!);
       cc.push(...grid.slice(0, 60));
       m.set(st, cc);
+      CAND_DEPTH.set(cc, cc.map((p, i) => (i === 0 ? (pointInRing(lot, p) ? distToRing(lot, p) : -1) : depth.get(p)!)));
     }
-    cands = cc;
+    cands = o.nc ? cc.slice(0, o.nc) : cc;
+    depths = CAND_DEPTH.get(cc)!;
   }
+  // (quick tests from the candidate's depth in the lot: a footprint whose inscribed circle round the candidate
+  // reaches the lot boundary cannot fit; one lying within depth − margin of it fits the lot for sure)
+  if (!depths) depths = cands.map((c) => (pointInRing(lot, c) ? distToRing(lot, c) : -1));
   for (let s = 1; s >= minS - 1e-9; s -= 0.1) {
-    for (const c of cands) {
+    for (let k = 0; k < cands.length; k++) {
+      const c = cands[k];
       const fp = build(c, s);
-      if (fp.length >= 3 && fits(lot, fp, others, margin, gap)) return fp;
+      if (fp.length < 3) continue;
+      const dep = depths[k];
+      let inLot = false;
+      if (dep >= 0) {
+        let R = 0, rin = Infinity;
+        for (let i = 0; i < fp.length; i++) { R = Math.max(R, dist(c, fp[i])); rin = Math.min(rin, distToSeg(c, fp[i], fp[(i + 1) % fp.length])); }
+        if (pointInRing(fp, c) && dep < rin - 1e-6) continue;
+        inLot = dep >= R + margin + 1e-6;
+      }
+      if (fits(lot, fp, others, margin, gap, inLot)) return fp;
     }
   }
   return null;
 }
+const CAND_DEPTH = new WeakMap<Vec2[], number[]>();
 
 /** Points along a ring at arclength spacing (for fences and hachures). */
 export function ringSamples(ring: Polygon, step: number): { p: Vec2; t: Vec2 }[] {

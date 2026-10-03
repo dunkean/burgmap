@@ -148,7 +148,7 @@ function clusterSites(ctx: UrbanCtx, c: Vec2, roads: Polyline[], r0: number, rad
  * villages, a gathering of camp circles along the river, a royal kraal and its homesteads, a hillfort and its raths).
  */
 export const CAMP_NAT_MAX: Record<string, number> = {
-  barbarian: 1300, 'barbarian-celtic': 1500, 'barbarian-norse': 1400, 'norse-ringfort': 1100, kraal: 2600, 'native-plains': 2600,
+  barbarian: 1300, 'barbarian-celtic': 1500, 'barbarian-norse': 1400, 'norse-ringfort': 1100, kraal: 1800, 'native-plains': 2600,
   'nomad-camp': 3500, 'native-iroquoian': 2200, 'native-pueblo': 3000, maya: 120000, khmer: 120000, 'celtic-oppidum': 12000,
   orcish: 30000, halfling: 700, 'stilt-town': 6000,
 };
