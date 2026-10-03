@@ -2,6 +2,8 @@
 
 This checklist reconciles the open work in `BUGS.md`, `HANDOFF.md` §7 and `web/POLISH.md`. A task is complete only after its implementation and relevant geometry, visual, UI and performance checks pass. Keep open user bug reports unchanged; remove resolved entries from BUGS.md after validation, as requested by the user. Record completed work here and in Git history.
 
+Current review gate: Astra, actual Claude Opus 5.5 and actual Claude Sonnet 5.5 must all approve each substantial source change or amendment before tests, typecheck, build or generation of the modified code.
+
 ## User bugs, in priority order
 
 - [x] Overlapping phase districts and faubourgs (`0b8b5b9`, seeded regression and visual inspection).
