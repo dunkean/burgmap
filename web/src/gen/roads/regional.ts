@@ -17,21 +17,29 @@ function relax(pl: Polyline, iters: number, maxDisp: number, isWater: (p: Vec2) 
   const pts = resample(pl, 8);
   if (pts.length < 4) return pl;
   // ends stay exactly where they are; interior points keep the relaxed positions
-  const orig = pts.map((p) => ({ ...p }));
+  // (flat coordinate arrays, double-buffered; the same arithmetic as on point objects)
+  const n = pts.length;
+  const OX = Float64Array.from(pts, (p) => p.x), OY = Float64Array.from(pts, (p) => p.y);
+  let X = OX.slice(), Y = OY.slice(), NX = OX.slice(), NY = OY.slice();
+  const q = { x: 0, y: 0 }, cur = { x: 0, y: 0 };
   for (let it = 0; it < iters; it++) {
-    const nx = pts.map((p) => ({ ...p }));
-    for (let i = 1; i < pts.length - 1; i++) {
-      let x = 0.5 * pts[i].x + 0.25 * (pts[i - 1].x + pts[i + 1].x);
-      let y = 0.5 * pts[i].y + 0.25 * (pts[i - 1].y + pts[i + 1].y);
-      const dx = x - orig[i].x, dy = y - orig[i].y, d = Math.hypot(dx, dy);
-      if (d > maxDisp) { x = orig[i].x + (dx / d) * maxDisp; y = orig[i].y + (dy / d) * maxDisp; }
-      if (isWater({ x, y }) && !isWater(pts[i])) continue; // never pull the road into water
-      if (pin && pin(pts[i])) continue;
-      nx[i].x = x; nx[i].y = y;
+    NX.set(X); NY.set(Y);
+    for (let i = 1; i < n - 1; i++) {
+      let x = 0.5 * X[i] + 0.25 * (X[i - 1] + X[i + 1]);
+      let y = 0.5 * Y[i] + 0.25 * (Y[i - 1] + Y[i + 1]);
+      const dx = x - OX[i], dy = y - OY[i], d = Math.hypot(dx, dy);
+      if (d > maxDisp) { x = OX[i] + (dx / d) * maxDisp; y = OY[i] + (dy / d) * maxDisp; }
+      q.x = x; q.y = y; cur.x = X[i]; cur.y = Y[i];
+      if (isWater(q) && !isWater(cur)) continue; // never pull the road into water
+      if (pin && pin(cur)) continue;
+      NX[i] = x; NY[i] = y;
     }
-    for (let i = 0; i < pts.length; i++) pts[i] = nx[i];
+    const tx = X, ty = Y;
+    X = NX; Y = NY; NX = tx; NY = ty;
   }
-  return pts;
+  const out: Vec2[] = new Array(n);
+  for (let i = 0; i < n; i++) out[i] = { x: X[i], y: Y[i] };
+  return out;
 }
 
 export const ROAD_WIDTH = { major: 8, minor: 5, track: 3 } as const;
@@ -46,19 +54,26 @@ export interface AStarCfg {
   allowBridge: boolean;
 }
 
+/**
+ * Search buffers reused across A* calls (one map grid at a time): an epoch stamp marks the cells touched by the
+ * current search, so a call costs what it explores, not the size of the map.
+ */
+let AS: { N: number; g: Float32Array; parent: Int32Array; seen: Uint32Array; closed: Uint32Array; epoch: number } | null = null;
+
 /** A* on the cost grid; returns the cell path start -> goal or null. */
 function astar(cfg: AStarCfg, start: number, isGoal: (idx: number) => boolean): number[] | null {
   const { w, h, cell, H, pass, cm, used, discount } = cfg;
   const N = w * h;
-  const g = new Float32Array(N).fill(Infinity);
-  const parent = new Int32Array(N).fill(-1);
-  const closed = new Uint8Array(N);
+  if (!AS || AS.N !== N || AS.epoch >= 0xfffffff0) AS = { N, g: new Float32Array(N), parent: new Int32Array(N), seen: new Uint32Array(N), closed: new Uint32Array(N), epoch: 0 };
+  const ep = ++AS.epoch;
+  const { g, parent, seen, closed } = AS;
+  // (a cell not seen in this search has g = Infinity and no parent)
   const heap = new MinHeap<number>();
-  g[start] = 0; heap.push(start, cfg.hf(start));
+  g[start] = 0; parent[start] = -1; seen[start] = ep; heap.push(start, cfg.hf(start));
   while (heap.size) {
     const c = heap.pop()!;
-    if (closed[c]) continue;
-    closed[c] = 1;
+    if (closed[c] === ep) continue;
+    closed[c] = ep;
     if (isGoal(c)) {
       const out: number[] = [];
       for (let i = c; i >= 0; i = parent[i]) out.push(i);
@@ -70,8 +85,8 @@ function astar(cfg: AStarCfg, start: number, isGoal: (idx: number) => boolean): 
       const nx = cx + dx, ny = cy + dy;
       if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
       const n = ny * w + nx;
-      if (closed[n]) continue;
-      let pt = pass[n];
+      if (closed[n] === ep) continue;
+      const pt = pass[n];
       if (!pt || (pt === 3 && !cfg.allowBridge)) continue;
       if (dx !== 0 && dy !== 0 && (!pass[c + dx] || !pass[c + dy * w] || (!cfg.allowBridge && (pass[c + dx] === 3 || pass[c + dy * w] === 3)))) continue;
       const d = D8_DIST[k] * cell;
@@ -79,8 +94,8 @@ function astar(cfg: AStarCfg, start: number, isGoal: (idx: number) => boolean): 
       let step = d * gradeMult(gr) * cm[n];
       if (used && used[n]) step *= discount;
       const ng = g[c] + step;
-      if (ng < g[n]) {
-        g[n] = ng; parent[n] = c;
+      if (ng < (seen[n] === ep ? g[n] : Infinity)) {
+        seen[n] = ep; g[n] = ng; parent[n] = c;
         const hv = cfg.hf(n);
         if (hv !== Infinity) heap.push(n, ng + hv);
       }
@@ -88,7 +103,6 @@ function astar(cfg: AStarCfg, start: number, isGoal: (idx: number) => boolean): 
   }
   return null;
 }
-
 
 /** Per-cell id of the river/brook (index into terrain.rivers) whose ribbon covers the cell, -1 elsewhere. */
 export function streamIds(terrain: TerrainLayer): Int16Array {
@@ -123,6 +137,19 @@ export function crossingCounts(cells: number[], ids: Int16Array, pass: Uint8Arra
   return out;
 }
 
+const STREAM_CELLS = new WeakMap<Int16Array, Int32Array>();
+/** Indices of the cells with a stream id (ascending), cached per id raster. */
+function streamCells(ids: Int16Array): Int32Array {
+  let l = STREAM_CELLS.get(ids);
+  if (!l) {
+    const out: number[] = [];
+    for (let i = 0; i < ids.length; i++) if (ids[i] >= 0) out.push(i);
+    l = Int32Array.from(out);
+    STREAM_CELLS.set(ids, l);
+  }
+  return l;
+}
+
 /**
  * A* that discourages crossing the same brook repeatedly (roads in gorges zig-zag over one stream 6+ times):
  * after each attempt every stream crossed more than once (`maxCross` for the main river) gets its cells' cost
@@ -144,7 +171,8 @@ export function astarFewCrossings(
     if (excess === 0) break;
     if (cm === cfg.cm) cm = Float32Array.from(cfg.cm);
     const set = new Set(bad);
-    for (let i = 0; i < cm.length; i++) if (set.has(ids[i]) && cfg.pass[i] >= 2) cm[i] *= 6;
+    // (only stream cells can carry a bad id: their list is kept per id raster)
+    for (const i of streamCells(ids)) if (set.has(ids[i]) && cfg.pass[i] >= 2) cm[i] *= 6;
   }
   return best;
 }
