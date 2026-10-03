@@ -182,7 +182,10 @@ function cultureUnderlay(ub: NonNullable<World['urban']>, pal: Palette, lw: (m: 
   const canalsL = (ub.lines ?? []).filter((l) => l.kind === 'canal');
   for (const l of canalsL) s += `<path d="${pathD(l.path, false)}" fill="none" stroke="${pal.riverFill}" stroke-width="${f1(l.width ?? 2)}" stroke-linecap="round" stroke-linejoin="round"/>`;
   // cornfields round a native village: corn hills in rows
-  const corn = ub.landmarks.filter((l) => l.kind === 'cornfield' || l.kind === 'terrace-field' || l.kind === 'garden-bed');
+  // agricultural terraces (andenes): the flights cleared and cultivated (their walls are drawn over the buildings)
+  const terr = ub.landmarks.filter((l) => l.kind === 'terrace-field').map((l) => pathD(l.poly, true)).join('');
+  if (terr) s += `<path class="u-terraces" d="${terr}" fill="${terraceTone(pal)}" stroke="${terraceTone(pal)}" stroke-width="${lw(1.5, 0.3)}"/>`;
+  const corn = ub.landmarks.filter((l) => l.kind === 'cornfield' || l.kind === 'garden-bed');
   if (corn.length) {
     const d = corn.map((l) => pathD(l.poly, true)).join('');
     // (the corn hills in rows: a dense dot texture that reads as a tilled field from afar)
@@ -218,7 +221,14 @@ function cultureOverlay(ub: NonNullable<World['urban']>, pal: Palette, lw: (m: n
     else if (k === 'parterre' || k === 'footpath') s += `<path d="${d}" fill="none" stroke="${k === 'footpath' ? (open ? pathEarth(pal) : U.street) : U.plotLine}" stroke-width="${lw(k === 'footpath' ? 1.4 : 0.5, 0.15)}" stroke-linecap="round"/>`;
     else if (k === 'ghat-steps') s += `<path d="${d}" fill="none" stroke="${U.plotLine}" stroke-width="${lw(0.3, 0.12)}"/>`;
     else if (k === 'terrace') s += `<path d="${d}" fill="none" stroke="${U.wall}" stroke-width="${lw(1.6, 0.8)}"/>`;
-    else if (k === 'andene') s += `<path d="${d}" fill="none" stroke="${U.wall}" stroke-width="${lw(0.9, 0.4)}" stroke-opacity="0.75"/>`;
+    else if (k === 'andene') {
+      // the riser faces first (shaded on the downhill side), then the retaining walls
+      const ris = (byKind.get('andene-riser') ?? []).join('');
+      if (ris) s += `<path d="${ris}" fill="none" stroke="${mixHex(U.wall, pal.land.meadow, 0.55)}" stroke-opacity="0.5" stroke-width="${lw(1.6, 0.5)}"/>`;
+      s += `<path d="${d}" fill="none" stroke="${U.wall}" stroke-width="${lw(0.8, 0.35)}" stroke-opacity="0.9"/>`;
+    }
+    else if (k === 'andene-riser') continue;
+    else if (k === 'terrace-stair') s += `<path d="${d}" fill="none" stroke="${U.wall}" stroke-width="${lw(1.6, 0.6)}" stroke-dasharray="0.35 0.55" stroke-opacity="0.85"/><path d="${d}" fill="none" stroke="${U.wall}" stroke-width="${lw(0.15, 0.1)}" stroke-opacity="0.6"/>`;
     else if (k === 'thorn-fence') s += `<path d="${d}" fill="none" stroke="${pal.treeInk ?? '#4a6a3a'}" stroke-width="${lw(2.2, 0.8)}" stroke-opacity="0.85" stroke-dasharray="1.3 0.9" stroke-linecap="round"/>`;
     else if (CAMP_FENCES[k]) s += fenceSvg(k, d, pal, lw);
     else if (k === 'garden-hedge') s += `<path d="${d}" fill="none" stroke="${pal.treeInk ?? '#4a6a3a'}" stroke-width="${lw(1.2, 0.4)}" stroke-opacity="0.7" stroke-dasharray="1.6 0.7"/>`;
@@ -261,6 +271,8 @@ export const pathEarth = (pal: Palette): string => mixHex(pal.trackFill, pal.urb
 export const yardEarthTone = (pal: Palette): string => mixHex(pal.farmYard, pal.trackFill, 0.12);
 /** Opaque ground of a walled open-ground city: the paper under a light meadow tint. */
 export const openGroundBase = (pal: Palette): string => mixHex(pal.paper, pal.land.meadow, 0.35);
+/** The cultivated treads of the Inca terraces. */
+export const terraceTone = (pal: Palette): string => mixHex(pal.land.meadow, pal.land.garden, 0.4);
 /** Width (m) of the grass band drawn round the quarters of an open-ground settlement. */
 export const OPEN_HALO = 12;
 

@@ -109,7 +109,7 @@ export const FENCE_STYLE: Record<string, [number, number, number, number]> = {
   palisade: [0.3, 1.05, 0.55, 0.28], 'kraal-fence': [0.3, 1.15, 0.8, 0.5],
 };
 /** Plan-line kinds with their own rule (anything else falls back to the wall-like stroke). */
-export const URBAN_SPECIAL_LINES = ['moat', 'canal', 'hedge', 'track', 'weir', 'parterre', 'footpath', 'ghat-steps', 'terrace', 'andene', 'thorn-fence', 'rampart', 'ditch', 'footbridge', 'bazaar-roof', 'qanat', 'qanat-shaft', 'hachure', 'roof-line', 'bund', 'garden-hedge'] as const;
+export const URBAN_SPECIAL_LINES = ['moat', 'canal', 'hedge', 'track', 'weir', 'parterre', 'footpath', 'ghat-steps', 'terrace', 'andene', 'thorn-fence', 'rampart', 'ditch', 'footbridge', 'bazaar-roof', 'qanat', 'qanat-shaft', 'hachure', 'roof-line', 'bund', 'garden-hedge', 'andene-riser', 'terrace-stair'] as const;
 export const URBAN_LINE_KINDS: readonly string[] = [...URBAN_SPECIAL_LINES, ...Object.keys(WALL_LINE_W), ...Object.keys(CAMP_FENCE_W)];
 
 export const LAND_ORDER: LandKind[] = ['meadow', 'marsh', 'pasture', 'commons', 'forest', 'garden', 'orchard', 'field'];
@@ -301,7 +301,8 @@ export function buildScene(world0: World, tileSize = TILE_SIZE): Scene {
     addPoly('u-bases', lmOf('tenshu-base', 'mebon'));
     addPoly('u-patios', ur.buildings.flatMap((b) => (b.kind === 'house' && b.courtyards?.length ? b.courtyards.filter((c) => c.length >= 3) : [])));
     addPoly('u-trees', (ur.trees ?? []).map((t) => ngon(t, t.r, 8)));
-    addPoly('u-cornfields', ur.landmarks.filter((l) => l.kind === 'cornfield' || l.kind === 'terrace-field' || l.kind === 'garden-bed').map((l) => l.poly));
+    addPoly('u-cornfields', ur.landmarks.filter((l) => l.kind === 'cornfield' || l.kind === 'garden-bed').map((l) => l.poly));
+    addPoly('u-terraces', ur.landmarks.filter((l) => l.kind === 'terrace-field').map((l) => l.poly));
     addPoly('u-chinampa-canals', ur.landmarks.filter((l) => l.kind === 'chinampa-canal' || l.kind === 'baray' || l.kind === 'pond').map((l) => l.poly));
     addPoly('u-chinampas', ur.landmarks.filter((l) => l.kind === 'chinampa').map((l) => l.poly));
     addPoly('block-edges', ur.blocks);

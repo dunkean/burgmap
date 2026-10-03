@@ -14,8 +14,8 @@ import type { UrbanLine } from '../types';
 import type { UrbanCtx } from './context';
 import type { CompoundCtx, CompoundOut } from './compounds';
 import { registerBuilders } from './compounds';
-import { area, orientPos, pointInRing, distToRing, inscribed, obb } from '../geo/poly';
-import { MultiPoly, differenceS } from '../geo/bool';
+import { area, orientPos, pointInRing, distToRing, inscribed, obb, bboxOf } from '../geo/poly';
+import { MultiPoly, differenceS, intersectionS } from '../geo/bool';
 import { ribbon } from '../geo/offset';
 import { pieces } from './camps/kit';
 import { alongEdge, placeRect, longestEdge, fits } from './m4/kit';
@@ -131,8 +131,10 @@ export function registerInca(): void {
 }
 
 /**
- * Agricultural terraces (andenes): contour lines every `step` m of height on the slopes round the town (between
- * 25 and `reach` m from the footprint), drawn as terrace walls; only where the ground is steep enough to need them.
+ * Agricultural terraces (andenes, as at Pisac, Moray, Ollantaytambo): flights of stepped strips on the slopes round
+ * the town (between 25 and `reach` m from the footprint, only where the ground is steep enough to need them), each
+ * flight a bounded patch of hillside; inside it a retaining wall on every contour `step` m apart, its riser face
+ * shaded on the downhill side, the treads cultivated; a stair climbs each flight up its fall line.
  */
 export function andenes(ctx: UrbanCtx, footprint: Polygon[], reach: number): { lines: UrbanLine[]; fields: Polygon[] } {
   const g = ctx.terrain.height, n = g.w, cell = g.cell;
@@ -141,17 +143,18 @@ export function andenes(ctx: UrbanCtx, footprint: Polygon[], reach: number): { l
   let lo = Infinity, hi = -Infinity;
   for (let i = 0; i < g.data.length; i++) if (dF[i] < reach) { lo = Math.min(lo, g.data[i]); hi = Math.max(hi, g.data[i]); }
   if (!(hi > lo)) return { lines: [], fields: [] };
-  const step = Math.max(2.2, Math.min(4, (hi - lo) / 40));
+  // (the step: ~2.5 m of height; on gentle ground a wider tread, never closer than ~6 m on the map)
+  const step = Math.max(2, Math.min(3.5, (hi - lo) / 45));
   const out: UrbanLine[] = [];
+  const slopeAt = (q: Vec2) => sampleGrid(ctx.terrain.slope, q.x, q.y);
   const ok = (q: Vec2): boolean => {
     const ix = Math.min(n - 1, Math.max(0, Math.floor(q.x / cell))), iy = Math.min(n - 1, Math.max(0, Math.floor(q.y / cell)));
     const d = dF[iy * n + ix];
     if (d < 25 || d > reach) return false;
     if (ctx.isWater(q)) return false;
-    const sl = sampleGrid(ctx.terrain.slope, q.x, q.y);
-    return sl > 0.07 && sl < 0.6;
+    const sl = slopeAt(q);
+    return sl > 0.08 && sl < 0.6;
   };
-  // the terraced land itself: the cells where terraces are built, smoothed into cultivated fields
   const mask = new Float32Array(n * n);
   for (let iy = 0; iy < n; iy++) for (let ix = 0; ix < n; ix++) mask[iy * n + ix] = ok({ x: (ix + 0.5) * cell, y: (iy + 0.5) * cell }) ? 1 : 0;
   const sm = mask.slice();
@@ -163,23 +166,99 @@ export function andenes(ctx: UrbanCtx, footprint: Polygon[], reach: number): { l
       sm[iy * n + ix] = t / 9;
     }
   }
-  // (clear of the roads and the water)
-  let fm: MultiPoly = isoRegions(sm, n, cell, 0.5, 3000).map((ph) => ({ outer: ph.outer, holes: [] }));
-  const roadRb: MultiPoly = (ctx.world.roads ?? []).map((r) => ribbon(r.path, r.width + 6)).filter((r) => r.length >= 3).map((r) => ({ outer: r, holes: [] }));
-  if (fm.length && roadRb.length) fm = differenceS(fm, roadRb);
-  if (fm.length && ctx.water.length) fm = differenceS(fm, ctx.water);
-  const fields = pieces(fm, 3000);
-  const inField = (q: Vec2) => fields.some((f) => pointInRing(f, q));
+  let land: MultiPoly = isoRegions(sm, n, cell, 0.5, 3000).map((ph) => ({ outer: ph.outer, holes: [] }));
+  const roadRb: MultiPoly = (ctx.world.roads ?? []).map((r) => ribbon(r.path, r.width + 8)).filter((r) => r.length >= 3).map((r) => ({ outer: r, holes: [] }));
+  if (land.length && roadRb.length) land = differenceS(land, roadRb);
+  if (land.length && ctx.water.length) land = differenceS(land, ctx.water);
+  if (!land.length) return { lines: [], fields: [] };
+  // ---- flights: lobes of the suitable land round seeds on the steepest ground nearest the town, each wider along
+  // the contour than down the slope
+  const seeds: { p: Vec2; s: number }[] = [];
+  for (let iy = 1; iy < n - 1; iy += 2) for (let ix = 1; ix < n - 1; ix += 2) {
+    const i = iy * n + ix;
+    if (sm[i] < 0.75) continue;
+    const p = { x: (ix + 0.5) * cell, y: (iy + 0.5) * cell };
+    seeds.push({ p, s: slopeAt(p) * 2 - dF[i] / reach });
+  }
+  seeds.sort((a, b) => b.s - a.s);
+  const flights: Polygon[] = [];
+  const centres: Vec2[] = [];
+  const maxF = Math.min(9, 3 + Math.round(reach / 120));
+  for (const sd of seeds) {
+    if (flights.length >= maxF) break;
+    const R = 70 + (Math.abs(Math.sin(sd.p.x * 0.013 + sd.p.y * 0.007)) * 80);
+    if (centres.some((c) => dist(c, sd.p) < R + 70)) continue;
+    // the contour direction at the seed: the lobe is stretched along it
+    const h = (q: Vec2) => ctx.heightAt(q);
+    const gx = h({ x: sd.p.x + 10, y: sd.p.y }) - h({ x: sd.p.x - 10, y: sd.p.y }), gy = h({ x: sd.p.x, y: sd.p.y + 10 }) - h({ x: sd.p.x, y: sd.p.y - 10 });
+    const along = Math.atan2(gx, -gy);
+    const lobe = orientPos(Array.from({ length: 28 }, (_, k) => {
+      const t = (k / 28) * 2 * Math.PI;
+      const w = 1 + 0.12 * Math.sin(t * 3 + sd.p.x * 0.1);
+      const u = Math.cos(t) * R * 1.5 * w, v = Math.sin(t) * R * 0.75 * w;
+      return { x: sd.p.x + u * Math.cos(along) - v * Math.sin(along), y: sd.p.y + u * Math.sin(along) + v * Math.cos(along) };
+    }));
+    // (its top and bottom edges follow two contours: the band of height round the seed's)
+    const h0 = ctx.heightAt(sd.p), Hh = step * (4 + Math.round(Math.abs(Math.sin(sd.p.y * 0.011)) * 6));
+    const band = new Float32Array(n * n);
+    const lb = bboxOf(lobe);
+    for (let iy = Math.max(0, Math.floor(lb.y0 / cell) - 1); iy <= Math.min(n - 1, Math.ceil(lb.y1 / cell) + 1); iy++) for (let ix = Math.max(0, Math.floor(lb.x0 / cell) - 1); ix <= Math.min(n - 1, Math.ceil(lb.x1 / cell) + 1); ix++) {
+      const hh = g.data[iy * n + ix];
+      band[iy * n + ix] = Math.abs(hh - h0) <= Hh / 2 ? 1 : 0;
+    }
+    let m: MultiPoly = [{ outer: lobe, holes: [] }];
+    const bandP: MultiPoly = isoRegions(band, n, cell, 0.5, 800).map((ph) => ({ outer: ph.outer, holes: [] }));
+    if (bandP.length) m = intersectionS(m, bandP);
+    m = intersectionS(m, land);
+    for (const f of flights) m = differenceS(m, [{ outer: f, holes: [] }]);
+    const ps = pieces(m, 2500);
+    if (!ps.length) continue;
+    // (the raster edges smoothed: a flight's sides are curved banks, not steps)
+    const f0 = ps.reduce((a, b) => (area(b) > area(a) ? b : a));
+    const f = orientPos(chaikin(f0, 2, true));
+    if (f.length < 3 || flights.some((o) => o.some((q) => pointInRing(f, q)) || f.some((q) => pointInRing(o, q)))) continue;
+    flights.push(f);
+    centres.push(sd.p);
+  }
+  const inFlight = (q: Vec2): number => flights.findIndex((f) => pointInRing(f, q));
+  // ---- the retaining walls: the contours inside each flight, their risers shaded on the downhill side
+  const down = (q: Vec2): Vec2 => {
+    const h = (p: Vec2) => ctx.heightAt(p);
+    const gx = h({ x: q.x + 4, y: q.y }) - h({ x: q.x - 4, y: q.y }), gy = h({ x: q.x, y: q.y + 4 }) - h({ x: q.x, y: q.y - 4 });
+    const L = Math.hypot(gx, gy) || 1;
+    return { x: -gx / L, y: -gy / L };
+  };
   for (let lv = Math.ceil(lo / step) * step; lv < hi; lv += step) {
     for (const p of marchingSquares(g.data, g.w, g.h, lv, cell, cell / 2, cell / 2)) {
-      const pts = chaikin(p.pts, 2, p.closed);
+      const pts = chaikin(p.pts, 3, p.closed);
       let run: Vec2[] = [];
-      const flush = () => { if (run.length >= 3 && polylineLength(run) > 30) out.push({ kind: 'andene', path: simplify(run, 0.6), width: 1 }); run = []; };
-      for (const q of pts) { if (ok(q) && inField(q)) run.push(q); else flush(); }
+      let fi = -1;
+      const flush = () => {
+        if (run.length >= 3 && polylineLength(run) > 14) {
+          const wall = simplify(run, 0.4);
+          out.push({ kind: 'andene', path: wall, width: 1 });
+          out.push({ kind: 'andene-riser', path: wall.map((q) => { const d = down(q); return { x: q.x + d.x * 1.3, y: q.y + d.y * 1.3 }; }), width: 1.6 });
+        }
+        run = [];
+      };
+      for (const q of pts) {
+        const f = inFlight(q);
+        if (f >= 0 && (fi < 0 || f === fi)) { run.push(q); fi = f; } else { flush(); fi = f; if (f >= 0) run.push(q); }
+      }
       flush();
     }
   }
-  return { lines: out, fields };
+  // ---- a stair up the fall line of each flight
+  centres.forEach((c, k) => {
+    const f = flights[k];
+    const path: Vec2[] = [];
+    let q = c;
+    for (let i = 0; i < 60 && pointInRing(f, q); i++) { path.unshift(q); const d = down(q); q = { x: q.x - d.x * 4, y: q.y - d.y * 4 }; }
+    q = c;
+    for (let i = 0; i < 60; i++) { const d = down(q); q = { x: q.x + d.x * 4, y: q.y + d.y * 4 }; if (!pointInRing(f, q)) break; path.push(q); }
+    if (path.length >= 4) out.push({ kind: 'terrace-stair', path, width: 1.4 });
+  });
+  return { lines: out, fields: flights };
 }
 
 /** Canalized streams: stone channel walls along both banks of the watercourses inside the town footprint. */
