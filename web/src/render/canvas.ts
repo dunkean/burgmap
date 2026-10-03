@@ -677,7 +677,7 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
       {
         const treeInk = pal.treeInk ?? '#4a6a3a';
         const fine = lod.fine;
-        strokeLines(linesOf((x) => x.role === 'uline' && x.kind === 'andene-riser'), mixHex(U.wall, pal.land.meadow, 0.55), () => lw(1.6, 0.6), 0.5);
+        if (lod.fine) strokeLines(linesOf((x) => x.role === 'uline' && x.kind === 'andene-riser'), U.wall, () => 1.5, 0.45, [0.22, 0.85], 'butt');
         for (const l of linesOf((x) => x.role === 'uline')) {
           const k = l.kind, w = l.width;
           const one = (color: string, width: number, alpha = 1, dash: number[] = [], cap: CanvasLineCap = 'round'): void => strokeLines([l], color, () => width, alpha, dash, cap);
@@ -694,7 +694,7 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
           else if (k === 'albarrada') one(U.wall, lw(0.85, 0.4), 0.4, fine ? [0.9, 0.45] : []);
           else if (k === 'ghat-steps') { if (fine) one(U.plotLine, lw(0.3, 0.4)); }
           else if (k === 'terrace') one(U.wall, lw(1.6, 0.8));
-          else if (k === 'andene') one(U.wall, lw(0.8, 0.45), 0.9);
+          else if (k === 'andene') one(U.wall, lw(0.4, 0.4), 0.8);
           else if (k === 'andene-riser') continue;
           else if (k === 'terrace-stair') { one(U.wall, lw(1.6, 0.6), 0.85, fine ? [0.35, 0.55] : [], 'butt'); }
           else if (k === 'thorn-fence') one(treeInk, lw(2.2, 0.8), 0.85, near ? [1.3, 0.9] : []);

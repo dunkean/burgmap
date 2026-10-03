@@ -224,8 +224,9 @@ function cultureOverlay(ub: NonNullable<World['urban']>, pal: Palette, lw: (m: n
     else if (k === 'andene') {
       // the riser faces first (shaded on the downhill side), then the retaining walls
       const ris = (byKind.get('andene-riser') ?? []).join('');
-      if (ris) s += `<path d="${ris}" fill="none" stroke="${mixHex(U.wall, pal.land.meadow, 0.55)}" stroke-opacity="0.5" stroke-width="${lw(1.6, 0.5)}"/>`;
-      s += `<path d="${d}" fill="none" stroke="${U.wall}" stroke-width="${lw(0.8, 0.35)}" stroke-opacity="0.9"/>`;
+      // (the riser face as short hachures on the downhill side of a fine wall line: the engraver's terrace)
+      if (ris) s += `<path d="${ris}" fill="none" stroke="${U.wall}" stroke-opacity="0.45" stroke-width="${f1(1.5)}" stroke-dasharray="0.22 0.85" stroke-linecap="butt"/>`;
+      s += `<path d="${d}" fill="none" stroke="${U.wall}" stroke-width="${lw(0.4, 0.25)}" stroke-opacity="0.8"/>`;
     }
     else if (k === 'andene-riser') continue;
     else if (k === 'terrace-stair') s += `<path d="${d}" fill="none" stroke="${U.wall}" stroke-width="${lw(1.6, 0.6)}" stroke-dasharray="0.35 0.55" stroke-opacity="0.85"/><path d="${d}" fill="none" stroke="${U.wall}" stroke-width="${lw(0.15, 0.1)}" stroke-opacity="0.6"/>`;

@@ -237,7 +237,7 @@ export function andenes(ctx: UrbanCtx, footprint: Polygon[], reach: number): { l
         if (run.length >= 3 && polylineLength(run) > 14) {
           const wall = simplify(run, 0.4);
           out.push({ kind: 'andene', path: wall, width: 1 });
-          out.push({ kind: 'andene-riser', path: wall.map((q) => { const d = down(q); return { x: q.x + d.x * 1.3, y: q.y + d.y * 1.3 }; }), width: 1.6 });
+          out.push({ kind: 'andene-riser', path: wall.map((q) => { const d = down(q); return { x: q.x + d.x * 0.95, y: q.y + d.y * 0.95 }; }), width: 1.5 });
         }
         run = [];
       };
