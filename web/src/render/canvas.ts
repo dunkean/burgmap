@@ -525,26 +525,15 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
           ctx.globalCompositeOperation = 'source-over';
           if (pat) { ctx.fillStyle = pat; for (const p of polyPaths(l)) ctx.fill(p, 'evenodd'); }
         };
-        // the settlement's ground: its quarters and a band round them (the land use keeps a margin round the footprint)
-        {
-          const gl = polyL('u-streets');
-          // (a walled city hides the regional roads under it: its ground is opaque)
-          if (gl && (world.urban?.walls?.length || polyL('u-mud'))) fillPolys('u-streets', mixHex(pal.paper, pal.land.meadow, 0.35), 1, 'nonzero');
-          if (gl) {
-            if (pal.landBlend === 'multiply') ctx.globalCompositeOperation = 'multiply';
-            ctx.globalAlpha = pal.landOpacity * 0.8; ctx.fillStyle = pal.land.meadow; ctx.strokeStyle = pal.land.meadow; ctx.lineWidth = 24; ctx.lineJoin = 'round';
-            const gp = polyPaths(gl);
-            // (one path for all: overlapping bands do not darken)
-            const all = new Path2D();
-            for (const p of gp) all.addPath(p);
-            ctx.fill(all, 'nonzero'); ctx.stroke(all);
-            ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
-          }
-        }
+        // the settlement's ground (the footprint and a margin round it, off the water), opaque where it hides roads
+        if (polyL('u-ground-solid')) fillPolys('u-ground-solid', mixHex(pal.paper, pal.land.meadow, 0.35), 1, 'nonzero');
+        tint('u-ground', pal.land.meadow, pal.landOpacity * 0.8, tuft);
         tint('u-open-grass', pal.land.pasture, pal.landOpacity * 0.85, tuft);
         tint('u-open-green', pal.land.meadow, pal.landOpacity, tuft);
         tint('u-open-garden', pal.land.garden, pal.landOpacity, null);
         tint('u-open-field', pal.land.field, pal.landOpacity, null);
+        if (polyL('u-open-field')) strokePolys('u-open-field', pal.furrow, lw(0.4, 0.4), 0.4);
+        tint('u-open-commons', pal.land.pasture, pal.landOpacity * 0.8, null);
         // churned mud (a war camp), puddles
         if (polyL('u-mud')) {
           const dk = mixHex(pal.trackFill, '#000000', 0.25);

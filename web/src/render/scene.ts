@@ -96,8 +96,9 @@ export const URBAN_PARCEL_USES = {
   openGreen: ['meadow', 'green'],
   openGarden: ['garden'],
   openField: ['field'],
+  openCommons: ['commons'],
 } as const;
-export const URBAN_LANDMARK_KINDS = ['sahn', 'garth', 'chinampa-canal', 'baray', 'pond', 'chinampa', 'cornfield', 'terrace-field', 'garden-bed', 'cemetery', 'tenshu-base', 'mebon', 'yard-earth', 'midden', 'mud', 'puddle'] as const;
+export const URBAN_LANDMARK_KINDS = ['sahn', 'garth', 'chinampa-canal', 'baray', 'pond', 'chinampa', 'cornfield', 'terrace-field', 'garden-bed', 'cemetery', 'tenshu-base', 'mebon', 'yard-earth', 'midden', 'mud', 'puddle', 'camp-ground'] as const;
 /** Building kinds with a dedicated look (the rest are ordinary roofs). */
 export const URBAN_BUILDING_KINDS = ['church', 'cathedral', 'landmark', 'house'] as const;
 /** Plan-line widths (m) of the generic wall-like kinds, and of camp / village fences (same tables as urban.ts). */
@@ -133,6 +134,15 @@ function polyArea(p: Polygon): number {
   let a = 0;
   for (let i = 0, j = p.length - 1; i < p.length; j = i++) a += (p[j].x + p[i].x) * (p[j].y - p[i].y);
   return Math.abs(a) / 2;
+}
+
+/**
+ * The ground pieces of an open-ground settlement that hide what lies under them (the regional roads): all of them
+ * for a walled or muddy camp, else the large ones (a camp circle, a village; not the homefields of scattered farms).
+ */
+export function solidGround(ub: NonNullable<World['urban']>): Polygon[] {
+  const all = !!ub.walls?.length || ub.landmarks.some((l) => l.kind === 'mud');
+  return ub.landmarks.filter((l) => l.kind === 'camp-ground' && (all || polyArea(l.poly) > 20000)).map((l) => l.poly);
 }
 
 /** Built-up fraction per cell (building footprints, else blocks). */
@@ -290,6 +300,9 @@ export function buildScene(world0: World, tileSize = TILE_SIZE): Scene {
       addPoly('u-open-green', parcelsOf([...PU.openGreen]));
       addPoly('u-open-garden', parcelsOf([...PU.openGarden]));
       addPoly('u-open-field', parcelsOf([...PU.openField]));
+      addPoly('u-open-commons', parcelsOf([...PU.openCommons]));
+      addPoly('u-ground', ur.landmarks.filter((l) => l.kind === 'camp-ground').map((l) => l.poly));
+      addPoly('u-ground-solid', solidGround(ur));
       addPoly('u-mud', ur.landmarks.filter((l) => l.kind === 'mud').map((l) => l.poly));
       addPoly('u-puddle', ur.landmarks.filter((l) => l.kind === 'puddle').map((l) => l.poly));
       addPoly('u-yard-earth', ur.landmarks.filter((l) => l.kind === 'yard-earth' || l.kind === 'midden').map((l) => l.poly));
@@ -342,7 +355,7 @@ export function buildScene(world0: World, tileSize = TILE_SIZE): Scene {
       crosses.push([{ x: cx - r, y: cy }, { x: cx + r, y: cy }], [{ x: cx, y: cy - r * 1.4 }, { x: cx, y: cy + r }]);
     }
     addLines('church-cross', 'cross', 'cross', 0.9, crosses);
-    addPoly('landmarks', ur.landmarks.filter((l) => l.kind !== 'yard-earth' && l.kind !== 'midden' && l.kind !== 'mud' && l.kind !== 'puddle').map((l) => l.poly));
+    addPoly('landmarks', ur.landmarks.filter((l) => l.kind !== 'yard-earth' && l.kind !== 'midden' && l.kind !== 'mud' && l.kind !== 'puddle' && l.kind !== 'camp-ground').map((l) => l.poly));
     // streets by rank and (rounded) width so each layer shares one stroke width; the streets of the secondary
     // settlements (villages, hamlets) are kept in their own layers ('vstreet-*'): the renderer never draws them as
     // far-zoom arterials

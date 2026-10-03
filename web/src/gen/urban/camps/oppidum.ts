@@ -27,7 +27,7 @@ export function oppidum(cc: CampCtx, c: Vec2, pop: number, rng: Rng): CampOut {
   const ctx = cc.ctx;
   const sk = Math.sqrt(cc.sprawl);
   // (spacious: 40–55 inhabitants per hectare inside the walls)
-  const dens = pop < 1000 ? 55 : 42;
+  const dens = pop < 1000 ? 55 : pop < 8000 ? 45 : 70;
   const R = Math.min(ctx.mapSize * 0.33, Math.max(110, Math.sqrt(((pop / dens) * 1e4 * cc.sprawl) / Math.PI)));
   const en = enclosureAt(cc, c, R, rng.fork('encl'), true);
   const ringAt = en.at;
@@ -110,6 +110,7 @@ export function oppidum(cc: CampCtx, c: Vec2, pop: number, rng: Rng): CampOut {
   const g0 = gates[0]?.p ?? c;
   const st = statusLadder(seeds.length, rng.fork('status'), false);
   const fr0 = rng.fork('fill');
+  const fill0 = rng.fork('open');
   const yardRings: { ring: Polygon; gates: { p: Vec2; width: number }[] }[] = [];
   let sanctuaryDone = false, placeDone = false;
   for (const blk of blocks) {
@@ -122,7 +123,8 @@ export function oppidum(cc: CampCtx, c: Vec2, pop: number, rng: Rng): CampOut {
       const A = area(pc.poly);
       // the sanctuary on the summit
       if (!sanctuaryDone && pointInRing(pc.poly, top) && A > 900) { sanctuaryDone = true; sanctuary(out, pc.poly, bi); continue; }
-      if (fr.len < 3.2 || A < 150) { out.parcels.push({ poly: pc.poly, use: A > 600 ? 'commons' : 'garden', block: bi }); continue; }
+      // (the open ground inside the walls: fields and pasture, gardens by the yards)
+      if (fr.len < 3.2 || A < 150) { out.parcels.push({ poly: pc.poly, use: A > 600 ? (fill0.fork('o' + pc.tag).chance(0.45) ? 'field' : 'commons') : 'garden', block: bi }); continue; }
       // the public place with its basin, near the summit on the main street
       if (!placeDone && dist(ic, top) < R * 0.45 && dist(ic, top) > 40 && A > 900) {
         placeDone = true;
@@ -146,7 +148,7 @@ export function oppidum(cc: CampCtx, c: Vec2, pop: number, rng: Rng): CampOut {
   // (the summit fell on a street or a small cell: the sanctuary takes the largest open ground near it)
   if (!sanctuaryDone) {
     let bi2 = -1, bs = -Infinity;
-    out.parcels.forEach((p, i) => { if (p.use !== 'commons' && p.use !== 'garden') return; const a2 = area(p.poly); if (a2 < 900) return; const sc = -dist(inscribed(p.poly, [], 2).c, top) + Math.sqrt(a2); if (sc > bs) { bs = sc; bi2 = i; } });
+    out.parcels.forEach((p, i) => { if (p.use !== 'commons' && p.use !== 'garden' && p.use !== 'field') return; const a2 = area(p.poly); if (a2 < 900) return; const sc = -dist(inscribed(p.poly, [], 2).c, top) + Math.sqrt(a2); if (sc > bs) { bs = sc; bi2 = i; } });
     if (bi2 >= 0) { const p = out.parcels[bi2]; out.parcels.splice(bi2, 1); for (const b of out.buildings) if (b.parcel > bi2) b.parcel--; sanctuary(out, p.poly, p.block); }
   }
   out.lines.push(...fences(yardRings, 'yard-fence', 0.4));

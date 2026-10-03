@@ -29,7 +29,9 @@ export function norseFarms(cc: CampCtx, c: Vec2, pop: number, rng: Rng): CampOut
     radius: (s: Status, r: Rng) => [r.range(52, 64), r.range(40, 50), r.range(31, 40), r.range(19, 25)][s] * sk,
     gap: 34 * sk,
     spread: (90 + Math.sqrt(nF) * 95) * sk,
-    wobble: 0.13,
+    wobble: 0.11,
+    // (homefields stretched along the slope's contour, as the farms lay along the shore and the valley side)
+    aspect: [1.2, 1.85],
     // near the shore (not on it), on the sunny side of the slope
     prefer: (p) => {
       const d = shore(p);

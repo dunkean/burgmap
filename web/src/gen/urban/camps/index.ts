@@ -17,8 +17,8 @@ import { resolveMorph } from '../morphology';
 import { makeCtx, type UrbanCtx } from '../context';
 import { differenceS, unionS, unionMany, intersectionS, mpArea, MultiPoly } from '../../geo/bool';
 import { area, pointInRing, bboxOf, distToRing } from '../../geo/poly';
-import { disk } from '../../geo/offset';
-import { CampOut, blockInfo } from './kit';
+import { disk, ribbon } from '../../geo/offset';
+import { CampOut, blockInfo, splitHoles } from './kit';
 import { ringCamp, RING_VARIANTS } from './ring';
 import { yardsVillage, YARD_VARIANTS } from './yards';
 import { longhouseVillage } from './longhouses';
@@ -170,7 +170,8 @@ function partPops(pop: number, natMax: number, rng: Rng): number[] {
   if (pop <= natMax) return [pop];
   const n = Math.min(MAX_PARTS + 1, Math.ceil(pop / (natMax * 0.7)));
   const main = Math.min(natMax, Math.round((pop / n) * 1.7));
-  const w = Array.from({ length: n - 1 }, (_, k) => rng.fork('w' + k).range(0.3, 1));
+  // (rank and size: a few large outlying settlements, many small ones)
+  const w = Array.from({ length: n - 1 }, (_, k) => rng.fork('w' + k).range(0.55, 1.25) / Math.pow(k + 1, 0.7));
   const tw = w.reduce((a, b) => a + b, 0);
   return [main, ...w.map((x) => Math.min(natMax, Math.max(40, Math.round(((pop - main) * x) / tw))))];
 }
@@ -388,6 +389,14 @@ export function assemble(world: World, parts: CampOut[], culture: Culture, morph
   layer.footprintH = foot.map((p) => ({ outer: p.outer, holes: p.holes }));
   layer.footprint = foot.map((p) => p.outer);
   layer.phases = [{ id: 1, kind: 'village', zone: 'village', region: layer.footprintH, walled: !!layer.walls?.length, fossil: false }];
+  // open ground: the settlement's ground, the footprint grown by the land use's margin round it (8 m), off the water
+  if (culture.render.openGround && foot.length) {
+    const grown: MultiPoly = [...foot];
+    for (const ph of foot) for (const r of [ph.outer, ...ph.holes]) { const rb = ribbon(r.concat([r[0]]), 16); if (rb.length >= 3) grown.push({ outer: rb, holes: [] }); }
+    let g = unionMany(grown.map((x): MultiPoly => [x]), 24, true);
+    if (water.length) g = differenceS(g, water);
+    for (const ph of g) for (const p of splitHoles(ph)) if (area(p) > 30) layer.landmarks.push({ kind: 'camp-ground', poly: p });
+  }
   void polygonCentroid; void pointInRing; void disk;
   return layer;
 }

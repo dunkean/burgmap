@@ -5,7 +5,7 @@ import type { Polygon } from '../gen/core/geom';
 import type { Palette } from './styles';
 import { f1, pathD } from './util';
 import { area } from '../gen/geo/poly';
-import { FENCE_STYLE } from './scene';
+import { FENCE_STYLE, solidGround } from './scene';
 
 const phD = (p: PolyH): string => pathD(p.outer, true) + p.holes.map((h) => pathD(h, true)).join('');
 
@@ -273,8 +273,6 @@ export const yardEarthTone = (pal: Palette): string => mixHex(pal.farmYard, pal.
 export const openGroundBase = (pal: Palette): string => mixHex(pal.paper, pal.land.meadow, 0.35);
 /** The cultivated treads of the Inca terraces. */
 export const terraceTone = (pal: Palette): string => mixHex(pal.land.meadow, pal.land.garden, 0.4);
-/** Width (m) of the grass band drawn round the quarters of an open-ground settlement. */
-export const OPEN_HALO = 12;
 
 /**
  * Open ground (camps, barbarian and native villages): no street space or block fill. Yards and paddocks are grass
@@ -286,12 +284,12 @@ function openGroundSvg(ub: NonNullable<World['urban']>, pal: Palette, lw: (m: nu
   const mul = pal.landBlend === 'multiply' ? ' style="mix-blend-mode:multiply"' : '';
   let s = `<defs><pattern id="p-utuft" patternUnits="userSpaceOnUse" width="11" height="9"><path d="M2.5 4.5l-0.8-1.9M2.5 4.5v-2.1M2.5 4.5l0.8-1.9M8 8.4l-0.8-1.9M8 8.4l0.8-1.9" stroke="${pal.grass}" stroke-width="0.35" fill="none" stroke-linecap="round" opacity="0.75"/></pattern></defs>`;
   const of = (uses: string[]) => ub.parcels.filter((p) => uses.includes(p.use)).map((p) => pathD(p.poly, true)).join('');
-  // the settlement's ground: its quarters and a band round them, grass (the land use keeps a margin round the
-  // footprint: without this the terrain shows through it as a bare patch)
-  const ground = ub.quarters.map((q) => pathD(q.poly.outer, true)).join('');
-  // (a walled city hides the regional roads under it: its ground is opaque, the meadow tint laid on the paper)
-  if (ground && (ub.walls?.length || ub.landmarks.some((l) => l.kind === 'mud'))) s += `<path class="u-ground-base" d="${ub.quarters.map((q) => pathD(q.poly.outer, true)).join('')}" fill="${openGroundBase(pal)}"/>`;
-  if (ground) s += `<g class="u-ground"><path d="${ground}" fill="${pal.land.meadow}" fill-opacity="${f1(pal.landOpacity * 0.8)}" stroke="${pal.land.meadow}" stroke-opacity="${f1(pal.landOpacity * 0.8)}" stroke-width="${OPEN_HALO * 2}" stroke-linejoin="round"${mul}/><path d="${ground}" fill="url(#p-utuft)" stroke="url(#p-utuft)" stroke-width="${OPEN_HALO * 2}" stroke-linejoin="round"/></g>`;
+  // the settlement's ground (the footprint and the land use's margin round it, off the water): grass, opaque where
+  // it must hide the roads under it
+  const ground = ub.landmarks.filter((l) => l.kind === 'camp-ground').map((l) => pathD(l.poly, true)).join('');
+  const solid = solidGround(ub).map((q) => pathD(q, true)).join('');
+  if (solid) s += `<path class="u-ground-base" d="${solid}" fill="${openGroundBase(pal)}"/>`;
+  if (ground) s += `<g class="u-ground"><path d="${ground}" fill="${pal.land.meadow}" fill-opacity="${f1(pal.landOpacity * 0.8)}"${mul}/><path d="${ground}" fill="url(#p-utuft)"/></g>`;
   const grass = of(OPEN_GRASS_USES);
   if (grass) s += `<g class="u-yards-grass"><path d="${grass}" fill="${pal.land.pasture}" fill-opacity="${f1(pal.landOpacity * 0.85)}"${mul}/><path d="${grass}" fill="url(#p-utuft)"/></g>`;
   const green = of(OPEN_GREEN_USES);
@@ -299,7 +297,9 @@ function openGroundSvg(ub: NonNullable<World['urban']>, pal: Palette, lw: (m: nu
   const gard = of(['garden']) + ub.backLand.filter(() => false).map(phD).join('');
   if (gard) s += `<g class="u-gardens"><path d="${gard}" fill="${pal.land.garden}" fill-opacity="${f1(pal.landOpacity)}"${mul}/><path d="${gard}" fill="url(#p-ugarden)" opacity="0.7"/></g>`;
   const fields = of(['field']);
-  if (fields) s += `<path class="u-fields" d="${fields}" fill="${pal.land.field}" fill-opacity="${f1(pal.landOpacity)}"${mul}/>`;
+  if (fields) s += `<defs><pattern id="p-ufurrow" patternUnits="userSpaceOnUse" width="40" height="3" patternTransform="rotate(24)"><path d="M0 1.5H40" stroke="${pal.furrow}" stroke-width="0.35" opacity="${pal.furrowAlpha}"/></pattern></defs><g class="u-fields"><path d="${fields}" fill="${pal.land.field}" fill-opacity="${f1(pal.landOpacity)}"${mul}/><path d="${fields}" fill="url(#p-ufurrow)" stroke="${pal.furrow}" stroke-opacity="0.4" stroke-width="${lw(0.4, 0.15)}"/></g>`;
+  const commons = of(['commons']);
+  if (commons) s += `<path class="u-commons" d="${commons}" fill="${pal.land.pasture}" fill-opacity="${f1(pal.landOpacity * 0.8)}"${mul}/>`;
   const paved = of(['place', 'plaza', 'market']);
   if (paved) s += `<g class="u-places"><path d="${paved}" fill="${U.place}"/><path d="${paved}" fill="url(#p-upave)"/></g>`;
   // churned mud (a war camp): the mud tone, specks and ruts, puddles
