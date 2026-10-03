@@ -119,6 +119,7 @@ export function goodShape(p: Polygon, minW = 2.2): boolean {
 export function pieces(m: MultiPoly, minA = 6): Polygon[] {
   const out: Polygon[] = [];
   for (const ph of m) for (const p of splitHoles(ph)) {
+    // (edges of 2 mm and more kept: dropping centimetre edges shifts long shared boundaries off their neighbours)
     const r = orientPos(cleanRing(p, 0.01, 0.01, Infinity, false));
     if (r.length >= 3 && area(r) >= minA) out.push(r);
   }
@@ -135,7 +136,19 @@ export function carveBlocks(quarter: Polygon, cuts: MultiPoly, water: MultiPoly)
   // (spikes left where path ribbons meet or graze the outline are cut off at 1.5 m width)
   const out = pieces(m, 40).map((p) => (goodShape(p, 2.5) ? p : orientPos(truncateAcute(p, (14 * Math.PI) / 180, 1.5)))).filter((p) => p.length >= 3 && goodShape(p, 2.5));
   // (a boolean that fell back to its coarse grid may leave a block a few cm out of its quarter: clipped back)
-  return out.flatMap((p) => (p.every((q) => pointInRing(quarter, q) || distToRing(quarter, q) < 0.002) ? [p] : pieces(intersectionS(p, quarter), 40).filter((x) => goodShape(x, 2.5))));
+  const res = out.flatMap((p) => (p.every((q) => pointInRing(quarter, q) || distToRing(quarter, q) < 0.002) ? [p] : pieces(intersectionS(p, quarter), 40).filter((x) => goodShape(x, 2.5))));
+  // (the pieces of a hole split into slabs can keep a sub-millimetre sliver in common along a cut: removed from the
+  // later piece)
+  if (res.length < 2 || res.length > 300) return res;
+  const bbs = res.map(bboxOf);
+  for (let i = 0; i < res.length; i++) for (let j = i + 1; j < res.length; j++) {
+    const a = bbs[i], b = bbs[j];
+    if (a.x0 > b.x1 || b.x0 > a.x1 || a.y0 > b.y1 || b.y0 > a.y1) continue;
+    if (mpArea(intersectionS(res[i], res[j])) < 0.005) continue;
+    const ps = pieces(differenceS([{ outer: res[j], holes: [] }], [{ outer: res[i], holes: [] }]), 40);
+    if (ps.length) { res[j] = ps.reduce((x, y) => (area(y) > area(x) ? y : x)); bbs[j] = bboxOf(res[j]); }
+  }
+  return res;
 }
 
 /** Street ribbons of open paths (closed rings are given as annuli by their layouts). */
@@ -153,18 +166,29 @@ export function pathRibbons(list: UrbanStreet[]): MultiPoly {
  * Exact cut of a block by cells (convex or not): block ∩ cell for every cell; pieces too small or badly shaped
  * are merged into the neighbouring piece they share most boundary with (the block stays exactly covered).
  */
-export function cutByCells(block: Polygon, cells: { poly: Polygon; tag: number }[]): { poly: Polygon; tag: number }[] {
+export function cutByCells(block: Polygon, cells: { poly: Polygon; tag: number }[], strict = false): { poly: Polygon; tag: number }[] {
   const bb = bboxOf(block);
+  const blockConvex = isConvex(block, 1e-9);
+  const near = cells.filter((c) => { const cb = bboxOf(c.poly); return !(cb.x0 > bb.x1 || cb.x1 < bb.x0 || cb.y0 > bb.y1 || cb.y1 < bb.y0); });
+  const viaBoolean = (): { poly: Polygon; tag: number }[] => {
+    const o: { poly: Polygon; tag: number }[] = [];
+    for (const c of near) for (const p of pieces(intersectionS(block, c.poly), 0.05)) o.push({ poly: p, tag: c.tag });
+    return o;
+  };
   let out: { poly: Polygon; tag: number }[] = [];
-  for (const c of cells) {
-    const cb = bboxOf(c.poly);
-    if (cb.x0 > bb.x1 || cb.x1 < bb.x0 || cb.y0 > bb.y1 || cb.y1 < bb.y0) continue;
+  let bad = false;
+  for (const c of near) {
     // convex cells: the block clipped by the cell's half-planes (exact and cheap); a concave cell takes a boolean
-    if (isConvex(c.poly, 1e-9)) {
-      const r = clipConvexCell(block, c.poly);
-      if (r.length >= 3 && area(r) > 0.05) for (const p of pieces(resolveRing(r), 0.05)) out.push({ poly: p, tag: c.tag });
-    } else for (const p of pieces(intersectionS(block, c.poly), 0.05)) out.push({ poly: p, tag: c.tag });
+    if (!isConvex(c.poly, 1e-9)) { for (const p of pieces(intersectionS(block, c.poly), 0.05)) out.push({ poly: p, tag: c.tag }); continue; }
+    const r = clipConvexCell(block, c.poly);
+    if (r.length < 3) continue;
+    // (a concave block clipped this way can leave zero-width spikes, or bridges across a notch of the block: an edge
+    // whose middle lies outside the block. Then the whole block is cut by booleans, so that neighbouring pieces
+    // keep identical shared edges)
+    if (strict && !blockConvex && (despike(r).length !== r.length || r.some((q, i) => { const n = r[(i + 1) % r.length]; const m = { x: (q.x + n.x) / 2, y: (q.y + n.y) / 2 }; return !pointInRing(block, m) && distToRing(block, m) > 0.01; }))) { bad = true; break; }
+    if (area(r) > 0.05) for (const p of pieces(resolveRing(r), 0.05)) out.push({ poly: p, tag: c.tag });
   }
+  if (bad) out = viaBoolean();
   out = mergeSmall(out);
   return out;
 }
@@ -196,6 +220,27 @@ function clipConvexCell(subject: Polygon, clip: Polygon): Polygon {
 }
 
 /** A clipped ring may hold zero-width bridges (several parts of a concave block): resolved into its parts. */
+/** Removes spikes (a vertex where the ring turns straight back: a zero-width bridge left by clipping a concave ring). */
+export function despike(r: Polygon): Polygon {
+  let p = r.slice();
+  for (let guard = 0; guard < 4 && p.length > 3; guard++) {
+    const keep: Vec2[] = [];
+    let removed = false;
+    for (let i = 0; i < p.length; i++) {
+      const a = p[(i + p.length - 1) % p.length], b = p[i], c = p[(i + 1) % p.length];
+      const ux = a.x - b.x, uy = a.y - b.y, vx = c.x - b.x, vy = c.y - b.y;
+      const lu = Math.hypot(ux, uy), lv = Math.hypot(vx, vy);
+      if (lu < 1e-6 || lv < 1e-6) { removed = true; continue; }
+      // (the two edges leave b in the same direction: b is the tip of a spike)
+      if ((ux * vx + uy * vy) / (lu * lv) > 0.99999 && Math.abs(ux * vy - uy * vx) / 2 < 0.5) { removed = true; continue; }
+      keep.push(b);
+    }
+    p = keep;
+    if (!removed) break;
+  }
+  return p;
+}
+
 function resolveRing(r: Polygon): MultiPoly {
   const c = orientPos(cleanRing(r, 0.005, 0.01, Infinity, false));
   if (c.length < 3) return [];

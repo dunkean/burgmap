@@ -182,7 +182,8 @@ export function ringCamp(cc: CampCtx, c: Vec2, pop: number, v: RingVariant, rng:
     out.blocks.push({ poly: b, kind: 'block', quarter: 0 });
     if (k < 0) { out.parcels.push({ poly: b, use: 'green', block: blockIdx }); return; }
     const row = rows[k];
-    const parts = cutByCells(b, cellsOf[k]);
+    // (strict: the annular row blocks are concave, wedge clipping may bridge across them)
+    const parts = cutByCells(b, cellsOf[k], true);
     for (const pc of parts) {
       const pi = out.parcels.length;
       const fr = front.frontage(pc.poly);
@@ -236,7 +237,7 @@ export function ringCamp(cc: CampCtx, c: Vec2, pop: number, v: RingVariant, rng:
         }
       }
       if (v.id === 'nomad' && pr.chance(0.45)) {
-        const g = fitIn(pc.poly, (q, s) => rect(q, th + Math.PI / 2, 3.4 * s, 2.2 * s), placed, { margin: 0.4, gap: 0.8, minScale: 0.9, cands: [P(th, row.a + v.depth - 1.8)] });
+        const g = fitIn(pc.poly, (q, s) => rect(q, th + Math.PI / 2, 3.6 * s, 2.5 * s), placed, { margin: 0.4, gap: 0.8, minScale: 0.9, cands: [P(th, row.a + v.depth - 1.8)] });
         if (g) { placed.push(g); out.buildings.push({ poly: g, kind: 'outbuilding', parcel: pi, arch: 'store-tent', roof: 'gable', storeys: 1, material: 'felt' }); }
       }
       if (great) out.sites.push({ id: 'great-hut', kind: v.id === 'kraal' ? 'great-hut' : 'chief-lodge', role: 'power', lot: pc.poly, anchor: ins.c });

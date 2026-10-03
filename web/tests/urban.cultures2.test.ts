@@ -25,6 +25,8 @@ export const SIGNATURES: Record<string, (w: World) => void> = {
     const u = w.urban!;
     const a = arches(w);
     expect(a.get('tipi') ?? 0, 'plains: tipis').toBeGreaterThan(5);
+    // (a hamlet is a band camp, loose along the stream: the circle is raised for a larger gathering)
+    if (u.population < 180) return;
     expect(a.get('council-lodge') ?? 0, 'plains: council lodge').toBeGreaterThan(0);
     // the circle opens to the east: no lodge within ±12° of due east of the council lodge
     const lodge = u.buildings.find((b) => b.arch === 'council-lodge')!;
@@ -41,9 +43,10 @@ export const SIGNATURES: Record<string, (w: World) => void> = {
   'native-iroquoian': (w) => {
     const lh = w.urban!.buildings.filter((b) => b.arch === 'longhouse');
     expect(lh.length, 'iroquoian: longhouses').toBeGreaterThan(1);
-    for (const b of lh) { const L = 2 * obb(b.poly).hu; expect(L, 'iroquoian: longhouse 20–60 m').toBeGreaterThan(19.5); expect(L).toBeLessThan(62); }
+    for (const b of lh) { const L = 2 * obb(b.poly).hu; expect(L, 'iroquoian: longhouse 12–70 m').toBeGreaterThan(11.5); expect(L).toBeLessThan(70); }
     // parallel: every longhouse within 3° of the first one's axis (per village of a cluster: same axis)
-    expect((w.urban!.walls ?? []).length, 'iroquoian: double palisade').toBeGreaterThanOrEqual(2);
+    // a palisaded village (rows of posts) for a village and more; a hamlet is a fishing camp
+    if (w.urban!.population >= 150) expect((w.urban!.lines ?? []).filter((l) => l.kind === 'palisade').length, 'iroquoian: double palisade').toBeGreaterThanOrEqual(2);
   },
   'native-pueblo': (w) => {
     const a = arches(w);

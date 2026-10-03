@@ -155,7 +155,7 @@ function fenceSvg(k: string, d: string, pal: Palette, lw: (m: number, px: number
   const [rail, pw, pl, gap] = FENCE_STYLE[k] ?? FENCE_STYLE['yard-fence'];
   return `<path d="${d}" fill="none" stroke="${U.wall}" stroke-opacity="0.8" stroke-width="${lw(rail, 0.18)}"/><path d="${d}" fill="none" stroke="${U.wall}" stroke-opacity="0.9" stroke-width="${f1(pw)}" stroke-dasharray="${pl} ${gap}" stroke-linecap="butt"/>`;
 }
-const WALL_LINES: Record<string, number> = { 'arcane-circle': 0.5, 'lock-gate': 0.8, bank: 0.8, stands: 2.4, dome: 0.6, gallery: 2.2, 'zigzag-wall': 2.4, 'canal-wall': 1, 'pyramid-step': 0.5, 'stall-row': 2.2,  'compound-wall': 1, 'citadel-wall': 2.4, 'stone-wall': 1.8, prakara: 1.6, 'ward-wall': 1.8, platform: 0.4, stela: 1.1, 'sacbe-edge': 0.5, balustrade: 1, 'round-door': 0.35 };
+const WALL_LINES: Record<string, number> = { 'arcane-circle': 0.5, 'lock-gate': 0.8, bank: 0.8, stands: 2.4, dome: 0.6, gallery: 2.2, 'zigzag-wall': 2.4, 'canal-wall': 1, 'pyramid-step': 0.5, 'stall-row': 2.2,  'compound-wall': 1, 'citadel-wall': 2.4, 'stone-wall': 1.8, prakara: 1.6, 'ward-wall': 1.8, platform: 0.4, stela: 1.1, 'sacbe-edge': 0.5, balustrade: 1, 'round-door': 0.35, 'drying-rack': 0.6 };
 
 /** Compound grounds, water pieces (moats, tanks) and the moat outside the town wall (drawn under the buildings). */
 function cultureUnderlay(ub: NonNullable<World['urban']>, pal: Palette, lw: (m: number, px: number) => string): string {
@@ -185,8 +185,9 @@ function cultureUnderlay(ub: NonNullable<World['urban']>, pal: Palette, lw: (m: 
   const corn = ub.landmarks.filter((l) => l.kind === 'cornfield' || l.kind === 'terrace-field' || l.kind === 'garden-bed');
   if (corn.length) {
     const d = corn.map((l) => pathD(l.poly, true)).join('');
-    s += `<defs><pattern id="p-ucorn" patternUnits="userSpaceOnUse" width="3" height="3" patternTransform="rotate(12)"><circle cx="1.5" cy="1.5" r="0.45" fill="${U.gardenInk}" opacity="0.6"/></pattern></defs>`;
-    s += `<g class="u-cornfields"><path d="${d}" fill="${pal.land.field}" stroke="${U.gardenInk}" stroke-opacity="0.5" stroke-width="${lw(0.4, 0.2)}"/><path d="${d}" fill="url(#p-ucorn)"/></g>`;
+    // (the corn hills in rows: a dense dot texture that reads as a tilled field from afar)
+    s += `<defs><pattern id="p-ucorn" patternUnits="userSpaceOnUse" width="2.6" height="2.6" patternTransform="rotate(12)"><circle cx="1.3" cy="1.3" r="0.6" fill="${U.gardenInk}" opacity="0.75"/></pattern></defs>`;
+    s += `<g class="u-cornfields"><path d="${d}" fill="${mixHex(pal.land.field, U.gardenInk, 0.14)}" stroke="${U.gardenInk}" stroke-opacity="0.55" stroke-width="${lw(0.45, 0.25)}" stroke-dasharray="2 1"/><path d="${d}" fill="url(#p-ucorn)"/></g>`;
   }
   const cem = ub.landmarks.filter((l) => l.kind === 'cemetery');
   if (cem.length) s += `<path d="${cem.map((l) => pathD(l.poly, true)).join('')}" fill="${U.garden}"/><path d="${cem.map((l) => pathD(l.poly, true)).join('')}" fill="url(#p-ugrave)"/>`;
@@ -290,7 +291,7 @@ function openGroundSvg(ub: NonNullable<World['urban']>, pal: Palette, lw: (m: nu
   const paved = of(['place', 'plaza', 'market']);
   if (paved) s += `<g class="u-places"><path d="${paved}" fill="${U.place}"/><path d="${paved}" fill="url(#p-upave)"/></g>`;
   // the trampled ground round the buildings
-  const earth = ub.landmarks.filter((l) => l.kind === 'yard-earth').map((l) => pathD(l.poly, true)).join('');
+  const earth = ub.landmarks.filter((l) => l.kind === 'yard-earth' || l.kind === 'midden').map((l) => pathD(l.poly, true)).join('');
   if (earth) s += `<path class="u-yard-earth" d="${earth}" fill="${yardEarthTone(pal)}" fill-opacity="0.85"/>`;
   // paths: trampled earth along the street centrelines (wide causeways keep the street colour)
   const ink = pathEarth(pal);

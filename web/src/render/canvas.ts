@@ -582,8 +582,9 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
         paved('u-meadows', U.garden, gardenPat, 0.45);
       }
       paved('u-plazas', U.place, pave);
-      const cornPat = near ? getPattern(ctx, 'corn', 3, 3, 12, (c, k) => { c.globalAlpha = 0.6; c.fillStyle = U.gardenInk; c.beginPath(); c.arc(1.5 * k, 1.5 * k, 0.45 * k, 0, TAU); c.fill(); }) : null;
-      paved('u-cornfields', pal.land.field, cornPat);
+      const cornPat = near ? getPattern(ctx, 'corn', 2.6, 2.6, 12, (c, k) => { c.globalAlpha = 0.75; c.fillStyle = U.gardenInk; c.beginPath(); c.arc(1.3 * k, 1.3 * k, 0.6 * k, 0, TAU); c.fill(); }) : null;
+      paved('u-cornfields', mixHex(pal.land.field, U.gardenInk, 0.14), cornPat);
+      if (polyL('u-cornfields') && lod.band >= 1) strokePolys('u-cornfields', U.gardenInk, lw(0.45, 0.4), 0.55);
       if (polyL('u-chinampa-canals')) fillPolys('u-chinampa-canals', pal.riverFill);
       paved('u-chinampas', U.garden, gardenPat);
       // urban water (moats, tanks, mill races) and the moat line outside a planned town's wall

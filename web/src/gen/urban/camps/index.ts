@@ -30,7 +30,7 @@ import { warCamp } from './warcamp';
 import { germanicVillage } from './germanic';
 import { norseFarms } from './norse';
 import { celticVillage, raths } from './celtic';
-import { satellite } from './satellites';
+import { satellite, bandCamp } from './satellites';
 import { mayaCity } from './maya';
 import { oppidum } from './oppidum';
 import { shireVillage } from './shire';
@@ -148,7 +148,7 @@ function clusterSites(ctx: UrbanCtx, c: Vec2, roads: Polyline[], r0: number, rad
  * villages, a gathering of camp circles along the river, a royal kraal and its homesteads, a hillfort and its raths).
  */
 export const CAMP_NAT_MAX: Record<string, number> = {
-  barbarian: 1300, 'barbarian-celtic': 1500, 'barbarian-norse': 1400, 'norse-ringfort': 1100, kraal: 3000, 'native-plains': 2600,
+  barbarian: 1300, 'barbarian-celtic': 1500, 'barbarian-norse': 1400, 'norse-ringfort': 1100, kraal: 2600, 'native-plains': 2600,
   'nomad-camp': 3500, 'native-iroquoian': 2200, 'native-pueblo': 3000, maya: 120000, khmer: 120000, 'celtic-oppidum': 12000,
   orcish: 30000, halfling: 700, 'stilt-town': 6000,
 };
@@ -190,7 +190,9 @@ function partRadius(culture: string, spec: CampSpec, pop: number, satelliteForm:
 
 function plan(cc: CampCtx, spec: CampSpec, c: Vec2, pop: number, rng: Rng): CampOut {
   switch (spec.layout) {
-    case 'ring': return ringCamp(cc, c, pop, RING_VARIANTS[spec.variant] ?? RING_VARIANTS.kraal, rng);
+    // (a Plains hamlet is a band camp: the circle was raised for the gatherings)
+    case 'ring': if (spec.variant === 'tipi' && pop < 180) return bandCamp(cc, c, pop, rng);
+      return ringCamp(cc, c, pop, RING_VARIANTS[spec.variant] ?? RING_VARIANTS.kraal, rng);
     case 'yards': if (spec.variant === 'germanic') return germanicVillage(cc, c, pop, rng);
       if (spec.variant === 'norse') return norseFarms(cc, c, pop, rng);
       if (spec.variant === 'celtic') return celticVillage(cc, c, pop, rng);
@@ -300,7 +302,7 @@ export function generateCamp(world: World, root: Rng, culture: Culture, pop0: nu
 function dropOverlapping(part: CampOut, taken: { poly: Polygon; bb: ReturnType<typeof bboxOf> }[]): CampOut {
   const drop = part.quarters.map((q) => {
     const bb = bboxOf(q);
-    return taken.some((t) => !(t.bb.x0 > bb.x1 || t.bb.x1 < bb.x0 || t.bb.y0 > bb.y1 || t.bb.y1 < bb.y0) && mpArea(intersectionS(q, t.poly)) > 1);
+    return taken.some((t) => !(t.bb.x0 > bb.x1 || t.bb.x1 < bb.x0 || t.bb.y0 > bb.y1 || t.bb.y1 < bb.y0) && mpArea(intersectionS(q, t.poly)) > 0.02);
   });
   if (!drop.some((d) => d)) return part;
   const dq = part.quarters.filter((_, i) => drop[i]);
