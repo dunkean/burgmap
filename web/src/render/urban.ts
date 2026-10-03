@@ -108,11 +108,12 @@ function buildingsSvg(ub: NonNullable<World['urban']>, U: Palette['urban'], lw: 
   const lm = lumHex(U.mass);
   const base = lm < 0.3 ? mixHex(U.mass, U.yard, 0.42) : U.mass;
   const edge = lm < 0.3 ? mixHex(U.mass, '#000000', 0.25) : lumHex(U.massEdge) < lm ? U.massEdge : mixHex(U.mass, '#000000', 0.6);
-  const tones = [-0.09, -0.045, 0, 0.045, 0.09].map((k) => (k < 0 ? mixHex(base, '#000000', -k) : mixHex(base, '#ffffff', k)));
+  const tones = (ub.renderHints?.storeyShade ? [-0.32, -0.22, -0.12, -0.03, 0.08] : [-0.09, -0.045, 0, 0.045, 0.09]).map((k) => (k < 0 ? mixHex(base, '#000000', -k) : mixHex(base, '#ffffff', k)));
   const buckets: string[][] = tones.map(() => []);
   ub.buildings.forEach((b, i) => {
     if (LANDMARK_KINDS.has(b.kind)) return;
-    const h = (Math.imul(i + 1, 2654435761) >>> 0) % tones.length;
+    // (terraced room blocks: the tone follows the storeys, lighter at the plaza, darker at the high back rows)
+    const h = ub.renderHints?.storeyShade && b.storeys ? Math.max(0, Math.min(tones.length - 1, tones.length - b.storeys)) : (Math.imul(i + 1, 2654435761) >>> 0) % tones.length;
     buckets[h].push(pathD(b.poly, true));
   });
   const ew = lw(Math.max(0.28, U.massEdgeW * 0.9), 0.22);

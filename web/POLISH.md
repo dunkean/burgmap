@@ -28,7 +28,7 @@ Each culture gets a `scale` range: the settlement classes it can produce. [x] `s
     - sunken huts (Grubenhäuser), granaries on posts, cattle pens;
     - irregular yards, no streets, only trampled paths.
     - Variants: Viking farmstead cluster; Celtic roundhouse village in a ringfort.
-  - [~] **Native North American**, three variants (`native-iroquoian`: camps/longhouses.ts, `native-plains`: camps/ring.ts, `native-pueblo`):
+  - [x] **Native North American**, three variants (`native-iroquoian`: camps/longhouses.ts, `native-plains`: camps/ring.ts, `native-pueblo`: camps/pueblo.ts):
     - *Iroquoian palisaded longhouse village*: parallel bark longhouses of 20–60 m inside a double palisade, cornfields around;
     - *Plains tipi camp*: a circle of tipis with the opening facing east, council lodge, horse herds;
     - *Pueblo*: terraced, agglutinated stone/adobe room blocks around plazas, kivas (round sunken chambers).

@@ -249,8 +249,6 @@ export function yardsVillage(cc: CampCtx, c: Vec2, pop: number, v: YardVariant, 
   if (v.id === 'norse') {
     const occCells: MultiPoly = [...occ].map((ci) => ({ outer: cells[ci], holes: [] }));
     let q = unionS(occCells, rib);
-    q = q.map((ph) => ({ outer: ph.outer, holes: [] }));
-    q = unionS(q);
     q = q.length ? intersectionS(q, outline) : q;
     quarters = pieces(q, 400).filter((p) => streets.some((s) => s.path.some((pt) => pointInRing(p, pt))));
   } else quarters = [outline];

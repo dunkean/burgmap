@@ -16,6 +16,7 @@ const M: Record<string, MorphologyParams> = {
   'barbarian-celtic': morph('barbarian-celtic', { arch: { typology: 'roundhouse', roof: 'thatch-round', storeys: [1, 1], material: 'wattle' }, density: { core: 70, middle: 70, edge: 70, faubourg: 70, village: 70 } }),
   'barbarian-norse': morph('barbarian-norse', { arch: { typology: 'longhouse', roof: 'gable', storeys: [1, 1], material: 'turf' }, density: { core: 25, middle: 25, edge: 25, faubourg: 25, village: 25 } }),
   'iroquoian': morph('iroquoian', { arch: { typology: 'longhouse', roof: 'barrel', storeys: [1, 1], material: 'bark' }, density: { core: 160, middle: 160, edge: 160, faubourg: 160, village: 160 } }),
+  pueblo: morph('pueblo', { arch: { typology: 'pueblo-room', roof: 'terraced', storeys: [1, 5], material: 'adobe' }, density: { core: 250, middle: 250, edge: 250, faubourg: 250, village: 250 } }),
   'nomad-camp': morph('nomad-camp', { arch: { typology: 'ger', roof: 'dome', storeys: [1, 1], material: 'felt' }, density: { core: 60, middle: 60, edge: 60, faubourg: 60, village: 60 } }),
 };
 Object.assign(MORPHOLOGIES, M);
@@ -56,6 +57,13 @@ export const CAMP_CULTURES: Culture[] = [
     ...campBase('native-iroquoian', 'Native American: Iroquoian longhouse village', 'iroquoian'), family: 'native-american',
     scale: { min: 'hamlet', max: 'village' }, camp: { layout: 'longhouses', variant: 'iroquoian' },
     sitePrefs: { flatness: 0.8, weights: { hilltop: 1.6, valley: 1.2, plain: 1, harbor: 0.2 } },
+  },
+  {
+    ...campBase('native-pueblo', 'Native American: Pueblo', 'pueblo'), family: 'native-american',
+    // (the pueblo grows to a town: several great houses, Chaco Canyon)
+    scale: { min: 'hamlet', max: 'town' }, camp: { layout: 'pueblo', variant: 'pueblo' },
+    render: { towerShape: 'square', plotLines: false, storeyShade: true },
+    sitePrefs: { flatness: 0.9, weights: { valley: 2, plain: 1.4, hilltop: 0.8, harbor: 0, estuary: 0 } },
   },
   {
     ...campBase('native-plains', 'Native American: Plains tipi camp', 'plains-camp'), family: 'native-american',

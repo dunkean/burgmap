@@ -45,6 +45,13 @@ export const SIGNATURES: Record<string, (w: World) => void> = {
     // parallel: every longhouse within 3° of the first one's axis (per village of a cluster: same axis)
     expect((w.urban!.walls ?? []).length, 'iroquoian: double palisade').toBeGreaterThanOrEqual(2);
   },
+  'native-pueblo': (w) => {
+    const a = arches(w);
+    expect(a.get('pueblo-room') ?? 0, 'pueblo: agglutinated rooms').toBeGreaterThan(10);
+    expect((a.get('kiva') ?? 0) + (a.get('great-kiva') ?? 0), 'pueblo: kivas').toBeGreaterThan(0);
+    // terraces: several storey levels
+    expect(new Set(w.urban!.buildings.filter((b) => b.arch === 'pueblo-room').map((b) => b.storeys)).size, 'pueblo: terraced').toBeGreaterThan(1);
+  },
   'nomad-camp': (w) => {
     const a = arches(w);
     expect(a.get('ger') ?? 0, 'nomad: gers').toBeGreaterThan(8);
@@ -76,6 +83,7 @@ const CASES: [string, SizeName[]][] = [
   ['native-plains', ['hamlet', 'village', 'town']],
   ['nomad-camp', ['hamlet', 'village', 'town']],
   ['native-iroquoian', ['hamlet', 'village', 'town']],
+  ['native-pueblo', ['hamlet', 'village', 'town', 'city']],
   ['barbarian', ['hamlet', 'village', 'town']],
   ['barbarian-celtic', ['hamlet', 'village', 'town']],
   ['barbarian-norse', ['hamlet', 'village', 'town']],
@@ -89,7 +97,7 @@ describe('village and camp cultures', () => {
       expect(w.urban!.culture).toBe(culture);
       if (size !== 'hamlet' || culture !== 'barbarian-norse') SIGNATURES[culture]?.(w);
       // above the culture's class (village): a cluster of villages, not a town
-      if (size === 'town' && culture !== 'barbarian-norse') expect(Number(w.stats['urban.camps']), 'a cluster of villages').toBeGreaterThan(1);
+      if (size === 'town' && culture !== 'barbarian-norse' && culture !== 'native-pueblo') expect(Number(w.stats['urban.camps']), 'a cluster of villages').toBeGreaterThan(1);
     });
   }
 });

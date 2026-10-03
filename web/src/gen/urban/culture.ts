@@ -85,6 +85,8 @@ export interface RenderHints {
   moat?: boolean;
   /** Plot hairlines (false: camps and villages without property lines). */
   plotLines?: boolean;
+  /** Roof tones by storeys (terraced room blocks: the higher, the darker). */
+  storeyShade?: boolean;
 }
 export interface SettlementForm {
   /** Village / hamlet layout: EO rule (street or nucleated village), a walled compact block, a grove, terraces. */
