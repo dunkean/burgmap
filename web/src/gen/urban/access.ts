@@ -27,42 +27,24 @@ export const ACC_STATS = { calls: 0, cells: 0, ms: 0, msRaster: 0, msStreet: 0 }
  * Reachable flags of the buildings of a block. `streetAt(p)` tells whether a point of the block boundary lies on a
  * street (or place) edge.
  */
-export function blockReach(block: Polygon, blds: Polygon[], streetAt0: StreetAt | ((p: Vec2) => boolean), cell = ACCESS_CELL): boolean[] {
-  if (!blds.length) return [];
+/**
+ * The rasters of a block that do not depend on its buildings (block mask, street-side cells, their ~1 m reach),
+ * kept for the next call on the same block (the access pass asks twice: before and after carving passages).
+ */
+interface BlockStatic { block: Polygon; streetAt: unknown; cell: number; x0: number; y0: number; w: number; h: number; inB: Uint8Array; streetCell: Uint8Array; near: Uint8Array }
+let LAST_BLOCK: BlockStatic | null = null;
+
+function blockStatic(block: Polygon, streetAt0: StreetAt | ((p: Vec2) => boolean), cell: number): BlockStatic {
+  if (LAST_BLOCK && LAST_BLOCK.block === block && LAST_BLOCK.streetAt === streetAt0 && LAST_BLOCK.cell === cell) return LAST_BLOCK;
   const bb = bboxOf(block);
   const sa = streetAt0 as StreetAt;
   const streetAt = sa.local ? sa.local(bb.x0, bb.y0, bb.x1, bb.y1) : streetAt0;
   const x0 = bb.x0 - cell, y0 = bb.y0 - cell;
   const w = Math.ceil((bb.x1 - x0) / cell) + 2, h = Math.ceil((bb.y1 - y0) / cell) + 2;
   const shift = (p: Polygon) => p.map((q) => ({ x: q.x - x0, y: q.y - y0 }));
-  ACC_STATS.calls++; ACC_STATS.cells += w * h;
   const tA = performance.now();
   const inB = rasterizePolys([shift(block)], w, h, cell);
-  // building ids per cell (0 = none): scanlines over each footprint's own rows
-  const bid = new Int32Array(w * h);
-  const xs: number[] = [];
-  blds.forEach((b0, k) => {
-    const b = shift(b0);
-    let ya = Infinity, yb = -Infinity;
-    for (const q of b) { ya = Math.min(ya, q.y); yb = Math.max(yb, q.y); }
-    const r0 = Math.max(0, Math.floor(ya / cell - 0.5)), r1 = Math.min(h - 1, Math.ceil(yb / cell - 0.5));
-    for (let r = r0; r <= r1; r++) {
-      const y = (r + 0.5) * cell;
-      xs.length = 0;
-      for (let i = 0, j = b.length - 1; i < b.length; j = i++) {
-        const p = b[i], q = b[j];
-        if ((p.y > y) !== (q.y > y)) xs.push(p.x + ((y - p.y) * (q.x - p.x)) / (q.y - p.y));
-      }
-      xs.sort((u, v) => u - v);
-      for (let t = 0; t + 1 < xs.length; t += 2) {
-        const c0 = Math.max(0, Math.ceil(xs[t] / cell - 0.5)), c1 = Math.min(w - 1, Math.floor(xs[t + 1] / cell - 0.5));
-        for (let c = c0; c <= c1; c++) bid[r * w + c] = k + 1;
-      }
-    }
-  });
   const N = w * h;
-  const freeA = new Uint8Array(N);
-  for (let i = 0; i < N; i++) freeA[i] = inB[i] === 1 && bid[i] === 0 ? 1 : 0;
   ACC_STATS.msRaster += performance.now() - tA;
   const tS = performance.now();
   // street side: block-boundary cells whose outside neighbour is on a street
@@ -82,18 +64,19 @@ export function blockReach(block: Polygon, blds: Polygon[], streetAt0: StreetAt 
       const gy0 = Math.max(0, Math.floor((Math.min(sg.a.y, sg.b.y) - r - y0) / BK)), gy1 = Math.min(bh - 1, Math.floor((Math.max(sg.a.y, sg.b.y) + r - y0) / BK));
       for (let gy = gy0; gy <= gy1; gy++) for (let gx = gx0; gx <= gx1; gx++) buckets[gy * bw + gx].push(si);
     });
+    const bnd: number[] = [];
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
       const i = y * w + x;
       if (!boundaryOut(x, y, i)) continue;
+      bnd.push(i);
       const p = at(i);
       const bk = buckets[Math.min(bh - 1, Math.floor((p.y - y0) / BK)) * bw + Math.min(bw - 1, Math.floor((p.x - x0) / BK))];
       for (const si of bk) { const sg = segs[si]; if (distToSeg(p, sg.a, sg.b) <= sg.hw * 1.15 + 1.2) { streetCell[i] = 1; break; } }
     }
     if (places.length) {
       const pb = places.map((q) => { const b2 = bboxOf(q); return { q, x0: b2.x0 - 0.8, y0: b2.y0 - 0.8, x1: b2.x1 + 0.8, y1: b2.y1 + 0.8 }; });
-      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-        const i = y * w + x;
-        if (streetCell[i] || !boundaryOut(x, y, i)) continue;
+      for (const i of bnd) {
+        if (streetCell[i]) continue;
         const p = at(i);
         if (pb.some((o) => p.x >= o.x0 && p.x <= o.x1 && p.y >= o.y0 && p.y <= o.y1 && (pointInRing(o.q, p) || distToRing(o.q, p) < 0.8))) streetCell[i] = 1;
       }
@@ -101,7 +84,51 @@ export function blockReach(block: Polygon, blds: Polygon[], streetAt0: StreetAt 
   } else {
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const i = y * w + x; if (boundaryOut(x, y, i) && streetAt(at(i))) streetCell[i] = 1; }
   }
+  // reach of the street edge (~1 m): the street cells are few, their neighbourhoods are stamped
+  const near = new Uint8Array(N);
+  const R = Math.max(1, Math.round(1 / cell));
+  for (let i = 0; i < N; i++) {
+    if (!streetCell[i]) continue;
+    const x = i % w, y = (i / w) | 0;
+    for (let yy = Math.max(0, y - R); yy <= Math.min(h - 1, y + R); yy++) for (let xx = Math.max(0, x - R); xx <= Math.min(w - 1, x + R); xx++) near[yy * w + xx] = 1;
+  }
   ACC_STATS.msStreet += performance.now() - tS;
+  LAST_BLOCK = { block, streetAt: streetAt0, cell, x0, y0, w, h, inB, streetCell, near };
+  return LAST_BLOCK;
+}
+
+export function blockReach(block: Polygon, blds: Polygon[], streetAt0: StreetAt | ((p: Vec2) => boolean), cell = ACCESS_CELL): boolean[] {
+  if (!blds.length) return [];
+  const { x0, y0, w, h, inB, streetCell, near } = blockStatic(block, streetAt0, cell);
+  const shift = (p: Polygon) => p.map((q) => ({ x: q.x - x0, y: q.y - y0 }));
+  ACC_STATS.calls++; ACC_STATS.cells += w * h;
+  const tA = performance.now();
+  const N = w * h;
+  // free cells: inside the block, outside every footprint (scanlines over each footprint's own rows)
+  const freeA = new Uint8Array(N);
+  freeA.set(inB);
+  const bid = new Int32Array(N);
+  const xs: number[] = [];
+  blds.forEach((b0, k) => {
+    const b = shift(b0);
+    let ya = Infinity, yb = -Infinity;
+    for (const q of b) { ya = Math.min(ya, q.y); yb = Math.max(yb, q.y); }
+    const r0 = Math.max(0, Math.floor(ya / cell - 0.5)), r1 = Math.min(h - 1, Math.ceil(yb / cell - 0.5));
+    for (let r = r0; r <= r1; r++) {
+      const y = (r + 0.5) * cell;
+      xs.length = 0;
+      for (let i = 0, j = b.length - 1; i < b.length; j = i++) {
+        const p = b[i], q = b[j];
+        if ((p.y > y) !== (q.y > y)) xs.push(p.x + ((y - p.y) * (q.x - p.x)) / (q.y - p.y));
+      }
+      xs.sort((u, v) => u - v);
+      for (let t = 0; t + 1 < xs.length; t += 2) {
+        const c0 = Math.max(0, Math.ceil(xs[t] / cell - 0.5)), c1 = Math.min(w - 1, Math.floor(xs[t + 1] / cell - 0.5));
+        for (let c = c0; c <= c1; c++) { bid[r * w + c] = k + 1; freeA[r * w + c] = 0; }
+      }
+    }
+  });
+  ACC_STATS.msRaster += performance.now() - tA;
   // passable: free with its four neighbours free (or the street outside)
   const pass = new Uint8Array(N);
   const okN = (j: number) => freeA[j] === 1 || (inB[j] === 0 && streetCell[j] === 1);
@@ -126,16 +153,9 @@ export function blockReach(block: Polygon, blds: Polygon[], streetAt0: StreetAt 
     if (i >= w) visit(i - w);
     if (i + w < N) visit(i + w);
   }
-  // reach masks: next to a reached cell (8-neighbourhood) or within ~1 m of the street edge
-  // (the street cells are few: their ~1 m neighbourhoods are stamped; the reached cells are tested from the
-  // building cells' side, 8 neighbours each, a building being settled at its first hit)
-  const near = new Uint8Array(N);
-  const R = Math.max(1, Math.round(1 / cell));
-  for (let i = 0; i < N; i++) {
-    if (!streetCell[i]) continue;
-    const x = i % w, y = (i / w) | 0;
-    for (let yy = Math.max(0, y - R); yy <= Math.min(h - 1, y + R); yy++) for (let xx = Math.max(0, x - R); xx <= Math.min(w - 1, x + R); xx++) near[yy * w + xx] = 1;
-  }
+  // reach masks: next to a reached cell (8-neighbourhood) or within ~1 m of the street edge (`near`)
+  // (the reached cells are tested from the building cells' side, 8 neighbours each, a building being settled at
+  // its first hit)
   const ok = blds.map(() => false);
   for (let i = 0; i < N; i++) {
     const k = bid[i];

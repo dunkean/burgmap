@@ -199,19 +199,17 @@ export function normalizeFootprints(list: Bldg[]): Bldg[] {
  * Courtyard building on a polygon Q: the ring of rooms (depth rd) around an inner court, returned as two simple
  * U-shaped pieces (split along `axis` through the court). Null when the court would be smaller than 3 × 3 m.
  */
-export function courtyardRing(Q: Polygon, rd: number, axis: Vec2): { pieces: Polygon[]; court: Polygon } | null {
+export function courtyardRing(Q: Polygon, rd: number, axis: Vec2, opt: { minCourt?: number; memo?: Map<number, Polygon> } = {}): { pieces: Polygon[]; court: Polygon } | null {
   const q = orientPos(Q);
-  let court: Polygon = [];
-  if (isConvex(q, 1e-3)) {
-    const inset = insetConvexSafe(q, rd);
-    if (inset.length >= 3) court = inset;
-  } else {
-    const r = difference(q, ribbon(q.concat([q[0]]), 2 * rd));
-    let best: Polygon = [];
-    for (const ph of r) if (!ph.holes.length && area(ph.outer) > area(best)) best = ph.outer;
-    court = best;
+  // (the court depends on Q and rd only: callers trying several axes share it through `memo`)
+  let court = opt.memo?.get(rd);
+  if (!court) {
+    court = courtOf(q, rd);
+    opt.memo?.set(rd, court);
   }
   if (court.length < 3 || area(court) < 9 || shapeOf(court).w < 3) return null;
+  // (a court smaller than the caller's minimum is a failure for it: the ring is not built)
+  if (opt.minCourt !== undefined && !(area(court) >= opt.minCourt)) return null;
   let cx = 0, cy = 0;
   for (const p of court) { cx += p.x; cy += p.y; }
   const c = { x: cx / court.length, y: cy / court.length };
@@ -231,6 +229,18 @@ export function courtyardRing(Q: Polygon, rd: number, axis: Vec2): { pieces: Pol
   }
   if (!pieces.length) return null;
   return { pieces, court };
+}
+
+/** The court of a courtyard ring of room depth rd on the positively oriented lot q ([] when none). */
+function courtOf(q: Polygon, rd: number): Polygon {
+  if (isConvex(q, 1e-3)) {
+    const inset = insetConvexSafe(q, rd);
+    return inset.length >= 3 ? inset : [];
+  }
+  const r = difference(q, ribbon(q.concat([q[0]]), 2 * rd));
+  let best: Polygon = [];
+  for (const ph of r) if (!ph.holes.length && area(ph.outer) > area(best)) best = ph.outer;
+  return best;
 }
 
 /**

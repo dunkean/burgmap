@@ -154,9 +154,10 @@ function courtyardHouse(pl: Plot, P: MorphologyParams, rng: Rng, cov = 0.93, sub
   // the patio takes ~14–24 % of the lot (≥ 9 m²) at the medina's dense baseline, more on looser land (coverage
   // lowered by the sprawl): the deepest room ring that still leaves it. (Large enough to read on a town plan.)
   const want = Math.max(9, A * Math.max(0.1, Math.min(0.42, 0.14 + 0.55 * (0.95 - cov) + rng.range(-0.02, 0.07))));
+  const courts = new Map<number, Polygon>();
   const ringFor = (axis: Vec2): ReturnType<typeof courtyardRing> => {
     for (let rd = P.roomDepth[1] + 1.5; rd >= 2.3; rd *= 0.92) {
-      const r = courtyardRing(pl.poly, rd, axis);
+      const r = courtyardRing(pl.poly, rd, axis, { minCourt: want, memo: courts });
       // (the ring must cover the lot: a failed half would leave a gaping U)
       if (r && area(r.court) >= want && r.pieces.reduce((s2, x) => s2 + area(x), 0) + area(r.court) >= 0.97 * A) return r;
     }
