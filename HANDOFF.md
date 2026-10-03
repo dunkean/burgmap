@@ -38,6 +38,7 @@ GITHUB_TOKEN_FILE=/d/Workspace/dunk_token bash scripts/deploy_pages.sh   # build
 | `web/URBAN_MORPHOLOGY.md` | culture system: phases, morphologies, operators, mixing, scale ladder 10 → 5 M, megacity LOD (§3d) |
 | `web/URBAN_LANDMARKS.md` | landmark lot claiming, catalogue, port, suburbs, shanty towns |
 | `web/REGION_SETTLEMENTS.md` | multiple settlements per map, settlement planner, road network |
+| `bug.md` (repo root) | **the user's bug list, written by the user.** Read it first at every session. Fix the listed bugs and mark each one as fixed with the commit hash. Never delete the user's entries. |
 | `web/POLISH.md` | user feedback backlog, with open and done items |
 
 ## 4. Code map (`web/src`)
@@ -103,6 +104,8 @@ GITHUB_TOKEN_FILE=/d/Workspace/dunk_token bash scripts/deploy_pages.sh   # build
 | 40 km lazy, first display | ~7 s |
 
 ## 7. What is left (priority order)
+
+0. **Bugs in `bug.md`** (repo root, maintained by the user) come first.
 
 1. **Megacity polish.** An agent was working on this at the pause; check `git log` and `POLISH.md`. The items:
    - polygonal walls instead of smooth ovals, and a less "dartboard" layout (eccentric, terrain-driven rings and asymmetric successive walls);
