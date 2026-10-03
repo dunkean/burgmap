@@ -447,10 +447,25 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
     // 4. regional roads + farmsteads
     if (lod.farmsteads && polyL('farm-yards')) {
       strokeLines(linesOf((l) => l.role === 'drive'), pal.trackFill, (l) => lw(l.width, 1), 0.7, [], 'butt');
+      fillPolys('farm-gardens', pal.land.garden);
+      strokePolys('farm-gardens', pal.hedge, lw(0.4, 0.3), 0.8);
+      fillPolys('farm-orchards', pal.land.orchard);
+      fillPolys('farm-paddocks', pal.land.pasture);
+      strokePolys('farm-platforms', pal.farmInk, lw(0.5, 0.4), 0.7, [px(3), px(2)]);
+      strokePolys('farm-lots', pal.hedge, lw(0.9, 0.6), 0.85);
       fillPolys('farm-yards', pal.farmYard, 0.9);
-      strokePolys('farm-yards', pal.farmInk, lw(0.5, 0.5), 1, [px(3), px(2)]);
+      fillPolys('farm-pens', pal.farmYard);
+      strokePolys('farm-pens', pal.farmInk, lw(0.3, 0.3));
+      fillPolys('farm-ponds', pal.lakeFill);
+      strokePolys('farm-ponds', pal.waterEdge, lw(0.5, 0.4));
+      strokeLines(linesOf((l) => l.name === 'farm-walls'), pal.farmInk, () => lw(0.9, 0.7), 1, [], 'butt');
+      if (lod.band >= 2 && polyL('farm-trees')) {
+        fillPolys('farm-trees', pal.treeFill);
+        strokePolys('farm-trees', pal.treeInk, lw(0.3, 0.3), 0.8);
+      }
       fillPolys('farm-buildings', pal.farmRoof);
-      strokePolys('farm-buildings', pal.farmInk, lw(0.7, 0.6));
+      strokePolys('farm-buildings', pal.farmInk, lw(0.5, 0.6));
+      if (lod.band >= 2) strokeLines(linesOf((l) => l.name === 'farm-ridges'), pal.farmInk, () => lw(0.35, 0.4), 0.8, [], 'butt');
     }
     // roads, tracks and the street strokes below never spill over the sea or the lakes (bridges come later)
     const land = landClip();

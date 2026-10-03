@@ -1,4 +1,5 @@
-import type { World, LandArea, LandKind } from '../gen/types';
+import type { World, LandArea, LandKind, Farmstead } from '../gen/types';
+import { farmRidges } from './farms';
 import type { Vec2 } from '../gen/core/geom';
 import { type Palette, ruralInk } from './styles';
 import { f1, pathD } from './util';
@@ -178,6 +179,25 @@ function fieldNetwork(world: World, pal: Palette, s: number): string {
   return out;
 }
 
+/** One farmstead at true size: lot pieces (garden, orchard, paddock, pond), hedged lot, yard, walls, trees, buildings with ridges. */
+function farmSvg(f: Farmstead, pal: Palette): string {
+  const plots = (k: string) => (f.plots ?? []).filter((p) => p.kind === k).map((p) => pathD(p.poly, true)).join('');
+  const fill = (k: string, c: string, extra = '') => { const d = plots(k); return d ? `<path d="${d}" fill="${c}"${extra}/>` : ''; };
+  let o = `<g class="farm" data-type="${f.type ?? ''}" data-size="${f.size ?? ''}">`;
+  o += fill('garden', pal.land.garden, ` stroke="${pal.hedge}" stroke-width="0.4"`) + fill('orchard', pal.land.orchard) + fill('paddock', pal.land.pasture);
+  o += fill('platform', 'none', ` stroke="${pal.farmInk}" stroke-width="0.5" stroke-dasharray="1.6 1.2" stroke-opacity="0.7"`);
+  o += `<path d="${pathD(f.lot!, true)}" fill="none" stroke="${pal.hedge}" stroke-width="0.9" stroke-opacity="0.85"/>`;
+  o += `<path d="${pathD(f.yard, true)}" fill="${pal.farmYard}" fill-opacity="0.9"/>`;
+  o += fill('pen', pal.farmYard, ` stroke="${pal.farmInk}" stroke-width="0.3"`) + fill('threshing-floor', pal.farmYard, ` stroke="${pal.farmInk}" stroke-width="0.4"`);
+  o += fill('pond', pal.lakeFill, ` stroke="${pal.waterEdge}" stroke-width="0.5"`);
+  if (f.walls?.length) o += `<path d="${f.walls.map((w) => pathD(w, false)).join('')}" fill="none" stroke="${pal.farmInk}" stroke-width="0.9" stroke-linecap="butt"/>`;
+  if (f.trees?.length) o += `<g fill="${pal.treeFill}" stroke="${pal.treeInk}" stroke-width="0.3">${f.trees.map((t) => `<circle cx="${f1(t.x)}" cy="${f1(t.y)}" r="2.2"/>`).join('')}</g>`;
+  o += `<g fill="${pal.farmRoof}" stroke="${pal.farmInk}" stroke-width="0.5">${f.buildings.map((b) => `<path d="${pathD(b, true)}"/>`).join('')}</g>`;
+  const rg = farmRidges(f);
+  if (rg.length) o += `<path d="${rg.map((r) => pathD(r, false)).join('')}" fill="none" stroke="${pal.farmInk}" stroke-width="0.35" stroke-opacity="0.8"/>`;
+  return o + '</g>';
+}
+
 function bridgeShape(a: Vec2, b: Vec2, w: number, pad: number): { deck: string; rails: string; ends: string } {
   const dx = b.x - a.x, dy = b.y - a.y, l = Math.hypot(dx, dy) || 1;
   const tx = dx / l, ty = dy / l, nx = -ty, ny = tx;
@@ -204,9 +224,14 @@ export function roadsLayer(world: World, pal: Palette, u: number): string {
   if (farms.length) {
     out += `<g class="farmsteads">`;
     for (const f of farms) {
-      out += `<path d="${pathD(f.drive, false)}" stroke="${pal.trackFill}" stroke-width="${f1(2 * s)}" stroke-opacity="0.7" stroke-linecap="butt"/>`;
-      out += `<path d="${pathD(f.yard, true)}" fill="${pal.farmYard}" fill-opacity="0.9" stroke="${pal.farmInk}" stroke-width="${f1(0.5 * s)}" stroke-dasharray="${f1(2.5 * s)} ${f1(1.5 * s)}"/>`;
-      out += `<g fill="${pal.farmRoof}" stroke="${pal.farmInk}" stroke-width="${f1(0.7 * s)}">${f.buildings.map((b) => `<path d="${pathD(b, true)}"/>`).join('')}</g>`;
+      const dl = f.drive.length > 1 ? Math.hypot(f.drive[f.drive.length - 1].x - f.drive[0].x, f.drive[f.drive.length - 1].y - f.drive[0].y) : 0;
+      if (dl > 0.5) out += `<path d="${pathD(f.drive, false)}" stroke="${pal.trackFill}" stroke-width="${f1(Math.min(2 * s, 3.2))}" stroke-opacity="0.7" stroke-linecap="butt"/>`;
+      if (!f.lot) {
+        out += `<path d="${pathD(f.yard, true)}" fill="${pal.farmYard}" fill-opacity="0.9" stroke="${pal.farmInk}" stroke-width="${f1(0.5 * s)}" stroke-dasharray="${f1(2.5 * s)} ${f1(1.5 * s)}"/>`;
+        out += `<g fill="${pal.farmRoof}" stroke="${pal.farmInk}" stroke-width="${f1(0.7 * s)}">${f.buildings.map((b) => `<path d="${pathD(b, true)}"/>`).join('')}</g>`;
+        continue;
+      }
+      out += farmSvg(f, pal);
     }
     out += '</g>';
   }

@@ -2,7 +2,7 @@ import polygonClipping from 'polygon-clipping';
 import { Delaunay } from 'd3-delaunay';
 import type { Rng } from '../core/rng';
 import { Noise2D } from '../core/noise';
-import { gradientAt, D8 } from '../core/grid';
+import { gradientAt, sampleGrid, D8 } from '../core/grid';
 import { blurFast as blurGrid } from './blur';
 import { Vec2, Polygon, Polyline, chaikin, simplify, polygonArea, polygonCentroid, polygonContains, bbox, dist } from '../core/geom';
 import { distanceField, forCellsNearPolyline, smoothstep } from '../core/field';
@@ -10,6 +10,7 @@ import { marchingSquares } from '../terrain/contour';
 import { rasterizePolys } from '../geo/raster';
 import { partitionRegion, pruneWays, FieldCtx, FieldNet } from './fields';
 import type { World, LandArea, LandKind, Farmstead, LandUseLayer } from '../types';
+import { FARM_SIZES, farmSize, farmType, layoutFarm, placeFarm, frameOf, segRectDist, type FarmContext, type LocalFarm } from './farms';
 
 type Ring = [number, number][];
 
@@ -212,16 +213,158 @@ export function generateRural(world: World, root: Rng, mainRoads?: number, strip
   const pastureMax = Math.max(fieldMax + 0.03, Math.min(world.options.relief === 'mountains' ? 0.5 : 0.3, qs(0.82)));
   stats['fieldMaxSlope'] = Math.round(fieldMax * 1000) / 1000;
 
-  // ---- farmsteads along roads
-  const farmCount = ({ hamlet: 0, village: 2, town: 4, city: 7, capital: 10 } as const)[world.options.size];
+  // ---- farmsteads (landuse/farms.ts): typed by culture and region, sized by wealth, each on its own lot by its track
+  const tFarm = performance.now();
   const farmsteads: Farmstead[] = [];
-  const farmR = 30;
   const farmMask = new Uint8Array(N); // 1 = exclusion, 2 = garden/orchard halo
+  const lotsC: { c: Vec2; r: number }[] = [];
+  const pays = new Noise2D(rr.fork('pays'));
+  const allSt = world.settlements ?? [];
+  const cellAt = (p: Vec2): number => Math.min(n - 1, Math.max(0, Math.floor(p.y / cell))) * n + Math.min(n - 1, Math.max(0, Math.floor(p.x / cell)));
+  /** Culture of the countryside at p: that of the nearest settlement (by its ring scale). */
+  const cultureAt = (p: Vec2): string => {
+    let best: string = world.options.culture, bd = Infinity;
+    for (const st of allSt) {
+      if (st.detail === 'farmstead') continue;
+      const d = dist(p, st.center) / ringScale(st.population);
+      if (d < bd) { bd = d; best = st.culture; }
+    }
+    return best;
+  };
+  const ctxAt = (p: Vec2, culture: string, pop?: number): FarmContext => {
+    const i = cellAt(p), g = 35;
+    const hx = sampleGrid(terrain.height, p.x + g, p.y) - sampleGrid(terrain.height, p.x - g, p.y);
+    const hy = sampleGrid(terrain.height, p.x, p.y + g) - sampleGrid(terrain.height, p.x, p.y - g);
+    const gl = Math.hypot(hx, hy);
+    let mean = 0;
+    for (let k = 0; k < 8; k++) mean += sampleGrid(terrain.height, p.x + 260 * Math.cos(k * 0.785), p.y + 260 * Math.sin(k * 0.785));
+    const prom = sampleGrid(terrain.height, p.x, p.y) - mean / 8;
+    const cl = (x: number) => Math.max(0, Math.min(1, x));
+    return {
+      culture, pop,
+      soil: noise.fbm(p.x / 380, p.y / 380, 3),
+      slope: slopeL[i],
+      downhill: gl / (2 * g) > 0.012 ? { x: -hx / gl, y: -hy / gl } : null,
+      wet: cl((5 - f.hab[i]) / 3.5) * cl((450 - f.dWater[i]) / 300),
+      exposed: cl(prom / 18 + (terrain.seaFraction > 0.02 && f.dSea[i] < 350 ? 0.35 : 0)),
+      market: cl(uDist[i] / (0.42 * Lm)),
+      west: 0.5 - p.x / S + 0.35 * pays.fbm(p.x / 3000, p.y / 3000, 2),
+    };
+  };
+  // roads and rivers in buckets for the exact lot clearance test
+  const BK = 200, bw = Math.ceil(S / BK) + 1;
+  const buckets = new Map<number, number[]>();
+  const segs: number[] = []; // ax ay bx by pad
+  const addSeg = (a: Vec2, b: Vec2, pad: number) => {
+    const k = segs.length / 5;
+    segs.push(a.x, a.y, b.x, b.y, pad);
+    const x0 = Math.floor(Math.min(a.x, b.x) / BK), x1 = Math.floor(Math.max(a.x, b.x) / BK), y0 = Math.floor(Math.min(a.y, b.y) / BK), y1 = Math.floor(Math.max(a.y, b.y) / BK);
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) { const key = y * bw + x; const l = buckets.get(key); if (l) l.push(k); else buckets.set(key, [k]); }
+  };
+  for (const rd of roads) for (let i = 1; i < rd.path.length; i++) addSeg(rd.path[i - 1], rd.path[i], rd.width / 2 + 1.5);
+  for (const rv of terrain.rivers) for (let i = 1; i < rv.path.length; i++) addSeg(rv.path[i - 1], rv.path[i], Math.max(rv.width[i - 1] ?? 2, rv.width[i] ?? 2) / 2 + 3);
+  /** The lot (front middle o, inward V, W × D) is on dry free land, clear of roads, rivers, settlements and other lots. */
+  const lotOk = (o: Vec2, V: Vec2, W: number, D: number): boolean => {
+    const U = { x: V.y, y: -V.x };
+    const P = (u: number, v: number): Vec2 => ({ x: o.x + u * U.x + v * V.x, y: o.y + u * U.y + v * V.y });
+    const c = P(0, D / 2), rad = 0.5 * Math.hypot(W, D);
+    if (c.x - rad < 0.01 * S || c.y - rad < 0.01 * S || c.x + rad > 0.99 * S || c.y + rad > 0.99 * S) return false;
+    for (const l of lotsC) if (dist(l.c, c) < l.r + rad + 12) return false;
+    const st = Math.min(4, 0.45 * cell);
+    for (let v = 0.5; v <= D; v += st) for (let u = -W / 2 + 0.5; u <= W / 2; u += st) {
+      const i = cellAt(P(u, v));
+      if (terrain.water[i] || reserve[i] || f.dWater[i] < cell) return false;
+    }
+    const seen = new Set<number>();
+    for (let y = Math.floor((c.y - rad - 20) / BK); y <= Math.floor((c.y + rad + 20) / BK); y++) for (let x = Math.floor((c.x - rad - 20) / BK); x <= Math.floor((c.x + rad + 20) / BK); x++) {
+      for (const k of buckets.get(y * bw + x) ?? []) {
+        if (seen.has(k)) continue;
+        seen.add(k);
+        const q = k * 5;
+        const ax = segs[q] - o.x, ay = segs[q + 1] - o.y, bx = segs[q + 2] - o.x, by = segs[q + 3] - o.y;
+        if (segRectDist(ax * U.x + ay * U.y, ax * V.x + ay * V.y, bx * U.x + by * U.y, bx * V.x + by * V.y, -W / 2, 0, W / 2, D) < segs[q + 4]) return false;
+      }
+    }
+    return true;
+  };
+  type Place = { o: Vec2; V: Vec2 };
+  /** Plan the farm (type from the culture and the site, size from its wealth), shrinking it until its lot fits one of the placements. */
+  const planOn = (ctx: FarmContext, fr: Rng, places: (D: number) => Place[]): { lf: LocalFarm; o: Vec2; V: Vec2 } | null => {
+    const size0 = farmSize(ctx, fr);
+    const type = farmType(ctx, size0, fr);
+    const dirs = places(0).map((p) => p.V);
+    for (let s = FARM_SIZES.indexOf(size0); s >= 0; s--) {
+      const lr = fr.fork('plan' + s);
+      for (let k = 0; k < dirs.length; k++) {
+        const lf = layoutFarm(type, FARM_SIZES[s], ctx, frameOf(dirs[k], ctx.downhill), lr.fork('l' + k));
+        const q = places(lf.D)[k];
+        if (lotOk(q.o, q.V, lf.W, lf.D)) return { lf, o: q.o, V: q.V };
+      }
+    }
+    return null;
+  };
+  const accept = (pl: { lf: LocalFarm; o: Vec2; V: Vec2 }, culture: string, bp: Vec2 | null) => {
+    const g = placeFarm(pl.lf, pl.lf.type, pl.o, pl.V);
+    const c = { x: pl.o.x + (pl.V.x * pl.lf.D) / 2, y: pl.o.y + (pl.V.y * pl.lf.D) / 2 };
+    lotsC.push({ c, r: 0.5 * Math.hypot(pl.lf.W, pl.lf.D) });
+    farmsteads.push({
+      pos: c, angle: g.angle, buildings: g.parts.map((p) => p.poly), yard: g.yard, drive: bp ? [bp, g.gate] : [g.gate, g.gate],
+      type: pl.lf.type, size: pl.lf.size, culture, lot: g.lot, parts: g.parts, plots: g.plots, walls: g.walls, trees: g.trees, gate: g.gate, entry: g.entry, tags: pl.lf.tags,
+    });
+  };
+  const nearestRoad = (p: Vec2): { d: number; bp: Vec2; t: Vec2; w: number } => {
+    let d = Infinity, bp = p, bt = { x: 1, y: 0 }, bwid = 3;
+    for (const rd of roads) for (let i = 1; i < rd.path.length; i++) {
+      const a = rd.path[i - 1], b = rd.path[i];
+      const dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy || 1;
+      const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / l2));
+      const q = { x: a.x + t * dx, y: a.y + t * dy };
+      const dd = dist(q, p);
+      if (dd < d) { d = dd; bp = q; const l = Math.sqrt(l2); bt = { x: dx / l, y: dy / l }; bwid = rd.width; }
+    }
+    return { d, bp, t: bt, w: bwid };
+  };
+  // farmsteads of the settlement system first: the farm on its track, in the middle of its own fields
+  for (const st of secondary) {
+    if (st.detail !== 'farmstead') continue;
+    const fr = root.fork('settlement:' + st.key).fork('farm');
+    const nr = nearestRoad(st.center);
+    const ctx = ctxAt(st.center, st.culture, st.population);
+    const sideFirst = fr.chance(0.5) ? 1 : -1;
+    const d0 = nr.d > 1 ? { x: (st.center.x - nr.bp.x) / nr.d, y: (st.center.y - nr.bp.y) / nr.d } : { x: 0, y: 1 };
+    const places = (D: number): Place[] => {
+      const out: Place[] = [];
+      // beside the track end, the lot running back from it
+      if (nr.d < 60) for (const sd of [sideFirst, -sideFirst]) {
+        const V = { x: -nr.t.y * sd, y: nr.t.x * sd };
+        out.push({ o: { x: nr.bp.x + V.x * (nr.w / 2 + 3), y: nr.bp.y + V.y * (nr.w / 2 + 3) }, V });
+      }
+      // in its fields, facing the track (then the other ways round)
+      for (const [cx, cy] of [[1, 0], [0, 1], [0, -1], [-1, 0]]) {
+        const V = { x: d0.x * cx - d0.y * cy, y: d0.x * cy + d0.y * cx };
+        out.push({ o: { x: st.center.x - (V.x * D) / 2, y: st.center.y - (V.y * D) / 2 }, V });
+      }
+      return out;
+    };
+    let pl = planOn(ctx, fr, places);
+    if (pl && dist({ x: pl.o.x + (pl.V.x * pl.lf.D) / 2, y: pl.o.y + (pl.V.y * pl.lf.D) / 2 }, st.center) > 75) pl = null;
+    if (!pl) {
+      // last resort: the smallest farm in the middle of its fields
+      stats['farm.forced'] = (stats['farm.forced'] ?? 0) + 1;
+      const lf = layoutFarm('l-yard', 'cottage', ctx, frameOf(d0, ctx.downhill), fr.fork('forced'));
+      pl = { lf, o: { x: st.center.x - (d0.x * lf.D) / 2, y: st.center.y - (d0.y * lf.D) / 2 }, V: d0 };
+    }
+    accept(pl, st.culture, nr.d < 400 ? nr.bp : null);
+  }
+  // farmsteads along the roads: dispersed farms of the main town's farmland (and, on custom maps, of the whole country)
   {
+    const custom = world.options.mapSize !== undefined;
+    const farmCount = ({ hamlet: 0, village: 2, town: 4, city: 7, capital: 10 } as const)[world.options.size] + (custom ? Math.min(90, Math.round(0.2 * (S / 1000) ** 2)) : 0);
     const fr = rr.fork('farm');
-    const cand: { p: Vec2; t: Vec2; score: number }[] = [];
-    for (const rd of mainRoads === undefined ? roads : roads.slice(0, mainRoads)) {
-      if (rd.kind === 'track') continue;
+    const cand: { o: Vec2; V: Vec2; score: number }[] = [];
+    const rds = custom ? roads : mainRoads === undefined ? roads : roads.slice(0, mainRoads);
+    for (const rd of rds) {
+      if (rd.kind === 'track' && !custom) continue;
       let acc = 0;
       for (let i = 1; i < rd.path.length; i++) {
         const a = rd.path[i - 1], b = rd.path[i];
@@ -231,83 +374,44 @@ export function generateRural(world: World, root: Rng, mainRoads?: number, strip
         acc = 0;
         const t = { x: (b.x - a.x) / (L || 1), y: (b.y - a.y) / (L || 1) };
         const side = fr.chance(0.5) ? 1 : -1;
-        const off = rd.width / 2 + 24 + fr.float() * 10;
-        const p = { x: b.x - t.y * off * side, y: b.y + t.x * off * side };
+        const V = { x: -t.y * side, y: t.x * side };
+        const o = { x: b.x + V.x * (rd.width / 2 + 3), y: b.y + V.y * (rd.width / 2 + 3) };
+        const p = { x: o.x + V.x * 25, y: o.y + V.y * 25 };
         if (p.x < 0.06 * S || p.y < 0.06 * S || p.x > 0.94 * S || p.y > 0.94 * S) continue;
-        const idx = Math.floor(p.y / cell) * n + Math.floor(p.x / cell);
-        if (terrain.water[idx] || f.dWater[idx] < 60 || f.hab[idx] < 2.5 || slopeL[idx] > fieldMax || reserve[idx] || uDist[idx] < 0.1 * Lm || uDist[idx] > 0.42 * Lm) continue;
-        cand.push({ p, t: { x: t.x * side, y: t.y * side }, score: fr.float() });
+        const idx = cellAt(p);
+        if (terrain.water[idx] || f.dWater[idx] < 40 || f.hab[idx] < 0.8 || slopeL[idx] > pastureMax || reserve[idx] || uDist[idx] < (custom ? 0.07 : 0.1) * Lm || uDist[idx] > 0.42 * Lm) continue;
+        cand.push({ o, V, score: fr.float() });
       }
     }
     cand.sort((a, b) => b.score - a.score);
-    const minSp = 0.13 * Lm;
+    const minSp = custom ? Math.max(200, 0.09 * Lm) : 0.13 * Lm;
+    let made = 0;
     for (const c of cand) {
-      if (farmsteads.length >= farmCount) break;
-      if (farmsteads.some((o) => dist(o.pos, c.p) < minSp)) continue;
-      const ang = Math.atan2(c.t.y, c.t.x) + (fr.chance(0.5) ? 0 : Math.PI / 2) * 0; // aligned with the road
-      const ca = Math.cos(ang), sa = Math.sin(ang);
-      const at = (u: number, v: number) => ({ x: c.p.x + u * ca - v * sa, y: c.p.y + u * sa + v * ca });
-      const fw = fr.range(26, 34), fh = fr.range(22, 28);
-      const yard = rect(c.p.x, c.p.y, fw, fh, ang);
-      const bl: Polygon[] = [];
-      const house = at(0, -fh / 2 - 5);
-      bl.push(rect(house.x, house.y, fr.range(11, 15), fr.range(6.5, 8), ang));
-      const barn = at(fw / 2 + 6, 0);
-      bl.push(rect(barn.x, barn.y, fr.range(8, 10), fr.range(16, 22), ang));
-      if (fr.chance(0.75)) { const sh = at(-fw / 2 - 5, fh * 0.15); bl.push(rect(sh.x, sh.y, fr.range(6, 9), fr.range(5, 7), ang)); }
-      if (fr.chance(0.55)) { const o = at(-fw * 0.15, fh / 2 + 4.5); bl.push(rect(o.x, o.y, fr.range(9, 13), fr.range(5, 6.5), ang)); }
-      // drive to the road
-      let bestD = Infinity, bp: Vec2 = c.p;
-      for (const rd of roads) for (let i = 1; i < rd.path.length; i++) {
-        const a = rd.path[i - 1], b = rd.path[i];
-        const dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy || 1;
-        const t = Math.max(0, Math.min(1, ((c.p.x - a.x) * dx + (c.p.y - a.y) * dy) / l2));
-        const q = { x: a.x + t * dx, y: a.y + t * dy };
-        const d = dist(q, c.p);
-        if (d < bestD) { bestD = d; bp = q; }
-      }
-      farmsteads.push({ pos: c.p, angle: ang, buildings: bl, yard, drive: [bp, c.p] });
-      forCellsNearPolyline([c.p, c.p], n, n, cell, farmR + cell, (idx) => { farmMask[idx] = 1; });
-      forCellsNearPolyline([c.p, c.p], n, n, cell, farmR + 45, (idx) => { if (!farmMask[idx]) farmMask[idx] = 2; });
-      forCellsNearPolyline([bp, c.p], n, n, cell, 3 + 0.75 * cell, (idx) => { farmMask[idx] = 1; });
+      if (made >= farmCount) break;
+      if (lotsC.some((l) => dist(l.c, c.o) < minSp)) continue;
+      const p = { x: c.o.x + c.V.x * 25, y: c.o.y + c.V.y * 25 };
+      const culture = cultureAt(p);
+      const pl = planOn(ctxAt(p, culture), fr.fork('f' + made), () => [c]);
+      if (!pl) continue;
+      // the drive from the road to the gate
+      const nr = nearestRoad(placeFarm(pl.lf, pl.lf.type, pl.o, pl.V).gate);
+      accept(pl, culture, nr.bp);
+      made++;
     }
   }
-  // farmsteads of the settlement system: the farm on its track, in the middle of its own fields
-  for (const st of secondary) {
-    if (st.detail !== 'farmstead') continue;
-    const fr = root.fork('settlement:' + st.key).fork('farm');
-    let bestD = Infinity, bp: Vec2 = st.center, bt: Vec2 = { x: 1, y: 0 };
-    for (const rd of roads) for (let i = 1; i < rd.path.length; i++) {
-      const a = rd.path[i - 1], b = rd.path[i];
-      const dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy || 1;
-      const t = Math.max(0, Math.min(1, ((st.center.x - a.x) * dx + (st.center.y - a.y) * dy) / l2));
-      const q = { x: a.x + t * dx, y: a.y + t * dy };
-      const d = dist(q, st.center);
-      if (d < bestD) { bestD = d; bp = q; const l = Math.sqrt(l2); bt = { x: dx / l, y: dy / l }; }
+  for (const fm of farmsteads) stats['farm.' + fm.type] = (stats['farm.' + fm.type] ?? 0) + 1;
+  // exclusion masks: the lots (and their drives); the halo round them is gardens and orchards
+  if (farmsteads.length) {
+    const lm = rasterizePolys(farmsteads.map((fm) => fm.lot!), n, n, cell);
+    for (let i = 0; i < N; i++) if (lm[i]) farmMask[i] = 1;
+    for (const fm of farmsteads) {
+      const ring = [...fm.lot!, fm.lot![0]];
+      forCellsNearPolyline(ring, n, n, cell, 0.75 * cell, (idx) => { farmMask[idx] = 1; });
+      forCellsNearPolyline(ring, n, n, cell, 40, (idx) => { if (!farmMask[idx]) farmMask[idx] = 2; });
+      if (dist(fm.drive[0], fm.drive[fm.drive.length - 1]) > 0.5) forCellsNearPolyline(fm.drive, n, n, cell, 3 + 0.75 * cell, (idx) => { farmMask[idx] = 1; });
     }
-    // the yard beside the track end, the house facing it
-    const side = fr.chance(0.5) ? 1 : -1;
-    const off = 22 + fr.float() * 8;
-    const pos = bestD < 60 ? { x: bp.x - bt.y * off * side, y: bp.y + bt.x * off * side } : st.center;
-    const pi = Math.min(n - 1, Math.max(0, Math.floor(pos.y / cell))) * n + Math.min(n - 1, Math.max(0, Math.floor(pos.x / cell)));
-    const c = terrain.water[pi] ? st.center : pos;
-    const ang = Math.atan2(bt.y, bt.x);
-    const ca = Math.cos(ang), sa = Math.sin(ang);
-    const at = (u: number, v: number) => ({ x: c.x + u * ca - v * sa, y: c.y + u * sa + v * ca });
-    const fw = fr.range(24, 34), fh = fr.range(20, 28);
-    const yard = rect(c.x, c.y, fw, fh, ang);
-    const bl: Polygon[] = [];
-    const house = at(0, -fh / 2 - 5);
-    bl.push(rect(house.x, house.y, fr.range(11, 15), fr.range(6.5, 8), ang));
-    const barn = at(fw / 2 + 6, 0);
-    bl.push(rect(barn.x, barn.y, fr.range(8, 10), fr.range(16, 22), ang));
-    if (fr.chance(0.7)) { const sh = at(-fw / 2 - 5, fh * 0.15); bl.push(rect(sh.x, sh.y, fr.range(6, 9), fr.range(5, 7), ang)); }
-    const drive: Polyline = bestD < 400 ? [bp, c] : [c, c];
-    farmsteads.push({ pos: c, angle: ang, buildings: bl, yard, drive });
-    forCellsNearPolyline([c, c], n, n, cell, farmR + cell, (idx) => { farmMask[idx] = 1; });
-    forCellsNearPolyline([c, c], n, n, cell, farmR + 45, (idx) => { if (!farmMask[idx]) farmMask[idx] = 2; });
-    if (bestD < 400) forCellsNearPolyline([bp, c], n, n, cell, 3 + 0.75 * cell, (idx) => { farmMask[idx] = 1; });
   }
+  stats['ms.lu.farms'] = Math.round(performance.now() - tFarm);
 
   // ---- class grid
   const tClass = performance.now();

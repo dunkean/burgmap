@@ -7,6 +7,7 @@ import type { World, LandKind, Polygon, Polyline, Vec2, PolyH } from '../gen/typ
 import { contourSet } from './contours';
 import { renderView } from '../gen/settlements/merge';
 import { seaWithIslands } from './util';
+import { farmPlots, farmRidges, treePolys } from './farms';
 import { offsetRibbon, polygonCentroid } from '../gen/core/geom';
 import { pointInRing } from '../gen/geo/poly';
 import { TileIndex, boxesOf, chunkPolyline } from './tileindex';
@@ -233,8 +234,20 @@ export function buildScene(world0: World, tileSize = TILE_SIZE): Scene {
     addPoly('furlong-edges', open, open_h);
     addPoly('hedge-trees', trees);
     addLines('hedges', 'field', 'hedge', 1, enclosed);
-    addPoly('farm-yards', lu.farmsteads.map((f) => f.yard));
-    addPoly('farm-buildings', lu.farmsteads.flatMap((f) => f.buildings));
+    // farmsteads: lot pieces, hedged lot, yard, pens and ponds, walls, trees, buildings and their roof ridges
+    const fms = lu.farmsteads;
+    addPoly('farm-gardens', farmPlots(fms, 'garden'));
+    addPoly('farm-orchards', farmPlots(fms, 'orchard'));
+    addPoly('farm-paddocks', farmPlots(fms, 'paddock'));
+    addPoly('farm-platforms', farmPlots(fms, 'platform'));
+    addPoly('farm-lots', fms.flatMap((f) => (f.lot ? [f.lot] : [])));
+    addPoly('farm-yards', fms.map((f) => f.yard));
+    addPoly('farm-pens', [...farmPlots(fms, 'pen'), ...farmPlots(fms, 'threshing-floor')]);
+    addPoly('farm-ponds', farmPlots(fms, 'pond'));
+    addPoly('farm-trees', treePolys(fms.flatMap((f) => f.trees ?? [])));
+    addPoly('farm-buildings', fms.flatMap((f) => f.buildings));
+    addLines('farm-walls', 'farm', 'wall', 0.9, fms.flatMap((f) => f.walls ?? []));
+    addLines('farm-ridges', 'farm', 'ridge', 0.35, fms.flatMap(farmRidges));
     addLines('farm-drives', 'drive', 'drive', 2, lu.farmsteads.map((f) => f.drive));
     addLines('field-ways', 'field', 'way', 2.6, (lu as { ways?: Polyline[] }).ways ?? []);
     addLines('headlands', 'field', 'headland', 1.5, (lu as { headlands?: Polyline[] }).headlands ?? []);

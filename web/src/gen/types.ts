@@ -86,7 +86,37 @@ export interface LandArea {
   /** Furlongs (kind 'field'): strip direction in radians and the strips themselves. */
   stripAngle?: number; strips?: Polygon[];
 }
-export interface Farmstead { pos: Vec2; angle: number; buildings: Polygon[]; yard: Polygon; drive: Polyline }
+export type RoofKind = 'gable' | 'hip' | 'flat' | 'dome' | 'pyramidal' | 'pagoda' | 'thatch-round' | 'none' | 'tiled-hip' | 'conical' | 'barrel' | 'terraced';
+export type FarmSize = 'cottage' | 'family' | 'large' | 'manor';
+/** One farm building with its architecture metadata (`use`: house, barn, byre, stable, shed, dovecote, gatehouse, ...). */
+export interface FarmBuilding {
+  poly: Polygon; use: string; arch: string; roof: RoofKind; storeys?: number; material?: string;
+  /** Gatehouse with a carriage passage (the way into the yard runs through it). */
+  passage?: boolean;
+}
+/** Piece of a farm lot: farmyard / garden / orchard / paddock partition the lot; ponds, pens, threshing floors and the raised platform lie inside it. */
+export interface FarmPlot { kind: 'farmyard' | 'garden' | 'orchard' | 'paddock' | 'pond' | 'pen' | 'threshing-floor' | 'platform'; poly: Polygon }
+export interface Farmstead {
+  /** Centre of the lot. */
+  pos: Vec2; angle: number;
+  /** Building footprints (same order as `parts`). */
+  buildings: Polygon[]; yard: Polygon; drive: Polyline;
+  // ---- farmstead variety (landuse/farms.ts)
+  /** Farm type (vierkanthof, longere, einhaus, l-yard, u-yard, haufenhof, masseria, norse-longhouse, minka, ...). */
+  type?: string; size?: FarmSize; culture?: string;
+  /** The farm lot: a rectangle on its track, partitioned by the farmyard / garden / orchard / paddock plots. */
+  lot?: Polygon;
+  parts?: FarmBuilding[];
+  plots?: FarmPlot[];
+  /** Yard walls, enclosure banks and fences (open polylines; the gap is the gate). */
+  walls?: Polyline[];
+  /** Orchard and shelter-belt trees. */
+  trees?: Vec2[];
+  /** Gate on the lot front (end of the drive) and a point inside the yard. */
+  gate?: Vec2; entry?: Vec2;
+  /** Site context tags: slope, wet, exposed, bank-barn, warft. */
+  tags?: string[];
+}
 export interface LandUseLayer {
   areas: LandArea[];
   farmsteads: Farmstead[];
