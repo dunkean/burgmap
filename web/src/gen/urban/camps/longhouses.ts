@@ -24,7 +24,8 @@ export function longhouseVillage(cc: CampCtx, c: Vec2, pop: number, rng: Rng): C
   const NL = Math.max(2, Math.round(pop / 42));
   const sr = rng.fork('shape');
   // ---- the oval: sized for the house slots (house + lane share) and the plaza
-  const slot = 40 * 12.5;
+  const sf = Math.log2(cc.sprawl);
+  const slot = 40 * 12.5 * (1 + 0.3 * sf);
   const A = (NL + 2.5) * slot * 1.25;
   const aspect = sr.range(1.25, 1.6);
   const a = Math.sqrt((A * aspect) / Math.PI), b = Math.sqrt(A / (Math.PI * aspect));
@@ -91,7 +92,7 @@ export function longhouseVillage(cc: CampCtx, c: Vec2, pop: number, rng: Rng): C
     const cellsK: { poly: Polygon; tag: number }[] = [];
     let v0 = axisV - side * 3;
     for (let j = 0; Math.abs(v0 - axisV) < b * 1.3 && j < 40; j++) {
-      const v1 = (j === 0 ? axisV : v0) + side * ((j === 0 ? 1.8 : 0) + hr.range(9.5, 14));
+      const v1 = (j === 0 ? axisV : v0) + side * ((j === 0 ? 1.8 : 0) + hr.range(9.5, 14) * (1 + 0.3 * sf));
       const lo = Math.min(v0, v1), hi = Math.max(v0, v1);
       cellsK.push({ poly: orientPos([P(-a * 1.5, lo), P(a * 1.5, lo), P(a * 1.5, hi), P(-a * 1.5, hi)]), tag: j });
       v0 = v1;

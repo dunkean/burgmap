@@ -46,7 +46,7 @@ Each culture gets a `scale` range: the settlement classes it can produce. [x] `s
   - [ ] Remaining fantasy presets from §3c: halfling, orcish, gnomish, stilt-town, wizard city, necropolis.
 
 ## Global settlement parameter
-- [ ] **Sprawl / density factor** (`sprawl` ∈ 0.5 … 2, default 1). It multiplies the extent for a given population, lowers coverage, loosens plots, makes gardens more frequent and spreads faubourgs and suburbs. Below 1 it gives a compact dense town. It must interact with the culture defaults (a medina stays dense relative to its own baseline). Expose it in the UI and the URL.
+- [x] **Sprawl / density factor** (`sprawl` ∈ 0.5 … 2, default 1). It multiplies the extent for a given population, lowers coverage, loosens plots, makes gardens more frequent and spreads faubourgs and suburbs. Below 1 it gives a compact dense town. It must interact with the culture defaults (a medina stays dense relative to its own baseline). Expose it in the UI and the URL. (Done: `applySprawl` in morphology.ts scales densities, coverage, infill, plot sizes, blocks, gaps and courtyards per culture; faubourg share and spread; camps loosen their rows and yards. Plan panel slider, `sprawl=` in the URL, tests/urban.sprawl.test.ts.)
 
 ## Building footprints: realism, proportions, variety (all cultures)
 - [x] Proportions:

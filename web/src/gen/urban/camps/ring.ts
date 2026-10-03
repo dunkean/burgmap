@@ -66,6 +66,9 @@ export function ringCamp(cc: CampCtx, c: Vec2, pop: number, v: RingVariant, rng:
   const out = emptyCamp();
   const ctx = cc.ctx;
   const N = Math.max(5, Math.round(pop / v.per));
+  // sprawl: dwellings further apart along the rows, deeper rows
+  const sf = Math.log2(cc.sprawl);
+  v = { ...v, arc: [v.arc[0] * (1 + 0.32 * sf), v.arc[1] * (1 + 0.32 * sf)], depth: v.depth * (1 + 0.15 * sf) };
   // ---- the opening: tipi circles open to the east; kraals open downslope (else toward the road); gers face south
   let alpha: number;
   if (v.id === 'tipi') alpha = 0;

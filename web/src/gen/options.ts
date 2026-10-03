@@ -85,6 +85,8 @@ export interface Options {
   plan?: PlanOverride | null;
   /** Inhabitants; 0 = automatic from the size preset. */
   population: number;
+  /** Sprawl 0.5 (compact, dense) … 2 (loose, gardens, spread suburbs) for the same population; 1 = the culture's baseline. */
+  sprawl?: number;
   /** Toponym language family; 'auto' (default) follows the culture. */
   language?: NameFamily | 'auto';
   /** Draw labels (names) / legend on the map. Display only. */
@@ -179,6 +181,7 @@ export function toQuery(o: Options): string {
   if (o.language && o.language !== 'auto') p.set('lang', o.language);
   if (o.labels === false) p.set('labels', '0');
   if (o.legend) p.set('legend', '1');
+  if (o.sprawl !== undefined && o.sprawl !== 1) p.set('sprawl', String(o.sprawl));
   if (o.cultureMix) p.set('mix', mixToString(o.cultureMix));
   if (o.plan) p.set('plan', planToString(o.plan));
   // the image itself is never put in the URL: only a marker plus its two scalars
@@ -224,6 +227,8 @@ export function fromQuery(q: string | URLSearchParams): Options {
   o.language = lang !== null && (NAME_FAMILIES as string[]).includes(lang) ? (lang as NameFamily) : 'auto';
   o.labels = p.get('labels') !== '0' && p.get('labels') !== 'false';
   o.legend = p.get('legend') === '1' || p.get('legend') === 'true';
+  const sp = Number(p.get('sprawl'));
+  if (p.get('sprawl') !== null && Number.isFinite(sp)) o.sprawl = Math.max(0.5, Math.min(2, sp));
   o.cultureMix = mixFromString(p.get('mix')) ?? undefined;
   o.plan = planFromString(p.get('plan')) ?? undefined;
   const hs = Number(p.get('hscale')), hz = Number(p.get('hsea'));
@@ -239,7 +244,7 @@ export const wantsCustomHeight = (q: string | URLSearchParams): boolean =>
 /** Parse "k=v" overrides (used by the preview script). */
 export function applyOverride(o: Options, k: string, v: string): void {
   const rec = o as unknown as Record<string, unknown>;
-  if (k === 'roads' || k === 'seaLevel' || k === 'population' || k === 'heightScale' || k === 'importSea') rec[k] = Number(v);
+  if (k === 'roads' || k === 'seaLevel' || k === 'population' || k === 'heightScale' || k === 'importSea' || k === 'sprawl') rec[k] = Number(v);
   else if (k === 'contours' || k === 'landuse' || k === 'labels' || k === 'legend') rec[k] = v === '1' || v === 'true';
   else if (k === 'mix' || k === 'cultureMix') o.cultureMix = mixFromString(v);
   else if (k === 'plan') o.plan = planFromString(v) ?? (() => { try { return JSON.parse(v); } catch { return null; } })();

@@ -9,7 +9,7 @@ import { dist } from '../core/geom';
 import type { Rng } from '../core/rng';
 import type { World, UrbanLayer, UrbanStreet, PolyH as PolyHT, UrbanLine, UrbanTree } from '../types';
 import type { MorphologyParams, Zone } from './morphology';
-import { resolveMorph } from './morphology';
+import { resolveMorph, applySprawl } from './morphology';
 import { resolvePlan, getCulture, ResolvedPlan, EnclosureSpec, NucleusSpec, scaleMinPop, scaleMaxPop } from './culture';
 import { generateCamp } from './camps/index';
 import { planRibbonVillage } from './villages';
@@ -129,11 +129,20 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   if (settlement && settlement.form !== 'auto' && archetype !== 'town') archetype = 'nucleated-village';
   // the plan of a town; villages and hamlets use the culture's settlement form
   const plan: ResolvedPlan = resolvePlan(culture.id, pop, archetype === 'town' ? opts.cultureMix : null, archetype === 'town' ? opts.plan : null);
-  const coreMorph = settlement?.morphology ? resolveMorph(settlement.morphology) : plan.phases[0].morph;
+  // sprawl: the same population on more (or less) land, relative to the culture's baseline
+  const sprawl = Math.max(0.5, Math.min(2, opts.sprawl ?? 1));
+  const sprF = Math.log2(sprawl);
+  if (sprawl !== 1) {
+    plan.phases = plan.phases.map((ph) => ({ ...ph, morph: applySprawl(ph.morph, sprawl), sectors: ph.sectors.map((sc) => ({ ...sc, morph: applySprawl(sc.morph, sprawl) })) }));
+    plan.faubourg = applySprawl(plan.faubourg, sprawl);
+    const fk = 1 + (sprF > 0 ? 0.7 : 0.5) * sprF;
+    plan.faubShare = [plan.faubShare[0] * fk, plan.faubShare[1] * fk];
+  }
+  const coreMorph = settlement?.morphology ? applySprawl(resolveMorph(settlement.morphology), sprawl) : plan.phases[0].morph;
   const base = coreMorph;
   // hamlets: wide farm plots and no block splitting; street villages: long blocks between field lanes
   const params: MorphologyParams = archetype === 'hamlet'
-    ? { ...base, frontage: { ...base.frontage, village: [26, 55] }, blockSize: { ...base.blockSize, village: [60000, 90000] } }
+    ? { ...base, frontage: { ...base.frontage, village: [26 * (1 + 0.32 * sprF), 55 * (1 + 0.32 * sprF)] }, blockSize: { ...base.blockSize, village: [60000, 90000] } }
     : archetype === 'street-village' ? { ...base, blockSize: { ...base.blockSize, village: [9000, 26000] } } : base;
   const lastEnc: EnclosureSpec = archetype === 'town' ? plan.phases[plan.phases.length - 1].enc : { ...plan.phases[0].enc, ...(settlement?.enclosure ?? {}) };
   const wallKind = lastEnc.wall;
@@ -198,7 +207,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     closing: ph.morph.streetOp === 'organic', fossil: ph.enc.fossil !== 'none',
   }));
   if (archetype === 'hamlet' || archetype === 'street-village') {
-    const rv = planRibbonVillage(ctx, roads, pop, archetype, rng.fork('village'));
+    const rv = planRibbonVillage(ctx, roads, pop, archetype, rng.fork('village'), sprawl);
     if (rv) {
       eplan = { phases: rv.phases, enclosure: rv.enclosure, walled: false };
       marketArea = archetype === 'street-village' ? 500 + pop * 0.6 : 0;
@@ -235,7 +244,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     // suburbs (M4): none, the faubourg ribbons, or thick suburbs (an outer wall for a city, absorbed villages)
     const faubArea = (faubPop / plan.faubourg.density.faubourg) * 1e4 + short;
     const sub = flags.suburbs;
-    faub = sub === 'none' ? { region: [] } : planFaubourgs(ctx, eplan.enclosure, roads, faubArea * (sub === 'many' ? 2.4 : 1), walled ? 22 + (listsW ? listsW + 8 : 0) : 0, rng.fork('faubourg'), 'faubourg', sub === 'many' ? 1.6 : 1);
+    faub = sub === 'none' ? { region: [] } : planFaubourgs(ctx, eplan.enclosure, roads, faubArea * (sub === 'many' ? 2.4 : 1), walled ? 22 + (listsW ? listsW + 8 : 0) : 0, rng.fork('faubourg'), 'faubourg', (sub === 'many' ? 1.6 : 1) * Math.max(0.7, 1 + 0.35 * sprF));
     if (sub === 'many' && faub.region.length) {
       // suburbs spread between the roads: a belt of 150–220 m round the walls (beyond the glacis) joins the ribbons;
       // its quarters, bounded by the radial roads, are split by their own secondary streets and lanes

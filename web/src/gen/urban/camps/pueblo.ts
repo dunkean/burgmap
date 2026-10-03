@@ -147,7 +147,7 @@ export function puebloSettlement(cc: CampCtx, c: Vec2, pop: number, rng: Rng): C
     return m;
   };
   const ok = (p: Vec2, r: number): boolean => {
-    if (placed.some((q) => dist(q.c, p) < q.r + r + 30)) return false;
+    if (placed.some((q) => dist(q.c, p) < q.r + r + 30 * cc.sprawl)) return false;
     if (roadDist(p) < r + 8) return false;
     for (let k = 0; k < 12; k++) { const a = (k / 12) * 2 * Math.PI; const q = { x: p.x + Math.cos(a) * r, y: p.y + Math.sin(a) * r }; if (ctx.isWater(q) || ctx.slopeAt(q) > 0.25) return false; }
     return !ctx.isWater(p);
@@ -155,7 +155,7 @@ export function puebloSettlement(cc: CampCtx, c: Vec2, pop: number, rng: Rng): C
   const site = (r: number, d0: number, d1: number, key: string): Vec2 | null => {
     const pr = rng.fork(key);
     for (let t = 0; t < 120; t++) {
-      const a = pr.range(0, 2 * Math.PI), dd = pr.range(d0, d1) + t * 2;
+      const a = pr.range(0, 2 * Math.PI), dd = pr.range(d0, d1) * cc.sprawl + t * 2;
       const p = t === 0 && d0 === 0 ? c : { x: c.x + Math.cos(a) * dd, y: c.y + Math.sin(a) * dd };
       if (p.x < r + 30 || p.y < r + 30 || p.x > ctx.mapSize - r - 30 || p.y > ctx.mapSize - r - 30) continue;
       if (ok(p, r)) return p;
@@ -165,7 +165,7 @@ export function puebloSettlement(cc: CampCtx, c: Vec2, pop: number, rng: Rng): C
   const siteNear = (a: Vec2, r: number, d0: number, d1: number, key: string): Vec2 | null => {
     const pr = rng.fork(key);
     for (let t = 0; t < 80; t++) {
-      const ang = pr.range(0, 2 * Math.PI), dd = pr.range(d0, d1) + t * 3;
+      const ang = pr.range(0, 2 * Math.PI), dd = pr.range(d0, d1) * cc.sprawl + t * 3;
       const p = { x: a.x + Math.cos(ang) * dd, y: a.y + Math.sin(ang) * dd };
       if (p.x < r + 30 || p.y < r + 30 || p.x > ctx.mapSize - r - 30 || p.y > ctx.mapSize - r - 30) continue;
       if (ok(p, r)) return p;

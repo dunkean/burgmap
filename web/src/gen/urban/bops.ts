@@ -110,15 +110,16 @@ function rectIn(pl: Plot, f: { fa: Vec2; t: Vec2; n: Vec2 }, u0: number, u1: num
  * The street walls are blank; the house is entered through a bent passage (skifa): in from the lane beside the
  * patio, a turn, then into the patio, so that the patio is never seen from the lane.
  */
-function courtyardHouse(pl: Plot, P: MorphologyParams, rng: Rng): ArchBldg[] {
+function courtyardHouse(pl: Plot, P: MorphologyParams, rng: Rng, cov = 0.93): ArchBldg[] {
   const f = frame(pl);
   const A = area(pl.poly);
   const okShape = (p: Polygon) => { const s = shapeOf(p); return s.w >= MIN_BW && s.asp <= MAX_ASPECT; };
   // (a lot too small or too thin for a patio is built whole; long ones are cut into rooms later)
   const solid = (): ArchBldg[] => (shapeOf(pl.poly).w >= MIN_BW ? [tag({ poly: pl.poly, kind: 'house' }, P.arch, rng)] : []);
   if (!f || A < 42) return solid();
-  // the patio takes ~9–15 % of the lot (≥ 9 m²): the deepest room ring that still leaves it
-  const want = Math.max(9, A * rng.range(0.09, 0.15));
+  // the patio takes ~14–24 % of the lot (≥ 9 m²) at the medina's dense baseline, more on looser land (coverage
+  // lowered by the sprawl): the deepest room ring that still leaves it. (Large enough to read on a town plan.)
+  const want = Math.max(9, A * Math.max(0.1, Math.min(0.42, 0.14 + 0.55 * (0.95 - cov) + rng.range(-0.02, 0.07))));
   const ringFor = (axis: Vec2): ReturnType<typeof courtyardRing> => {
     for (let rd = P.roomDepth[1] + 1.5; rd >= 2.3; rd *= 0.92) {
       const r = courtyardRing(pl.poly, rd, axis);
@@ -495,7 +496,7 @@ export function buildOn(pl: Plot, cov: number, P: MorphologyParams, rng: Rng, hi
 
 function buildOnRaw(pl: Plot, cov: number, P: MorphologyParams, rng: Rng, hint?: CourtHint): ArchBldg[] {
   switch (P.buildingOp) {
-    case 'courtyardHouse': return courtyardHouse(pl, P, rng);
+    case 'courtyardHouse': return courtyardHouse(pl, P, rng, cov);
     case 'shopRow': return shopRow(pl, P, rng);
     case 'pavilionCompound': return pavilionCompound(pl, P, rng).map((b) => ({ ...b, poly: rectify(b.poly, pl.front[0], unitT(pl), pl.nrm) ?? b.poly }));
     case 'yashiki': return yashiki(pl, P, rng);

@@ -118,6 +118,16 @@ registry.add(checkControl($<HTMLInputElement>('legend'), 'legend', true));
     slot.append(lab, sel);
     registry.add(selectControl(sel, key, (v) => v as never));
   }
+  // sprawl: the same population on more or less land (0.5 compact … 2 loose), relative to the plan's baseline
+  const lab = document.createElement('label');
+  lab.htmlFor = 'sprawl';
+  const inp = document.createElement('input');
+  inp.type = 'range'; inp.id = 'sprawl'; inp.min = '0.5'; inp.max = '2'; inp.step = '0.05';
+  const show = (): void => { lab.textContent = `Sprawl ${Number(inp.value).toFixed(2)} (0.5 dense … 2 loose)`; };
+  inp.addEventListener('input', show);
+  slot.append(lab, inp);
+  const sc = numberControl(inp, 'sprawl', 1);
+  registry.add({ ...sc, live: false, write: (o) => { sc.write(o); show(); } });
 }
 registry.writeAll(opts);
 // ---------- Plan section: the scale note of the chosen culture (cap of village-only cultures)

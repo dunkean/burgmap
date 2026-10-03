@@ -250,3 +250,32 @@ export function blendParams(a: MorphologyParams, b: MorphologyParams, t: number)
   r.id = t < 0.5 ? a.id : b.id;
   return r;
 }
+
+/**
+ * Sprawl (global settlement parameter, 0.5 … 2, default 1): for the same population a looser or tighter town,
+ * relative to the culture's own baseline (a medina stays dense compared with a European town at the same sprawl).
+ * f = log2(sprawl): densities ÷ sprawl (extent ∝ sprawl), coverage and burgage-cycle infill lowered (more yards and
+ * gardens), plots wider and deeper, blocks larger, side gaps and setbacks opened; f < 0 tightens all of it.
+ */
+export function applySprawl(m: MorphologyParams, sprawl: number): MorphologyParams {
+  const s = Math.max(0.5, Math.min(2, sprawl || 1));
+  if (Math.abs(s - 1) < 1e-6) return m;
+  const f = Math.log2(s);
+  const zones = Object.keys(m.density) as Zone[];
+  const per = <T>(rec: Record<Zone, T>, fn: (v: T, z: Zone) => T): Record<Zone, T> => Object.fromEntries(zones.map((z) => [z, fn(rec[z], z)])) as Record<Zone, T>;
+  const rng = (r: Range, k: number, lo = 0, hi = Infinity): Range => [Math.max(lo, Math.min(hi, r[0] * k)), Math.max(lo, Math.min(hi, r[1] * k))];
+  const covK = 1 - 0.24 * f;
+  return {
+    ...m,
+    density: per(m.density, (v) => v / s),
+    coverage: per(m.coverage, (r) => rng(r, covK, 0.05, 0.97)),
+    infill: per(m.infill, (v) => Math.max(0, Math.min(1, v * (1 - 0.3 * f)))),
+    frontage: per(m.frontage, (r) => rng(r, 1 + 0.32 * f, 3.5)),
+    plotDepth: per(m.plotDepth, (r) => rng(r, 1 + 0.22 * f, 8)),
+    blockSize: per(m.blockSize, (r) => rng(r, 1 + 0.45 * f, 300)),
+    sideGap: per(m.sideGap, (r) => (f > 0 ? [r[0] + 0.8 * f, r[1] + 1.8 * f] : [r[0] * (1 + f), r[1] * (1 + 0.7 * f)])),
+    setback: per(m.setback, (r) => (f > 0 ? [r[0] + 0.6 * f, r[1] + 2 * f] : [r[0] * (1 + f), r[1] * (1 + 0.7 * f)])),
+    houseArea: per(m.houseArea, (r) => rng(r, 1 + 0.25 * f, 30)),
+  };
+}
+

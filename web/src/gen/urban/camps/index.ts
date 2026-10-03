@@ -40,6 +40,8 @@ export interface CampCtx {
   main: boolean;
   /** Direction (radians) of the main regional road leaving the site. */
   roadAngle: number;
+  /** Sprawl factor (0.5 … 2): looser camps, larger yards, houses further apart. */
+  sprawl: number;
 }
 
 /** Direction of the longest regional road reaching the site centre. */
@@ -132,6 +134,7 @@ export interface CampResult { layer: UrbanLayer; stats: Record<string, number | 
 export function generateCamp(world: World, root: Rng, culture: Culture, pop0: number): CampResult {
   const t0 = performance.now();
   const spec = culture.camp as CampSpec;
+  const sprawl = Math.max(0.5, Math.min(2, world.options.sprawl ?? 1));
   const rng = root.fork('camp');
   const morph = resolveMorph(culture.core.morphology);
   const maxPop = scaleMaxPop(culture.scale?.max ?? 'megacity');
@@ -142,7 +145,8 @@ export function generateCamp(world: World, root: Rng, culture: Culture, pop0: nu
     const each = Math.min(maxPop, Math.round(pop0 / n));
     pops = Array.from({ length: n }, (_, k) => Math.round(each * (k === 0 ? 1.15 : 0.85 + 0.3 * rng.fork('cl:' + k).float())));
   }
-  const r0 = campRadius(spec, pops[0]);
+  const rk = Math.sqrt(sprawl);
+  const r0 = campRadius(spec, pops[0]) * rk;
   const ctx = makeCtx(world, morph, Math.min(world.mapSize / 2, 2.2 * r0 + 600 + (pops.length > 1 ? 900 : 0)));
   const roads = (world.roads ?? []).filter((r) => r.kind !== 'track').map((r) => r.path);
   const roadAngle = mainRoadAngleOf(world);
@@ -163,9 +167,9 @@ export function generateCamp(world: World, root: Rng, culture: Culture, pop0: nu
     }
   }
   const centers: Vec2[] = [main];
-  if (pops.length > 1) centers.push(...clusterSites(ctx, main, roads, r0 * 1.3, pops.slice(1).map((p) => campRadius(spec, p) * 1.3), rng.fork('cluster'), spec.variant === 'norse' ? 0.45 : 0.8));
+  if (pops.length > 1) centers.push(...clusterSites(ctx, main, roads, r0 * 1.3, pops.slice(1).map((p) => campRadius(spec, p) * rk * 1.3), rng.fork('cluster'), spec.variant === 'norse' ? 0.45 : 0.8));
   pops = pops.slice(0, centers.length);
-  const parts: CampOut[] = centers.map((c, k) => plan({ ctx, world, culture, roads, main: k === 0, roadAngle }, spec, c, pops[k], rng.fork('part:' + k)));
+  const parts: CampOut[] = centers.map((c, k) => plan({ ctx, world, culture, roads, main: k === 0, roadAngle, sprawl }, spec, c, pops[k], rng.fork('part:' + k)));
   // tracks from each satellite to the main camp (a trampled way, drawn as a plan line), and from the road's end
   const extraLines: UrbanLine[] = [];
   if (dist(main, ctx.center) > r0 * 0.6) {
@@ -176,7 +180,7 @@ export function generateCamp(world: World, root: Rng, culture: Culture, pop0: nu
   for (let k = 1; k < centers.length; k++) {
     const a = centers[k], b = centers[0];
     const L = dist(a, b);
-    const ra = campRadius(spec, pops[k]), rb = r0;
+    const ra = campRadius(spec, pops[k]) * rk, rb = r0;
     if (L <= ra + rb) continue;
     const ux = (b.x - a.x) / L, uy = (b.y - a.y) / L;
     extraLines.push({ kind: 'track', path: [{ x: a.x + ux * ra, y: a.y + uy * ra }, { x: b.x - ux * rb, y: b.y - uy * rb }], width: 2.6 });

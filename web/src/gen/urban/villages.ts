@@ -54,11 +54,12 @@ function sliceByLength(pl: Polyline, s0: number, s1: number): Polyline {
   return out;
 }
 
-export function planRibbonVillage(ctx: UrbanCtx, roads: RoadIn[], pop: number, kind: 'hamlet' | 'street-village', rng: Rng): { phases: PhasePlan[]; enclosure: MultiPoly } | null {
+export function planRibbonVillage(ctx: UrbanCtx, roads: RoadIn[], pop: number, kind: 'hamlet' | 'street-village', rng: Rng, sprawl = 1): { phases: PhasePlan[]; enclosure: MultiPoly } | null {
   const tr = throughRoute(ctx.center, roads);
   if (!tr) return null;
   const farms = kind === 'hamlet' ? Math.max(3, Math.min(15, Math.round(pop / 9))) : Math.max(12, Math.round(pop / 6.5));
-  const front = kind === 'hamlet' ? 40 : 26;
+  const sk = 1 + 0.32 * Math.log2(sprawl);
+  const front = (kind === 'hamlet' ? 40 : 26) * sk;
   const L = Math.min(kind === 'hamlet' ? 420 : 1100, (farms * front) / 2 + 30);
   const f = rng.range(0.75, 1.25);
   let s0 = Math.max(0, tr.sc - (L / 2) * f), s1 = Math.min(polylineLength(tr.route), tr.sc + (L / 2) * (2 - f));
@@ -71,7 +72,7 @@ export function planRibbonVillage(ctx: UrbanCtx, roads: RoadIn[], pop: number, k
   seg = seg.slice(lo, hi + 1);
   if (seg.length < 2 || polylineLength(seg) < 60) return null;
   void s0; void s1;
-  const depth = kind === 'hamlet' ? rng.range(55, 75) : rng.range(62, 90);
+  const depth = (kind === 'hamlet' ? rng.range(55, 75) : rng.range(62, 90)) * (1 + 0.22 * Math.log2(sprawl));
   const rb = ribbon(seg, 2 * depth);
   let region: MultiPoly = [{ outer: rb, holes: [] }];
   if (ctx.water.length) region = difference(region, ctx.water);
