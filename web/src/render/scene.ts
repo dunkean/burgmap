@@ -75,6 +75,32 @@ export interface Scene {
   buildMs: number;
 }
 
+/**
+ * Shared urban kind lists: what `render/urban.ts` (SVG) draws and what the Canvas scene indexes.
+ * tests/canvas_urban_kinds.test.ts fails when urban.ts draws a kind that is missing here.
+ */
+export const URBAN_PARCEL_USES = {
+  places: ['place', 'market', 'quay', 'pier', 'slipway', 'timber-yard', 'mill-yard', 'mill', 'tannery-yard', 'bridge'],
+  greens: ['green', 'mill-island', 'windmill-mound', 'gallows-hill', 'ropewalk-yard'],
+  yards: ['church'],
+  blocks: ['arena-plot', 'inn'],
+  plazas: ['plaza'],
+  meadows: ['meadow'],
+  plots: ['plot'],
+  ditch: ['ditch'],
+  /** Compound grounds (also any `compound:*`). */
+  grounds: ['bailey', 'causeway', 'ghat', 'castle-honmaru', 'compound:castle-honmaru', 'bailey-gate', 'esplanade'],
+} as const;
+export const URBAN_LANDMARK_KINDS = ['sahn', 'garth', 'chinampa-canal', 'baray', 'pond', 'chinampa', 'cornfield', 'terrace-field', 'garden-bed', 'cemetery', 'tenshu-base', 'mebon'] as const;
+/** Building kinds with a dedicated look (the rest are ordinary roofs). */
+export const URBAN_BUILDING_KINDS = ['church', 'cathedral', 'landmark', 'house'] as const;
+/** Plan-line widths (m) of the generic wall-like kinds, and of camp / village fences (same tables as urban.ts). */
+export const WALL_LINE_W: Record<string, number> = { 'arcane-circle': 0.5, 'lock-gate': 0.8, bank: 0.8, stands: 2.4, dome: 0.6, gallery: 2.2, 'zigzag-wall': 2.4, 'canal-wall': 1, 'pyramid-step': 0.5, 'stall-row': 2.2, 'compound-wall': 1, 'citadel-wall': 2.4, 'stone-wall': 1.8, prakara: 1.6, 'ward-wall': 1.8 };
+export const CAMP_FENCE_W: Record<string, number> = { 'kraal-fence': 1.1, 'yard-fence': 0.45, 'pen-fence': 0.5, 'orda-fence': 0.8, palisade: 1.2 };
+/** Plan-line kinds with their own rule (anything else falls back to the wall-like stroke). */
+export const URBAN_SPECIAL_LINES = ['moat', 'canal', 'hedge', 'track', 'weir', 'parterre', 'footpath', 'ghat-steps', 'terrace', 'andene', 'thorn-fence', 'rampart', 'ditch', 'footbridge', 'bazaar-roof', 'qanat', 'qanat-shaft', 'hachure'] as const;
+export const URBAN_LINE_KINDS: readonly string[] = [...URBAN_SPECIAL_LINES, ...Object.keys(WALL_LINE_W), ...Object.keys(CAMP_FENCE_W)];
+
 export const LAND_ORDER: LandKind[] = ['meadow', 'marsh', 'pasture', 'commons', 'forest', 'garden', 'orchard', 'field'];
 export const TEXTURE_KINDS: LandKind[] = ['forest', 'orchard', 'meadow', 'pasture', 'marsh', 'commons'];
 
@@ -225,12 +251,22 @@ export function buildScene(world0: World, tileSize = TILE_SIZE): Scene {
     addPoly('footprint', ur.footprint);
     addPoly('u-streets', ur.quarters.map((q) => q.poly.outer));
     const parcelsOf = (use: string[]): Polygon[] => ur.parcels.filter((p) => use.includes(p.use)).map((p) => p.poly);
-    addPoly('u-places', parcelsOf(['place', 'market']));
-    addPoly('u-greens', parcelsOf(['green']));
-    addPoly('u-yards', parcelsOf(['church']));
-    addPoly('u-blocks', ur.blocks.filter((_, i) => ur.blockInfo[i]?.kind === 'block'));
-    addPoly('u-meadows', parcelsOf(['meadow']));
-    addPoly('u-plazas', parcelsOf(['plaza']));
+    const PU = URBAN_PARCEL_USES;
+    addPoly('u-places', parcelsOf([...PU.places]));
+    addPoly('u-greens', parcelsOf([...PU.greens]));
+    addPoly('u-yards', parcelsOf([...PU.yards]));
+    addPoly('u-blocks', [...ur.blocks.filter((_, i) => ur.blockInfo[i]?.kind === 'block'), ...parcelsOf([...PU.blocks])]);
+    addPoly('u-meadows', parcelsOf([...PU.meadows]));
+    addPoly('u-plazas', parcelsOf([...PU.plazas]));
+    addPoly('u-grounds', ur.parcels.filter((p) => (typeof p.use === 'string' && p.use.startsWith('compound:')) || (PU.grounds as readonly string[]).includes(p.use)).map((p) => p.poly));
+    addPoly('u-ditch', parcelsOf([...PU.ditch]));
+    const lmOf = (...k: string[]): Polygon[] => ur.landmarks.filter((l) => k.includes(l.kind)).map((l) => l.poly);
+    addPoly('u-sahn', lmOf('sahn'));
+    addPoly('u-garth', lmOf('garth'));
+    addPoly('u-cemetery', lmOf('cemetery'));
+    addPoly('u-bases', lmOf('tenshu-base', 'mebon'));
+    addPoly('u-patios', ur.buildings.flatMap((b) => (b.kind === 'house' && b.courtyards?.length ? b.courtyards.filter((c) => c.length >= 3) : [])));
+    addPoly('u-trees', (ur.trees ?? []).map((t) => ngon(t, t.r, 8)));
     addPoly('u-cornfields', ur.landmarks.filter((l) => l.kind === 'cornfield' || l.kind === 'terrace-field' || l.kind === 'garden-bed').map((l) => l.poly));
     addPoly('u-chinampa-canals', ur.landmarks.filter((l) => l.kind === 'chinampa-canal' || l.kind === 'baray' || l.kind === 'pond').map((l) => l.poly));
     addPoly('u-chinampas', ur.landmarks.filter((l) => l.kind === 'chinampa').map((l) => l.poly));
@@ -245,7 +281,7 @@ export function buildScene(world0: World, tileSize = TILE_SIZE): Scene {
       const inside = (b: { poly: Polygon }, c: Polygon) => c.length >= 3 && pointInRing(b.poly, polygonCentroid(c));
       addPoly('u-bldg', bs.map((b) => b.poly), bs.map((b) => { const h = (b.courtyards ?? []).filter((c) => inside(b, c)); return h.length ? h : undefined; }));
     }
-    addPoly('u-plots', ur.renderHints?.plotLines === false ? [] : parcelsOf(['plot']));
+    addPoly('u-plots', ur.renderHints?.plotLines === false ? [] : parcelsOf([...PU.plots]));
     addPoly('u-church', ur.buildings.filter((b) => b.kind === 'church' || b.kind === 'cathedral').map((b) => b.poly));
     // landmark buildings (keeps, halls, temples, minarets...), urban water (moats, tanks, mill races) and the plan
     // lines (compound and ward walls, moats, quay edges, terraces, hedges, footpaths)
