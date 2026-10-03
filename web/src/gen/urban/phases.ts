@@ -8,7 +8,7 @@ import type { Rng } from '../core/rng';
 import { Noise2D } from '../core/noise';
 import { marchingSquares } from '../terrain/contour';
 import { distanceField, forCellsNearPolyline } from '../core/field';
-import { blurGrid } from '../core/grid';
+import { blurGrid, FINITE_BOX } from '../core/grid';
 import type { SizeName } from '../options';
 import type { Archetype, UrbanZone } from '../types';
 import type { UrbanCtx } from './context';
@@ -150,14 +150,19 @@ export function buildField(ctx: UrbanCtx, rng: Rng, steepMax = 0.2, blocked?: Ui
   const ea = Math.cos(ang), eb = Math.sin(ang);
   // the field before the steepness / blocked masks depends on the context and the stream only: computed once
   // (the planner asks again with other steepness limits and blocked cells)
+  // (a bounded cost field: only its box can be finite)
+  const cbox = FINITE_BOX.get(site.cost.data);
+  const bx0 = cbox ? cbox.x0 : 0, bx1 = cbox ? cbox.x1 : n - 1, by0 = cbox ? cbox.y0 : 0, by1 = cbox ? cbox.y1 : n - 1;
+  if (cbox) f.fill(Infinity);
   let bm = BASE_CACHE.get(ctx);
   if (!bm) { bm = new Map(); BASE_CACHE.set(ctx, bm); }
-  let base = bm.get(rng.seedKey);
-  if (base) {
-    f.set(base);
-    for (let i = 0; i < N; i++) if ((slopeS[i] > 0.3 && slopeL[i] > steepMax) || (blocked && blocked[i])) f[i] = Infinity;
-  }
-  if (!base) for (let i = 0; i < N; i++) {
+  const base = bm.get(rng.seedKey);
+  const mask = (): void => {
+    for (let yy = by0; yy <= by1; yy++) for (let i = yy * n + bx0, e = yy * n + bx1; i <= e; i++) if ((slopeS[i] > 0.3 && slopeL[i] > steepMax) || (blocked && blocked[i])) f[i] = Infinity;
+  };
+  if (base) { f.set(base); mask(); }
+  if (!base) for (let yy = by0; yy <= by1; yy++) for (let xx = bx0; xx <= bx1; xx++) {
+    const i = yy * n + xx;
     const x = ((i % n) + 0.5) * cell, y = (((i / n) | 0) + 0.5) * cell;
     const c = site.cost.data[i];
     const border = x < 0.03 * S || y < 0.03 * S || x > 0.97 * S || y > 0.97 * S;
@@ -176,10 +181,7 @@ export function buildField(ctx: UrbanCtx, rng: Rng, steepMax = 0.2, blocked?: Ui
     }
     f[i] = c * k + 40 * Math.max(0, (steep ? slopeL[i] : slopeS[i]) - 0.1);
   }
-  if (!base) {
-    bm.set(rng.seedKey, f.slice());
-    for (let i = 0; i < N; i++) if ((slopeS[i] > 0.3 && slopeL[i] > steepMax) || (blocked && blocked[i])) f[i] = Infinity;
-  }
+  if (!base) { bm.set(rng.seedKey, f.slice()); mask(); }
   // bipolar growth: a second nucleus (a burg across the river, an abbey or castle burg) whose region merges
   if (G.bipolar && rng.fork('bipolar').chance(G.bipolar)) {
     const br = rng.fork('bipolar2');
@@ -189,7 +191,7 @@ export function buildField(ctx: UrbanCtx, rng: Rng, steepMax = 0.2, blocked?: Ui
     const qi = Math.min(n - 1, Math.max(0, Math.floor(q.y / cell))) * n + Math.min(n - 1, Math.max(0, Math.floor(q.x / cell)));
     if (isFinite(f[qi])) {
       const off = R * br.range(0.35, 0.55);
-      for (let i = 0; i < N; i++) {
+      for (let yy = by0; yy <= by1; yy++) for (let i = yy * n + bx0, e = yy * n + bx1; i <= e; i++) {
         if (!isFinite(f[i])) continue;
         const x = ((i % n) + 0.5) * cell, y = (((i / n) | 0) + 0.5) * cell;
         const d2 = off + Math.hypot(x - q.x, y - q.y) * 1.1;
@@ -197,6 +199,7 @@ export function buildField(ctx: UrbanCtx, rng: Rng, steepMax = 0.2, blocked?: Ui
       }
     }
   }
+  if (cbox) FINITE_BOX.set(f, cbox);
   return f;
 }
 
@@ -252,7 +255,10 @@ export function phaseField(ctx: UrbanCtx, f: Float32Array): PhaseField {
   const water = ctx.terrain.water;
   // water is crossed only at the road bridges: land beyond water without a street crossing cannot be urbanized
   const bridgeCells = new Uint8Array(N);
-  for (const b of ctx.world.bridges ?? []) forCellsNearPolyline([b.a, b.b], n, n, ctx.cell, Math.max(b.width, 6) + ctx.cell, (i) => { bridgeCells[i] = 1; });
+  const bridgeList: number[] = [];
+  for (const b of ctx.world.bridges ?? []) forCellsNearPolyline([b.a, b.b], n, n, ctx.cell, Math.max(b.width, 6) + ctx.cell, (i) => { bridgeCells[i] = 1; bridgeList.push(i); });
+  // (f is Infinity outside its box when it has one: the passable cells are the box's and the bridges')
+  const fb = FINITE_BOX.get(f) ?? { x0: 0, y0: 0, x1: n - 1, y1: n - 1 };
   const pass = (i: number) => isFinite(f[i]) || (water[i] !== 0 && bridgeCells[i] === 1);
   const lv = new Float32Array(N).fill(Infinity);
   // start at the center cell, or the nearest buildable cell
@@ -269,7 +275,8 @@ export function phaseField(ctx: UrbanCtx, f: Float32Array): PhaseField {
   if (pass(start)) {
     // (the levels are exact minimax values of f — no arithmetic — so any processing order gives the same lv)
     const ok = new Uint8Array(N);
-    for (let i = 0; i < N; i++) if (pass(i)) ok[i] = 1;
+    for (let yy = fb.y0; yy <= fb.y1; yy++) for (let i = yy * n + fb.x0, e = yy * n + fb.x1; i <= e; i++) if (pass(i)) ok[i] = 1;
+    for (const i of bridgeList) if (pass(i)) ok[i] = 1;
     const heap = new MinHeap<number>();
     lv[start] = isFinite(f[start]) ? f[start] : 0;
     heap.push(start, lv[start]);
@@ -291,7 +298,7 @@ export function phaseField(ctx: UrbanCtx, f: Float32Array): PhaseField {
     }
   }
   const vals: number[] = [];
-  for (let i = 0; i < N; i++) if (isFinite(f[i]) && isFinite(lv[i])) vals.push(lv[i]);
+  for (let yy = fb.y0; yy <= fb.y1; yy++) for (let i = yy * n + fb.x0, e = yy * n + fb.x1; i <= e; i++) if (isFinite(f[i]) && isFinite(lv[i])) vals.push(lv[i]);
   return { f, lv, sorted: Float32Array.from(vals).sort() };
 }
 

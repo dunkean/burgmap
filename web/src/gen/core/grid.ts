@@ -1,5 +1,11 @@
 export interface Grid { w: number; h: number; cell: number; data: Float32Array }
 
+/**
+ * Optional side table: a box (cells, inclusive) outside which a grid's data is known to be Infinity (bounded cost
+ * fields of the secondary settlements). Loops may skip the rest; absent = no such knowledge.
+ */
+export const FINITE_BOX = new WeakMap<Float32Array, { x0: number; y0: number; x1: number; y1: number }>();
+
 export function createGrid(w: number, h: number, cell: number, fill = 0): Grid {
   const data = new Float32Array(w * h);
   if (fill !== 0) data.fill(fill);

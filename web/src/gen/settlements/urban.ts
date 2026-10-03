@@ -7,7 +7,7 @@
  */
 import { Rng } from '../core/rng';
 import { MinHeap } from '../core/pq';
-import { createGrid, D8, D8_DIST } from '../core/grid';
+import { createGrid, D8, D8_DIST, FINITE_BOX } from '../core/grid';
 import { Vec2, Polygon, Polyline, dist, polygonCentroid } from '../core/geom';
 import { nearestOn, insertVertex } from '../core/pline';
 import { pointInRing } from '../geo/poly';
@@ -30,10 +30,13 @@ export function boundedCost(world: World, start: Vec2, limit: number): SiteLayer
   let pc = PASS_CACHE.get(f);
   if (!pc || pc.water !== t.water) { pc = { water: t.water, pass: passability(t, f) }; PASS_CACHE.set(f, pc); }
   const pass = pc.pass;
-  const d = new Float32Array(n * n).fill(Infinity);
+  const g = createGrid(n, n, cell, Infinity);
+  const d = g.data;
+  // (only the cells reached are visited again below: the rest of the map stays Infinity)
+  const touched: number[] = [];
   const s0 = Math.min(n - 1, Math.max(0, Math.floor(start.y / cell))) * n + Math.min(n - 1, Math.max(0, Math.floor(start.x / cell)));
   const heap = new MinHeap<number>();
-  d[s0] = 0; heap.push(s0, 0);
+  d[s0] = 0; heap.push(s0, 0); touched.push(s0);
   while (heap.size) {
     const key = heap.peekKey();
     const c = heap.pop()!;
@@ -49,12 +52,19 @@ export function boundedCost(world: World, start: Vec2, limit: number): SiteLayer
       const dd = D8_DIST[k];
       const g = pt >= 2 || pass[c] >= 2 ? 0 : Math.abs(H[m] - H[c]) / (dd * cell);
       const nd = key + dd * cell * (1 + 100 * g * g) * (pt === 1 ? 1 : pt === 2 ? 4 : 3);
-      if (nd < d[m]) { d[m] = nd; heap.push(m, nd); }
+      if (nd < d[m]) { d[m] = nd; heap.push(m, nd); touched.push(m); }
     }
   }
-  for (let i = 0; i < d.length; i++) if (d[i] > limit) d[i] = Infinity;
-  const g = createGrid(n, n, cell);
-  g.data.set(d);
+  let x0 = n, y0 = n, x1 = -1, y1 = -1;
+  for (const i of touched) {
+    if (d[i] > limit) { d[i] = Infinity; continue; }
+    const x = i % n, y = (i / n) | 0;
+    if (x < x0) x0 = x;
+    if (x > x1) x1 = x;
+    if (y < y0) y0 = y;
+    if (y > y1) y1 = y;
+  }
+  if (x1 >= 0) FINITE_BOX.set(d, { x0, y0, x1, y1 });
   return g;
 }
 
