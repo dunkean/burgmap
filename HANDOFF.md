@@ -137,7 +137,11 @@ GITHUB_TOKEN_FILE=/d/Workspace/dunk_token bash scripts/deploy_pages.sh   # build
    - Let the user drop waypoints or pins with a note.
    - "Copy link" includes the pins and the current view (e.g. `pins=x,y,note;…&view=cx,cy,scale`).
    - The bug reporter can then give the seed, options and an exact location. The agent reproduces it with `scripts/preview.ts --crop x,y,w` or `ui_check.mjs` at that view.
-8. **Nice to have:** a 3D or roof view from the building `arch`/`roof` metadata (already stored per building), and a JSON import/export round trip for editing.
+8. **Small bridges in town.** Today only main streets bridge rivers. In towns, secondary streets and lanes should also cross small rivers and streams with small bridges or footbridges:
+   - several per stream inside the town, at street continuations;
+   - a plank footbridge for lanes and a stone arch for streets;
+   - the street network on both banks stays connected.
+9. **Nice to have:** a 3D or roof view from the building `arch`/`roof` metadata (already stored per building), and a JSON import/export round trip for editing.
 
 ## 8. Working conventions used so far
 
