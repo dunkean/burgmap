@@ -60,7 +60,7 @@ export function extentGap(pa: number, pb: number): number {
 }
 
 export interface PlanRequest { key: string; cls: CountClass | SettlementClass; pop: number; culture: string; siteType?: SiteArchetype; position?: Vec2; explicit: boolean }
-export interface PlanResult { settlements: Settlement[]; warnings: string[]; requested: number }
+export interface PlanResult { settlements: Settlement[]; warnings: string[]; requested: number; ms?: Record<string, number> }
 
 const logUniform = (r: Rng, [a, b]: [number, number]): number => Math.round(a * Math.pow(b / a, r.float()));
 
@@ -153,6 +153,7 @@ export function planSettlements(world: World, opts: Options, root: Rng): PlanRes
   const f = site.fields;
   const warnings: string[] = [];
   const r = root.fork('settlements');
+  const tPlan = performance.now();
 
   // ---- main settlement (index 0)
   const mainPop = world.urban?.population ?? 100;
@@ -276,32 +277,68 @@ export function planSettlements(world: World, opts: Options, root: Rng): PlanRes
   // ---- placement
   const placed: Settlement[] = [main];
   const sorted = new Map<string, { i: number; s: number }[]>();
+  let tSort = 0;
   const sortedFor = (pop: number, culture: string): { i: number; s: number }[] => {
     // one ranking per (class band, culture): the score only depends on them
     const band = pop < 15 ? 0 : pop < 100 ? 1 : pop < 1000 ? 2 : pop < 20000 ? 3 : 4;
     const key = band + '|' + culture;
     let l = sorted.get(key);
     if (!l) {
+      const ts = performance.now();
       const rep = [8, 40, 300, 3000, 30000][band];
       l = [];
       for (const i of cand) { const s = scoreOf(i, rep, culture); if (s > -Infinity) l.push({ i, s }); }
       l.sort((a, b) => b.s - a.s || a.i - b.i);
       sorted.set(key, l);
+      tSort += performance.now() - ts;
     }
     return l;
   };
+  const BUCKET = 2000;
+  const buckets = new Map<number, Settlement[]>();
+  let maxPop = 0;
+  const addBucket = (o: Settlement): void => {
+    const k = Math.floor(o.center.y / BUCKET) * 4096 + Math.floor(o.center.x / BUCKET);
+    let l = buckets.get(k);
+    if (!l) buckets.set(k, (l = []));
+    l.push(o);
+    maxPop = Math.max(maxPop, o.population);
+  };
+  addBucket(main);
   const okAgainst = (p: Vec2, pop: number, relax: number): boolean => {
     const ext = extentRadius(pop);
     const ci = Math.min(n - 1, Math.floor(p.y / cell)) * n + Math.min(n - 1, Math.floor(p.x / cell));
     // the main town's real footprint plus a gardens ring
     if (dFoot[ci] < ext + 80 + 0.2 * mainR) return false;
-    for (const o of placed) {
+    // only the placed settlements within the largest possible spacing (buckets of 2 km)
+    const R = Math.max(pairSpacing(maxPop, pop), extentGap(maxPop, pop), ext + mainR + 80);
+    const bx0 = Math.floor((p.x - R) / BUCKET), bx1 = Math.floor((p.x + R) / BUCKET), by0 = Math.floor((p.y - R) / BUCKET), by1 = Math.floor((p.y + R) / BUCKET);
+    for (let by = by0; by <= by1; by++) for (let bx = bx0; bx <= bx1; bx++) for (const o of buckets.get(by * 4096 + bx) ?? []) {
       const d = dist(o.center, p);
       const gap = o.main ? ext + mainR + 80 : extentGap(o.population, pop);
       if (d < gap) return false;
       if (d < relax * pairSpacing(o.population, pop)) return false;
     }
     return true;
+  };
+  // cells that no settlement of a band can take any more (inside an extent gap or the tightest spacing of a
+  // placed settlement): skipped without the pairwise test (big maps place hundreds of settlements)
+  const BAND_MIN = [5, 15, 100, 1000, 20000];
+  const bandOf = (pop: number): number => (pop < 15 ? 0 : pop < 100 ? 1 : pop < 1000 ? 2 : pop < 20000 ? 3 : 4);
+  const blocked: (Uint8Array | null)[] = [null, null, null, null, null];
+  const block = (b: number, o: Settlement): void => {
+    const m = blocked[b]!;
+    const pm = BAND_MIN[b];
+    const R = o.main ? extentRadius(pm) + mainR + 80 : Math.max(extentGap(o.population, pm), 0.48 * pairSpacing(o.population, pm));
+    const cx = Math.floor(o.center.x / cell), cy = Math.floor(o.center.y / cell), rc = Math.floor(R / cell) - 1;
+    for (let y = Math.max(0, cy - rc); y <= Math.min(n - 1, cy + rc); y++) for (let x = Math.max(0, cx - rc); x <= Math.min(n - 1, cx + rc); x++) {
+      if ((x - cx) ** 2 + (y - cy) ** 2 <= rc * rc) m[y * n + x] = 1;
+    }
+  };
+  const blockedFor = (pop: number): Uint8Array => {
+    const b = bandOf(pop);
+    if (!blocked[b]) { blocked[b] = new Uint8Array(N); for (const o of placed) block(b, o); }
+    return blocked[b]!;
   };
   let requested = 0;
   const failedBand = new Set<string>();
@@ -332,10 +369,12 @@ export function planSettlements(world: World, opts: Options, root: Rng): PlanRes
       // automatic mode: once a class finds no room, the rest of that class is skipped
       if (!q.explicit && failedBand.has(bandKey)) continue;
       const list = sortedFor(q.pop, q.culture);
+      const bm = blockedFor(q.pop);
       const steps = q.explicit ? [1, 0.8, 0.62, 0.48] : [1];
       for (const relax of steps) {
         const tryList = (need: boolean): boolean => {
           for (const c of list) {
+            if (bm[c.i]) continue;
             const p = pos(c.i);
             if (need && q.siteType && !matches(q.siteType, c.i, ext, p)) continue;
             if (!okAgainst(p, q.pop, relax)) continue;
@@ -374,6 +413,8 @@ export function planSettlements(world: World, opts: Options, root: Rng): PlanRes
       key: q.key, index: placed.length, cls, population: q.pop, culture: q.culture, center, archetype, radius: ext,
       extent: [], region: [], fixed: !!q.position, detail: cls === 'farmstead' ? 'farmstead' : 'eager',
     });
+    for (let b = 0; b < 5; b++) if (blocked[b]) block(b, placed[placed.length - 1]);
+    addBucket(placed[placed.length - 1]);
   }
 
   // ---- regions (Voronoi cells) and extents (disc clipped to the cell)
@@ -382,5 +423,5 @@ export function planSettlements(world: World, opts: Options, root: Rng): PlanRes
     s.region = regions[k];
     s.extent = clipConvex(circle(s.center, s.radius), regions[k]);
   });
-  return { settlements: placed, warnings, requested };
+  return { settlements: placed, warnings, requested, ms: { sort: Math.round(tSort), total: Math.round(performance.now() - tPlan) } };
 }

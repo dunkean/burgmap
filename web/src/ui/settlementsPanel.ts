@@ -151,7 +151,7 @@ export function initSettlementsUI(registry: ControlRegistry, getOpts: () => Opti
     else if (f === 'siteType') rows[k] = { ...rows[k], siteType: (t.value || undefined) as SiteArchetype | undefined };
   });
   addBtn.addEventListener('click', () => { rows.push({ population: rows.length ? 120 : 300 }); renderRows(); fire(box); });
-  const showMode = (): void => { countsBox.hidden = mode.value !== 'counts'; listBox.hidden = mode.value !== 'list'; countsBox.style.display = mode.value === 'counts' ? 'grid' : 'none'; };
+  const showMode = (): void => { countsBox.style.display = mode.value === 'counts' ? 'grid' : 'none'; listBox.style.display = mode.value === 'list' ? 'flex' : 'none'; };
   mode.addEventListener('change', () => {
     if (mode.value === 'list' && !rows.length) rows = [{ population: 300 }, { population: 80 }];
     if (mode.value === 'counts' && COUNT_CLASSES.every((c) => Number(countEls[c].value) === 0)) { countEls.village.value = '4'; countEls.hamlet.value = '4'; countEls.farmstead.value = '6'; }

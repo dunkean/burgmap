@@ -96,6 +96,7 @@ export function generate(options: Options, onStage?: (stage: string, partial?: W
   world.settlements = settlements;
   const t4a = performance.now();
   stats['ms.planner'] = r(t4a - t3b);
+  for (const [k, v] of Object.entries(plan.ms ?? {})) stats['planner.ms.' + k] = v;
   if (settlements.length > 1) {
     const net = routeNetwork(world, settlements, root);
     world.roads = [...world.roads, ...net.roads];
@@ -140,7 +141,9 @@ export function generate(options: Options, onStage?: (stage: string, partial?: W
   {
     const mv = mainView();
     if (mv !== world) mv.settlements = world.settlements;
-    const lu = generateRural(mv, root, mainRoads);
+    // big lazy maps: furlong strips only around the main town (level of detail; fields elsewhere stay plain)
+    const lod = lazy ? { center: world.site!.center, radius: 4000 } : undefined;
+    const lu = generateRural(mv, root, mainRoads, lod);
     world.landuse = lu.layer;
     for (const [k, v] of Object.entries(lu.stats)) stats['landuse.' + k] = v;
   }
@@ -149,11 +152,7 @@ export function generate(options: Options, onStage?: (stage: string, partial?: W
 
   onStage?.('names');
   {
-    // the main toponyms see the main roads only (their far ends name the villages beyond the map)
-    const all = world.roads;
-    world.roads = all.slice(0, mainRoads);
     world.names = generateNames(world, root);
-    world.roads = all;
     settlementNames(world, root);
   }
   stats['ms.names'] = r(performance.now() - t4);

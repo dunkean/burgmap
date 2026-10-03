@@ -8,5 +8,5 @@ for (const a of args.filter((x) => x.includes('='))) { const i = a.indexOf('=');
 const t = performance.now();
 const w = generate(o, undefined, args.includes('--lazy') ? { lazy: true } : {});
 const s = w.stats;
-const keep = Object.entries(s).filter(([k]) => (k.startsWith('ms.') && !k.startsWith('ms.lot') && !k.startsWith('ms.q')) || k.startsWith('settl') || k.startsWith('network') || k === 'urban.pop' || k === 'landuse.strips');
+const keep = Object.entries(s).filter(([k]) => (k.startsWith('ms.') && !k.startsWith('ms.lot') && !k.startsWith('ms.q')) || k.startsWith('settl') || k.startsWith('network') || k.startsWith('planner') || k === 'urban.pop' || k === 'landuse.strips');
 console.log(Math.round(performance.now() - t), 'ms', JSON.stringify(Object.fromEntries(keep)));

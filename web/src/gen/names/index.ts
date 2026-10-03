@@ -167,9 +167,12 @@ export function generateNames(world: World, root: Rng): NamesLayer {
   // ---- roads: neighbouring villages at the exits
   interface RoadInfo { path: Polyline; exit: Vec2; dest: string; kind: string }
   const roadInfos: RoadInfo[] = [];
+  // (only roads that leave the map: the settlement network's inner roads lead to named settlements on the map)
+  const onEdge = (p: Vec2): boolean => p.x < 1 || p.y < 1 || p.x > S - 1 || p.y > S - 1;
   (world.roads ?? []).forEach((r, i) => {
     if (r.kind === 'track' || r.path.length < 2) return;
     const a = r.path[0], b = r.path[r.path.length - 1];
+    if (world.settlements && world.settlements.length > 1 && !onEdge(a) && !onEdge(b)) return;
     const exit = dist(a, center) > dist(b, center) ? a : b;
     const dest = unique('dest:' + i, 1);
     roadInfos.push({ path: r.path, exit, dest, kind: r.kind });

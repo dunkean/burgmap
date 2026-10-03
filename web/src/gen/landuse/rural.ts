@@ -80,12 +80,12 @@ export function ringScale(pop: number): number {
 }
 
 /**
- * Rural land use. With a settlement system (M3c) the von Thünen rings are computed from every settlement: the
+ * Rural land use (`stripLod`: cut the furlong strips only within that disc). With a settlement system (M3c) the von Thünen rings are computed from every settlement: the
  * main town's rings (scaled by the map extent on the legacy presets, by its population otherwise), each village's
  * and hamlet's own fields, commons and woods, and the planner's farmsteads sitting in their fields.
  * `mainRoads`: number of leading roads that belong to the main town (the legacy roadside farmsteads use only those).
  */
-export function generateRural(world: World, root: Rng, mainRoads?: number): { layer: LandUseLayer; stats: Record<string, number> } {
+export function generateRural(world: World, root: Rng, mainRoads?: number, stripLod?: { center: Vec2; radius: number }): { layer: LandUseLayer; stats: Record<string, number> } {
   const terrain = world.terrain, site = world.site!;
   const roads = world.roads ?? [];
   const S = world.mapSize;
@@ -452,7 +452,9 @@ export function generateRural(world: World, root: Rng, mainRoads?: number): { la
       const strips: Polygon[] = [];
       const furlongMP = [pg as Ring[]];
       const slabs = Math.ceil((vmax - vmin) / ws);
-      if (slabs >= 2 && slabs <= 60 && a > 2500) {
+      // level of detail (big lazy maps): the strips are cut only near the main town
+      const stripsHere = !stripLod || dist(cen, stripLod.center) < stripLod.radius;
+      if (stripsHere && slabs >= 2 && slabs <= 60 && a > 2500) {
         for (let s = 0; s < slabs; s++) {
           const v0 = vmin + s * ws, v1 = v0 + ws * ftRng.range(0.92, 1.0);
           const slab: Ring = [[0, 0], [0, 0], [0, 0], [0, 0], [0, 0]];

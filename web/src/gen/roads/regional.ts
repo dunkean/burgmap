@@ -176,6 +176,22 @@ function pointAtLength(pl: Polyline, s: number): Vec2 {
 
 const TRACKS: Record<SizeName, number> = { hamlet: 1, village: 1, town: 2, city: 3, capital: 3 };
 
+/**
+ * Rivers whose bounding box comes within `margin` of the polyline's bounding box, in their original order: a superset
+ * of every river the bridge / ribbon passes can touch (they look no further than ~250 m from the road), so results
+ * are unchanged while long roads on big maps skip the far rivers.
+ */
+export function riversNear<R extends { path: Vec2[] }>(rivers: R[], pl: Polyline, margin: number): R[] {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const p of pl) { if (p.x < x0) x0 = p.x; if (p.y < y0) y0 = p.y; if (p.x > x1) x1 = p.x; if (p.y > y1) y1 = p.y; }
+  x0 -= margin; y0 -= margin; x1 += margin; y1 += margin;
+  return rivers.filter((r) => {
+    let a = Infinity, b = Infinity, c = -Infinity, d = -Infinity;
+    for (const p of r.path) { if (p.x < a) a = p.x; if (p.y < b) b = p.y; if (p.x > c) c = p.x; if (p.y > d) d = p.y; }
+    return a <= x1 && c >= x0 && b <= y1 && d >= y0;
+  });
+}
+
 export interface RoadContext {
   n: number; cell: number; N: number;
   /** Smoothed heights (grade). */
@@ -500,7 +516,7 @@ export function routeRoads(
   // ---- bridges: perpendicular crossings on dry approaches
   const roadBridges: { a: Vec2; b: Vec2; width: number }[][] = [];
   for (const rd of roads) {
-    const res = bridgeRoad(rd.path, { rivers: terrain.rivers, wet: isWaterPt, roadWidth: rd.width }, 3.0);
+    const res = bridgeRoad(rd.path, { rivers: riversNear(terrain.rivers, rd.path, 400), wet: isWaterPt, roadWidth: rd.width }, 3.0);
     rd.path = res.path;
     roadBridges.push(res.bridges);
   }
@@ -526,7 +542,7 @@ export function routeRoads(
     roads.length = 0; roads.push(...keepRoads);
     roadBridges.length = 0; roadBridges.push(...keepBr);
   }
-  roads.forEach((rd, i) => { rd.path = clearRibbons(rd.path, terrain.rivers, roadBridges[i]); });
+  roads.forEach((rd, i) => { rd.path = clearRibbons(rd.path, riversNear(terrain.rivers, rd.path, 400), roadBridges[i]); });
   const bridges: Bridge[] = roadBridges.flat();
   return { roads, bridges, stats: { roads: roads.length, bridges: bridges.length } };
 }
