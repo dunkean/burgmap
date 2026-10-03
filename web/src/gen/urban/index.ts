@@ -572,8 +572,16 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   const encRingsF = eplan.enclosure.map((ph) => ph.outer);
   // (many suburbs: the suburban belt is a garden suburb, looser than the ribbons at the gates)
   const subK = flags.suburbs === 'many' ? 1 : 0;
+  // (the wall distance only matters below 380 m: the fade is 1 beyond; an index of the ring edges finds it)
+  const encIdx = new GridIndex<{ a: Vec2; b: Vec2 }>(40);
+  for (const r of encRingsF) for (let i = 0; i < r.length; i++) encIdx.insertSeg(r[i], r[(i + 1) % r.length], { a: r[i], b: r[(i + 1) % r.length] });
   const faubFade = (p: Vec2): number => {
-    const d = encRingsF.length ? Math.min(...encRingsF.map((r) => distToRing(r, p))) : 0;
+    let d = 0;
+    if (encRingsF.length) {
+      d = Infinity;
+      encIdx.forEachIn(p.x - 381, p.y - 381, p.x + 381, p.y + 381, (sg) => { const e = distToSeg(p, sg.a, sg.b); if (e < d) d = e; });
+      if (d > 381) d = 1e9;
+    }
     const f = Math.max(0, Math.min(1, (d - 50) / 330));
     return subK ? Math.min(1, 0.12 + 1.35 * f) : f;
   };

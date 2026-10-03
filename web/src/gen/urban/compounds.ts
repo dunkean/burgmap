@@ -528,6 +528,7 @@ export interface ClaimBlock { poly: Polygon; kind: string; phase: number; zone: 
  * Picks a block for a landmark: area within range (scored by fit), then by the placement rule (next to the
  * nucleus street, near the nucleus, at the enclosure edge, north on the axis, east / west, near a gate).
  */
+const R_INS = new WeakMap<ClaimBlock, { poly: Polygon; r: number }>();
 export function pickBlock(
   blocks: ClaimBlock[], place: string, [amin, amax]: [number, number], nucleus: Vec2, R: number,
   ctx: { frontsNucleus: (i: number) => number; edgeDist: (p: Vec2) => number; gates: Vec2[]; rng: Rng; taken: Set<number>; others?: Vec2[]; sep?: number; targets?: Vec2[] },
@@ -537,8 +538,10 @@ export function pickBlock(
     if (b.kind !== 'block' || ctx.taken.has(i)) return;
     const a = area(b.poly);
     if (a < amin * 0.7 || a > amax * 1.8) return;
-    // landmark lots are compact
-    const rIns = inscribed(b.poly, [], 2).r;
+    // landmark lots are compact (the radius is kept per block: every landmark scans all blocks)
+    let ri = R_INS.get(b);
+    if (!ri || ri.poly !== b.poly) { ri = { poly: b.poly, r: inscribed(b.poly, [], 2).r }; R_INS.set(b, ri); }
+    const rIns = ri.r;
     if (rIns < 0.3 * Math.sqrt(amin)) return;
     const c = polygonCentroid(b.poly);
     const d = dist(c, nucleus);
