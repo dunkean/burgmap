@@ -14,6 +14,7 @@ This checklist reconciles the open work in `BUGS.md`, `HANDOFF.md` §7 and `web/
 - [ ] Rural green seams: subdued boundaries between fields in both renderers.
 - [ ] Terrace strokes: legible retaining walls and slope hachures at each zoom.
 - [ ] Open-town edges: soften the exact outer boundary and distribute houses beyond it, keeping frontage, terrain and parcel containment valid (new user report in `BUGS.md`).
+- [ ] Tribal cultures at large populations: grow a primitive urban settlement appropriate to population and culture rather than repeating isolated tribes (new user report in `BUGS.md`).
 
 ## Scale, performance and test health
 

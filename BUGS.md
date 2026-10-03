@@ -31,3 +31,4 @@ Agents: fix entries in order, then mark each one fixed with the commit hash (e.g
 - Entre certains champs y a un trait vert, c'est pas beau et trop visible.
 - Les traits de terrasses sont pas jolis non 
 - dans les open town, il faut que la frontière ne soit pas tracée nette. Mais que les maison déborde hors du cadre de la ville un peu.
+- Les cultures qui sont faites pour être en tribus (genre nordic), lorsqu'on demande du gros, il faut faire une ville primitive au lieu des tribus. En gros on adapte l'archi urbaine à la taille de la pop + culture
