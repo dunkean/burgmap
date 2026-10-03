@@ -88,7 +88,8 @@ export const CAMP_CULTURES: Culture[] = [
   },
   {
     ...campBase('orcish', 'Orcish war camp', 'orcish'), fantasy: true,
-    scale: { min: 'hamlet', max: 'town' }, camp: { layout: 'ring', variant: 'orc' },
+    // (chaotic sprawl inside lobed stake palisades: the camp grew by bursts; the ring layout's 'orc' variant is kept)
+    scale: { min: 'hamlet', max: 'town' }, camp: { layout: 'warcamp', variant: 'orc' },
     sitePrefs: { flatness: 0.8, weights: { hilltop: 1.6, valley: 1.2, plain: 1, harbor: 0.3 } },
   },
   {

@@ -153,7 +153,7 @@ function courtyardHouse(pl: Plot, P: MorphologyParams, rng: Rng, cov = 0.93, sub
   if (!f || A < 42) return solid();
   // the patio takes ~14–24 % of the lot (≥ 9 m²) at the medina's dense baseline, more on looser land (coverage
   // lowered by the sprawl): the deepest room ring that still leaves it. (Large enough to read on a town plan.)
-  const want = Math.max(9, A * Math.max(0.1, Math.min(0.42, 0.14 + 0.55 * (0.95 - cov) + rng.range(-0.02, 0.07))));
+  const want = Math.max(10, A * Math.max(0.12, Math.min(0.42, 0.155 + 0.55 * (0.95 - cov) + rng.range(-0.02, 0.06))));
   const courts = new Map<number, Polygon>();
   const ringFor = (axis: Vec2): ReturnType<typeof courtyardRing> => {
     for (let rd = P.roomDepth[1] + 1.5; rd >= 2.3; rd *= 0.92) {
@@ -419,37 +419,63 @@ function machiya(pl: Plot, cov: number, P: MorphologyParams, rng: Rng): ArchBldg
     if (D - hd > 12) put(piece(hd + rng.range(4, 6), Math.min(D, hd + rng.range(10, 13)), { k: 0, w: W * rng.range(0.5, 0.8) }), 'kura', 'back', 2);
     return out;
   }
-  const hd = Math.min(D, rng.range(8, 11));
+  // (the pieces keep to the no-matchstick rule: ≥ 4.5 m wide, within 1:3)
+  const putM = (poly: Polygon | null, arch: string, kind: Bldg['kind'], storeys: number) => {
+    if (poly && shapeOf(poly).w >= MIN_BW && shapeOf(poly).asp <= MAX_ASPECT) out.push({ poly, kind, arch, roof: 'gable', material: 'wood', storeys, orientation: ori });
+  };
+  // the narrow eel's-bed lot (machi of Kyoto, Edo): full-width ranges one behind the other down the lot — the shop
+  // house, the back rooms across the tsuboniwa, the kura, the back tenements — each within 1:3 of the lot width
+  if (W < 7.5 && cov > 0.4) {
+    const lim = Math.max(MIN_BW, 2.9 * W);
+    let d = 0;
+    const seq: [string, Bldg['kind'], number, [number, number], number][] = [
+      ['machiya', 'house', 2, [10, 13], rng.range(2.2, 3.2)],
+      ['machiya-okuzashiki', 'rear', 2, [6, 9], rng.range(2.2, 3.4)],
+      ['kura', 'back', 2, [5.5, 7], rng.range(1.8, 2.8)],
+      ['nagaya', 'back', 1, [8, 14], rng.range(1.8, 2.6)],
+      ['nagaya', 'back', 1, [8, 14], 2],
+    ];
+    for (const [arch, kind, st, [lo, hi], gap] of seq) {
+      const depth = Math.min(lim, rng.range(lo, hi));
+      if (d + Math.min(depth, MIN_BW) > D - 0.6) break;
+      const p2 = piece(d, Math.min(D - 0.6, d + depth));
+      if (p2) putM(p2, arch, kind, st);
+      d += depth + gap;
+      if (cov < 0.6 && arch === 'kura') break;
+    }
+    pl.gated = true;
+    return out;
+  }
+  const hd = Math.min(D, rng.range(9.5, 12.5));
   const front = piece(0, hd);
   if (!front) return out;
   // (the tori-niwa, an earthen-floored passage through the house, leads to the garden and the kura)
   pl.gated = true;
-  const court = rng.range(2.5, 3.6);
+  const court = rng.range(2.4, 3.4);
   // (the C-shaped house stays within 1:3)
-  const rd = Math.min(rng.range(5, 7.5), 2.9 * W - hd - court);
+  const rd = Math.min(rng.range(6, 9), 2.9 * W - hd - court);
   let house: Polygon = front;
   let backEnd = hd;
   const k = rng.chance(0.5) ? 0 : 1;
-  if (rd >= 4 && D - hd >= court + rd + 0.5 && cov > 0.6) {
+  if (rd >= 4 && D - hd >= court + rd + 0.5 && cov > 0.4) {
     const corr = piece(hd, hd + court, { k, w: Math.min(1.8, W - 2.5) });
     const back = piece(hd + court, hd + court + rd);
     if (corr && back) {
       const j1 = stitchUnion(house, corr);
       const j2 = j1 ? stitchUnion(j1, back) : null;
-      if (j2) house = j2; else put(back, 'machiya-okuzashiki', 'rear', 2);
+      if (j2) house = j2; else putM(back, 'machiya-okuzashiki', 'rear', 2);
       backEnd = hd + court + rd;
     }
   }
-  put(house, 'machiya', 'house', rng.chance(0.3) ? 1 : 2);
-  // the kura behind the back garden, against one side line (at most ~32 m from the street: on a deep lot the rest
-  // is the back of the cho, where the back tenements stand)
-  const kd = rng.range(5.5, 7), kw = Math.min(W - 0.6, rng.range(4.6, 5.5));
-  const kEnd = Math.min(D - 0.8, Math.max(backEnd + 4 + kd, rng.range(24, 32)));
-  if (kEnd - kd > backEnd + 2 && kw >= 3.6) put(piece(kEnd - kd, kEnd, { k: 0, w: kw, off: 0.3 }), 'kura', 'back', 2);
+  putM(house, 'machiya', 'house', rng.chance(0.3) ? 1 : 2);
+  // the kura across the small back garden, against one side line
+  const kd = rng.range(5.5, 7), kw = W < 6.2 ? W - 0.4 : Math.min(W - 0.6, rng.range(4.8, 5.6));
+  const kEnd = Math.min(D - 0.8, backEnd + rng.range(2.5, 4.5) + kd);
+  if (kEnd - kd > backEnd + 2 && kw >= MIN_BW) putM(piece(kEnd - kd, kEnd, { k: 0, w: kw, off: 0.3 }), 'kura', 'back', 2);
   // ura-nagaya: on a deep lot, a back tenement row along the other side line, reached by the lot's alley
-  if (D - kEnd > 14 && W >= MIN_BW + 0.5 && cov > 0.55) {
-    const nw = Math.min(W - 1.4, rng.range(4.6, 5.6));
-    put(piece(kEnd + 2.5, Math.min(D - 1.2, kEnd + 2.5 + rng.range(14, 24)), { k: 1, w: nw, off: 0.2 }), 'nagaya', 'back', 1);
+  if (D - kEnd > 8 && W >= 4.9 && cov > 0.45) {
+    const nw = Math.max(4.6, Math.min(W - 0.3, rng.range(4.6, 5.6)));
+    putM(piece(kEnd + 2, Math.min(D - 0.8, kEnd + 2 + rng.range(10, 24)), { k: 1, w: nw, off: 0.2 }), 'nagaya', 'back', 1);
   }
   void P;
   return out;

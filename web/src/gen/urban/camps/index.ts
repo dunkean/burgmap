@@ -27,9 +27,10 @@ import { puebloSettlement } from './pueblo';
 import { ringFort } from './ringfort';
 import { khmerCity } from './khmer';
 import { stiltTown } from './stilts';
+import { warCamp } from './warcamp';
 
 export interface CampSpec {
-  layout: 'ring' | 'yards' | 'longhouses' | 'pueblo' | 'ringfort' | 'khmer' | 'stilts';
+  layout: 'ring' | 'yards' | 'longhouses' | 'pueblo' | 'ringfort' | 'khmer' | 'stilts' | 'warcamp';
   variant: string;
 }
 
@@ -71,6 +72,7 @@ function campRadius(spec: CampSpec, pop: number): number {
     case 'khmer': return Math.sqrt((pop / 62) * 1e4) / 2 + 60;
     case 'ringfort': return 50 + Math.sqrt(Math.ceil(Math.min(48, pop / 22) / 4)) * 40;
     case 'stilts': return Math.max(42, Math.sqrt((pop * 36) / Math.PI)) * 1.3;
+    case 'warcamp': return Math.sqrt(((pop / 26) * 330) / Math.PI + 900) * 1.35;
     default: return 80;
   }
 }
@@ -133,6 +135,7 @@ function plan(cc: CampCtx, spec: CampSpec, c: Vec2, pop: number, rng: Rng): Camp
     case 'ringfort': return ringFort(cc, c, pop, rng);
     case 'khmer': return khmerCity(cc, c, pop, rng);
     case 'stilts': return stiltTown(cc, c, pop, rng);
+    case 'warcamp': return warCamp(cc, c, pop, rng);
     default: return ringCamp(cc, c, pop, RING_VARIANTS.kraal, rng);
   }
 }

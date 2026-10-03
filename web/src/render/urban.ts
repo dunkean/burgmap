@@ -281,6 +281,12 @@ export function urbanLayer(world: World, pal: Palette, u: number, debug: boolean
   if (plotD) s += `<path class="u-plots" d="${plotD}" fill="none" stroke="${U.plotLine}" stroke-opacity="${f1(U.plotAlpha * 0.75)}" stroke-width="${lw(U.plotW, 0.05)}"/>`;
   s += cultureUnderlay(ub, pal, lw);
   s += buildingsSvg(ub, U, lw);
+  // courtyard houses: the patio drawn as a paved court with a crisp inner edge, so the courts read at town scale
+  const courts = ub.buildings.flatMap((b) => (b.kind === 'house' && b.courtyards?.length ? b.courtyards : []));
+  if (courts.length) {
+    const d = courts.map((c) => pathD(c, true)).join('');
+    s += `<g class="u-patios"><path d="${d}" fill="${U.place}" stroke="${U.massEdge}" stroke-width="${lw(0.45, 0.35)}"/><path d="${d}" fill="url(#p-upave)"/></g>`;
+  }
   s += cultureOverlay(ub, pal, lw);
   // main streets keep a legible minimum width at small scales (drawn over the street space only where wider)
   const mains = ub.streets.filter((st) => st.rank <= 1 && st.role !== 'close');
