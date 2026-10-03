@@ -83,6 +83,9 @@ GITHUB_TOKEN_FILE=/d/Workspace/dunk_token bash scripts/deploy_pages.sh   # build
 
 ## 6. Current state
 
+- **Primitive cities (`4fb1626`, 2026-10-04):** twelve tribal cultures now transition to a connected town at population-specific thresholds while preserving their architecture. Small villages remain byte-identical. All three required source reviewers accepted the implementation and UI amendment; 18 tests, 14 world-hash controls, typecheck/build, twelve culture previews and live Norse Canvas checks passed. The resolved primitive-city report was removed from BUGS.md as requested. Other parallel fixes remain pending their own triple reviews and validation.
+
+
 - **43 culture presets**, each with a scale range:
   - **European family:** European organic, bastide, Roman core, Byzantine, Venetian, Hanseatic, Russian kremlin.
   - **Islamic and Asian:** medina, Persian, Ottoman, Sahel; Chinese, Japanese jōkamachi, Korean, Indian temple, Khmer.
