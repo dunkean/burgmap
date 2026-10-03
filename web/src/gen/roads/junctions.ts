@@ -1,7 +1,7 @@
 import type { Rng } from '../core/rng';
 import { Vec2, Polyline, dist, polylineLength } from '../core/geom';
 import {
-  nearestOn, pointAt, tangentAt, lengths, insertVertex, blendEnd, rot, bezier, firstCrossing, selfIntersects,
+  nearestOn, pointAt, pointAtPre, tangentAt, lengths, insertVertex, blendEnd, rot, bezier, firstCrossing, selfIntersects, PolyIndex,
 } from '../core/pline';
 import type { River } from '../types';
 
@@ -127,10 +127,15 @@ export interface BridgeCtx {
   roadWidth: number;
 }
 
-function riverAt(rivers: River[], p: Vec2): { r: River; nn: ReturnType<typeof nearestOn>; w: number } | null {
+/** Per-river segment index and widest width (exact early-outs for the nearest-point tests). */
+interface RiverIdx { r: River; ix: PolyIndex; maxW: number }
+const indexRivers = (rivers: River[]): RiverIdx[] => rivers.map((r) => ({ r, ix: new PolyIndex(r.path), maxW: r.width.reduce((m, w) => (w > m ? w : m), 0) }));
+
+function riverAt(rivers: RiverIdx[], p: Vec2): { r: River; nn: ReturnType<typeof nearestOn>; w: number } | null {
   let best: { r: River; nn: ReturnType<typeof nearestOn>; w: number; score: number } | null = null;
-  for (const r of rivers) {
-    const nn = nearestOn(r.path, p);
+  for (const { r, ix } of rivers) {
+    const nn = ix.nearest(p, 60);
+    if (!nn) continue;
     const w = Math.max(r.width[nn.i], r.width[Math.min(r.width.length - 1, nn.i + 1)]);
     const score = nn.d - w / 2;
     if (nn.d < 60 && (!best || score < best.score)) best = { r, nn, w, score };
@@ -146,31 +151,34 @@ export function bridgeRoad(path: Polyline, ctx: BridgeCtx, fordW = 3.0): { path:
   let cur = path.slice();
   const bridges: BridgeSeg[] = [];
   const handled: Vec2[] = [];
-  const free = (p: Vec2, r: River, w: number): boolean => !ctx.wet(p) && nearestOn(r.path, p).d >= w / 2 + 1.4;
+  const rix = indexRivers(ctx.rivers);
+  const ixOf = new Map(rix.map((x) => [x.r, x.ix]));
+  const free = (p: Vec2, r: River, w: number): boolean => { if (ctx.wet(p)) return false; const nn = ixOf.get(r)!.nearest(p, w / 2 + 1.4); return !nn || nn.d >= w / 2 + 1.4; };
   for (let iter = 0; iter < 12; iter++) {
     // wet runs along the current path
     const L = polylineLength(cur);
+    const pre = lengths(cur);
     const runs: [number, number][] = [];
     let s = 0, open = -1, lastWet = -1;
     for (; s <= L; s += 1.5) {
-      const pp0 = pointAt(cur, s).pt;
-      const w = ctx.wet(pp0) || ctx.rivers.some((rv) => { const nr = nearestOn(rv.path, pp0); const wv = Math.max(rv.width[nr.i], rv.width[Math.min(rv.width.length - 1, nr.i + 1)]); return wv >= 3.7 && nr.d < wv / 2; });
+      const pp0 = pointAtPre(cur, pre, s).pt;
+      const w = ctx.wet(pp0) || rix.some(({ r: rv, ix, maxW }) => { const nr = ix.nearest(pp0, maxW / 2); if (!nr) return false; const wv = Math.max(rv.width[nr.i], rv.width[Math.min(rv.width.length - 1, nr.i + 1)]); return wv >= 3.7 && nr.d < wv / 2; });
       if (w) { if (open < 0) open = s; lastWet = s; }
       else if (open >= 0 && s - lastWet > 10) { runs.push([open, lastWet]); open = -1; }
     }
     if (open >= 0) runs.push([open, lastWet]);
     let target: [number, number] | null = null;
     for (const r of runs) {
-      const mid = pointAt(cur, (r[0] + r[1]) / 2).pt;
+      const mid = pointAtPre(cur, pre, (r[0] + r[1]) / 2).pt;
       if (bridges.some((b) => nearestOn([b.a, b.b], mid).d < 4)) continue;
       if (handled.some((h) => dist(h, mid) < 10)) continue;
       target = r; break;
     }
     if (!target) break;
     const sM = (target[0] + target[1]) / 2;
-    const M = pointAt(cur, sM).pt;
+    const M = pointAtPre(cur, pre, sM).pt;
     handled.push(M);
-    const ri = riverAt(ctx.rivers, M);
+    const ri = riverAt(rix, M);
     const wLoc = ri ? ri.w : 6;
     if (ri && wLoc < fordW && target[1] - target[0] < 12) continue; // ford over a brook
     let built: { path: Polyline; br: BridgeSeg } | null = null;
@@ -230,7 +238,7 @@ export function bridgeRoad(path: Polyline, ctx: BridgeCtx, fordW = 3.0): { path:
               for (let q = 0; q <= Lp && okp; q += 2) {
                 const p = pointAt(pc, q).pt;
                 if (ctx.wet(p)) okp = false;
-                else for (const rv of ctx.rivers) { const nr = nearestOn(rv.path, p); const wv = Math.max(rv.width[nr.i], rv.width[Math.min(rv.width.length - 1, nr.i + 1)]); if (nr.d < wv / 2 + 1.2) { okp = false; break; } }
+                else for (const { r: rv, ix, maxW } of rix) { const nr = ix.nearest(p, maxW / 2 + 1.2); if (!nr) continue; const wv = Math.max(rv.width[nr.i], rv.width[Math.min(rv.width.length - 1, nr.i + 1)]); if (nr.d < wv / 2 + 1.2) { okp = false; break; } }
               }
             }
             if (!okp) continue;
@@ -260,12 +268,15 @@ export function clearRibbons(path: Polyline, rivers: River[], bridges: BridgeSeg
   const out = path.slice();
   const onBridge = (p: Vec2): boolean => bridges.some((b) => nearestOn([b.a, b.b], p).d < 4);
   const L0 = polylineLength(out);
+  const rix = indexRivers(rivers);
+  let pre: number[] | null = null;
   for (let s = 0; s <= L0; s += 2) {
-    const p = pointAt(out, s).pt;
+    if (!pre) pre = lengths(out);
+    const p = pointAtPre(out, pre, s).pt;
     if (onBridge(p)) continue;
-    for (const r of rivers) {
-      const nn = nearestOn(r.path, p);
-      if (nn.d > 40) continue;
+    for (const { r, ix } of rix) {
+      const nn = ix.nearest(p, 40);
+      if (!nn || nn.d > 40) continue;
       const w = Math.max(r.width[nn.i], r.width[Math.min(r.width.length - 1, nn.i + 1)]);
       if (w < 3.7 || nn.d >= w / 2 + margin - 0.2) continue;
       const dd = nn.d || 0.01;
@@ -275,6 +286,7 @@ export function clearRibbons(path: Polyline, rivers: River[], bridges: BridgeSeg
       const cand = [na.i, na.i + 1].filter((k) => k > 0 && k < out.length - 1 && dist(out[k], p) < 2.5);
       if (cand.length && !bridges.some((b) => dist(out[cand[0]], b.a) < 0.3 || dist(out[cand[0]], b.b) < 0.3)) out[cand[0]] = q;
       else out.splice(na.i + 1, 0, q);
+      pre = null;
       break;
     }
   }

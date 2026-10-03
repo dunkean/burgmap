@@ -84,6 +84,73 @@ export function pointAt(pl: Polyline, s: number): { pt: Vec2; dir: Vec2; i: numb
   return { pt: pl[0], dir: { x: 1, y: 0 }, i: 0 };
 }
 
+/**
+ * `pointAt(pl, s)` with the prefix lengths `pre = lengths(pl)` computed once: the same floats as the linear walk
+ * (pre[i] is exactly the walk's `acc + l`), found by binary search.
+ */
+export function pointAtPre(pl: Polyline, pre: number[], s: number): { pt: Vec2; dir: Vec2; i: number } {
+  const n = pl.length;
+  if (n < 2) return { pt: pl[0], dir: { x: 1, y: 0 }, i: 0 };
+  // first i in [1, n-1] with pre[i] >= s, else n-1
+  let lo = 1, hi = n - 1;
+  while (lo < hi) { const m = (lo + hi) >> 1; if (pre[m] >= s) hi = m; else lo = m + 1; }
+  const i = lo;
+  const a = pl[i - 1], b = pl[i];
+  const l = dist(a, b);
+  const t = l > 0 ? Math.max(0, Math.min(1, (s - pre[i - 1]) / l)) : 0;
+  const dl = l || 1;
+  return { pt: { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }, dir: { x: (b.x - a.x) / dl, y: (b.y - a.y) / dl }, i: i - 1 };
+}
+
+/**
+ * Grid index over the segments of a polyline. `nearest(p, R)` returns exactly `nearestOn(pl, p)` (same segment,
+ * same parameter, same distance, first index on ties) when that distance is ≤ R, and null when it is larger.
+ * The polyline must not change while the index is used.
+ */
+export class PolyIndex {
+  private cells = new Map<number, number[]>();
+  private stamp: Int32Array;
+  private tick = 0;
+  constructor(readonly pl: Polyline, private cs = 24) {
+    this.stamp = new Int32Array(Math.max(1, pl.length));
+    for (let i = 0; i + 1 < pl.length; i++) {
+      const a = pl[i], b = pl[i + 1];
+      const x0 = Math.floor(Math.min(a.x, b.x) / cs), x1 = Math.floor(Math.max(a.x, b.x) / cs);
+      const y0 = Math.floor(Math.min(a.y, b.y) / cs), y1 = Math.floor(Math.max(a.y, b.y) / cs);
+      for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+        const k = x * 1048576 + y;
+        let l = this.cells.get(k);
+        if (!l) { l = []; this.cells.set(k, l); }
+        l.push(i);
+      }
+    }
+  }
+  nearest(p: Vec2, R: number): Near | null {
+    const pl = this.pl, cs = this.cs;
+    if (pl.length < 2 || !(R >= 0)) return null;
+    const x0 = Math.floor((p.x - R) / cs), x1 = Math.floor((p.x + R) / cs);
+    const y0 = Math.floor((p.y - R) / cs), y1 = Math.floor((p.y + R) / cs);
+    const tk = ++this.tick;
+    let best = Infinity, bi = -1, bt = 0, bx = 0, by = 0;
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+      const l = this.cells.get(x * 1048576 + y);
+      if (!l) continue;
+      for (const i of l) {
+        if (this.stamp[i] === tk) continue;
+        this.stamp[i] = tk;
+        const a = pl[i], b = pl[i + 1];
+        const dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy;
+        const t = l2 === 0 ? 0 : Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / l2));
+        const qx = a.x + t * dx, qy = a.y + t * dy;
+        const d = Math.hypot(p.x - qx, p.y - qy);
+        if (d < best || (d === best && i < bi)) { best = d; bi = i; bt = t; bx = qx; by = qy; }
+      }
+    }
+    if (bi < 0 || !(best <= R)) return null;
+    return { pt: { x: bx, y: by }, i: bi, t: bt, d: best };
+  }
+}
+
 /** Arc length of a point described by (segment, t). */
 export function arcOf(pl: Polyline, i: number, t: number): number {
   let s = 0;
