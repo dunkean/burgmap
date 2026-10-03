@@ -31,7 +31,7 @@ export const ACC_STATS = { calls: 0, cells: 0, ms: 0, msRaster: 0, msStreet: 0 }
  * The rasters of a block that do not depend on its buildings (block mask, street-side cells, their ~1 m reach),
  * kept for the next call on the same block (the access pass asks twice: before and after carving passages).
  */
-interface BlockStatic { block: Polygon; streetAt: unknown; cell: number; x0: number; y0: number; w: number; h: number; inB: Uint8Array; streetCell: Uint8Array; near: Uint8Array }
+interface BlockStatic { block: Polygon; streetAt: unknown; cell: number; x0: number; y0: number; w: number; h: number; inB: Uint8Array; streetCell: Uint8Array; near: Uint8Array; streetSeeds: number[] }
 let LAST_BLOCK: BlockStatic | null = null;
 
 function blockStatic(block: Polygon, streetAt0: StreetAt | ((p: Vec2) => boolean), cell: number): BlockStatic {
@@ -92,28 +92,31 @@ function blockStatic(block: Polygon, streetAt0: StreetAt | ((p: Vec2) => boolean
     const x = i % w, y = (i / w) | 0;
     for (let yy = Math.max(0, y - R); yy <= Math.min(h - 1, y + R); yy++) for (let xx = Math.max(0, x - R); xx <= Math.min(w - 1, x + R); xx++) near[yy * w + xx] = 1;
   }
+  // the interior street cells, in raster order: the seeds of the flood
+  const streetSeeds: number[] = [];
+  for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) if (streetCell[y * w + x]) streetSeeds.push(y * w + x);
   ACC_STATS.msStreet += performance.now() - tS;
-  LAST_BLOCK = { block, streetAt: streetAt0, cell, x0, y0, w, h, inB, streetCell, near };
+  LAST_BLOCK = { block, streetAt: streetAt0, cell, x0, y0, w, h, inB, streetCell, near, streetSeeds };
   return LAST_BLOCK;
 }
 
 export function blockReach(block: Polygon, blds: Polygon[], streetAt0: StreetAt | ((p: Vec2) => boolean), cell = ACCESS_CELL): boolean[] {
   if (!blds.length) return [];
-  const { x0, y0, w, h, inB, streetCell, near } = blockStatic(block, streetAt0, cell);
+  const { x0, y0, w, h, inB, streetCell, near, streetSeeds } = blockStatic(block, streetAt0, cell);
   const shift = (p: Polygon) => p.map((q) => ({ x: q.x - x0, y: q.y - y0 }));
   ACC_STATS.calls++; ACC_STATS.cells += w * h;
   const tA = performance.now();
   const N = w * h;
-  // free cells: inside the block, outside every footprint (scanlines over each footprint's own rows)
-  const freeA = new Uint8Array(N);
-  freeA.set(inB);
+  // building ids per cell (0 = none; a later footprint overwrites), scanlines over each footprint's own rows
   const bid = new Int32Array(N);
+  const cellsOf: number[][] = blds.map(() => []);
   const xs: number[] = [];
   blds.forEach((b0, k) => {
     const b = shift(b0);
     let ya = Infinity, yb = -Infinity;
     for (const q of b) { ya = Math.min(ya, q.y); yb = Math.max(yb, q.y); }
     const r0 = Math.max(0, Math.floor(ya / cell - 0.5)), r1 = Math.min(h - 1, Math.ceil(yb / cell - 0.5));
+    const own = cellsOf[k];
     for (let r = r0; r <= r1; r++) {
       const y = (r + 0.5) * cell;
       xs.length = 0;
@@ -124,28 +127,49 @@ export function blockReach(block: Polygon, blds: Polygon[], streetAt0: StreetAt 
       xs.sort((u, v) => u - v);
       for (let t = 0; t + 1 < xs.length; t += 2) {
         const c0 = Math.max(0, Math.ceil(xs[t] / cell - 0.5)), c1 = Math.min(w - 1, Math.floor(xs[t + 1] / cell - 0.5));
-        for (let c = c0; c <= c1; c++) { bid[r * w + c] = k + 1; freeA[r * w + c] = 0; }
+        for (let c = c0; c <= c1; c++) { bid[r * w + c] = k + 1; own.push(r * w + c); }
       }
     }
   });
   ACC_STATS.msRaster += performance.now() - tA;
-  // passable: free with its four neighbours free (or the street outside)
-  const pass = new Uint8Array(N);
-  const okN = (j: number) => freeA[j] === 1 || (inB[j] === 0 && streetCell[j] === 1);
-  for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
-    const i = y * w + x;
-    if (freeA[i] && okN(i - 1) && okN(i + 1) && okN(i - w) && okN(i + w)) pass[i] = 1;
-  }
+  // A building is reached when one of its cells lies within ~1 m of the street edge (`near`) or next to a reached
+  // cell (8-neighbourhood). Reached cells: flood from the street side through passable cells (free — inside the
+  // block, outside every footprint — with their four neighbours free or the street outside). The flood settles
+  // the buildings around each cell it reaches and stops once every building is settled (same verdicts as a full
+  // flood followed by a scan of the building cells).
+  const ok = blds.map(() => false);
+  let left = blds.length;
+  cellsOf.forEach((own, k) => { for (const i of own) if (bid[i] === k + 1 && near[i]) { ok[k] = true; left--; break; } });
+  if (left === 0) { ACC_STATS.ms += performance.now() - tA; return ok; }
+  const free = (j: number) => inB[j] === 1 && bid[j] === 0;
+  const okN = (j: number) => (inB[j] === 1 ? bid[j] === 0 : streetCell[j] === 1);
+  const passable = (j: number): boolean => {
+    const x = j % w, y = (j / w) | 0;
+    return x >= 1 && x < w - 1 && y >= 1 && y < h - 1 && free(j) && okN(j - 1) && okN(j + 1) && okN(j - w) && okN(j + w);
+  };
+  const settle = (i: number) => { const k = bid[i]; if (k && !ok[k - 1]) { ok[k - 1] = true; left--; } };
   const seen = new Uint8Array(N);
   const queue = new Int32Array(N);
   let qh = 0, qt = 0;
-  const visit = (j: number) => { if (pass[j] && !seen[j]) { seen[j] = 1; queue[qt++] = j; } };
-  for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
-    const i = y * w + x;
-    if (!streetCell[i]) continue;
+  const visit = (j: number) => {
+    if (seen[j] || !passable(j)) return;
+    seen[j] = 1; queue[qt++] = j;
+    const x = j % w;
+    const l = x > 0, r = x < w - 1, u = j >= w, d = j + w < N;
+    if (l) settle(j - 1);
+    if (r) settle(j + 1);
+    if (u) settle(j - w);
+    if (d) settle(j + w);
+    if (l && u) settle(j - w - 1);
+    if (r && u) settle(j - w + 1);
+    if (l && d) settle(j + w - 1);
+    if (r && d) settle(j + w + 1);
+  };
+  for (const i of streetSeeds) {
     visit(i - 1); visit(i + 1); visit(i - w); visit(i + w);
+    if (left === 0) break;
   }
-  while (qh < qt) {
+  while (qh < qt && left > 0) {
     const i = queue[qh++];
     const x = i % w;
     if (x > 0) visit(i - 1);
@@ -153,20 +177,6 @@ export function blockReach(block: Polygon, blds: Polygon[], streetAt0: StreetAt 
     if (i >= w) visit(i - w);
     if (i + w < N) visit(i + w);
   }
-  // reach masks: next to a reached cell (8-neighbourhood) or within ~1 m of the street edge (`near`)
-  // (the reached cells are tested from the building cells' side, 8 neighbours each, a building being settled at
-  // its first hit)
-  const ok = blds.map(() => false);
-  for (let i = 0; i < N; i++) {
-    const k = bid[i];
-    if (!k || ok[k - 1]) continue;
-    if (near[i]) { ok[k - 1] = true; continue; }
-    const x = i % w;
-    const l = x > 0, r = x < w - 1, u = i >= w, d = i + w < N;
-    if ((l && seen[i - 1]) || (r && seen[i + 1]) || (u && seen[i - w]) || (d && seen[i + w])
-      || (l && u && seen[i - w - 1]) || (r && u && seen[i - w + 1]) || (l && d && seen[i + w - 1]) || (r && d && seen[i + w + 1])) ok[k - 1] = true;
-  }
-  void pointInRing;
   ACC_STATS.ms += performance.now() - tA;
   return ok;
 }
