@@ -59,12 +59,36 @@ export const setSlowLog = (f: typeof SLOW_LOG) => { SLOW_LOG = f; };
 export const BOOL_GRID = 1000;
 const snapGeom = (g: Geom): Geom => g.map((pg) => pg.map((r) => r.map(([x, y]) => [Math.round(x * BOOL_GRID) / BOOL_GRID, Math.round(y * BOOL_GRID) / BOOL_GRID] as [number, number])));
 
+type Box = { x0: number; y0: number; x1: number; y1: number };
+const ringBox = (r: Ring): Box => {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const [x, y] of r) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+  return { x0, y0, x1, y1 };
+};
+const geomBox = (g: Geom): Box => {
+  const b = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+  for (const pg of g) { const r = ringBox(pg[0]); b.x0 = Math.min(b.x0, r.x0); b.y0 = Math.min(b.y0, r.y0); b.x1 = Math.max(b.x1, r.x1); b.y1 = Math.max(b.y1, r.y1); }
+  return b;
+};
+/** Boxes overlap or touch (a margin keeps the test conservative). */
+const boxMeets = (a: Box, b: Box): boolean => !(a.x0 > b.x1 + 1e-6 || a.x1 < b.x0 - 1e-6 || a.y0 > b.y1 + 1e-6 || a.y1 < b.y0 - 1e-6);
+
 function run(op: 'union' | 'intersection' | 'difference', a: Operand, rest: Operand[], snapped = false): MultiPoly {
   let ga = toGeom(a);
   let gr = rest.map(toGeom).filter((g) => g.length);
   if (snapped) { ga = snapGeom(ga); gr = gr.map(snapGeom); }
   if (!ga.length) return op === 'union' && gr.length ? run('union', rest[0], rest.slice(1), snapped) : [];
   if (!gr.length) return op === 'intersection' ? [] : fromGeom(ga, 0.01, snapped);
+  if (op !== 'union') {
+    // polygons of the clip operands whose box misses the subject's box cannot touch the result (each operand keeps
+    // its order; an operand left empty is dropped, as the engine would): huge operands such as the town's water
+    // shrink to the few pieces near a lot. (The engine still runs when nothing is left to subtract: it normalizes
+    // the subject's rings.)
+    const sb = geomBox(ga);
+    gr = gr.map((g) => (g.length > 1 ? g.filter((pg) => boxMeets(ringBox(pg[0]), sb)) : g));
+    if (op === 'difference') gr = gr.filter((g) => g.length);
+    else if (gr.some((g) => !g.length)) return [];
+  }
   const f = polygonClipping[op] as (g: Geom, ...r: Geom[]) => Geom;
   const t0 = typeof performance !== 'undefined' ? performance.now() : 0;
   try {
