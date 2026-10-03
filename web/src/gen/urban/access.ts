@@ -47,15 +47,24 @@ function blockStatic(block: Polygon, streetAt0: StreetAt | ((p: Vec2) => boolean
   const N = w * h;
   ACC_STATS.msRaster += performance.now() - tA;
   const tS = performance.now();
-  // street side: block-boundary cells whose outside neighbour is on a street
+  // street side: block-boundary cells (outside the block, a 4-neighbour inside) whose outside neighbour is on a
+  // street; the boundary cells are listed once, in raster order
   const streetCell = new Uint8Array(N);
+  const bnd: number[] = [];
+  for (let y = 0; y < h; y++) {
+    const row = y * w;
+    for (let x = 0; x < w; x++) {
+      const i = row + x;
+      if (inB[i]) continue;
+      if ((x > 0 && inB[i - 1]) || (x < w - 1 && inB[i + 1]) || (y > 0 && inB[i - w]) || (y < h - 1 && inB[i + w])) bnd.push(i);
+    }
+  }
   const at = (i: number): Vec2 => ({ x: x0 + ((i % w) + 0.5) * cell, y: y0 + (Math.floor(i / w) + 0.5) * cell });
-  const boundaryOut = (x: number, y: number, i: number) => !inB[i] && ((x > 0 && inB[i - 1]) || (x < w - 1 && inB[i + 1]) || (y > 0 && inB[i - w]) || (y < h - 1 && inB[i + w]));
   if (sa.parts) {
     // street ribbons (with the slack) stamped on the raster: only the cells near each segment are visited
     const { segs, places } = sa.parts(bb.x0, bb.y0, bb.x1, bb.y1);
-    // segments bucketed on a coarse grid (8 m) over the raster; the block's outer boundary cells (one scan) test
-    // only the segments of their bucket (a long street's box would otherwise be scanned cell by cell)
+    // segments bucketed on a coarse grid (8 m) over the raster; the block's outer boundary cells test only the
+    // segments of their bucket (a long street's box would otherwise be scanned cell by cell)
     const BK = 8, bw = Math.ceil((w * cell) / BK) + 1, bh = Math.ceil((h * cell) / BK) + 1;
     const buckets: number[][] = Array.from({ length: bw * bh }, () => []);
     segs.forEach((sg, si) => {
@@ -64,11 +73,7 @@ function blockStatic(block: Polygon, streetAt0: StreetAt | ((p: Vec2) => boolean
       const gy0 = Math.max(0, Math.floor((Math.min(sg.a.y, sg.b.y) - r - y0) / BK)), gy1 = Math.min(bh - 1, Math.floor((Math.max(sg.a.y, sg.b.y) + r - y0) / BK));
       for (let gy = gy0; gy <= gy1; gy++) for (let gx = gx0; gx <= gx1; gx++) buckets[gy * bw + gx].push(si);
     });
-    const bnd: number[] = [];
-    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-      const i = y * w + x;
-      if (!boundaryOut(x, y, i)) continue;
-      bnd.push(i);
+    for (const i of bnd) {
       const p = at(i);
       const bk = buckets[Math.min(bh - 1, Math.floor((p.y - y0) / BK)) * bw + Math.min(bw - 1, Math.floor((p.x - x0) / BK))];
       for (const si of bk) { const sg = segs[si]; if (distToSeg(p, sg.a, sg.b) <= sg.hw * 1.15 + 1.2) { streetCell[i] = 1; break; } }
@@ -82,19 +87,19 @@ function blockStatic(block: Polygon, streetAt0: StreetAt | ((p: Vec2) => boolean
       }
     }
   } else {
-    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const i = y * w + x; if (boundaryOut(x, y, i) && streetAt(at(i))) streetCell[i] = 1; }
+    for (const i of bnd) if (streetAt(at(i))) streetCell[i] = 1;
   }
-  // reach of the street edge (~1 m): the street cells are few, their neighbourhoods are stamped
+  // reach of the street edge (~1 m): the street cells are few, their neighbourhoods are stamped; the interior
+  // ones (raster order) seed the flood
   const near = new Uint8Array(N);
   const R = Math.max(1, Math.round(1 / cell));
-  for (let i = 0; i < N; i++) {
+  const streetSeeds: number[] = [];
+  for (const i of bnd) {
     if (!streetCell[i]) continue;
     const x = i % w, y = (i / w) | 0;
     for (let yy = Math.max(0, y - R); yy <= Math.min(h - 1, y + R); yy++) for (let xx = Math.max(0, x - R); xx <= Math.min(w - 1, x + R); xx++) near[yy * w + xx] = 1;
+    if (x >= 1 && x < w - 1 && y >= 1 && y < h - 1) streetSeeds.push(i);
   }
-  // the interior street cells, in raster order: the seeds of the flood
-  const streetSeeds: number[] = [];
-  for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) if (streetCell[y * w + x]) streetSeeds.push(y * w + x);
   ACC_STATS.msStreet += performance.now() - tS;
   LAST_BLOCK = { block, streetAt: streetAt0, cell, x0, y0, w, h, inB, streetCell, near, streetSeeds };
   return LAST_BLOCK;
