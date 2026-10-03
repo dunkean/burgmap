@@ -64,15 +64,26 @@ export interface PlanResult { settlements: Settlement[]; warnings: string[]; req
 
 const logUniform = (r: Rng, [a, b]: [number, number]): number => Math.round(a * Math.pow(b / a, r.float()));
 
-/** Automatic counts from the usable land (pre-industrial densities: ~25–40 rural inhabitants per km²). */
+/**
+ * Automatic counts from the usable land. A sparse, legible hierarchy rather than the full rural density: villages
+ * some 3–6 km apart (count sublinear in the area, ~14 on 300 km² of usable land), fewer hamlets on the best land
+ * only, and few labelled farmsteads (the others are implicit in the fields).
+ */
 export function autoCounts(usableKm2: number, mainPop: number, relief: Options['relief']): SettlementCounts {
   const rf = relief === 'mountains' ? 0.55 : relief === 'flat' ? 1.15 : relief === 'valley' ? 0.9 : 1;
   const mainCls = classOfPop(mainPop);
   const city = Math.max(0, Math.floor(usableKm2 / 1300) - (mainCls === 'city' || mainCls === 'metropolis' || mainCls === 'megacity' ? 1 : 0));
-  const town = Math.max(0, Math.round(usableKm2 / 320) - (mainCls === 'town' ? 1 : 0) - 2 * city);
-  const village = Math.max(0, Math.round((usableKm2 / 9) * rf));
-  return { city, town, village, hamlet: Math.round(village * 1.25), farmstead: Math.round(village * 1.6) };
+  const town = Math.max(0, Math.round(Math.pow(usableKm2 / 320, 0.85)) - (mainCls === 'town' ? 1 : 0) - 2 * city);
+  const village = Math.max(0, Math.round((Math.pow(Math.max(0, usableKm2), 0.8) / 7) * rf));
+  return { city, town, village, hamlet: Math.round(village * 0.5), farmstead: Math.round(village * 0.4) };
 }
+
+/** Automatic mode: central-place spacing is widened by this factor (villages ≥ ~3 km apart). */
+export const AUTO_SPREAD = 1.3;
+/** Automatic mode: villages, hamlets and farmsteads keep this many main-town radii away (faubourgs cover it). */
+export const AUTO_MAIN_CLEAR = 2.5;
+/** Automatic mode: hamlets and farmsteads only take the best-scored fraction of the land. */
+export const AUTO_SMALL_TOP = 0.35;
 
 /** Requests in placement order (stable keys). */
 export function settlementRequests(opts: Options, usableKm2: number, mainPop: number, root: Rng): PlanRequest[] {
@@ -390,12 +401,18 @@ export function planSettlements(world: World, opts: Options, root: Rng): PlanRes
       if (!q.explicit && failedBand.has(bandKey)) continue;
       const list = sortedFor(q.pop, q.culture);
       const bm = blockedFor(q.pop);
-      const steps = q.explicit ? [1, 0.8, 0.62, 0.48] : [1];
+      const steps = q.explicit ? [1, 0.8, 0.62, 0.48] : [AUTO_SPREAD];
+      // automatic mode: small settlements only on good land, and none in the main town's own outskirts
+      const small = !q.explicit && q.pop < 1000;
+      const nTry = small && q.pop < 100 ? Math.ceil(list.length * AUTO_SMALL_TOP) : list.length;
+      const clear = small ? AUTO_MAIN_CLEAR * mainR + ext : 0;
       for (const relax of steps) {
         const tryList = (need: boolean): boolean => {
-          for (const c of list) {
+          for (let li = 0; li < nTry; li++) {
+            const c = list[li];
             if (bm[c.i]) continue;
             const p = pos(c.i);
+            if (clear && dist(p, main.center) < clear) continue;
             if (need && q.siteType && !matches(q.siteType, c.i, ext, p)) continue;
             if (!okAgainst(p, q.pop, relax)) continue;
             chosen = { i: c.i, p, relax };
@@ -411,7 +428,7 @@ export function planSettlements(world: World, opts: Options, root: Rng): PlanRes
         else failedBand.add(bandKey);
         continue;
       }
-      if ((chosen as { relax: number }).relax < 1) warnings.push(`settlement ${q.key}: spacing relaxed to ${Math.round((chosen as { relax: number }).relax * 100)} %`);
+      if (q.explicit && (chosen as { relax: number }).relax < 1) warnings.push(`settlement ${q.key}: spacing relaxed to ${Math.round((chosen as { relax: number }).relax * 100)} %`);
     }
     if (!chosen) continue;
     const c = chosen as { i: number; p: Vec2 };

@@ -254,6 +254,17 @@ export const LANDMARK_TOGGLES: [keyof Options & ('cathedral' | 'palace' | 'monas
 const SITE_TYPES: SiteType[] = ['auto', ...SITE_ARCHETYPES];
 const SIZES = Object.keys(SIZE_PRESETS) as SizeName[];
 
+/**
+ * Switch the culture: the options that only make sense for the previous culture are dropped (a plan override, a
+ * culture mix, explicit site preferences), so choosing a culture again always gives its own plan whatever was tried
+ * in between (and the link no longer carries `plan=` / `mix=` of another culture). Same object when unchanged.
+ */
+export function withCulture(o: Options, culture: Options['culture']): Options {
+  if (culture === o.culture) return o;
+  const { plan: _p, cultureMix: _m, sitePrefs: _s, ...rest } = o;
+  return { ...rest, culture };
+}
+
 export function makeOptions(partial: Partial<Options> = {}): Options {
   return { ...DEFAULTS, ...partial, seed: String(partial.seed ?? DEFAULTS.seed) };
 }

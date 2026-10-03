@@ -117,7 +117,11 @@ export function renderSvg(world0: World, opts: RenderOptions = {}): string {
   water += '</g>';
   parts.push(water);
 
-  parts.push(roadsLayer(world, pal, u));
+  // roads and tracks never spill over the sea or the lakes (bridges over rivers are not masked)
+  const lakeD = t.lakes.filter((p) => p.length >= 3).map((p) => pathD(p, true)).join('');
+  const masked = seaD.length > 0 || lakeD.length > 0;
+  if (masked) parts.push(`<clipPath id="landclip"><path d="M-50 -50H${S + 50}V${S + 50}H-50Z${seaD.join('')}${lakeD}" clip-rule="evenodd"/></clipPath>`);
+  parts.push(masked ? `<g clip-path="url(#landclip)">${roadsLayer(world, pal, u)}</g>` : roadsLayer(world, pal, u));
   if (world.urban) {
     parts.push(urbanLayer(world, pal, u, !!opts.debug));
     if (!opts.debug) { parts.push(shadowSvg(world, pal, u)); parts.push(litSvg(world, pal, u)); }

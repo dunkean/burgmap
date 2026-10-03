@@ -54,7 +54,7 @@ export function kindStyles(_style: MapStyle, pal: Palette): Record<NameKind, Kin
     forest: k({ shape: 'area', caps: areaCaps, color: wood, spacing: 0.2, stretch: 0.3, sizeM: 20, minPx: 12.5, maxPx: 20, minScale: 0.03, maxScale: 0.9, priority: 44 }),
     hill: k({ shape: 'point', symbol: 'tri', italic: true, color: soft, sizeM: 12, minPx: 10, maxPx: 14, maxScale: 0.7, priority: 42 }),
     village: k({ shape: 'point', symbol: 'dot', bold: false, sizeM: 14, minPx: 11.5, maxPx: 16, maxScale: 0.7, priority: 75 }),
-    farm: k({ shape: 'point', symbol: 'dot', italic: true, color: soft, sizeM: 6, minPx: 9.5, maxPx: 11, minScale: 0.22, priority: 28 }),
+    farm: k({ shape: 'point', italic: true, color: soft, sizeM: 6, minPx: 9.5, maxPx: 11, minScale: 0.22, priority: 28 }),
     bridge: k({ shape: 'point', italic: true, sizeM: 6, minPx: 10, maxPx: 12, minScale: 0.5, priority: 34 }),
   };
 }

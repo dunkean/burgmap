@@ -25,6 +25,9 @@ type Bridge = NonNullable<World['bridges']>[number];
 /** Passability per (terrain, fields): the same for every settlement of a map (read-only here). */
 const PASS_CACHE = new WeakMap<object, { water: Uint8Array; pass: Uint8Array }>();
 
+/** Float64 scratch distances shared by all bounded searches (only the touched cells are reset after each). */
+let D64: Float64Array | null = null;
+
 /** Travel cost from `start`, explored only up to `limit` (m-equivalents); Infinity beyond. */
 export function boundedCost(world: World, start: Vec2, limit: number): SiteLayer['cost'] {
   const t = world.terrain, f = world.site!.fields;
@@ -34,7 +37,12 @@ export function boundedCost(world: World, start: Vec2, limit: number): SiteLayer
   if (!pc || pc.water !== t.water) { pc = { water: t.water, pass: passability(t, f) }; PASS_CACHE.set(f, pc); }
   const pass = pc.pass;
   const g = createGrid(n, n, cell, Infinity);
-  const d = g.data;
+  // The search runs in float64 and only the result is stored in the float32 grid. Comparing float64 offers with
+  // float32-rounded stored costs re-pushed a cell for every path whose cost differed below the float32 ulp (and
+  // skipped cells rounded down): a combinatorial blow-up of the heap on flat land, which ended in
+  // "RangeError: Invalid array length" (seed=2&map=20000&coast=S&size=city).
+  if (!D64 || D64.length < n * n) D64 = new Float64Array(n * n).fill(Infinity);
+  const d = D64;
   // (only the cells reached are visited again below: the rest of the map stays Infinity)
   const touched: number[] = [];
   const s0 = Math.min(n - 1, Math.max(0, Math.floor(start.y / cell))) * n + Math.min(n - 1, Math.max(0, Math.floor(start.x / cell)));
@@ -53,21 +61,28 @@ export function boundedCost(world: World, start: Vec2, limit: number): SiteLayer
       const pt = pass[m];
       if (!pt) continue;
       const dd = D8_DIST[k];
-      const g = pt >= 2 || pass[c] >= 2 ? 0 : Math.abs(H[m] - H[c]) / (dd * cell);
-      const nd = key + dd * cell * (1 + 100 * g * g) * (pt === 1 ? 1 : pt === 2 ? 4 : 3);
-      if (nd < d[m]) { d[m] = nd; heap.push(m, nd); touched.push(m); }
+      const gr = pt >= 2 || pass[c] >= 2 ? 0 : Math.abs(H[m] - H[c]) / (dd * cell);
+      const nd = key + dd * cell * (1 + 100 * gr * gr) * (pt === 1 ? 1 : pt === 2 ? 4 : 3);
+      if (nd < d[m]) {
+        if (d[m] === Infinity) touched.push(m);
+        d[m] = nd; heap.push(m, nd);
+      }
     }
   }
   let x0 = n, y0 = n, x1 = -1, y1 = -1;
+  const out = g.data;
   for (const i of touched) {
-    if (d[i] > limit) { d[i] = Infinity; continue; }
+    const v = d[i];
+    d[i] = Infinity; // reset the shared scratch for the next search
+    if (v > limit) continue;
+    out[i] = v;
     const x = i % n, y = (i / n) | 0;
     if (x < x0) x0 = x;
     if (x > x1) x1 = x;
     if (y < y0) y0 = y;
     if (y > y1) y1 = y;
   }
-  if (x1 >= 0) FINITE_BOX.set(d, { x0, y0, x1, y1 });
+  if (x1 >= 0) FINITE_BOX.set(out, { x0, y0, x1, y1 });
   return g;
 }
 

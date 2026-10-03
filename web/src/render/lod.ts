@@ -11,6 +11,8 @@ export const PARCEL_SCALE = 0.6;
 export const BUILDING_SCALE = 0.12;
 /** Fine plan detail (stair treads, fence dashes, patio courts, pavement and landmark hatching). */
 export const FINE_SCALE = 0.2;
+/** Field ways (cart tracks between the furlongs): from mid-close zoom only, so the far map is not hatched with lines. */
+export const WAY_SCALE = 0.1;
 
 /** Per-band vertex decimation tolerance (m). Constant per band so cached paths stay valid. */
 export const BAND_MIN_EDGE: readonly number[] = [10, 1.5, 0];
