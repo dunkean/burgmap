@@ -63,6 +63,7 @@ interface Morphology {
 | `axis` | one dominant ceremonial axis (N–S) + cross axis | CN, IN, Roman cardo/decumanus |
 | `gateToGate` | through-routes linking gates via the core (souk spine) | medina, EU |
 | `culDeSacTree` | tree-like dead-end derbs branching into large blocks, no loops | medina, some IN mohallas |
+| `hutong` (`closeOp`) | cardinal dead-end lanes serving deep, river- or wall-clipped ward interiors before parcel cutting | CN |
 | `ribbon` | one street + back lanes along a road | street villages, faubourgs |
 | `defensiveKinks` | T-junctions/dog-legs (masugata) near castle and gates | JP, some EU |
 | `wardWalls` | walled sub-quarters with 1–4 gates | CN (fang), medina (hara), JP (machi gates) |

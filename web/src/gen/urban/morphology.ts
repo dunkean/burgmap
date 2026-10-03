@@ -27,8 +27,8 @@ export interface MorphologyParams {
   streets: StreetOpId[];
   /** Level-2 street operator: organic cross-field splitting, or a (skewed) lattice. */
   streetOp: 'organic' | 'grid';
-  /** Dead ends: occasional closes (Europe), a tree of derbs (medina), none. */
-  closeOp: 'closes' | 'culDeSacTree' | 'none';
+  /** Dead ends: European closes, medina derbs, cardinal Chinese hutongs, or none. */
+  closeOp: 'closes' | 'culDeSacTree' | 'hutong' | 'none';
   plotOp: PlotOpId;
   buildingOp: BuildingOpId;
   /** Lattice orientation: along the main road, or true north. */
@@ -44,7 +44,7 @@ export interface MorphologyParams {
   /** Courtyard / compound lots: area range per zone (m²); room depth of courtyard houses (m). */
   houseArea: Record<Zone, Range>;
   roomDepth: Range;
-  /** culDeSacTree: no point of a block farther than this from a street or a dead end (m). */
+  /** Derb/hutong target depth from street access (m); invalid paths are rejected. */
   accessDepth: number;
   /** Twist (radians) added to the radial/tangential field: spiral streets. */
   fieldTwist: number;

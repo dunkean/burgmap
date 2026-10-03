@@ -29,7 +29,9 @@ export function culDeSacTree(pieces: Piece[], streets: Streets, rng: Rng): numbe
   let count = 0;
   for (const pc of pieces) {
     const P = pc.morph;
-    if (!P || pc.kind !== 'block' || P.closeOp !== 'culDeSacTree') continue;
+    if (!P || pc.kind !== 'block' || (P.closeOp !== 'culDeSacTree' && P.closeOp !== 'hutong')) continue;
+    const hutong = P.closeOp === 'hutong';
+    if (hutong && (pc.compound || pc.lot)) continue;
     const pts = pc.lp.pts;
     const n = pts.length;
     const Dmax = P.accessDepth;
@@ -39,9 +41,20 @@ export function culDeSacTree(pieces: Piece[], streets: Streets, rng: Rng): numbe
     for (let i = 0; i < n; i++) {
       const l = pc.lp.lab[i];
       if (l < 0 || !streets.connected.has(l) || !streets.list[l].ribbon) continue;
-      const a = pts[i], b = pts[(i + 1) % n], L = dist(a, b);
+      let a = pts[i], b = pts[(i + 1) % n];
+      const L = dist(a, b);
       if (L < 4) continue;
-      acc.push({ a, b, hw: (streets.list[l].widths[0] ?? 4) / 2, nrm: { x: -(b.y - a.y) / L, y: (b.x - a.x) / L } });
+      const nrm = { x: -(b.y - a.y) / L, y: (b.x - a.x) / L };
+      if (hutong) {
+        // Short street frontage must still enter away from the neighbouring wall/river corner.
+        // Otherwise every shadow target chooses that corner and exhausts the rejection budget.
+        const margin = w / 2 + 7.5;
+        if (L <= 2 * margin) continue;
+        const t = margin / L, aa = a;
+        a = { x: aa.x + (b.x - aa.x) * t, y: aa.y + (b.y - aa.y) * t };
+        b = { x: b.x + (aa.x - b.x) * t, y: b.y + (aa.y - b.y) * t };
+      }
+      acc.push({ a, b, hw: (streets.list[l].widths[0] ?? 4) / 2, nrm });
     }
     if (!acc.length) continue;
     // sample the interior
@@ -80,7 +93,23 @@ export function culDeSacTree(pieces: Piece[], streets: Streets, rng: Rng): numbe
       // start: just inside the street ribbon (the notch opens onto the street), or on the parent derb
       const start = onStreet ? { x: q0.x - (onStreet as typeof acc[number]).nrm.x * (onStreet as typeof acc[number]).hw * 0.8, y: q0.y - (onStreet as typeof acc[number]).nrm.y * (onStreet as typeof acc[number]).hw * 0.8 } : q0;
       let path: Polyline = [start, e];
-      if (stop > 22 && rng.chance(0.55)) {
+      if (hutong) {
+        // Wards clipped by a river have no through-going lattice chord. Serve their interior with cardinal
+        // lanes instead of merging acres of back land into a lot with only a few metres of frontage.
+        // A branch leaves its parent squarely; a street entry follows the closest cardinal inward normal.
+        const parentPath = parent >= 0 ? slits[parent] : null;
+        let horizontal = Math.abs(target.x - q0.x) >= Math.abs(target.y - q0.y);
+        if (onStreet) horizontal = Math.abs(onStreet.nrm.x) >= Math.abs(onStreet.nrm.y);
+        else if (parentPath) {
+          let best = Infinity;
+          for (let i = 1; i < parentPath.length; i++) {
+            const d = distToSeg(q0, parentPath[i - 1], parentPath[i]);
+            if (d < best) { best = d; horizontal = Math.abs(parentPath[i].y - parentPath[i - 1].y) >= Math.abs(parentPath[i].x - parentPath[i - 1].x); }
+          }
+        }
+        const bend = horizontal ? { x: e.x, y: q0.y } : { x: q0.x, y: e.y };
+        path = [start, q0, bend, e].filter((p, i, arr) => i === 0 || dist(p, arr[i - 1]) > 0.05);
+      } else if (stop > 22 && rng.chance(0.55)) {
         const m = { x: (q0.x + e.x) / 2, y: (q0.y + e.y) / 2 };
         const off = rng.range(-0.22, 0.22) * stop;
         path = [start, { x: m.x - u.y * off, y: m.y + u.x * off }, e];
@@ -95,6 +124,7 @@ export function culDeSacTree(pieces: Piece[], streets: Streets, rng: Rng): numbe
           const p = { x: a.x + ((b.x - a.x) * j) / k, y: a.y + ((b.y - a.y) * j) / k };
           const along = dist(start, p);
           // the root necessarily starts at the edge (street) or on the parent derb
+          if (hutong && along > (onStreet ? onStreet.hw + 0.5 : 0.5) && !pointInRing(pts, p)) { ok = false; break; }
           if (along < (onStreet ? (onStreet as typeof acc[number]).hw + gapB + 1 : w + 6)) continue;
           if (!pointInRing(pts, p) || distToRing(pts, p) < gapB) ok = false;
           for (let si = 0; si < slits.length && ok; si++) if (si !== parent || along > 10) if (distPl(p, slits[si]) < (si === parent ? w + 6 : gapS)) ok = false;
