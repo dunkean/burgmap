@@ -22,6 +22,7 @@ import {
 } from '../options';
 import { getCulture } from '../urban/culture';
 import { BIG_RIVER_W } from '../site/site';
+import { resolvePosition } from '../site/position';
 
 /** Population ranges used for counted / automatic settlements (log-uniform). */
 export const CLASS_POP: Record<CountClass, [number, number]> = {
@@ -379,22 +380,17 @@ export function planSettlements(world: World, opts: Options, root: Rng): PlanRes
     const ext = extentRadius(q.pop);
     let chosen: { i: number; p: Vec2; relax: number } | null = null;
     if (q.position) {
-      // fixed position: snapped to the nearest dry cell
-      let best = -1, bd = Infinity;
-      const px = Math.min(S - 1, Math.max(1, q.position.x)), py = Math.min(S - 1, Math.max(1, q.position.y));
-      const cx = Math.floor(px / cell), cy = Math.floor(py / cell);
-      const R = Math.ceil(400 / cell);
-      for (let y = Math.max(0, cy - R); y <= Math.min(n - 1, cy + R); y++) for (let x = Math.max(0, cx - R); x <= Math.min(n - 1, cx + R); x++) {
-        const i = y * n + x;
-        if (water[i]) continue;
-        const d = Math.hypot(x - cx, y - cy);
-        if (d < bd) { bd = d; best = i; }
-      }
-      if (best >= 0) {
-        const p = pos(best);
-        chosen = { i: best, p, relax: 1 };
-        if (!okAgainst(p, q.pop, 0)) warnings.push(`settlement ${q.key} (fixed position) overlaps another settlement's extent`);
-      } else warnings.push(`settlement ${q.key}: no dry land near the given position`);
+      const prefs = getCulture(q.culture).sitePrefs ?? {};
+      const p = resolvePosition(terrain, S, q.position, {
+        inset: 0.03 * S + 0.8 * ext + 40, maxMove: 400,
+        slopeMax: 0.3 + 0.25 * (prefs.mountainFace ?? 0) + 0.08 * (prefs.woodland ?? 0),
+        allowed: (i, point) => okAgainst(point, q.pop, 0) && (f.dWater[i] >= 200 || f.hab[i] >= 1),
+      });
+      if (p) {
+        const i = Math.min(n - 1, Math.floor(p.y / cell)) * n + Math.min(n - 1, Math.floor(p.x / cell));
+        chosen = { i, p, relax: 1 };
+        if (dist(p, q.position) > 0.01) warnings.push(`Settlement ${q.key} moved to ${Math.round(p.x)}, ${Math.round(p.y)} m to stay on usable land clear of other settlements`);
+      } else warnings.push(`Settlement ${q.key}: no usable land near the given position clear of other settlements`);
     } else {
       const bandKey = (q.pop < 15 ? 0 : q.pop < 100 ? 1 : q.pop < 1000 ? 2 : q.pop < 20000 ? 3 : 4) + '|' + q.culture + '|' + (q.siteType ?? '');
       // automatic mode: once a class finds no room, the rest of that class is skipped
@@ -437,13 +433,7 @@ export function planSettlements(world: World, opts: Options, root: Rng): PlanRes
     const p = { x: c.p.x + jr.range(-0.3, 0.3) * cell * stride, y: c.p.y + jr.range(-0.3, 0.3) * cell * stride };
     const pi = Math.min(n - 1, Math.max(0, Math.floor(p.y / cell))) * n + Math.min(n - 1, Math.max(0, Math.floor(p.x / cell)));
     const relaxed = (chosen as { relax: number }).relax;
-    let center = water[pi] || (!q.position && !okAgainst(p, q.pop, relaxed)) ? c.p : p;
-    if (q.position) {
-      // a fixed position is kept exactly when it is on dry land
-      const gp = { x: Math.min(S - 1, Math.max(1, q.position.x)), y: Math.min(S - 1, Math.max(1, q.position.y)) };
-      const gi = Math.min(n - 1, Math.floor(gp.y / cell)) * n + Math.min(n - 1, Math.floor(gp.x / cell));
-      center = water[gi] ? c.p : gp;
-    }
+    const center = q.position || water[pi] || !okAgainst(p, q.pop, relaxed) ? c.p : p;
     const archetype = q.siteType && matches(q.siteType, c.i, ext, center) ? q.siteType : archetypeAt(c.i, ext, center);
     const cls = classOfPop(q.pop);
     placed.push({

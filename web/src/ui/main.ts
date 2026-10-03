@@ -658,8 +658,8 @@ function focusSettlement(s: SettlementMeta): void {
     const v = viewer.getView();
     const [x, y] = screenToWorld(v, r.width, r.height, e.clientX - r.left, e.clientY - r.top);
     lastClick = [x, y]; renderCoords();
-    if (pinMode || e.altKey) { pinsUI.add(x, y); ($('sec-pins') as HTMLDetailsElement).open = true; return; }
     if (settlUI.picking !== null) { settlUI.place({ x, y }); return; }
+    if (pinMode || e.altKey) { pinsUI.add(x, y); ($('sec-pins') as HTMLDetailsElement).open = true; return; }
     let best: SettlementMeta | null = null, bd = Infinity;
     for (const s of settlementList()) {
       const d = Math.hypot(s.center.x - x, s.center.y - y);

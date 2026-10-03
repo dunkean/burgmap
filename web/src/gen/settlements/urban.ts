@@ -184,7 +184,7 @@ export function generateSettlementUrban(world: World, s: Settlement): Settlement
   const rng = new Rng('burgmap:' + world.seed).fork('settlement:' + s.key);
   const o = world.options;
   const options = {
-    ...o, culture: s.culture, population: s.population, size: sizeForPop(s.population), siteType: 'auto' as const, sitePrefs: undefined,
+    ...o, culture: s.culture, population: s.population, size: sizeForPop(s.population), siteType: 'auto' as const, sitePrefs: undefined, center: undefined,
     walls: 'auto' as const, castle: 'auto' as const, castles: 'auto' as const, cathedral: 'auto' as const, palace: 'auto' as const,
     monasteries: 'auto' as const, port: 'auto' as const, arena: 'auto' as const, activities: 'auto' as const, suburbs: 'auto' as const,
     shantytowns: 'auto' as const, cultureMix: null, plan: null, settlements: 'none' as const,

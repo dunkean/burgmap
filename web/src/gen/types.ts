@@ -68,6 +68,8 @@ export type { SiteArchetype };
 
 export interface SiteLayer {
   center: Vec2; crossing?: Vec2; harbor?: Vec2; citadelSpot?: Vec2;
+  /** Requested centre could not be used exactly (shown with settlement warnings). */
+  warning?: string;
   /** Historical site type the core was placed in, and the feature point that justifies it (bridge point, harbor, confluence...). */
   archetype: SiteArchetype;
   feature?: Vec2;

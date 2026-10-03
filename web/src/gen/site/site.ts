@@ -8,6 +8,7 @@ import { nearestOn, lengths, pointAt, tangentAt } from '../core/pline';
 import { SITE_ARCHETYPES } from '../options';
 import type { Options, SizeName, SiteArchetype } from '../options';
 import type { TerrainLayer, SiteLayer, SiteFields, River } from '../types';
+import { resolvePosition } from './position';
 
 export const RESERVE_RADIUS: Record<SizeName, number> = { hamlet: 90, village: 170, town: 380, city: 700, capital: 1150 };
 /** Channels at least this wide (m) count as real rivers (bridged, fronted by towns); narrower ones are brooks. */
@@ -565,11 +566,37 @@ export function chooseSite(terrain: TerrainLayer, opts: Options, mapSize: number
     pick = { i: bi, q: 0.05, feature: pos(bi) };
     chosen = 'plain';
   }
-  const best = pick.i;
-  const center: Vec2 = pos(best);
+  let best = pick.i;
+  let center: Vec2 = pos(best);
+  let warning: string | undefined;
+  if (opts.center) {
+    // The requested centre takes precedence over automatic site preferences. Keep space for mega plans,
+    // but ordinary settlements may be placed outside the automatic 20% central band.
+    const inset = Math.max(0.03 * S + 2 * cell, (prefs.margin ?? 0) > 0.2 ? Math.min(0.45, prefs.margin!) * S : 0);
+    const fixed = resolvePosition(terrain, S, opts.center, {
+      inset, slopeMax: Math.max(0.22, buildSlope) + 0.25 * (prefs.mountainFace ?? 0) + 0.08 * (prefs.woodland ?? 0),
+      allowed: (i) => dw.dist[i] >= 200 || hab[i] >= 1,
+    });
+    if (fixed) {
+      center = fixed; best = at(center.x, center.y);
+      if (dist(center, opts.center) > 0.01) warning = `Main centre moved to ${Math.round(center.x)}, ${Math.round(center.y)} m to stay on usable land inside the map`;
+      // Do not carry the automatically chosen site's remote quay or nucleus into the custom town.
+      chosen = 'plain';
+      pick = { i: best, q: 1 };
+      let local = Infinity;
+      for (const a of SITE_ARCHETYPES) {
+        const c = cands[a];
+        if (!c || a === 'plain' || (forced && a !== forced)) continue;
+        const d = dist(pos(c.i), center);
+        if (d < Math.min(160, 0.3 * Rres + 45) && d < local) { local = d; chosen = a; pick = { ...c, i: best }; }
+      }
+    } else warning = 'Main centre could not be placed on usable land; automatic placement used';
+  }
   const archetype: SiteArchetype = chosen!;
 
   // ---- derived site features (consistent with the archetype)
+  // The regional crossing may lie outside town: it opens a bridge zone for cost/road routing across
+  // the main river. It never replaces the custom nucleus or the archetype's feature.
   let crossing: Vec2 | undefined = pick.crossing;
   if (!crossing && allAnchors.length) {
     let bs = Infinity;
@@ -656,5 +683,5 @@ export function chooseSite(terrain: TerrainLayer, opts: Options, mapSize: number
   const cost: Grid = createGrid(n, n, cell);
   cost.data.set(costArr);
 
-  return { center, crossing, harbor, citadelSpot, archetype, feature: pick.feature, offers, cost, reserveRadius: Rres, fields };
+  return { center, crossing, harbor, citadelSpot, archetype, feature: pick.feature, offers, cost, reserveRadius: Rres, fields, ...(warning ? { warning } : {}) };
 }

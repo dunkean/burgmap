@@ -58,6 +58,8 @@ export interface Options {
   /** Site archetype: 'auto' picks one from what the terrain offers. */
   siteType?: SiteType;
   sitePrefs?: SitePrefs;
+  /** Requested main settlement centre in meters; unsuitable points move to nearby usable land. */
+  center?: { x: number; y: number };
   /** Shifts the sea inland (+) or seaward (-), range about [-1, 1]. Only used when a coast exists. */
   seaLevel?: number;
   // Placeholders for later stages
@@ -183,7 +185,7 @@ export function settlementsFromString(v: string | null): SettlementsOpt {
       const spec: SettlementSpec = { population: Math.max(POP_MIN, Math.min(POP_MAX, Math.round(pop))) };
       if (cu && (CULTURE_IDS as string[]).includes(cu)) spec.culture = cu;
       if (st && (SITE_ARCHETYPES as string[]).includes(st)) spec.siteType = st as SiteArchetype;
-      if (x !== undefined && y !== undefined && x !== '' && y !== '' && Number.isFinite(Number(x)) && Number.isFinite(Number(y))) spec.position = { x: Number(x), y: Number(y) };
+      if (x !== undefined && y !== undefined && x !== '' && y !== '' && Number.isFinite(Number(x)) && Number.isFinite(Number(y))) spec.position = { x: Math.round(Number(x)), y: Math.round(Number(y)) };
       list.push(spec);
     }
     return { list };
@@ -286,6 +288,7 @@ export function toQuery(o: Options): string {
   if (o.castles && o.castles !== 'auto') p.set('castles', o.castles);
   if (o.shantytowns && o.shantytowns !== 'auto') p.set('shanty', o.shantytowns);
   if (o.siteType && o.siteType !== 'auto') p.set('site', o.siteType);
+  if (o.center && Number.isFinite(o.center.x) && Number.isFinite(o.center.y)) p.set('center', `${o.center.x},${o.center.y}`);
   if (o.seaLevel !== undefined) p.set('seaLevel', String(o.seaLevel));
   if (o.contours !== DEFAULTS.contours) p.set('contours', o.contours ? '1' : '0');
   if (o.landuse !== DEFAULTS.landuse) p.set('landuse', o.landuse ? '1' : '0');
@@ -320,6 +323,7 @@ export function fromQuery(q: string | URLSearchParams): Options {
   o.coast = oneOf(p.get('coast'), COASTS, DEFAULTS.coast);
   o.river = oneOf(p.get('river'), RIVERS, DEFAULTS.river);
   o.siteType = oneOf(p.get('site'), SITE_TYPES, 'auto');
+  o.center = positionFromString(p.get('center'));
   o.walls = oneOf(p.get('walls'), WALLS, DEFAULTS.walls);
   if (p.has('moat')) o.moat = oneOf(p.get('moat'), TRIS, 'auto');
   o.castles = oneOf(p.get('castles'), CASTLES, 'auto');
@@ -367,6 +371,7 @@ export const wantsCustomHeight = (q: string | URLSearchParams): boolean =>
 export function applyOverride(o: Options, k: string, v: string): void {
   const rec = o as unknown as Record<string, unknown>;
   if (k === 'roads' || k === 'seaLevel' || k === 'population' || k === 'heightScale' || k === 'importSea' || k === 'mapSize' || k === 'sprawl' || k === 'eagerPop') rec[k] = Number(v);
+  else if (k === 'center') o.center = positionFromString(v);
   else if (k === 'biome') o.biome = biomeName(v);
   else if (k === 'moat') o.moat = oneOf(v, TRIS, 'auto');
   else if (k === 'settlements' || k === 'settl') o.settlements = settlementsFromString(v);
@@ -374,4 +379,11 @@ export function applyOverride(o: Options, k: string, v: string): void {
   else if (k === 'mix' || k === 'cultureMix') o.cultureMix = mixFromString(v);
   else if (k === 'plan') o.plan = planFromString(v) ?? (() => { try { return JSON.parse(v); } catch { return null; } })();
   else rec[k] = v;
+}
+
+function positionFromString(value: string | null): Options['center'] {
+  const parts = value?.split(',');
+  if (!parts || parts.length !== 2 || parts.some((v) => !v.trim())) return undefined;
+  const [x, y] = parts.map(Number);
+  return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : undefined;
 }

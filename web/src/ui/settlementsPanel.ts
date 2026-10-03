@@ -27,8 +27,8 @@ const popToSlider = (p: number): number => Math.round(((Math.log10(Math.max(POP_
 const CLASS_LABEL: Record<CountClass, string> = { city: 'Cities', town: 'Towns', village: 'Villages', hamlet: 'Hamlets', farmstead: 'Farmsteads' };
 
 export interface SettlementsUI {
-  /** Row index waiting for a map click (list mode), or null. */
-  readonly picking: number | null;
+  /** Main centre or row index waiting for a map click, or null. */
+  readonly picking: 'main' | number | null;
   /** A map click while picking: sets that row's position (meters). */
   place(p: { x: number; y: number }): void;
   cancelPick(): void;
@@ -83,7 +83,18 @@ export function initSettlementsUI(registry: ControlRegistry, getOpts: () => Opti
 
   // ---- settlements: auto / none / counts / list
   const box = el('div', { id: 'settlementsBox' });
-  roadsEl.insertAdjacentElement('afterend', box);
+  const centerBox = el('div', { id: 'centerBox' });
+  roadsEl.insertAdjacentElement('afterend', centerBox);
+  centerBox.append(el('label', {}, 'Main settlement centre'));
+  const centerCoords = el('div', { style: 'display:grid;grid-template-columns:1fr 1fr;gap:4px' });
+  const centerX = el('input', { id: 'centerX', type: 'number', step: '1', placeholder: 'x (m)', 'aria-label': 'Main centre x (m)' });
+  const centerY = el('input', { id: 'centerY', type: 'number', step: '1', placeholder: 'y (m)', 'aria-label': 'Main centre y (m)' });
+  centerCoords.append(centerX, centerY);
+  const centerPick = el('button', { id: 'centerPick', type: 'button', class: 'secondary small' }, 'Place on map');
+  const centerAuto = el('button', { id: 'centerAuto', type: 'button', class: 'secondary small' }, 'Automatic centre');
+  const centerHint = el('div', { class: 'hint', id: 'centerHint' });
+  centerBox.append(centerCoords, centerPick, centerAuto, centerHint);
+  centerBox.insertAdjacentElement('afterend', box);
   box.append(el('label', { for: 'settlMode' }, 'Other settlements'));
   const mode = el('select', { id: 'settlMode' });
   for (const [v, t] of [['auto', 'Automatic (from the map area)'], ['none', 'None (main settlement only)'], ['counts', 'Counts per class'], ['list', 'List (one by one)']]) mode.appendChild(el('option', { value: v }, t));
@@ -108,15 +119,44 @@ export function initSettlementsUI(registry: ControlRegistry, getOpts: () => Opti
   box.appendChild(warnEl);
 
   let rows: SettlementSpec[] = [];
-  let picking: number | null = null;
-  const setPicking = (k: number | null): void => {
+  let picking: 'main' | number | null = null;
+  const setPicking = (k: 'main' | number | null): void => {
     picking = k;
-    pickHint.textContent = k === null ? '' : `Click on the map to place settlement ${k + 1} (Esc to cancel)`;
+    pickHint.textContent = typeof k === 'number' ? `Click on the map to place settlement ${k + 1} (Esc to cancel)` : '';
+    centerPick.textContent = k === 'main' ? 'Click the map...' : 'Place on map';
+    centerHint.textContent = k === 'main' ? 'Click on the map to place the main centre (Esc to cancel).' : 'Leave blank for automatic placement. Unsuitable positions move to usable land.';
     document.getElementById('map')?.classList.toggle('picking', k !== null);
     renderRows();
   };
   const cultureItems: [string, string][] = [['', 'Main culture'], ...CULTURE_LIST.map((c) => [c.id, c.fantasy ? `${c.label} (fantasy)` : c.label] as [string, string])];
   const siteItems: [string, string][] = [['', 'Any site'], ...SITE_ARCHETYPES.map((a) => [a, a] as [string, string])];
+  centerPick.addEventListener('click', () => setPicking(picking === 'main' ? null : 'main'));
+  centerAuto.addEventListener('click', () => { centerX.value = ''; centerY.value = ''; setPicking(null); fire(centerBox); });
+  centerBox.addEventListener('change', (e) => {
+    if (e.target !== centerX && e.target !== centerY) return;
+    if ((!centerX.value && !centerY.value) || (centerX.value && centerY.value && Number.isFinite(Number(centerX.value)) && Number.isFinite(Number(centerY.value)))) return;
+    centerHint.textContent = 'Enter both x and y coordinates in meters.';
+    e.stopImmediatePropagation();
+  });
+  let writtenCenter: string | undefined;
+  registry.add({
+    el: centerBox, live: false,
+    read: (o) => {
+      const x = Number(centerX.value), y = Number(centerY.value);
+      if (!centerX.value && !centerY.value) return { ...o, center: undefined };
+      return centerX.value && centerY.value && Number.isFinite(x) && Number.isFinite(y) ? { ...o, center: { x, y } } : o;
+    },
+    write: (o) => {
+      const key = o.center ? `${o.center.x},${o.center.y}` : 'auto';
+      const incomplete = !!centerX.value !== !!centerY.value;
+      if (key !== writtenCenter || !incomplete) {
+        if (document.activeElement !== centerX) centerX.value = o.center ? String(o.center.x) : '';
+        if (document.activeElement !== centerY) centerY.value = o.center ? String(o.center.y) : '';
+      }
+      writtenCenter = key;
+      centerAuto.disabled = !o.center;
+    },
+  });
   function renderRows(): void {
     rowsEl.textContent = '';
     rows.forEach((it, k) => {
@@ -135,9 +175,15 @@ export function initSettlementsUI(registry: ControlRegistry, getOpts: () => Opti
       clr.disabled = !it.position;
       clr.addEventListener('click', () => { rows[k] = { ...rows[k], position: undefined }; renderRows(); fire(box); });
       const rm = el('button', { type: 'button', class: 'secondary small', title: 'Remove' }, 'Remove');
-      rm.addEventListener('click', () => { rows.splice(k, 1); if (picking !== null) picking = null; renderRows(); fire(box); });
+      rm.addEventListener('click', () => { rows.splice(k, 1); setPicking(null); fire(box); });
+      const coords = el('div', { style: 'grid-column:1 / span 2;display:grid;grid-template-columns:1fr 1fr;gap:4px' });
+      for (const axis of ['x', 'y'] as const) {
+        const inp = el('input', { type: 'number', step: '1', placeholder: `${axis} (m)`, 'aria-label': `Settlement ${k + 1} ${axis} (m)`, 'data-k': String(k), 'data-f': axis });
+        inp.value = it.position ? String(it.position[axis]) : '';
+        coords.appendChild(inp);
+      }
       const head = el('div', { style: 'grid-column:1 / span 2;font-size:11px;color:var(--ink2)' }, `#${k + 1} - ${classOfPop(it.population)}`);
-      r.append(head, pop, cu, st, posB, clr, rm);
+      r.append(head, pop, cu, st, posB, coords, clr, rm);
       rowsEl.appendChild(r);
     });
   }
@@ -149,10 +195,21 @@ export function initSettlementsUI(registry: ControlRegistry, getOpts: () => Opti
     if (f === 'population') { const v = Number(t.value); if (Number.isFinite(v) && v > 0) rows[k] = { ...rows[k], population: Math.max(POP_MIN, Math.min(POP_MAX, Math.round(v))) }; }
     else if (f === 'culture') rows[k] = { ...rows[k], culture: t.value || undefined };
     else if (f === 'siteType') rows[k] = { ...rows[k], siteType: (t.value || undefined) as SiteArchetype | undefined };
+    else if (f === 'x' || f === 'y') {
+      const coords = t.parentElement!;
+      const x = coords.querySelector<HTMLInputElement>('[data-f="x"]')!;
+      const y = coords.querySelector<HTMLInputElement>('[data-f="y"]')!;
+      if (!x.value && !y.value) { rows[k] = { ...rows[k], position: undefined }; renderRows(); }
+      else if (x.value && y.value && Number.isFinite(Number(x.value)) && Number.isFinite(Number(y.value))) {
+        rows[k] = { ...rows[k], position: { x: Math.round(Number(x.value)), y: Math.round(Number(y.value)) } };
+        renderRows();
+      }
+    }
   });
   addBtn.addEventListener('click', () => { rows.push({ population: rows.length ? 120 : 300 }); renderRows(); fire(box); });
   const showMode = (): void => { countsBox.style.display = mode.value === 'counts' ? 'grid' : 'none'; listBox.style.display = mode.value === 'list' ? 'flex' : 'none'; };
   mode.addEventListener('change', () => {
+    if (typeof picking === 'number') setPicking(null);
     if (mode.value === 'list' && !rows.length) rows = [{ population: 300 }, { population: 80 }];
     if (mode.value === 'counts' && COUNT_CLASSES.every((c) => Number(countEls[c].value) === 0)) { countEls.village.value = '4'; countEls.hamlet.value = '4'; countEls.farmstead.value = '6'; }
     renderRows(); showMode();
@@ -177,6 +234,7 @@ export function initSettlementsUI(registry: ControlRegistry, getOpts: () => Opti
       if (typeof s === 'string') mode.value = s;
       else if ('counts' in s) { mode.value = 'counts'; for (const c of COUNT_CLASSES) countEls[c].value = String(s.counts[c] ?? 0); }
       else { mode.value = 'list'; rows = s.list.map((r) => ({ ...r })); }
+      if (typeof picking === 'number' && (mode.value !== 'list' || !rows[picking])) setPicking(null);
       renderRows(); showMode();
     },
   });
@@ -184,11 +242,17 @@ export function initSettlementsUI(registry: ControlRegistry, getOpts: () => Opti
   registry.add({ el: slider, read: (o) => o, write: (o) => syncPop(o) });
   window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && picking !== null) setPicking(null); });
   showMode();
-  void getOpts;
+  setPicking(null);
 
   return {
     get picking() { return picking; },
     place(p) {
+      const extent = mapSizeOf(getOpts());
+      if (!Number.isFinite(p.x) || !Number.isFinite(p.y) || p.x < 0 || p.y < 0 || p.x > extent || p.y > extent) return;
+      if (picking === 'main') {
+        centerX.value = String(Math.round(p.x)); centerY.value = String(Math.round(p.y));
+        setPicking(null); fire(centerBox); return;
+      }
       if (picking === null || !rows[picking]) return;
       rows[picking] = { ...rows[picking], position: { x: Math.round(p.x), y: Math.round(p.y) } };
       setPicking(null);
