@@ -572,7 +572,7 @@ export function chooseSite(terrain: TerrainLayer, opts: Options, mapSize: number
   if (opts.center) {
     // The requested centre takes precedence over automatic site preferences. Keep space for mega plans,
     // but ordinary settlements may be placed outside the automatic 20% central band.
-    const inset = Math.max(0.03 * S + 2 * cell, (prefs.margin ?? 0) > 0.2 ? Math.min(0.45, prefs.margin!) * S : 0);
+    const inset = Math.max(0.03 * S + 2 * cell, Math.min(0.45 * S, prefs.centerInset ?? ((prefs.margin ?? 0) > 0.2 ? prefs.margin! * S : 0)));
     const fixed = resolvePosition(terrain, S, opts.center, {
       inset, slopeMax: Math.max(0.22, buildSlope) + 0.25 * (prefs.mountainFace ?? 0) + 0.08 * (prefs.woodland ?? 0),
       allowed: (i) => dw.dist[i] >= 200 || hab[i] >= 1,

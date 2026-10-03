@@ -75,7 +75,10 @@ export function generate(options: Options, onStage?: (stage: string, partial?: W
   const cprefs = getCulture(options.culture).sitePrefs;
   let siteOpts = mainOpts.sitePrefs || !cprefs ? mainOpts : { ...mainOpts, sitePrefs: cprefs };
   // a megacity needs its built-up radius free around the site (kept off the map edge as far as the map allows)
-  if (mega) siteOpts = { ...siteOpts, sitePrefs: { ...(siteOpts.sitePrefs ?? {}), margin: (megaRadius(megaPop, mainOpts) + 400) / mapSize } };
+  if (mega) {
+    const clearance = megaRadius(megaPop, mainOpts) + 400;
+    siteOpts = { ...siteOpts, sitePrefs: { ...(siteOpts.sitePrefs ?? {}), margin: clearance / mapSize, centerInset: clearance } };
+  }
   world.site = chooseSite(terrain, siteOpts, mapSize, root);
   if (world.site.warning) warnings.push(world.site.warning);
   const t2 = performance.now();

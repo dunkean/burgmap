@@ -4,13 +4,14 @@ import { dist, polygonCentroid } from '../src/gen/core/geom';
 import { Rng } from '../src/gen/core/rng';
 import { applyOverride, fromQuery, makeOptions, toQuery } from '../src/gen/options';
 import { generate } from '../src/gen/pipeline';
+import { megaRadius } from '../src/gen/urban/mega/plan';
 import { planSettlements } from '../src/gen/settlements/planner';
 import { chooseSite } from '../src/gen/site/site';
 import { resolvePosition } from '../src/gen/site/position';
 import type { TerrainLayer, World } from '../src/gen/types';
 
-function flatTerrain(): TerrainLayer {
-  const n = 100, cell = 20, N = n * n;
+function flatTerrain(size = 2000): TerrainLayer {
+  const n = 100, cell = size / n, N = n * n;
   return {
     height: createGrid(n, n, cell, 30), slope: createGrid(n, n, cell), flow: createGrid(n, n, cell),
     water: new Uint8Array(N), filled: new Float32Array(N).fill(30), receiver: new Int32Array(N).fill(-1),
@@ -148,4 +149,24 @@ describe('settlement centre overrides', () => {
     expect(world.settlements![0].center).toEqual(center);
     expect(world.urban!.macro!.quarters.length).toBeGreaterThan(10);
   }, 120000);
+
+  it('honours explicit footprint clearance even below the automatic twenty-percent band', () => {
+    const terrain = flatTerrain(20000), center = { x: 800, y: 10000 };
+    const opts = makeOptions({ size: 'city', center, sitePrefs: { margin: 0.1, centerInset: 2000 } });
+    const site = chooseSite(terrain, opts, 20000, new Rng('burgmap:clearance'));
+    expect(site.center).toEqual({ x: 2000, y: 10000 });
+    expect(site.warning).toMatch(/Main centre moved/);
+    expect(site.cost.data[50 * 100 + 10]).toBe(0);
+  });
+
+  it('reserves a small megacity radius on a large map when the centre is placed near the edge', () => {
+    const opts = makeOptions({ seed: 'placement-large-mega', mapSize: 20000, population: 60000, importedHeight, relief: 'flat', river: 'none', center: { x: 200, y: 10000 }, settlements: 'none' });
+    const clearance = megaRadius(60000, opts) + 400;
+    expect(clearance / 20000).toBeLessThan(0.2);
+    const w = generate(opts);
+    expect(w.site!.center.x).toBeGreaterThanOrEqual(clearance);
+    expect(w.urban!.macro!.center).toEqual(w.site!.center);
+    expect(w.urban!.macro!.quarters.flatMap((q) => q.pts).every((p) => p.x >= 0 && p.x <= w.mapSize && p.y >= 0 && p.y <= w.mapSize)).toBe(true);
+  }, 120000);
+
 });

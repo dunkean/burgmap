@@ -39,6 +39,8 @@ export interface SitePrefs {
   flatness?: number;
   /** Share of the map side kept free between the site and the map edge (default 0.2; megacities need more). */
   margin?: number;
+  /** Minimum edge clearance in meters for an explicitly placed main centre (megacity footprint reserve). */
+  centerInset?: number;
 }
 /** Culture preset id (URBAN_MORPHOLOGY.md §3; registry in urban/cultures.ts). */
 export type Culture = string;
