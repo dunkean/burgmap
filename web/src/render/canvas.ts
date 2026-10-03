@@ -684,6 +684,7 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
           else if (k === 'parterre') { if (fine) one(U.plotLine, lw(0.5, 0.4)); }
           else if (k === 'footpath') { if (fine) one(open ? earth : U.street, lw(1.4, 0.6)); }
           else if (k === 'roof-line') { if (near) one(U.massEdge, lw(0.2, 0.3), 0.7, [], 'butt'); }
+          else if (k === 'garden-hedge') one(treeInk, lw(1.2, 0.5), 0.7, fine ? [1.6, 0.7] : [], 'butt');
           else if (k === 'bund') { if (fine) one(U.plotLine, lw(0.4, 0.3), 0.35, [], 'butt'); }
           else if (k === 'turf-wall') { one(mixHex(pal.grass, U.wall, 0.35), lw(2.2, 0.8), 0.42); if (fine) one(U.wall, lw(0.16, 0.3), 0.45); }
           else if (k === 'albarrada') one(U.wall, lw(0.85, 0.4), 0.4, fine ? [0.9, 0.45] : []);

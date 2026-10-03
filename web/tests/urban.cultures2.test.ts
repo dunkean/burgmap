@@ -87,7 +87,7 @@ export const SIGNATURES: Record<string, (w: World) => void> = {
   },
   halfling: (w) => {
     expect(arches(w).get('smial') ?? 0, 'halfling: smials').toBeGreaterThan(3);
-    expect(lineKinds(w).has('hedge'), 'halfling: hedgerows').toBe(true);
+    expect(lineKinds(w).has('hedge') || lineKinds(w).has('garden-hedge'), 'halfling: hedgerows').toBe(true);
     expect((w.urban!.trees ?? []).length, 'halfling: trees').toBeGreaterThan(3);
   },
   'nomad-camp': (w) => {

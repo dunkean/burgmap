@@ -17,6 +17,7 @@ import { raths } from './celtic';
 import { norseFarms } from './norse';
 import { nearestOn } from './norse';
 import { openRing } from './kit';
+import { shireVillage, shireFarms } from './shire';
 
 /** Germanic hamlet: a few fenced farmyards (Einzelhöfe) along their tracks. */
 export function germanicHamlet(cc: CampCtx, c: Vec2, pop: number, rng: Rng): CampOut {
@@ -52,7 +53,10 @@ export function satellite(culture: string, cc: CampCtx, c: Vec2, pop: number, rn
       return germanicVillage(cc, c, pop, rng, wetness(cc, c, 260) > 0.04 && pop <= 340 ? 'wurt' : 'street');
     case 'barbarian-celtic':
     case 'celtic-oppidum':
-      return raths(cc, c, Math.min(pop, 220), rng);
+      return raths(cc, c, pop, rng);
+    case 'halfling':
+      // (farm hamlets and smaller hill villages)
+      return pop < 260 || (pop < 600 && rng.fork('form').chance(0.5)) ? shireFarms(cc, c, pop, rng) : shireVillage(cc, c, pop, rng);
     case 'norse-ringfort':
       return norseFarms(cc, c, Math.min(pop, 600), rng);
     default:

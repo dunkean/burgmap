@@ -29,9 +29,11 @@ import { stiltTown } from './stilts';
 import { warCamp } from './warcamp';
 import { germanicVillage } from './germanic';
 import { norseFarms } from './norse';
-import { celticVillage } from './celtic';
+import { celticVillage, raths } from './celtic';
 import { satellite } from './satellites';
 import { mayaCity } from './maya';
+import { oppidum } from './oppidum';
+import { shireVillage } from './shire';
 
 export interface CampSpec {
   layout: 'ring' | 'yards' | 'longhouses' | 'pueblo' | 'ringfort' | 'khmer' | 'stilts' | 'warcamp';
@@ -148,7 +150,7 @@ function clusterSites(ctx: UrbanCtx, c: Vec2, roads: Polyline[], r0: number, rad
 export const CAMP_NAT_MAX: Record<string, number> = {
   barbarian: 1300, 'barbarian-celtic': 1500, 'barbarian-norse': 1400, 'norse-ringfort': 1100, kraal: 3000, 'native-plains': 2600,
   'nomad-camp': 3500, 'native-iroquoian': 2200, 'native-pueblo': 3000, maya: 120000, khmer: 120000, 'celtic-oppidum': 12000,
-  orcish: 30000, halfling: 900, 'stilt-town': 6000,
+  orcish: 30000, halfling: 700, 'stilt-town': 6000,
 };
 
 /** Outlying settlements never exceed this many (the rest of the population lives in the larger ones). */
@@ -179,6 +181,8 @@ function partRadius(culture: string, spec: CampSpec, pop: number, satelliteForm:
   switch (culture) {
     case 'barbarian': return 40 + Math.sqrt(((pop / 12) * 1900) / Math.PI) * 1.25;
     case 'barbarian-norse': return 120 + Math.sqrt(pop / 14) * 95;
+    case 'celtic-oppidum': return pop < 150 ? 70 + Math.sqrt(pop / 16) * 90 : Math.sqrt((pop / (pop < 1000 ? 55 : 42)) * 1e4 / Math.PI) + 50;
+    case 'halfling': return 120 + Math.sqrt(pop / 5.5) * 28;
     case 'barbarian-celtic': return pop < 150 ? 70 + Math.sqrt(pop / 16) * 90 : Math.sqrt((pop * 105) / Math.PI) + 40;
     default: return campRadius(spec, pop);
   }
@@ -191,6 +195,8 @@ function plan(cc: CampCtx, spec: CampSpec, c: Vec2, pop: number, rng: Rng): Camp
       if (spec.variant === 'norse') return norseFarms(cc, c, pop, rng);
       if (spec.variant === 'celtic') return celticVillage(cc, c, pop, rng);
       if (spec.variant === 'maya') return mayaCity(cc, c, pop, rng);
+      if (spec.variant === 'halfling') return shireVillage(cc, c, pop, rng);
+      if (spec.variant === 'oppidum') return pop < 150 ? raths(cc, c, pop, rng) : oppidum(cc, c, pop, rng);
       return yardsVillage(cc, c, pop, YARD_VARIANTS[spec.variant] ?? YARD_VARIANTS.germanic, rng);
     case 'longhouses': return longhouseVillage(cc, c, pop, rng);
     case 'pueblo': return puebloSettlement(cc, c, pop, rng);

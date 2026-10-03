@@ -173,7 +173,9 @@ export function cutByCells(block: Polygon, cells: { poly: Polygon; tag: number }
 export function cutExact(block: Polygon, cells: { poly: Polygon; tag: number }[]): { poly: Polygon; tag: number }[] {
   let parts = cutByCells(block, cells);
   const A = area(block), S = parts.reduce((s, p) => s + area(p.poly), 0);
-  if (S < A * 0.999) {
+  // (the missing area is only slivers when the cells cover the block: the boolean for them is costly with many
+  // cells, and the partition tolerance is 0.5 %)
+  if (S < A * 0.997) {
     const rest = pieces(parts.length ? differenceS([{ outer: block, holes: [] }], ...parts.map((p): MultiPoly => [{ outer: p.poly, holes: [] }])) : [{ outer: block, holes: [] }], 0.5);
     parts = mergeSmall([...parts, ...rest.map((poly) => ({ poly, tag: -1 }))]);
   }
@@ -200,16 +202,34 @@ function resolveRing(r: Polygon): MultiPoly {
   return isSimple(c) ? [{ outer: c, holes: [] }] : unionS([{ outer: c, holes: [] }]);
 }
 
+/** Segment grid of a ring (cached per ring: a merge tests the same large pieces again and again). */
+const SEG_GRID = new WeakMap<Polygon, GridIndex<number>>();
+function segGrid(b: Polygon): GridIndex<number> {
+  let g = SEG_GRID.get(b);
+  if (!g) {
+    g = new GridIndex<number>(6);
+    for (let i = 0; i < b.length; i++) g.insertSeg(b[i], b[(i + 1) % b.length], i);
+    SEG_GRID.set(b, g);
+  }
+  return g;
+}
+
 /** Length of the boundary of `a` lying on `b`'s boundary (within 2 cm). */
 export function sharedLen(a: Polygon, b: Polygon): number {
+  const g = segGrid(b);
+  const bb = bboxOf(b);
   let L = 0;
   for (let i = 0; i < a.length; i++) {
     const p = a[i], q = a[(i + 1) % a.length];
+    if (Math.max(p.x, q.x) < bb.x0 - 0.05 || Math.min(p.x, q.x) > bb.x1 + 0.05 || Math.max(p.y, q.y) < bb.y0 - 0.05 || Math.min(p.y, q.y) > bb.y1 + 0.05) continue;
     const l = dist(p, q);
     const n = Math.max(1, Math.ceil(l / 0.5));
     for (let j = 0; j < n; j++) {
       const t = (j + 0.5) / n;
-      if (distToRing(b, { x: p.x + (q.x - p.x) * t, y: p.y + (q.y - p.y) * t }) < 0.02) L += l / n;
+      const m = { x: p.x + (q.x - p.x) * t, y: p.y + (q.y - p.y) * t };
+      let on = false;
+      for (const k of g.queryPt(m, 0.05)) if (distToSeg(m, b[k], b[(k + 1) % b.length]) < 0.02) { on = true; break; }
+      if (on) L += l / n;
     }
   }
   return L;

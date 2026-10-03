@@ -70,7 +70,7 @@ export const CAMP_CULTURES: Culture[] = [
     // (Tikal, Copán, Caracol: a garden city; the dispersed houselots grow to a city of tens of thousands)
     ...campBase('maya', 'Maya city (ceremonial core, sacbeob)', 'maya'),
     scale: { min: 'hamlet', max: 'megacity' }, camp: { layout: 'yards', variant: 'maya' },
-    render: { towerShape: 'square', plotLines: false },
+    render: { towerShape: 'square', plotLines: false, openGround: true },
     sitePrefs: { flatness: 1.2, weights: { plain: 1.6, hilltop: 1.2, valley: 1, harbor: 0.3 } },
   },
   {
@@ -95,7 +95,7 @@ export const CAMP_CULTURES: Culture[] = [
   {
     ...campBase('halfling', 'Halfling shire', 'halfling'), fantasy: true,
     scale: { min: 'hamlet', max: 'megacity' }, camp: { layout: 'yards', variant: 'halfling' },
-    render: { towerShape: 'round', plotLines: false },
+    render: { towerShape: 'round', plotLines: false, openGround: true },
     sitePrefs: { flatness: 0.7, weights: { hilltop: 1.6, valley: 1.4, plain: 1, harbor: 0.2 } },
   },
   {

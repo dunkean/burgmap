@@ -92,7 +92,7 @@ export const URBAN_PARCEL_USES = {
   /** Compound grounds (also any `compound:*`). */
   grounds: ['bailey', 'causeway', 'ghat', 'castle-honmaru', 'compound:castle-honmaru', 'bailey-gate', 'esplanade'],
   /** Open ground (camps and barbarian villages, `renderHints.openGround`): yards and paddocks as grass, greens, gardens, fields. */
-  openGrass: ['pen', 'commons'],
+  openGrass: ['pen'],
   openGreen: ['meadow', 'green'],
   openGarden: ['garden'],
   openField: ['field'],
@@ -101,7 +101,7 @@ export const URBAN_LANDMARK_KINDS = ['sahn', 'garth', 'chinampa-canal', 'baray',
 /** Building kinds with a dedicated look (the rest are ordinary roofs). */
 export const URBAN_BUILDING_KINDS = ['church', 'cathedral', 'landmark', 'house'] as const;
 /** Plan-line widths (m) of the generic wall-like kinds, and of camp / village fences (same tables as urban.ts). */
-export const WALL_LINE_W: Record<string, number> = { 'arcane-circle': 0.5, 'lock-gate': 0.8, bank: 0.8, stands: 2.4, dome: 0.6, gallery: 2.2, 'zigzag-wall': 2.4, 'canal-wall': 1, 'pyramid-step': 0.5, 'stall-row': 2.2, 'compound-wall': 1, 'citadel-wall': 2.4, 'stone-wall': 1.8, prakara: 1.6, 'ward-wall': 1.8, platform: 0.4, stela: 1.1, 'sacbe-edge': 0.5, balustrade: 1 };
+export const WALL_LINE_W: Record<string, number> = { 'arcane-circle': 0.5, 'lock-gate': 0.8, bank: 0.8, stands: 2.4, dome: 0.6, gallery: 2.2, 'zigzag-wall': 2.4, 'canal-wall': 1, 'pyramid-step': 0.5, 'stall-row': 2.2, 'compound-wall': 1, 'citadel-wall': 2.4, 'stone-wall': 1.8, prakara: 1.6, 'ward-wall': 1.8, platform: 0.4, stela: 1.1, 'sacbe-edge': 0.5, balustrade: 1, 'round-door': 0.35 };
 export const CAMP_FENCE_W: Record<string, number> = { 'kraal-fence': 1.1, 'yard-fence': 0.45, 'pen-fence': 0.5, 'orda-fence': 0.8, palisade: 1.2, 'turf-wall': 2.2, albarrada: 0.9 };
 /** Fences drawn as fences (same table as urban.ts): [rail width, post width, post length, gap] in meters. */
 export const FENCE_STYLE: Record<string, [number, number, number, number]> = {
@@ -109,7 +109,7 @@ export const FENCE_STYLE: Record<string, [number, number, number, number]> = {
   palisade: [0.3, 1.05, 0.55, 0.28], 'kraal-fence': [0.3, 1.15, 0.8, 0.5],
 };
 /** Plan-line kinds with their own rule (anything else falls back to the wall-like stroke). */
-export const URBAN_SPECIAL_LINES = ['moat', 'canal', 'hedge', 'track', 'weir', 'parterre', 'footpath', 'ghat-steps', 'terrace', 'andene', 'thorn-fence', 'rampart', 'ditch', 'footbridge', 'bazaar-roof', 'qanat', 'qanat-shaft', 'hachure', 'roof-line', 'bund'] as const;
+export const URBAN_SPECIAL_LINES = ['moat', 'canal', 'hedge', 'track', 'weir', 'parterre', 'footpath', 'ghat-steps', 'terrace', 'andene', 'thorn-fence', 'rampart', 'ditch', 'footbridge', 'bazaar-roof', 'qanat', 'qanat-shaft', 'hachure', 'roof-line', 'bund', 'garden-hedge'] as const;
 export const URBAN_LINE_KINDS: readonly string[] = [...URBAN_SPECIAL_LINES, ...Object.keys(WALL_LINE_W), ...Object.keys(CAMP_FENCE_W)];
 
 export const LAND_ORDER: LandKind[] = ['meadow', 'marsh', 'pasture', 'commons', 'forest', 'garden', 'orchard', 'field'];

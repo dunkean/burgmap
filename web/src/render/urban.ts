@@ -155,7 +155,7 @@ function fenceSvg(k: string, d: string, pal: Palette, lw: (m: number, px: number
   const [rail, pw, pl, gap] = FENCE_STYLE[k] ?? FENCE_STYLE['yard-fence'];
   return `<path d="${d}" fill="none" stroke="${U.wall}" stroke-opacity="0.8" stroke-width="${lw(rail, 0.18)}"/><path d="${d}" fill="none" stroke="${U.wall}" stroke-opacity="0.9" stroke-width="${f1(pw)}" stroke-dasharray="${pl} ${gap}" stroke-linecap="butt"/>`;
 }
-const WALL_LINES: Record<string, number> = { 'arcane-circle': 0.5, 'lock-gate': 0.8, bank: 0.8, stands: 2.4, dome: 0.6, gallery: 2.2, 'zigzag-wall': 2.4, 'canal-wall': 1, 'pyramid-step': 0.5, 'stall-row': 2.2,  'compound-wall': 1, 'citadel-wall': 2.4, 'stone-wall': 1.8, prakara: 1.6, 'ward-wall': 1.8, platform: 0.4, stela: 1.1, 'sacbe-edge': 0.5, balustrade: 1 };
+const WALL_LINES: Record<string, number> = { 'arcane-circle': 0.5, 'lock-gate': 0.8, bank: 0.8, stands: 2.4, dome: 0.6, gallery: 2.2, 'zigzag-wall': 2.4, 'canal-wall': 1, 'pyramid-step': 0.5, 'stall-row': 2.2,  'compound-wall': 1, 'citadel-wall': 2.4, 'stone-wall': 1.8, prakara: 1.6, 'ward-wall': 1.8, platform: 0.4, stela: 1.1, 'sacbe-edge': 0.5, balustrade: 1, 'round-door': 0.35 };
 
 /** Compound grounds, water pieces (moats, tanks) and the moat outside the town wall (drawn under the buildings). */
 function cultureUnderlay(ub: NonNullable<World['urban']>, pal: Palette, lw: (m: number, px: number) => string): string {
@@ -220,6 +220,7 @@ function cultureOverlay(ub: NonNullable<World['urban']>, pal: Palette, lw: (m: n
     else if (k === 'andene') s += `<path d="${d}" fill="none" stroke="${U.wall}" stroke-width="${lw(0.9, 0.4)}" stroke-opacity="0.75"/>`;
     else if (k === 'thorn-fence') s += `<path d="${d}" fill="none" stroke="${pal.treeInk ?? '#4a6a3a'}" stroke-width="${lw(2.2, 0.8)}" stroke-opacity="0.85" stroke-dasharray="1.3 0.9" stroke-linecap="round"/>`;
     else if (CAMP_FENCES[k]) s += fenceSvg(k, d, pal, lw);
+    else if (k === 'garden-hedge') s += `<path d="${d}" fill="none" stroke="${pal.treeInk ?? '#4a6a3a'}" stroke-width="${lw(1.2, 0.4)}" stroke-opacity="0.7" stroke-dasharray="1.6 0.7"/>`;
     else if (k === 'bund') s += `<path d="${d}" fill="none" stroke="${U.plotLine}" stroke-opacity="0.35" stroke-width="${lw(0.4, 0.1)}" stroke-linecap="butt"/>`;
     else if (k === 'roof-line') s += `<path d="${d}" fill="none" stroke="${U.massEdge}" stroke-opacity="0.7" stroke-width="${lw(0.2, 0.08)}" stroke-linecap="butt"/>`;
     else if (k === 'rampart') s += `<path d="${d}" fill="none" stroke="${U.garden}" stroke-width="${lw(7, 1.4)}" stroke-opacity="0.9"/><path d="${d}" fill="none" stroke="${U.wall}" stroke-width="${lw(0.6, 0.3)}"/>`;
@@ -252,7 +253,7 @@ function cultureOverlay(ub: NonNullable<World['urban']>, pal: Palette, lw: (m: n
 }
 
 /** Parcel uses of an open-ground settlement drawn as grass (yards, paddocks), gardens and open greens. */
-export const OPEN_GRASS_USES = ['pen', 'commons'];
+export const OPEN_GRASS_USES = ['pen'];
 export const OPEN_GREEN_USES = ['meadow', 'green'];
 /** Trampled earth of the paths of an open-ground settlement (between the rural track ink and the street colour). */
 export const pathEarth = (pal: Palette): string => mixHex(pal.trackFill, pal.urban.street, 0.52);
