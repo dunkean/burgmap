@@ -5,6 +5,7 @@
  */
 import type { World, UrbanLayer, Settlement, UrbanBlockInfo, UrbanParcel, Polygon } from '../types';
 import { standIn } from '../urban/mega/standin';
+import { MEGA_KEY } from '../urban/mega/types';
 
 export function mergeUrban(layers: UrbanLayer[]): UrbanLayer | undefined {
   if (!layers.length) return undefined;
@@ -77,10 +78,21 @@ export function megaView(u: UrbanLayer, details?: Record<number, UrbanLayer>): U
   return ds.length ? { ...mergeUrban([base, ...ds])!, macro: undefined } : base;
 }
 
-/** The World as the renderers should see it: `urban` = all settlements (main first; lazy ones as their extent). */
+/**
+ * The World as the renderers should see it: `urban` = all settlements (main first; lazy ones as their extent).
+ * Megacity plans (the main settlement, big secondary ones) show their detailed quarters and stand-ins for the rest;
+ * `megaDetail` keys are si·MEGA_KEY + quarter (si = 0 for the main settlement).
+ */
 export function renderView(world: World): World {
-  const main = world.urban?.macro ? megaView(world.urban, world.megaDetail) : world.urban;
-  const extra = (world.settlements ?? []).filter((s) => !s.main && (s.urban || s.detail === 'lazy')).map((s) => s.urban ?? placeholderUrban(s));
+  const det = world.megaDetail;
+  const sub = (si: number): Record<number, UrbanLayer> | undefined => {
+    if (!det) return undefined;
+    const out: Record<number, UrbanLayer> = {};
+    for (const k of Object.keys(det)) { const key = Number(k); if (Math.floor(key / MEGA_KEY) === si) out[key - si * MEGA_KEY] = det[key]; }
+    return out;
+  };
+  const main = world.urban?.macro ? megaView(world.urban, sub(0)) : world.urban;
+  const extra = (world.settlements ?? []).filter((s) => !s.main && (s.urban || s.detail === 'lazy')).map((s) => (s.urban?.macro ? megaView(s.urban, sub(s.index)) : s.urban ?? placeholderUrban(s)));
   if (!extra.length || !main) return main === world.urban ? world : { ...world, urban: main };
   return { ...world, urban: mergeUrban([main, ...extra]) };
 }

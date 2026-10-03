@@ -13,6 +13,9 @@ import { nearestOn, insertVertex } from '../core/pline';
 import { pointInRing } from '../geo/poly';
 import { passability } from '../site/site';
 import { generateUrban } from '../urban';
+import { generateMega } from '../urban/mega/plan';
+import { getCulture } from '../urban/culture';
+import { EAGER_MAIN_POP } from '../urban/mega/types';
 import { sizeForPop } from '../options';
 import type { World, Settlement, SiteLayer, UrbanLayer, PolyH } from '../types';
 
@@ -178,6 +181,13 @@ export function generateSettlementUrban(world: World, s: Settlement): Settlement
     site: settlementSite(world, s), roads: roadsFor(world, s), bridges: bridges0,
   };
   const n0 = bridges0.length;
+  // a big settlement (above the eager threshold) is planned like the main megacity: the macro plan now, its quarters
+  // detailed lazily (keys si·MEGA_KEY + q); the plan is not clipped (its quarters tile its own built-up land)
+  const eagerPop = o.eagerPop ?? EAGER_MAIN_POP;
+  if (s.population > eagerPop && !getCulture(s.culture).camp) {
+    const mr = generateMega(sub, rng, s.population, eagerPop);
+    return { urban: mr.layer, bridges: mr.bridges, stats: mr.stats };
+  }
   // on coarse terrain grids (big maps) the region of a tiny hamlet can round down to nothing: the plan is then
   // made for a slightly bigger population (same streams, deterministic) and keeps its real population
   let res = generateUrban(sub, rng);

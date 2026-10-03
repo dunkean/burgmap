@@ -14,17 +14,13 @@ import { generateSettlementUrban } from './settlements/urban';
 import { choosePopulation } from './urban/phases';
 import { scaleMinPop, scaleMaxPop } from './urban/culture';
 import { generateMega, megaRadius } from './urban/mega/plan';
+import { EAGER_MAIN_POP } from './urban/mega/types';
 
 /** Above this total population, secondary settlements are generated lazily (on demand, URBAN_MORPHOLOGY §3d). */
 export const EAGER_POP = 50000;
 /** The urban engine's ceiling for the main settlement (megacity detail is not generated). */
 export const MAIN_POP_CAP = 250000;
-/**
- * Main settlements above this population get the megacity path (URBAN_MORPHOLOGY §3d): an eager macro plan, the
- * quarters' detail generated lazily. At or below it everything is generated eagerly (unchanged output).
- * Option `eagerPop` (URL `eager=`) overrides it.
- */
-export const EAGER_MAIN_POP = 40000;
+export { EAGER_MAIN_POP };
 
 /** The main settlement's population as the urban stage draws it (size preset range, culture scale bounds). */
 export function mainPopulation(o: Options, root: Rng): number {

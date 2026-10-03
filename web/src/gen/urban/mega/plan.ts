@@ -192,7 +192,7 @@ function firstCrossing(pl: Polyline, ring: Polygon, idx?: GridIndex<number>): { 
 
 function ringIndex(ring: Polygon): GridIndex<number> {
   const g = new GridIndex<number>(60);
-  for (let k = 0; k < ring.length; k++) g.insertSeg(ring[k], ring[(k + 1) % ring.length], k);
+  for (let k = 0; k < ring.length; k++) g.insertSegThin(ring[k], ring[(k + 1) % ring.length], k);
   return g;
 }
 
@@ -466,7 +466,7 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
     } else fixedP.push(null);
   }
   // (the outer limit of the suburbs is no wall: a finer, ragged line)
-  const tolK = radii.map((r, k) => Math.max(18, Math.min(130, ((k === nR ? 0.008 : 0.022) * r.reduce((a, b) => a + b, 0)) / r.length)));
+  const tolK = radii.map((r, k) => Math.max(18, Math.min(95, ((k === nR ? 0.008 : 0.019) * r.reduce((a, b) => a + b, 0)) / r.length)));
   const snapHigh = (i: number, j: number, r: number): number => {
     if (!standing.has(i + 1)) return r;
     const lo = i >= 1 ? radii[i - 1][j] + 0.6 * gap : 80, hi = rays[j].rmax - (nR - i) * gap;
@@ -497,12 +497,12 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
     labelOf.push(label ?? id);
     return id;
   };
-  const g = new StreetGraph();
+  const g = new StreetGraph({ thinSegs: true });
   const segIdx = new GridIndex<{ a: Vec2; b: Vec2 }>(80);
   const insert = (pl: Polyline, id: number, merge = 0): void => {
     const st = mstreets[id];
     g.insertPolyline(pl, { width: st.widths[0], rank: st.rank, phase: st.phase, kind: st.role === 'ring' ? 'ring' : st.role === 'radial' ? 'radial' : 'street', street: id }, { snapR: 1.5, mergeDist: merge, mergeAngleDeg: 12 });
-    for (let i = 1; i < pl.length; i++) segIdx.insertSeg(pl[i - 1], pl[i], { a: pl[i - 1], b: pl[i] });
+    for (let i = 1; i < pl.length; i++) segIdx.insertSegThin(pl[i - 1], pl[i], { a: pl[i - 1], b: pl[i] });
   };
   const closed = (r: Polygon): Polyline => [...r, r[0]];
   // the market at the meeting of the main roads
@@ -925,6 +925,7 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
   const quarters: MacroQuarter[] = [];
   let palaceQ: MacroQuarter | null = null;
   const mstreetsObj = new Streets();
+  mstreetsObj.thin = true;
   for (const st of mstreets) mstreetsObj.add(st.path, st.widths, st.rank, st.role, st.phase, st.widths[0] > 0);
   const fsec = (ph: ResolvedPlan['phases'][number], p: Vec2): { morph: MorphologyParams; culture: string } => {
     if (!ph.sectors.length) return { morph: ph.morph, culture: ph.culture };
@@ -1140,7 +1141,7 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
     const pl = st.path;
     const L = polylineLength(pl);
     const zone = zoneOf(Math.min(nR + 1, Math.max(1, st.phase)));
-    const sp = Math.sqrt(QUARTER_AREA[zone]) * 0.45;
+    const sp = Math.sqrt(QUARTER_AREA[zone]) * 0.6;
     if (L < 2 * sp) continue;
     const anchors: Vec2[] = [];
     let h = (Math.imul(si + 1, 2654435761) ^ 0x9e3779b9) >>> 0;

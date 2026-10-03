@@ -54,6 +54,19 @@ export interface MacroQuarter {
   inset: Polygon;
 }
 
+/**
+ * Quarter keys (lazy detail, `World.megaDetail`): quarter q of the main settlement has key q; quarter q of a
+ * secondary settlement planned as a megacity (settlement index si ≥ 1) has key si·MEGA_KEY + q.
+ */
+export const MEGA_KEY = 1_000_000;
+
+/**
+ * Settlements above this population get the megacity path (URBAN_MORPHOLOGY §3d): an eager macro plan, the
+ * quarters' detail generated lazily — the main settlement and, when generated lazily, the big secondary ones. At or
+ * below it everything is generated eagerly (unchanged output). Option `eagerPop` (URL `eager=`) overrides it.
+ */
+export const EAGER_MAIN_POP = 40000;
+
 export interface MacroPlan {
   version: 1;
   /** Seed key of the macro stream (the detail of quarter k uses `new Rng(seedKey).fork('quarter:' + k)`). */

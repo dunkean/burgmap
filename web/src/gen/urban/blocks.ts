@@ -200,7 +200,7 @@ export function splitQuarter(ctx: UrbanCtx, q: Quarter, qi: number, streets: Str
         const l = dist(a, b);
         if (l < 1e-6 || dist(an, a) < 12 || dist(an, b) < 12) continue;
         anchorsHere.push(an);
-        if (pc.level <= 2) tries.push({ seed: an, fi: -1, entry: Math.atan2((b.x - a.x) / l, -(b.y - a.y) / l), bonus: -0.32 });
+        tries.push({ seed: an, fi: -1, entry: Math.atan2((b.x - a.x) / l, -(b.y - a.y) / l), bonus: -0.32 });
       }
     }
     // continuation seeds: carry streets that T into this piece's boundary across it (crossroads, long streets)
@@ -246,7 +246,7 @@ export function splitQuarter(ctx: UrbanCtx, q: Quarter, qi: number, streets: Str
         snapped = snapped.slice();
         for (const end of [0, snapped.length - 1]) {
           const p = snapped[end];
-          let ba: Vec2 | null = null, bd = 34;
+          let ba: Vec2 | null = null, bd = 48;
           for (const an of anchorsHere) { const d = dist(an, p); if (d > 0.01 && d < bd) { bd = d; ba = an; } }
           if (ba) snapped[end] = ba;
         }
@@ -282,6 +282,14 @@ export function splitQuarter(ctx: UrbanCtx, q: Quarter, qi: number, streets: Str
       cands.push({ A, B, chord: used, cost, placeA, placeB, rank });
     }
     cands.sort((a, b) => a.cost - b.cost);
+    // (megacity quarters: a cut from an arterial anchor goes first unless clearly worse, so that the quarters on
+    // both sides of the arterial start their streets at the same points)
+    if (anchorsHere.length && cands.length) {
+      const isA = (c: Cand) => anchorsHere.includes(c.chord[0]) || anchorsHere.includes(c.chord[c.chord.length - 1]);
+      const lim = cands[0].cost + 0.6;
+      const first = cands.filter((c) => isA(c) && c.cost < lim);
+      if (first.length) { const rest = cands.filter((c) => !first.includes(c)); cands.length = 0; cands.push(...first, ...rest); }
+    }
     // expensive width test only on the best-ranked candidates
     let best: Cand | null = null;
     for (const c of cands.slice(0, 6)) {

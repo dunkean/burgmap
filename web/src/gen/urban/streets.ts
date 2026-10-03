@@ -26,12 +26,15 @@ export class Streets {
   /** Street ids reachable from the radials (the network seed); cuts may only hang off connected streets. */
   connected = new Set<number>();
   private idx = new GridIndex<{ s: number; i: number }>(30);
+  /** Index segments by the cells they cross (long straight arterials of a megacity plan). */
+  thin = false;
 
   add(path: Polyline, width: number | number[], rank: number, role: StreetRole, phase: number, ribbon = true): number {
     const id = this.list.length;
     const widths = typeof width === 'number' ? path.map(() => width) : width;
     this.list.push({ id, path, widths, rank, role, phase, ribbon });
-    for (let i = 1; i < path.length; i++) this.idx.insertSeg(path[i - 1], path[i], { s: id, i: i - 1 });
+    if (this.thin) for (let i = 1; i < path.length; i++) this.idx.insertSegThin(path[i - 1], path[i], { s: id, i: i - 1 });
+    else for (let i = 1; i < path.length; i++) this.idx.insertSeg(path[i - 1], path[i], { s: id, i: i - 1 });
     return id;
   }
 

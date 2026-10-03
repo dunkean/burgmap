@@ -26,6 +26,35 @@ export class GridIndex<T> {
   insertSeg(a: Vec2, b: Vec2, item: T): void {
     this.insertBox(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.max(a.x, b.x), Math.max(a.y, b.y), item);
   }
+  /**
+   * A segment registered in the cells it passes through only (not its whole box): long diagonal segments cost a
+   * line of cells instead of a square. Any box query that meets the segment still finds it.
+   */
+  insertSegThin(a: Vec2, b: Vec2, item: T): void {
+    const c = this.cell;
+    const ix0 = Math.floor(Math.min(a.x, b.x) / c), ix1 = Math.floor(Math.max(a.x, b.x) / c);
+    const iy0 = Math.floor(Math.min(a.y, b.y) / c), iy1 = Math.floor(Math.max(a.y, b.y) / c);
+    if ((ix1 - ix0 + 1) * (iy1 - iy0 + 1) <= 6) { this.insertSeg(a, b, item); return; }
+    const id = this.items.length;
+    this.items.push(item);
+    if (id >= this.stamp.length) { const st = new Uint32Array(this.stamp.length * 2); st.set(this.stamp); this.stamp = st; }
+    const dx = b.x - a.x, dy = b.y - a.y, xl = Math.min(a.x, b.x), xh = Math.max(a.x, b.x), eps = 1e-6 * c;
+    for (let ix = ix0; ix <= ix1; ix++) {
+      let ya: number, yb: number;
+      if (Math.abs(dx) < 1e-9) { ya = Math.min(a.y, b.y); yb = Math.max(a.y, b.y); }
+      else {
+        const xa = Math.max(ix * c, xl), xb = Math.min((ix + 1) * c, xh);
+        const y1 = a.y + (dy * (xa - a.x)) / dx, y2 = a.y + (dy * (xb - a.x)) / dx;
+        ya = Math.min(y1, y2); yb = Math.max(y1, y2);
+      }
+      for (let iy = Math.floor((ya - eps) / c); iy <= Math.floor((yb + eps) / c); iy++) {
+        const k = this.key(ix, iy);
+        let l = this.cells.get(k);
+        if (!l) { l = []; this.cells.set(k, l); }
+        l.push(id);
+      }
+    }
+  }
   insertPts(pts: Vec2[], item: T): void {
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
     for (const p of pts) { if (p.x < x0) x0 = p.x; if (p.x > x1) x1 = p.x; if (p.y < y0) y0 = p.y; if (p.y > y1) y1 = p.y; }

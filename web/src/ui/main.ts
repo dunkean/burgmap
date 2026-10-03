@@ -27,7 +27,7 @@ import { OffscreenBackend, BackendEvents } from './backend';
 import type { DisplayOpts, GDone, SettlementMeta } from './protocol';
 import { initSettlementsUI, showSettlementWarnings } from './settlementsPanel';
 import { screenToWorld } from '../render/view';
-import { generateSettlementDetail } from '../gen/pipeline';
+import { generateSettlementDetail, EAGER_MAIN_POP } from '../gen/pipeline';
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 
@@ -333,6 +333,8 @@ const backendEvents: BackendEvents = {
     if (s) s.hasUrban = !d.error;
     rec('settlementDetail', d.ms);
     if (d.error) console.error('settlement detail:', d.error);
+    // (a big secondary settlement is planned as a megacity: its quarters can be detailed now)
+    else if (s && s.population > megaPop()) { megaRect = null; maybeQuarters(viewer.getView()); }
   },
   onQuarters(d) {
     if (d.id !== reqId) return;
@@ -495,6 +497,7 @@ function applyDetail(index: number, urban: NonNullable<World['urban']>, bridges:
   const list = currentWorld.settlements.slice();
   list[index] = { ...list[index], urban };
   currentWorld = { ...currentWorld, settlements: list, bridges: [...(currentWorld.bridges ?? []), ...bridges] };
+  if (urban.macro) { megaLocal?.setWorld(currentWorld); megaRect = null; maybeQuarters(viewer.getView()); }
   sceneCache = null;
   rerender(true);
 }
@@ -522,7 +525,9 @@ const MEGA_SCALE = 0.1;
 let megaRect: { x0: number; y0: number; x1: number; y1: number } | null = null;
 let megaLocal: QuarterQueue | null = null;
 let megaRedraw: number | undefined;
-const isMega = (): boolean => (backend ? !!meta?.mega : !!currentWorld?.urban?.macro);
+/** Settlements above this population are planned as megacities (macro plan + lazy quarters). */
+const megaPop = (): number => opts.eagerPop ?? EAGER_MAIN_POP;
+const isMega = (): boolean => (backend ? !!meta?.mega || settlementList().some((s) => s.index > 0 && s.population > megaPop()) : !!currentWorld?.urban?.macro || !!currentWorld?.settlements?.some((s) => s.urban?.macro));
 function megaProgress(done: number, queued: number, total: number): void {
   statusEl.textContent = queued > 0 ? `Detailing quarters: ${done} ready, ${queued} queued (of ${total})` : `${done} of ${total} quarters detailed (zoom in elsewhere for more)`;
 }

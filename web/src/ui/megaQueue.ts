@@ -2,10 +2,14 @@
  * Megacity quarter detail queue (URBAN_MORPHOLOGY §3d): runs where the World lives (generation worker, or the page
  * in main-thread mode). A view request queues the quarters meeting the view (nearest its centre first, replacing the
  * previous queue); quarters are generated in slices of ~150 ms so new requests are handled between them, and each
- * slice is emitted as a batch. An LRU cache keeps at most `cap` quarters (the visible ones are never evicted).
+ * slice is emitted as a batch. An LRU cache keeps at most `cap` quarters (the visible ones are never evicted). When
+ * the view's quarters are done, the old core's quarters are detailed in the background (`prefetch`).
+ *
+ * Quarters are keyed si·MEGA_KEY + q: the main settlement's plan (si = 0) and the plans of big secondary settlements
+ * (si = their index, once their lazy detail exists).
  */
 import type { World, UrbanLayer } from '../gen/types';
-import { megaQuarterDetail } from '../gen/urban/mega/detail';
+import { megaQuarterDetail, megaHosts, megaKey } from '../gen/urban/mega/detail';
 
 export type Rect = { x0: number; y0: number; x1: number; y1: number };
 export interface QueueStats { done: number; queued: number; total: number; ms: number }
@@ -27,18 +31,21 @@ export class QuarterQueue {
     private slice = 150,
   ) {}
 
-  get total(): number { return this.world.urban?.macro?.quarters.length ?? 0; }
+  /** The World changed (main-thread mode: a secondary settlement's plan arrived). Generated quarters stay valid. */
+  setWorld(w: World): void { this.world = w; }
+
+  get total(): number { return megaHosts(this.world).reduce((s, h) => s + h.M.quarters.length, 0); }
 
   /** Quarters meeting the rectangle, nearest its centre first. */
   visible(r: Rect): number[] {
-    const M = this.world.urban?.macro;
-    if (!M) return [];
     const cx = (r.x0 + r.x1) / 2, cy = (r.y0 + r.y1) / 2;
     const out: { id: number; d: number }[] = [];
-    for (const q of M.quarters) {
-      const [x0, y0, x1, y1] = q.bb;
-      if (x0 > r.x1 || x1 < r.x0 || y0 > r.y1 || y1 < r.y0) continue;
-      out.push({ id: q.id, d: Math.hypot((x0 + x1) / 2 - cx, (y0 + y1) / 2 - cy) });
+    for (const h of megaHosts(this.world)) {
+      for (const q of h.M.quarters) {
+        const [x0, y0, x1, y1] = q.bb;
+        if (x0 > r.x1 || x1 < r.x0 || y0 > r.y1 || y1 < r.y0) continue;
+        out.push({ id: megaKey(h.si, q.id), d: Math.hypot((x0 + x1) / 2 - cx, (y0 + y1) / 2 - cy) });
+      }
     }
     return out.sort((a, b) => a.d - b.d || a.id - b.id).map((x) => x.id);
   }
@@ -52,8 +59,8 @@ export class QuarterQueue {
   }
 
   /**
-   * Pre-details the oldest quarters (the main core, the fused towns' cores, nearest the centre first) in the
-   * background, after any view request, so zooming in on the heart of the city finds them ready.
+   * Pre-details the oldest quarters of the main plan (the core, the fused towns' cores, nearest the centre first)
+   * in the background, after any view request, so zooming in on the heart of the city finds them ready.
    */
   prefetch(max = 140): void {
     const M = this.world.urban?.macro;
@@ -68,18 +75,17 @@ export class QuarterQueue {
 
   /** Generates every quarter (synchronously, with progress), e.g. for a full-detail export. Bypasses the cap. */
   all(progress?: (done: number, total: number) => void): Record<number, UrbanLayer> {
-    const M = this.world.urban?.macro;
     const out: Record<number, UrbanLayer> = {};
-    if (!M) return out;
-    M.quarters.forEach((q, i) => {
-      const l = this.cache.get(q.id) ?? megaQuarterDetail(this.world, q.id);
-      if (l) out[q.id] = l;
-      if (progress && (i % 10 === 0 || i === M.quarters.length - 1)) progress(i + 1, M.quarters.length);
+    const keys = megaHosts(this.world).flatMap((h) => h.M.quarters.map((q) => megaKey(h.si, q.id)));
+    keys.forEach((k, i) => {
+      const l = this.cache.get(k) ?? megaQuarterDetail(this.world, k);
+      if (l) out[k] = l;
+      if (progress && (i % 10 === 0 || i === keys.length - 1)) progress(i + 1, keys.length);
     });
     return out;
   }
 
-  stop(): void { this.stopped = true; if (this.timer) clearTimeout(this.timer); this.timer = null; this.queue = []; }
+  stop(): void { this.stopped = true; if (this.timer) clearTimeout(this.timer); this.timer = null; this.queue = []; this.idle = []; }
 
   private schedule(): void {
     if (this.timer || this.stopped || (!this.queue.length && !this.idle.length)) return;

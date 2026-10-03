@@ -22,6 +22,8 @@ export class StreetGraph {
   edges: GEdge[] = [];
   private nodeIdx = new GridIndex<number>(16);
   private segIdx = new GridIndex<SegRef>(24);
+  /** `thinSegs`: segments indexed by the cells they cross (long straight lines: megacity plans). */
+  constructor(private opts: { thinSegs?: boolean } = {}) {}
 
   private addNode(p: Vec2): number {
     const id = this.nodes.length;
@@ -45,7 +47,8 @@ export class StreetGraph {
     this.edges.push(e);
     this.nodes[a].edges.push(id);
     if (b !== a) this.nodes[b].edges.push(id);
-    for (let i = 1; i < pts.length; i++) this.segIdx.insertSeg(pts[i - 1], pts[i], { e: id, i: i - 1 });
+    if (this.opts.thinSegs) for (let i = 1; i < pts.length; i++) this.segIdx.insertSegThin(pts[i - 1], pts[i], { e: id, i: i - 1 });
+    else for (let i = 1; i < pts.length; i++) this.segIdx.insertSeg(pts[i - 1], pts[i], { e: id, i: i - 1 });
     return id;
   }
 

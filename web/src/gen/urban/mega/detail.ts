@@ -45,7 +45,7 @@ import { registerSahel } from '../sahel';
 import { registerHanse } from '../hanse';
 import { registerKorea } from '../korea';
 import { innerPoint } from './plan';
-import type { MacroPlan } from './types';
+import { MEGA_KEY, type MacroPlan } from './types';
 
 interface Runtime {
   ctx: UrbanCtx;
@@ -93,6 +93,16 @@ function ringNear(ring: Polygon, b: { x0: number; y0: number; x1: number; y1: nu
   return out;
 }
 
+export const megaKey = (si: number, q: number): number => si * MEGA_KEY + q;
+
+/** The urban layers holding a macro plan: the main settlement (index 0) and big secondary settlements. */
+export function megaHosts(world: World): { si: number; u: UrbanLayer; M: MacroPlan }[] {
+  const out: { si: number; u: UrbanLayer; M: MacroPlan }[] = [];
+  if (world.urban?.macro) out.push({ si: 0, u: world.urban, M: world.urban.macro });
+  for (const s of world.settlements ?? []) if (!s.main && s.index > 0 && s.urban?.macro) out.push({ si: s.index, u: s.urban, M: s.urban.macro });
+  return out;
+}
+
 const RANK_W = [0.26, 0.18, 0.02, -0.12, -0.2];
 const LOT_SITE: Record<string, UrbanSite['role']> = { 'm4-palace': 'power', 'm4-cathedral-close': 'worship', 'm4-monastery': 'worship' };
 
@@ -101,11 +111,14 @@ const LOT_SITE: Record<string, UrbanSite['role']> = { 'm4-palace': 'power', 'm4-
  * streets, blocks, parcels, buildings, masses and plan lines (the arterials, walls and quarters stay in the macro
  * layer). Null when the World has no macro plan or no such quarter.
  */
-export function megaQuarterDetail(world: World, id: number): UrbanLayer | null {
-  const M = world.urban?.macro;
+export function megaQuarterDetail(world: World, key: number): UrbanLayer | null {
+  const si = Math.floor(key / MEGA_KEY), id = key - si * MEGA_KEY;
+  const host = si === 0 ? world.urban : world.settlements?.[si]?.urban;
+  const M = host?.macro;
   const mq = M?.quarters[id];
-  if (!M || !mq) return null;
-  const rt = runtime(world, M);
+  if (!M || !mq || !host) return null;
+  // (a secondary settlement's context is centred on its own plan)
+  const rt = runtime(si === 0 ? world : { ...world, site: { ...world.site!, center: M.center } }, M);
   const ctx = rt.ctx;
   const rng = rt.base.fork('quarter:' + id);
   const P = rt.morphs[mq.morph];
@@ -114,6 +127,7 @@ export function megaQuarterDetail(world: World, id: number): UrbanLayer | null {
 
   // ---- the streets this quarter can see: the arterials around it (same ids as the macro labels)
   const local = new Streets();
+  local.thin = true;
   const [qx0, qy0, qx1, qy1] = mq.bb;
   const MG = 260;
   M.streets.forEach((st, i) => {
@@ -348,7 +362,7 @@ export function megaQuarterDetail(world: World, id: number): UrbanLayer | null {
   perBlock.forEach((list) => { if (list.length) for (const ph of unionMany(list, 24, true)) masses.push({ outer: ph.outer, holes: ph.holes }); });
 
   // ---- plan lines: walled compound lots (yashiki, siheyuan, kancha...), ward walls
-  const hints = (world.urban?.renderHints ?? {}) as { compoundWalls?: boolean; wardWalls?: boolean };
+  const hints = (host.renderHints ?? {}) as { compoundWalls?: boolean; wardWalls?: boolean };
   if (hints.compoundWalls) {
     plots.forEach((pl, pi) => {
       const op = P.buildingOp;
@@ -377,7 +391,7 @@ export function megaQuarterDetail(world: World, id: number): UrbanLayer | null {
   }
   const walls: UrbanWall[] = extraWalls.map((w, wi) => {
     const wf = wallFeatures(w.ring, w.gates, rng.fork('xwall:' + wi), ctx.isWater, (p) => ctx.isWater(p), 40);
-    return { path: w.ring, closed: true, towers: wf.towers, gates: w.gates.map((g) => g.p), thickness: 3.2, gateInfo: w.gates, pieces: wf.pieces, gateTowers: wf.gateTowers, towerScale: wf.towerScale.map((x) => x * 1.15), curtains: wf.curtains, towerShape: world.urban?.renderHints?.towerShape ?? 'round', role: w.role === 'castle' ? 'castle' : 'quarter' };
+    return { path: w.ring, closed: true, towers: wf.towers, gates: w.gates.map((g) => g.p), thickness: 3.2, gateInfo: w.gates, pieces: wf.pieces, gateTowers: wf.gateTowers, towerScale: wf.towerScale.map((x) => x * 1.15), curtains: wf.curtains, towerShape: host.renderHints?.towerShape ?? 'round', role: w.role === 'castle' ? 'castle' : 'quarter' };
   });
   const streets: UrbanStreet[] = local.list.slice(nMacro).filter((s) => s.ribbon).map((s) => ({
     path: s.path, width: s.widths.reduce((a, b) => a + b, 0) / s.widths.length, widths: s.widths,

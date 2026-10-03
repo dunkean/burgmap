@@ -85,9 +85,12 @@ function megaMeta(w: World): { quarters: number; cityR: number } | undefined {
   return M ? { quarters: M.quarters.length, cityR: M.cityR } : undefined;
 }
 
-/** Megacity: the quarter queue of the kept World (created on first use), emitting to the render worker / page. */
+/**
+ * Megacity: the quarter queue of the kept World (created on first use), emitting to the render worker / page. (The
+ * plans of big secondary settlements join it when their lazy detail arrives.)
+ */
 function quarterQueue(id: number): QuarterQueue | null {
-  if (!lastWorld?.urban?.macro || lastId !== id) return null;
+  if (!lastWorld || lastId !== id) return null;
   if (!quarters) {
     const port = lastPort;
     quarters = new QuarterQueue(lastWorld, (layers, drop, st) => {
@@ -111,7 +114,7 @@ function doExport(m: GExport): void {
     if (!lastWorld) throw new Error('no world available (still generating?)');
     // megacity: the export shows the quarters generated so far, or (full) every quarter
     const q = quarterQueue(lastId);
-    if (q && lastWorld.urban?.macro) {
+    if (q && q.total > 0) {
       const det: Record<number, NonNullable<World['urban']>> = m.full ? q.all((d, n) => post({ type: 'quartersDone', id: lastId, done: d, queued: n - d, total: n, ms: 0 })) : Object.fromEntries(q.cache);
       lastWorld = { ...lastWorld, megaDetail: det };
     }
