@@ -1,4 +1,5 @@
 /** SVG rendering of the urban layer (streets as space, blocks, plots, building masses, walls). */
+import { townBridgesSvg } from './townbridges';
 import type { World, PolyH, UrbanWall } from '../gen/types';
 import type { Polygon } from '../gen/core/geom';
 import type { Palette } from './styles';
@@ -366,6 +367,8 @@ export function urbanLayer(world: World, pal: Palette, u: number, debug: boolean
   const wide = mains.filter((st) => st.width < minW);
   if (wide.length) s += `<path class="u-main-streets"${stilts || !(world.terrain.coastline.length || world.terrain.lakes.some((l) => l.length >= 3)) ? '' : ' clip-path="url(#landclip)"'} d="${wide.map((st) => pathD(st.path, false)).join('')}" fill="none" stroke="${U.street}" stroke-width="${f1(minW)}" stroke-linecap="round" stroke-linejoin="round"/>`;
   if (!stilts) s += `<path class="u-block-edges" d="${ub.blocks.map((b) => pathD(b, true)).join('')}" fill="none" stroke="${U.blockEdge}" stroke-width="${lw(U.blockEdgeW, 0.3)}"/>`;
+  // small bridges over the streams (true size, by kind: footbridges, arches, fords), over the street space
+  s += townBridgesSvg(world.bridges ?? [], pal);
   for (const w of ub.walls ?? []) s += wallSvg(w, U.wall, U.wallFill, U.wallScale, U.towerScale);
   s += '</g>';
   return s;

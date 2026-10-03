@@ -399,6 +399,8 @@ export function buildShanty(B: Polygon, cx: CompoundCtx): Out {
   // under 52 %: a tighter packing (narrower gaps), then huts filling their whole cell
   if (huts.cov < 0.52) { const h2 = hutsFor(0.55, [36, 40], rng.fork('huts2')); if (h2.cov > huts.cov) huts = h2; }
   if (huts.cov < 0.52) { const h3 = hutsFor(0.55, [36, 40], rng.fork('huts3'), false); if (h3.cov > huts.cov) huts = h3; }
+  // still under 50 % (a rare draw): a few more tight packings until one reaches it
+  for (let t = 4; t < 8 && huts.cov < 0.5; t++) { const h = hutsFor(t % 2 ? 0.45 : 0.5, [36, 40], rng.fork('huts' + t), t % 2 === 0); if (h.cov > huts.cov) huts = h; }
   // too dense: huts are shrunk about their centroid
   const kk = huts.cov > 0.66 ? Math.sqrt(0.62 / huts.cov) : 1;
   for (const h of huts.list) {

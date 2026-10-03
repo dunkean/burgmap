@@ -1,3 +1,4 @@
+import { isKinded } from './townbridges';
 import type { World, LandArea, LandKind, Farmstead } from '../gen/types';
 import { farmRidges } from './farms';
 import type { Vec2 } from '../gen/core/geom';
@@ -252,6 +253,8 @@ export function roadsLayer(world: World, pal: Palette, u: number): string {
   if (br.length) {
     out += '<g class="layer-bridges">';
     for (const b of br) {
+      // (small town bridges, footbridges, arches and fords, are drawn at true size over the street space: urban.ts)
+      if (isKinded(b)) continue;
       const sh = bridgeShape(b.a, b.b, b.width * s + 1, 1.5 * s);
       out += `<path d="${sh.deck}" fill="${pal.bridgeDeck}" stroke="none"/>` +
         `<path d="${sh.rails}" stroke="${pal.bridgeInk}" stroke-width="${f1(1.1 * s)}" stroke-linecap="butt"/>` +

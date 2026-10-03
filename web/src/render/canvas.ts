@@ -9,6 +9,7 @@
  * - Palettes come from styles.ts (read-only).
  * Everything DOM-ish is injectable (`CanvasRendererDeps`) so a mock 2D context can drive it in Node.
  */
+import { bridgeShapes, isKinded, type BridgeShapes } from './townbridges';
 import type { World, LandKind, Vec2 } from '../gen/types';
 import { PALETTES, Palette, MapStyle, ruralInk } from './styles';
 import { renderTerrainRaster } from './raster';
@@ -940,10 +941,29 @@ function drawMapLabels(ctx: CanvasRenderingContext2D, placed: PlacedMapLabel[], 
 }
 void estimateWidth;
 
+function drawTownBridge(ctx: CanvasRenderingContext2D, sh: BridgeShapes, pal: Palette, sc: number): void {
+  const poly = (pts: Vec2[]): void => { ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y); for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y); };
+  ctx.lineCap = 'butt';
+  if (sh.deck) { poly(sh.deck); ctx.closePath(); ctx.fillStyle = pal.bridgeDeck; ctx.globalAlpha = sh.deckAlpha; ctx.fill(); ctx.globalAlpha = 1; }
+  if (sh.seams && sc > 2) {
+    poly(sh.seams.pts); ctx.strokeStyle = pal.bridgeInk; ctx.globalAlpha = 0.45; ctx.lineWidth = sh.seams.w; ctx.setLineDash(sh.seams.dash); ctx.stroke();
+    ctx.setLineDash([]); ctx.globalAlpha = 1;
+  }
+  ctx.strokeStyle = pal.bridgeInk;
+  for (const l of sh.lines) { poly(l.pts); ctx.lineWidth = Math.max(l.w, 0.8 / sc); ctx.stroke(); }
+  if (sh.stones.length) {
+    ctx.fillStyle = pal.bridgeDeck; ctx.lineWidth = Math.max(0.15, 0.6 / sc);
+    for (const st of sh.stones) { ctx.beginPath(); ctx.arc(st.c.x, st.c.y, Math.max(st.r, 0.8 / sc), 0, TAU); ctx.fill(); ctx.stroke(); }
+  }
+  ctx.lineCap = 'round';
+}
+
 function drawBridges(ctx: CanvasRenderingContext2D, world: World, pal: Palette, rect: Rect4, sc: number): void {
   const s = Math.max(1, (world.mapSize / 1600) * 0.85);
   for (const b of world.bridges ?? []) {
     if (Math.max(b.a.x, b.b.x) < rect.minX || Math.min(b.a.x, b.b.x) > rect.maxX || Math.max(b.a.y, b.b.y) < rect.minY || Math.min(b.a.y, b.b.y) > rect.maxY) continue;
+    // small town bridges (footbridges, arches, fords) at true size, by kind
+    if (isKinded(b)) { drawTownBridge(ctx, bridgeShapes(b), pal, sc); continue; }
     const dx = b.b.x - b.a.x, dy = b.b.y - b.a.y, l = Math.hypot(dx, dy) || 1;
     const tx = dx / l, ty = dy / l, nx = -ty, ny = tx, pad = 1.5 * s;
     const h = (Math.max(b.width * s + 1, 2 / sc)) / 2;

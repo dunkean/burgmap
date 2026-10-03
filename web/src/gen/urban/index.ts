@@ -61,6 +61,7 @@ import { reserveMills, reserveWindmills, reserveTanneries, reserveRoadside, rese
 import { reserveShanty } from './m4/shanty';
 import { embedChurch } from './m4/churches';
 import { reserveBridges, bridgeHouses, type BridgeHousesData } from './m4/bridges';
+import { streamBridges, STREAM_BRIDGES } from './streambridges';
 import { outerEnclosure, absorbedVillages, joinVillages, reserveVillages, quarterWall, type Village } from './m4/suburbs';
 import type { ReservedLot } from './primary';
 import { unionS } from '../geo/bool';
@@ -462,6 +463,15 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     if (!progress) break;
   }
   field.P = null;
+  // ---- small bridges: secondary streets and lanes cross the streams and small rivers of the town
+  if (STREAM_BRIDGES.on && archetype !== 'hamlet') {
+    const tsb = performance.now();
+    const sb = streamBridges(ctx, pieces, streets, { archetype, cultureOf: (qi) => prim.quarters[qi]?.culture ?? culture.id, lagoon: !!plan.render.lagoon, cuttableLot: (l) => lotKind.get(l) === 'm4-quay', existing: world.bridges ?? [], rng: rng.fork('streamBridges') });
+    if (sb.bridges.length) world.bridges = [...(world.bridges ?? []), ...sb.bridges];
+    stats['streamBridges'] = sb.bridges.length;
+    for (const [k, v] of Object.entries(sb.stats)) stats['sb.' + k] = v;
+    stats['ms.streamBridges'] = Math.round((performance.now() - tsb) * 10) / 10;
+  }
   const t3 = performance.now();
   let demoted = 0;
   for (const st of streets.list) if (!streets.connected.has(st.id) && st.ribbon) { streets.demote(st.id); demoted++; }

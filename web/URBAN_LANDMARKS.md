@@ -72,6 +72,16 @@ The culture presets define their own catalogue and rules through the same mechan
   Culture variants include the Parisian "zone" outside the walls, gecekondu hillsides and bidonville edges.
 - **Suburban land use:** market gardens, orchards, vineyards, laundry fields (bleaching grounds), rope walks and brick kilns in the rural–urban fringe.
 
+## 3b. Bridges
+
+- **Big rivers** (11 m wide and more, `m4/bridges.ts`): a bridge every 250–500 m of course inside the enclosure, closer in the core, on main streets only; in a large city the bridge nearest the nucleus carries houses.
+- **Streams and small rivers** (`streambridges.ts`), in towns and villages: secondary streets and lanes cross them, as in Colmar, Annecy or Strasbourg's Petite France. A crossing is a street piece over the water only, square to the stream within ±30°, joined to a street on each bank:
+  - two streets ending on facing banks are joined;
+  - a street ending on the bank is carried across by a lane cut through the piece opposite (an ordinary partition cut ending on a connected street);
+  - a stretch of stream without a crossing for more than about 65 m on either side gets a lane cut through the bank pieces on both sides.
+  
+  New crossings keep 45 m (streets) or 55 m (lanes) from the others. Kinds (`kind`/`arch` on the `World.bridges` entry, drawn at true size over the street space): plank footbridge for lanes (2–3 m), stone arch for streets (4–7 m); arched timber bridges in Japanese towns, stone humpbacks in Chinese towns, the stepped footbridges of the canals in lagoon towns (Venetian, gnomish); villages ford the brooks under 4 m most of the time.
+
 ## 4. Invariants
 
 - Landmark lots are pieces of the partition, so no overlaps.
