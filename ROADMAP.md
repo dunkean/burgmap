@@ -15,6 +15,7 @@ This checklist reconciles the open work in `BUGS.md`, `HANDOFF.md` §7 and `web/
 - [x] Terrace strokes (`f30671b`): continuous soft riser shade, fine retaining walls, real arc-spaced hachures and transverse stairs shared by SVG/Canvas. Detail fades at intermediate zoom. Both source and final image reviews accepted; 32 rendering/Canvas tests, typecheck/build and live Inca/dwarven views from 0.1 to 6 px/m passed.
 - [x] Open-town edges (`7074c2a`): small served fringe lanes, lower edge density and garden gaps; rural cover reaches the exact footprint while farms keep their safe reserve. Astra + actual Opus 5.5 approved every code amendment before testing and accepted wide/detail/Canvas images. Thirteen focused and nine field tests, typecheck/build, seven culture diagnostics and three live zooms passed; single/double/elf hedge-walled output remains byte-identical. P4 gains four fringe quarters and 29 garden gaps without parcel overlaps or lost frontage.
 - [ ] Tribal cultures at large populations: grow a primitive urban settlement appropriate to population and culture rather than repeating isolated tribes (new user report in `BUGS.md`).
+- [ ] Open-town ground: blend countryside texture into peripheral quarters instead of a uniform urban background (new user report in `BUGS.md`, after the primitive-city fix).
 
 ## Scale, performance and test health
 
