@@ -27,11 +27,11 @@ const S = w.mapSize;
 let crop = { x: 0, y: 0, w: S };
 const cr = arg('--crop');
 if (cr) { const [x, y, ww] = cr.split(',').map(Number); crop = { x, y, w: ww }; }
-else if (M) { const R = M.cityR * 1.15; crop = { x: M.center.x - R, y: M.center.y - R, w: 2 * R }; }
+else if (M) { const R = arg('--zoom') ? Number(arg('--zoom')) : M.cityR * 1.15; const o = (arg('--off') ?? '0,0').split(',').map(Number); crop = { x: M.center.x + o[0] - R, y: M.center.y + o[1] - R, w: 2 * R }; }
 const px = 1800 / crop.w;
 const P = (p: Polygon): string => p.map((q, i) => (i ? 'L' : 'M') + ((q.x - crop.x) * px).toFixed(1) + ',' + ((q.y - crop.y) * px).toFixed(1)).join('') + 'Z';
 const L = (p: Polygon): string => p.map((q, i) => (i ? 'L' : 'M') + ((q.x - crop.x) * px).toFixed(1) + ',' + ((q.y - crop.y) * px).toFixed(1)).join('');
-const COL: Record<string, string> = { market: '#e8d9a8', 'old-town': '#c9705a', town: '#d99a6c', suburb: '#e6c79c', village: '#8fb070', satellite: '#b5654f', port: '#6f98b8', palace: '#a77fc2', cathedral: '#8c3b3b', craft: '#9a8f6a', gardens: '#9cc48a' };
+const COL: Record<string, string> = { market: '#e8d9a8', 'old-town': '#c9705a', town: '#d99a6c', suburb: '#e6c79c', village: '#8fb070', satellite: '#b5654f', port: '#6f98b8', palace: '#a77fc2', cathedral: '#8c3b3b', craft: '#9a8f6a', gardens: '#9cc48a', citadel: '#444', university: '#d8c25a' };
 const parts: string[] = [];
 parts.push(`<rect width="1800" height="1800" fill="#f4efe2"/>`);
 for (const ph of w.terrain.coastline) parts.push(`<path d="${P(ph)}" fill="#a9c6d6"/>`);
@@ -42,6 +42,7 @@ if (M) for (const q of M.quarters) {
   const fill = dens ? `hsl(20,60%,${Math.round(92 - Math.min(60, q.density / 6))}%)` : COL[q.district] ?? '#ccc';
   parts.push(`<path d="${P(q.pts)}" fill="${fill}" stroke="#7a6a55" stroke-width="0.4"/>`);
 }
+for (const wt of u.water ?? []) parts.push(`<path d="${P(wt.outer)}" fill="#a9c6d6"/>`);
 for (const st of u.streets) parts.push(`<path d="${L(st.path)}" stroke="${st.rank === 0 ? '#3a2f25' : '#6b5a48'}" stroke-width="${Math.max(0.6, st.width * px)}" fill="none" stroke-linecap="round"/>`);
 for (const wl of u.walls ?? []) for (const pc of wl.pieces ?? [wl.path]) parts.push(`<path d="${L(pc)}" stroke="#222" stroke-width="${Math.max(1.6, wl.thickness * 2 * px)}" fill="none"/>`);
 for (const wl of u.walls ?? []) for (const t of wl.towers) parts.push(`<circle cx="${((t.x - crop.x) * px).toFixed(1)}" cy="${((t.y - crop.y) * px).toFixed(1)}" r="${Math.max(1.2, 6 * px)}" fill="#222"/>`);
@@ -50,10 +51,11 @@ if (M) for (const nu of M.nuclei) parts.push(`<circle cx="${((nu.p.x - crop.x) *
 if (M && nDetail > 0) {
   const order = M.quarters.map((q) => q.id).sort((a, b) => {
     const qa = M.quarters[a], qb = M.quarters[b];
-    const da = Math.hypot((qa.bb[0] + qa.bb[2]) / 2 - M.center.x, (qa.bb[1] + qa.bb[3]) / 2 - M.center.y);
-    const db = Math.hypot((qb.bb[0] + qb.bb[2]) / 2 - M.center.x, (qb.bb[1] + qb.bb[3]) / 2 - M.center.y);
+    const cx = crop.x + crop.w / 2, cy = crop.y + crop.w / 2;
+    const da = Math.hypot((qa.bb[0] + qa.bb[2]) / 2 - cx, (qa.bb[1] + qa.bb[3]) / 2 - cy);
+    const db = Math.hypot((qb.bb[0] + qb.bb[2]) / 2 - cx, (qb.bb[1] + qb.bb[3]) / 2 - cy);
     return da - db;
-  }).slice(0, nDetail);
+  }).slice(0, nDetail).filter((id) => { const q = M.quarters[id]; return !(q.bb[0] > crop.x + crop.w || q.bb[2] < crop.x || q.bb[1] > crop.y + crop.w || q.bb[3] < crop.y); });
   let tot = 0, mx = 0;
   for (const id of order) {
     const t = performance.now();
@@ -66,6 +68,11 @@ if (M && nDetail > 0) {
     for (const st of d.streets) parts.push(`<path d="${L(st.path)}" stroke="#bba" stroke-width="${Math.max(0.3, st.width * px * 0.3)}" fill="none"/>`);
   }
   console.log('detail', order.length, 'quarters: mean', Math.round(tot / order.length), 'ms, max', Math.round(mx), 'ms');
+}
+if (args.includes('--rings') && M) {
+  const rc = ['#e00', '#0a0', '#00e', '#e0e', '#0cc', '#880'];
+  M.rings.forEach((r, i) => parts.push(`<path d="${P(r)}" fill="none" stroke="${rc[i % rc.length]}" stroke-width="${3 - i * 0.3}" stroke-opacity="0.8"/>`));
+  M.rings.forEach((r, i) => r.forEach((q) => parts.push(`<circle cx="${((q.x - crop.x) * px).toFixed(1)}" cy="${((q.y - crop.y) * px).toFixed(1)}" r="2.5" fill="${rc[i % rc.length]}"/>`)));
 }
 const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1800" viewBox="0 0 1800 1800">${parts.join('')}</svg>`;
 mkdirSync(dirname(out), { recursive: true });

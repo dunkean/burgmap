@@ -14,6 +14,8 @@ export class QuarterQueue {
   /** Generated quarters, least recently used first. */
   readonly cache = new Map<number, UrbanLayer>();
   private queue: number[] = [];
+  /** Background work when the view's quarters are done: the old core's quarters (seen first when zooming in). */
+  private idle: number[] = [];
   private keep = new Set<number>();
   private timer: ReturnType<typeof setTimeout> | null = null;
   private stopped = false;
@@ -49,6 +51,21 @@ export class QuarterQueue {
     this.schedule();
   }
 
+  /**
+   * Pre-details the oldest quarters (the main core, the fused towns' cores, nearest the centre first) in the
+   * background, after any view request, so zooming in on the heart of the city finds them ready.
+   */
+  prefetch(max = 140): void {
+    const M = this.world.urban?.macro;
+    if (!M) return;
+    const c = M.center;
+    this.idle = M.quarters
+      .filter((q) => (q.phase === 1 && q.nucleus === 0) || q.district === 'satellite' || q.kind === 'market')
+      .map((q) => ({ id: q.id, d: Math.hypot((q.bb[0] + q.bb[2]) / 2 - c.x, (q.bb[1] + q.bb[3]) / 2 - c.y) + (q.nucleus === 0 ? 0 : 1500) }))
+      .sort((a, b) => a.d - b.d || a.id - b.id).slice(0, Math.min(max, Math.floor(this.cap * 0.6))).map((x) => x.id);
+    this.schedule();
+  }
+
   /** Generates every quarter (synchronously, with progress), e.g. for a full-detail export. Bypasses the cap. */
   all(progress?: (done: number, total: number) => void): Record<number, UrbanLayer> {
     const M = this.world.urban?.macro;
@@ -65,7 +82,7 @@ export class QuarterQueue {
   stop(): void { this.stopped = true; if (this.timer) clearTimeout(this.timer); this.timer = null; this.queue = []; }
 
   private schedule(): void {
-    if (this.timer || this.stopped || !this.queue.length) return;
+    if (this.timer || this.stopped || (!this.queue.length && !this.idle.length)) return;
     this.timer = setTimeout(() => { this.timer = null; this.pump(); }, 0);
   }
 
@@ -74,8 +91,8 @@ export class QuarterQueue {
     const t0 = performance.now();
     const out: Record<number, UrbanLayer> = {};
     let n = 0;
-    while (this.queue.length && performance.now() - t0 < this.slice) {
-      const id = this.queue.shift()!;
+    while ((this.queue.length || (this.idle.length && this.cache.size < this.cap * 0.7)) && performance.now() - t0 < this.slice) {
+      const id = this.queue.length ? this.queue.shift()! : this.idle.shift()!;
       if (this.cache.has(id)) continue;
       const l = megaQuarterDetail(this.world, id);
       if (!l) continue;
@@ -92,6 +109,7 @@ export class QuarterQueue {
       for (const id of drop) this.cache.delete(id);
     }
     if (n || drop.length) this.emit(out, drop, { done: this.cache.size, queued: this.queue.length, total: this.total, ms: Math.round(performance.now() - t0) });
+    if (!this.queue.length && this.cache.size >= this.cap * 0.7) this.idle = [];
     this.schedule();
   }
 }

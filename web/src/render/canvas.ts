@@ -543,6 +543,8 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
             const ink = lm < 0.3 ? mixHex(U.mass, '#000000', 0.25) : lumHex(U.massEdge) < lm ? U.massEdge : mixHex(U.mass, '#000000', 0.6);
             const bp = polyPaths(bl);
             ctx.fillStyle = roof;
+            // (the masses first: a megacity quarter not detailed yet has its stand-in masses and no buildings)
+            for (const p of paths) ctx.fill(p, 'evenodd');
             for (const p of bp) ctx.fill(p, 'evenodd');
             ctx.strokeStyle = ink; ctx.lineWidth = lw(Math.max(0.28, U.massEdgeW * 0.9), 0.45); ctx.lineJoin = 'miter';
             for (const p of bp) ctx.stroke(p);

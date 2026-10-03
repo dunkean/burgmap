@@ -7,7 +7,11 @@ import type { Vec2, Polygon, Polyline } from '../../core/geom';
 import type { UrbanZone, StreetRole } from '../../types';
 
 /** One street of the arterial graph (its index is its id: quarter edge labels refer to it). */
-export interface MacroStreet { path: Polyline; widths: number[]; rank: number; role: StreetRole; phase: number }
+export interface MacroStreet {
+  path: Polyline; widths: number[]; rank: number; role: StreetRole; phase: number;
+  /** Points on the street where the quarters on both sides start their main streets (continuity across it). */
+  anchors?: Vec2[];
+}
 
 /** A nucleus of the polycentric plan: the main core, a fused satellite town, an absorbed village. */
 export interface MacroNucleus {
@@ -19,7 +23,7 @@ export interface MacroNucleus {
 /** A landmark the quarter detail claims on its best piece (city-rank lots are whole quarters instead). */
 export interface MacroWant { kind: string; place: 'near-nucleus' | 'any' | 'edge'; area: [number, number]; data?: unknown }
 
-export type MacroDistrict = 'market' | 'old-town' | 'town' | 'suburb' | 'village' | 'satellite' | 'port' | 'palace' | 'cathedral' | 'craft' | 'gardens';
+export type MacroDistrict = 'market' | 'old-town' | 'town' | 'suburb' | 'village' | 'satellite' | 'port' | 'palace' | 'cathedral' | 'craft' | 'gardens' | 'citadel' | 'university';
 
 export interface MacroQuarter {
   /** Stable id (index in the plan). */

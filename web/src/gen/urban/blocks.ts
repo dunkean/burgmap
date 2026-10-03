@@ -72,7 +72,14 @@ function endAngles(X: LPoly, a: Vec2, b: Vec2): number[] {
   return out;
 }
 
-export interface SplitOpts { nucleus: Vec2; gridAngle: number; terrainAngle?: number; waterAngle?: number }
+export interface SplitOpts {
+  nucleus: Vec2; gridAngle: number; terrainAngle?: number; waterAngle?: number;
+  /**
+   * Megacity quarters: points on the bounding arterials where the main streets of the quarters on both sides start
+   * (organic splits of the first levels begin there or snap their ends to them), so streets continue across.
+   */
+  anchors?: Vec2[];
+}
 
 export function splitQuarter(ctx: UrbanCtx, q: Quarter, qi: number, streets: Streets, field: GuidanceField, o: SplitOpts, rng: Rng): Piece[] {
   const P = q.morph ?? ctx.params;
@@ -182,6 +189,20 @@ export function splitQuarter(ctx: UrbanCtx, q: Quarter, qi: number, streets: Str
     const tries: { seed: Vec2; fi: number; entry?: number; bonus: number }[] = [];
     for (const fi of order) for (const seed of seeds[fi]) tries.push({ seed, fi, bonus: 0 });
     for (const ac of access.slice(-4)) tries.push({ seed: ac.p, fi: -1, entry: ac.h, bonus: 0.25 });
+    // arterial anchors: a street starting there, square to the arterial (its twin across starts at the same point)
+    const anchorsHere: Vec2[] = [];
+    if (o.anchors && P.streetOp === 'organic' && pc.level <= 3) {
+      for (const an of o.anchors) {
+        if (an.x < ob.c.x - ob.hu - ob.hv || an.x > ob.c.x + ob.hu + ob.hv || an.y < ob.c.y - ob.hu - ob.hv || an.y > ob.c.y + ob.hu + ob.hv) continue;
+        const loc = locate(pts, an);
+        if (loc.d > 0.3 || pc.lp.lab[loc.edge] < 0 || !streets.connected.has(pc.lp.lab[loc.edge])) continue;
+        const a = pts[loc.edge], b = pts[(loc.edge + 1) % pts.length];
+        const l = dist(a, b);
+        if (l < 1e-6 || dist(an, a) < 12 || dist(an, b) < 12) continue;
+        anchorsHere.push(an);
+        if (pc.level <= 2) tries.push({ seed: an, fi: -1, entry: Math.atan2((b.x - a.x) / l, -(b.y - a.y) / l), bonus: -0.32 });
+      }
+    }
     // continuation seeds: carry streets that T into this piece's boundary across it (crossroads, long streets)
     if (P.streetOp === 'organic') {
       for (const st of streets.query(pts, 12)) {
@@ -219,7 +240,17 @@ export function splitQuarter(ctx: UrbanCtx, q: Quarter, qi: number, streets: Str
         chord = back.slice().reverse().concat(fwd.slice(1));
       }
       chord = simplify(chord, 0.25);
-      const snapped = tr.entry !== undefined ? [chord[0], ...snapEnds(pc.lp, chord, 6).slice(1)] : snapEnds(pc.lp, chord, 6);
+      let snapped = tr.entry !== undefined ? [chord[0], ...snapEnds(pc.lp, chord, 6).slice(1)] : snapEnds(pc.lp, chord, 6);
+      // (an end near an arterial anchor moves onto it)
+      if (anchorsHere.length) {
+        snapped = snapped.slice();
+        for (const end of [0, snapped.length - 1]) {
+          const p = snapped[end];
+          let ba: Vec2 | null = null, bd = 34;
+          for (const an of anchorsHere) { const d = dist(an, p); if (d > 0.01 && d < bd) { bd = d; ba = an; } }
+          if (ba) snapped[end] = ba;
+        }
+      }
       let res = splitByChord(pc.lp, snapped, TMP_LABEL);
       let used = snapped;
       if (!res) { res = splitByChord(pc.lp, chord, TMP_LABEL); used = chord; }

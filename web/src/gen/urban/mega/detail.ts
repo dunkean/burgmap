@@ -136,7 +136,10 @@ export function megaQuarterDetail(world: World, id: number): UrbanLayer | null {
   const field = new GuidanceField(ctx, nucleus, local, M.mainAngle, rt.base.fork('field'));
   field.terrainAngle = M.terrainAngle;
   field.waterAngle = M.waterAngle;
-  const pieces = splitQuarter(ctx, q, id, local, field, { nucleus, gridAngle: M.mainAngle, terrainAngle: M.terrainAngle, waterAngle: M.waterAngle }, rng.fork('split'));
+  // the anchors of the arterials around the quarter (shared with the quarters across them)
+  const anchors: Vec2[] = [];
+  for (const l of new Set(mq.lab)) if (l >= 0 && M.streets[l]?.anchors) anchors.push(...M.streets[l].anchors!);
+  const pieces = splitQuarter(ctx, q, id, local, field, { nucleus, gridAngle: M.mainAngle, terrainAngle: M.terrainAngle, waterAngle: M.waterAngle, anchors }, rng.fork('split'));
   field.P = null;
   // ---- the landmarks the macro plan asked for, on the best piece
   const wantData = new Map<string, unknown>();
@@ -147,7 +150,7 @@ export function megaQuarterDetail(world: World, id: number): UrbanLayer | null {
     const taken = new Set<number>();
     const R = Math.sqrt(mq.area / Math.PI);
     mq.wants.forEach((w, k) => {
-      const nuc = w.kind === 'm4-cathedral-close' ? M.center : qc;
+      const nuc = w.kind === 'm4-cathedral-close' ? (M.nuclei[mq.nucleus]?.p ?? M.center) : qc;
       const pi = pickBlock(cb, w.place, w.area, nuc, R, {
         frontsNucleus: () => 0, edgeDist: (p) => Math.min(...mq.pts.map((a, i) => distToSeg(p, a, mq.pts[(i + 1) % mq.pts.length]))), gates: [], rng: rng.fork('lm:' + k), taken,
       });
@@ -177,7 +180,8 @@ export function megaQuarterDetail(world: World, id: number): UrbanLayer | null {
   const extraWalls: NonNullable<ReturnType<typeof buildCompound>['walls']> = [];
   const claim = (bi: number, kind: string, ang: number, data?: unknown): boolean => {
     const out = buildCompound(kind, carved[bi].poly, { angle: ang, pop, rng: rng.fork('cmp:' + bi), center: M.center, data });
-    if (out.walls) extraWalls.push(...out.walls);
+    // (the citadel's curtain is drawn by the macro plan)
+    if (out.walls) extraWalls.push(...out.walls.filter((w) => !(w.role === 'castle' && mq.compound === 'm4-castle')));
     if (out.trees) trees.push(...out.trees);
     if (!out.parcels.length) return false;
     const first = parcels.length;

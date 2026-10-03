@@ -72,6 +72,8 @@ function doRun(m: GRun): void {
       type: 'done', id, ms: Math.round(performance.now() - t0), stats: world.stats,
       meta: { center: world.site?.center ?? { x: world.mapSize / 2, y: world.mapSize / 2 }, anchors, mapSize: world.mapSize, settlements: settlementMeta(world), mega: megaMeta(world) },
     });
+    // megacity: the old core's quarters are detailed in the background right away
+    if (world.urban?.macro) quarterQueue(id)?.prefetch();
   } catch (err) {
     post({ type: 'error', id, error: String((err as Error)?.stack ?? err) });
   }

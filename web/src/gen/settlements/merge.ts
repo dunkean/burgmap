@@ -61,9 +61,9 @@ export function megaView(u: UrbanLayer, details?: Record<number, UrbanLayer>): U
     const green = q.kind === 'place' || q.district === 'gardens';
     if (q.kind === 'quarter') {
       // stand-in fabric: block-sized pieces with their built mass
-      const si = standIn(q);
+      const si = standIn(q, M.nuclei[q.nucleus]?.p ?? M.center);
       for (const b of si.blocks) { blocks.push(b); blockInfo.push({ quarter: q.id, phase: q.phase, zone: q.zone, kind: 'block', culture: q.culture }); }
-      for (const m of si.masses) masses.push({ outer: m, holes: [] });
+      masses.push(...si.masses);
       continue;
     }
     const bi = blocks.length;
