@@ -6,12 +6,14 @@ This checklist reconciles the open work in `BUGS.md`, `HANDOFF.md` §7 and `web/
 
 - [x] Overlapping phase districts and faubourgs (`0b8b5b9`, seeded regression and visual inspection).
 - [x] Biomes: selectable climates, water-dependent cultivation, vegetation, consistent SVG/Canvas rendering, share links (`1508eb4`; six inspected previews, browser control/link, typecheck/build, targeted suites).
-- [ ] Chinese moats: optional, terrain-aware, gates crossed properly; diversify and fill wards.
+- [x] Chinese moats: optional, terrain-aware, dry gates and double-wall crossings; separate defensive reserves, SVG/Canvas water holes (`6f78c19`; Astra + Opus 5.5 reviews before 39 passing tests, typecheck/build, inspected PNG and browser On/Off/link checks).
+- [ ] Chinese wards: diversify and fill the sparse/repetitive lots; the combined Chinese user bug remains open until this is verified.
 - [ ] Empty Japanese/Roman quarters on `p4uefz`: distinguish intentional gardens from inaccessible or discarded urban land.
 - [ ] Venetian waterways: eliminate isolated river/canal ends.
 - [ ] Stilt towns: adapt footprints and boardwalks to shores, channels and relief.
 - [ ] Rural green seams: subdued boundaries between fields in both renderers.
 - [ ] Terrace strokes: legible retaining walls and slope hachures at each zoom.
+- [ ] Open-town edges: soften the exact outer boundary and distribute houses beyond it, keeping frontage, terrain and parcel containment valid (new user report in `BUGS.md`).
 
 ## Scale, performance and test health
 
