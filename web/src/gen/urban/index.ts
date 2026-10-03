@@ -10,7 +10,7 @@ import type { Rng } from '../core/rng';
 import type { World, UrbanLayer, UrbanStreet, PolyH as PolyHT, UrbanLine, UrbanTree } from '../types';
 import type { MorphologyParams, Zone } from './morphology';
 import { resolveMorph, applySprawl } from './morphology';
-import { resolvePlan, getCulture, ResolvedPlan, EnclosureSpec, NucleusSpec, scaleMinPop, scaleMaxPop } from './culture';
+import { resolvePlan, populationCulture, ResolvedPlan, EnclosureSpec, NucleusSpec, scaleMinPop, scaleMaxPop } from './culture';
 import { generateCamp } from './camps/index';
 import { planRibbonVillage } from './villages';
 import { makeCtx } from './context';
@@ -156,8 +156,8 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   const t0 = performance.now();
   const rng = root.fork('urban');
   const opts = world.options;
-  const culture = getCulture(opts.culture);
   let pop = choosePopulation(opts.size, opts.population, rng.fork('pop'));
+  const culture = populationCulture(opts.culture, pop);
   // settlements planned without streets (camps, kraals, barbarian and native villages, pueblos)
   if (culture.camp) {
     const cr = generateCamp(world, rng, culture, pop);
@@ -189,6 +189,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     : archetype === 'street-village' ? { ...base, blockSize: { ...base.blockSize, village: [9000, 26000] } } : base;
   const lastEnc: EnclosureSpec = archetype === 'town' ? plan.phases[plan.phases.length - 1].enc : { ...plan.phases[0].enc, ...(settlement?.enclosure ?? {}) };
   const wallKind = lastEnc.wall;
+  const primitivePalisade = !!culture.urbanGrowth && !culture.camp && culture.id !== 'native-pueblo';
   const autoWalled = archetype === 'town' && (pop >= 2500 || rng.fork('walls').chance(0.6));
   const canWall = archetype === 'town' || archetype === 'nucleated-village';
   // walls: none (open town), single curtain, double enceinte (old spellings: yes / no)
@@ -196,7 +197,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   const walled = wallsOpt === 'none' ? false : wallsOpt === 'single' || wallsOpt === 'double' ? canWall
     : wallKind === 'auto' ? autoWalled : wallKind === 'none' ? false : canWall;
   // the double enceinte: an outer, lower wall 10–25 m outside the curtain (the lists between them)
-  const listsW = walled && wallsOpt === 'double' && archetype === 'town' && wallKind !== 'palisade' && wallKind !== 'hedge' ? rng.fork('lists').range(12, 22) : 0;
+  const listsW = walled && wallsOpt === 'double' && archetype === 'town' && wallKind !== 'palisade' && wallKind !== 'hedge' && !primitivePalisade ? rng.fork('lists').range(12, 22) : 0;
   const estArea = (pop / params.density.middle) * 1e4;
   const ctx = makeCtx(world, params, 2.6 * Math.sqrt(estArea / Math.PI) + 450);
   const mainAngle = mainRoadAngle(world);
@@ -810,8 +811,8 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
       if (b.kind === 'garden') { plotGardens.push(b.poly); continue; }
       if (first && b.kind === 'house') { b.arch = 'smithy'; first = false; }
       // the warehouse row on the quay (merchant quarter) and the craftsmen's quarter by the tanneries
-      if (onQuay && b.kind === 'house' && plotMorph[pi].buildingOp !== 'venetian') { b.arch = 'warehouse'; b.storeys = 3; }
-      else if (craft && b.kind === 'house') b.arch = 'craft-workshop';
+      if (onQuay && b.kind === 'house' && plotMorph[pi].buildingOp !== 'venetian' && plotMorph[pi].buildingOp !== 'primitive') { b.arch = 'warehouse'; b.storeys = 3; }
+      else if (craft && b.kind === 'house' && plotMorph[pi].buildingOp !== 'primitive') b.arch = 'craft-workshop';
       plotBld[pi].push(b);
     }
     // no matchsticks among dwellings: long footprints are cut into rooms, the remaining slivers dropped
@@ -1095,6 +1096,10 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
       if (wallKind === 'hedge') {
         // a living hedge: a plan line, no masonry
         lines.push({ kind: 'hedge', path: w.ring, closed: true, width: 2.6 });
+        return null;
+      }
+      if (primitivePalisade) {
+        for (const path of wf.pieces) lines.push({ kind: 'palisade', path, width: 1.2 });
         return null;
       }
       return { path: w.ring, closed: true, towers: wf.towers, gates: w.gates.map((g) => g.p), thickness: wallKind === 'palisade' ? 1.6 : pop > 12000 ? 3.2 : 2.6, gateInfo: w.gates.map((g) => ({ p: g.p, dir: g.dir, width: g.width })), pieces: wf.pieces, gateTowers: wf.gateTowers, towerScale: wf.towerScale, curtains: wf.curtains, towerShape, role: 'town' as const };

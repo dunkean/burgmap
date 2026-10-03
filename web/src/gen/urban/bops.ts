@@ -16,6 +16,7 @@
 import type { Vec2, Polygon } from '../core/geom';
 import { dist } from '../core/geom';
 import type { Rng } from '../core/rng';
+import { primitiveHouse } from './primitive';
 import type { MorphologyParams, ArchSpec } from './morphology';
 import type { Plot } from './plots';
 import { buildPlot, clipPlot, courtyardRing, rectify, shapeOf, dropOverlaps, MIN_BW, MAX_ASPECT, type Bldg, type HalfPlane, type CourtHint } from './buildings';
@@ -1009,6 +1010,7 @@ export function buildOn(pl: Plot, cov: number, P: MorphologyParams, rng: Rng, hi
 
 function buildOnRaw(pl: Plot, cov: number, P: MorphologyParams, rng: Rng, hint?: CourtHint): ArchBldg[] {
   switch (P.buildingOp) {
+    case 'primitive': return primitiveHouse(pl, cov, P, rng);
     case 'courtyardHouse': return courtyardHouse(pl, P, rng, cov);
     case 'shopRow': return shopRow(pl, P, rng);
     case 'pavilionCompound': return pavilionCompound(pl, P, rng).map((b) => ({ ...b, poly: rectify(b.poly, pl.front[0], unitT(pl), pl.nrm) ?? b.poly }));

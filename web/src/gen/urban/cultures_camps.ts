@@ -6,6 +6,7 @@
 import type { Culture } from './culture';
 import type { MorphologyParams } from './morphology';
 import { MORPHOLOGIES, EO_BASE, deepMerge } from './morphology';
+import { attachUrbanGrowth } from './cultures_primitive';
 
 const morph = (id: string, over: Record<string, unknown>): MorphologyParams => deepMerge(EO_BASE, { ...over, id, gatePlaces: 0, crossPlaces: 0 });
 
@@ -126,3 +127,5 @@ export const CAMP_CULTURES: Culture[] = [
     sitePrefs: { flatness: 2, weights: { plain: 2.5, hilltop: 0, harbor: 0, estuary: 0 } },
   },
 ];
+
+attachUrbanGrowth(CAMP_CULTURES);

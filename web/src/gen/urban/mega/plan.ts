@@ -17,7 +17,7 @@ import { Noise2D } from '../../core/noise';
 import type { World, UrbanLayer, UrbanStreet, UrbanWall, UrbanSite, UrbanLine, UrbanZone, PolyH, StreetRole } from '../../types';
 import type { MorphologyParams } from '../morphology';
 import { applySprawl } from '../morphology';
-import { getCulture, resolvePlan, type ResolvedPlan } from '../culture';
+import { getCulture, populationCulture, resolvePlan, type ResolvedPlan } from '../culture';
 import { makeCtx, type UrbanCtx } from '../context';
 import { shapePolygon } from '../phases';
 import { makeMarket } from '../primary';
@@ -286,7 +286,8 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
   const lap = (k: string) => { const t = performance.now(); tm[k] = Math.round(t - tl); tl = t; };
   const rng = root.fork('mega');
   const opts = world.options;
-  const culture = getCulture(opts.culture);
+  const culture = populationCulture(opts.culture, pop);
+  const primitive = !!culture.urbanGrowth && !culture.camp;
   const site = world.site!;
   const c = site.center;
   const plan: ResolvedPlan = resolvePlan(culture.id, pop, opts.cultureMix, opts.plan);
@@ -381,7 +382,8 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
   // walls: which lines still stand (the last two of a big city), which became boulevards
   const wallsOpt = opts.walls === 'no' ? 'none' : opts.walls === 'yes' ? 'single' : opts.walls;
   const wallKind = plan.phases[nPh - 1].enc.wall;
-  const walledCulture = wallKind !== 'none' && wallKind !== 'hedge';
+  const primitivePalisade = !!culture.urbanGrowth && !culture.camp && culture.id !== 'native-pueblo';
+  const walledCulture = (wallKind !== 'none' && wallKind !== 'hedge') || (primitivePalisade && (wallsOpt === 'single' || wallsOpt === 'double'));
   const standing = new Set<number>();
   if (wallsOpt !== 'none' && walledCulture) {
     standing.add(nR);
@@ -838,7 +840,7 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
   // the palace city: a large lot in the middle rings, by the water or on high ground, away from the old towns
   const palaceA = Math.max(40000, Math.min(900000, pop * 0.18));
   let palaceP: Vec2 | null = null;
-  {
+  if (!primitive) {
     const pr = rng.fork('palace');
     const h0 = ctx.heightAt(c);
     let bs = -Infinity;
@@ -976,7 +978,7 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
   const lm = rng.fork('landmarks');
   const marketLab = labelOf[marketId];
   const byScore = <T>(list: T[], f: (x: T) => number): T | undefined => { let b: T | undefined, bs = -Infinity; for (const x of list) { const s = f(x); if (s > bs) { bs = s; b = x; } } return b; };
-  const cat = byScore(quarters.filter((q) => q.kind === 'quarter' && q.phase === 1 && q.lab.includes(marketLab)), (q) => Math.min(q.area, 60000) + lm.float() * 5000);
+  const cat = primitive ? undefined : byScore(quarters.filter((q) => q.kind === 'quarter' && q.phase === 1 && q.lab.includes(marketLab)), (q) => Math.min(q.area, 60000) + lm.float() * 5000);
   if (cat) {
     cat.wants.push({ kind: 'm4-cathedral-close', place: 'near-nucleus', area: [9000, 30000], data: { kind: 'cathedral-close', ang: 0, Lc: pop > 500000 ? 135 : 115 } });
     cat.district = 'cathedral';
@@ -1035,11 +1037,11 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
   // the fused towns' collegiate church by their market; the university (colleges) across the water from the old
   // town or beside the cathedral close (the Latin Quarter)
   for (let ni = 1; ni < nuclei.length; ni++) {
-    if (nuclei[ni].kind !== 'town') continue;
+    if (primitive || nuclei[ni].kind !== 'town') continue;
     const tq = byScore(quarters.filter((q) => q.kind === 'quarter' && q.nucleus === ni && q.district === 'satellite'), (q) => -dist(ipq(q), nuclei[ni].p) + Math.min(q.area, 40000) / 400);
     if (tq) tq.wants.push({ kind: 'm4-cathedral-close', place: 'near-nucleus', area: [5000, 18000], data: { kind: 'cathedral-close', ang: 0, Lc: 85 } });
   }
-  if (pop >= 250000) {
+  if (!primitive && pop >= 250000) {
     const ur = rng.fork('university');
     const catP = cat ? ipq(cat) : c;
     const bank = (p: Vec2): number => (riverAxis === null ? 0 : Math.sign(-Math.sin(riverAxis) * (p.x - c.x) + Math.cos(riverAxis) * (p.y - c.y)));
@@ -1081,7 +1083,7 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
   }
   // parish churches (one quarter in two in the old rings, one in four outside), abbeys in the outer rings
   for (const q of quarters) {
-    if (q.kind !== 'quarter') continue;
+    if (primitive || q.kind !== 'quarter') continue;
     const r = new Rng(rng.seedKey + '\u0001lm:' + q.id);
     const p = q.district === 'village' || q.district === 'satellite' ? 0.8 : q.phase <= 2 ? 0.5 : q.phase <= nR ? 0.3 : 0.22;
     if (r.chance(p)) q.wants.push({ kind: 'parish-church', place: 'near-nucleus', area: [700, 5000] });
@@ -1207,6 +1209,10 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
       }
     }
     const wf = wallFeatures(ring, gates, rng.fork('wall:' + key), ctx.isWater, skip ? (p) => nearW(p) || skip(p) : nearW, spacing);
+    if (primitivePalisade) {
+      for (const path of wf.pieces) lines.push({ kind: 'palisade', path, width: 1.2 });
+      return;
+    }
     walls.push({ path: ring, closed: true, towers: wf.towers, gates: gates.map((x) => x.p), thickness, gateInfo: gates, pieces: wf.pieces, gateTowers: wf.gateTowers, towerScale: wf.towerScale, curtains: wf.curtains, towerShape, role });
   };
   // (a stretch shared with an older standing wall is that wall's: drawn once)

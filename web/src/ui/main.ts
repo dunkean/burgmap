@@ -79,8 +79,8 @@ fillSelect(coastEl, [['none', 'None'], ['random', 'Random side'], ['N', 'North']
 fillSelect(riverEl, [['none', 'None'], ['stream', 'Stream'], ['river', 'River'], ['major', 'Major river']], opts.river);
 fillSelect(roadsEl, [['0', `Auto (${DEFAULT_ROADS[opts.size]})`], ...[1, 2, 3, 4, 5, 6, 7, 8].map((k) => [String(k), String(k)] as [string, string])], String(opts.roads));
 fillSelect(styleEl, STYLE_LIST.map((s) => [s.id, s.label] as [string, string]), opts.style);
-// (village-only cultures note their cap: above it they become a large village or a cluster of villages)
-fillSelect(cultureEl, CULTURE_LIST.map((c) => [c.id, `${c.label}${c.scale && c.scale.max !== 'megacity' ? ` (up to ${c.scale.max})` : ''}${c.fantasy ? ' (fantasy)' : ''}`] as [string, string]), opts.culture);
+// Show caps only for cultures without population-driven urban growth.
+fillSelect(cultureEl, CULTURE_LIST.map((c) => [c.id, `${c.label}${!c.urbanGrowth && c.scale && c.scale.max !== 'megacity' ? ` (up to ${c.scale.max})` : ''}${c.fantasy ? ' (fantasy)' : ''}`] as [string, string]), opts.culture);
 fillSelect(languageEl, [['auto', 'Automatic (from the plan)'], ...NAME_FAMILIES.map((f) => [f, f[0].toUpperCase() + f.slice(1)] as [string, string])], opts.language ?? 'auto');
 
 const seedControl = {
@@ -148,7 +148,7 @@ registry.add(checkControl($<HTMLInputElement>('legend'), 'legend', true));
   registry.add({ ...sc, live: false, write: (o) => { sc.write(o); show(); } });
 }
 registry.writeAll(opts);
-// ---------- Plan section: the scale note of the chosen culture (cap of village-only cultures)
+// ---------- Plan section: population-driven growth or the culture's scale cap
 {
   const note = document.createElement('div');
   note.className = 'note';
@@ -158,7 +158,9 @@ registry.writeAll(opts);
     const c = CULTURE_LIST.find((x) => x.id === cultureEl.value);
     const pop = Number(($<HTMLInputElement>('population')).value) || POP_RANGE[sizeEl.value as Options['size']]?.[0] || 0;
     const max = c?.scale?.max;
-    note.textContent = max && max !== 'megacity' && pop > scaleMaxPop(max) * 1.5
+    note.textContent = c?.urbanGrowth
+      ? `Village layout below ${c.urbanGrowth.minPop.toLocaleString('en-US')} inhabitants; larger populations form a connected town.`
+      : max && max !== 'megacity' && pop > scaleMaxPop(max) * 1.5
       ? `Above ${max} size this plan becomes a cluster of ${max}s (or one large ${max}).`
       : max && max !== 'megacity' ? `Settlements up to ${max} size.` : '';
   };

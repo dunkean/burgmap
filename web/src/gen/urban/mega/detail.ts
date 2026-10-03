@@ -259,7 +259,7 @@ export function megaQuarterDetail(world: World, key: number): UrbanLayer | null 
     for (const gp of r.back) parcels.push({ poly: gp, use: 'garden', block: bi, zone: b.zone });
   });
   // the market hall (or town hall with its belfry) on the main square
-  {
+  if (!host.renderHints?.primitive) {
     const mi = parcels.findIndex((p) => p.use === 'market');
     if (mi >= 0) { const hb = marketHall(parcels[mi].poly, mq.nucleus === 0 ? pop : 9000, rng.fork('hall')); if (hb) buildings.push({ ...hb, parcel: mi }); }
   }
@@ -289,8 +289,8 @@ export function megaQuarterDetail(world: World, key: number): UrbanLayer | null 
     const onQuay = port && !!local.nearest(fm, 10, (st) => st.role === 'quay');
     for (const b of buildOn(pl, cov, P, pr, courtHint(pl))) {
       if (b.kind === 'garden') { plotGardens.push(b.poly); continue; }
-      if (onQuay && b.kind === 'house' && P.buildingOp !== 'venetian') { b.arch = 'warehouse'; b.storeys = 3; }
-      else if (craft && b.kind === 'house') b.arch = 'craft-workshop';
+      if (onQuay && b.kind === 'house' && P.buildingOp !== 'venetian' && P.buildingOp !== 'primitive') { b.arch = 'warehouse'; b.storeys = 3; }
+      else if (craft && b.kind === 'house' && P.buildingOp !== 'primitive') b.arch = 'craft-workshop';
       plotBld[pi].push(b);
     }
     plotBld[pi] = splitLong(plotBld[pi].filter((b) => !b.ring)).filter((b) => b.kind === 'landmark' || shapeOkObb(b.poly)).concat(plotBld[pi].filter((b) => b.ring));

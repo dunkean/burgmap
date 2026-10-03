@@ -3,7 +3,7 @@ import { Options, mapSizeOf, effectiveSize } from './options';
 import type { World, Settlement } from './types';
 import { terrainForExtent } from './terrain/hydrology';
 import { chooseSite } from './site/site';
-import { getCulture } from './urban/culture';
+import { getCulture, populationCulture } from './urban/culture';
 import { routeRoads } from './roads/regional';
 import { generateRural } from './landuse/rural';
 import { generateUrban } from './urban';
@@ -59,7 +59,8 @@ export function generate(options: Options, onStage?: (stage: string, partial?: W
   const warnings: string[] = [];
   let mainOpts: Options = size !== options.size ? { ...options, size } : options;
   const eagerPop = options.eagerPop ?? EAGER_MAIN_POP;
-  const megaPop = getCulture(options.culture).camp ? 0 : mainPopulation(mainOpts, root);
+  const mainPop = mainPopulation(mainOpts, root);
+  const megaPop = populationCulture(options.culture, mainPop).camp ? 0 : mainPop;
   const mega = megaPop > eagerPop;
   if (!mega && mainOpts.population > MAIN_POP_CAP) {
     warnings.push(`main settlement: ${options.population} inhabitants requested, plan generated for ${MAIN_POP_CAP} (megacity detail is not available)`);

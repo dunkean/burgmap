@@ -72,6 +72,8 @@ export interface LandmarkSpec {
   level1?: boolean;
 }
 export interface RenderHints {
+  /** Population-grown tribal towns: suppress generic medieval additions in lazy quarter detail. */
+  primitive?: boolean;
   towerShape: 'round' | 'square';
   /** Draw plot boundaries of compound lots as walls. */
   compoundWalls?: boolean;
@@ -142,6 +144,8 @@ export interface Culture {
   scale?: ScaleRange;
   /** Planned without streets (camps, kraals, barbarian and native villages, pueblos): camps/index.ts. */
   camp?: CampSpec;
+  /** A village/camp becomes one connected town above this population, retaining its cultural architecture. */
+  urbanGrowth?: { minPop: number; recipe: UrbanGrowthRecipe };
   /** Family of variants shown together in the plan selector (barbarian, native-american). */
   family?: string;
   /**
@@ -150,6 +154,8 @@ export interface Culture {
    */
   waterBuild?: boolean;
 }
+export type UrbanGrowthRecipe = Pick<Culture, 'nucleus' | 'core' | 'ring' | 'phaseCount' | 'faubourg' | 'faubShare' | 'render'>
+  & Partial<Pick<Culture, 'm4' | 'landmarks' | 'waterBuild'>>;
 export interface CultureMix { id: string; t: number; mode: 'phases' | 'sectors' | 'blend' }
 export interface PlanOverride {
   nucleus?: Partial<NucleusSpec>;
@@ -160,6 +166,12 @@ export interface PlanOverride {
 export const CULTURES: Record<string, Culture> = Object.fromEntries(CULTURE_LIST.map((c) => [c.id, c]));
 export const CULTURE_IDS = CULTURE_LIST.map((c) => c.id);
 export const getCulture = (id: string | undefined): Culture => CULTURES[id ?? ''] ?? CULTURES['european-organic'];
+
+/** Resolve scale without mutating the preset, so generating a city cannot change a later village. */
+export function populationCulture(id: string | undefined, pop: number): Culture {
+  const c = getCulture(id);
+  return c.urbanGrowth && pop >= c.urbanGrowth.minPop ? { ...c, ...c.urbanGrowth.recipe, camp: undefined } : c;
+}
 
 export interface ResolvedSector { morph: MorphologyParams; share: number; culture: string }
 export interface ResolvedPhase {
@@ -195,8 +207,8 @@ const phaseSpecs = (c: Culture, n: number): PhaseSpec[] => Array.from({ length: 
 
 /** Resolves the enclosed phases of a town-sized settlement. */
 export function resolvePlan(cultureId: string, pop: number, mix?: CultureMix | null, override?: PlanOverride | null): ResolvedPlan {
-  const c = getCulture(cultureId);
-  const m = mix && mix.id !== c.id && CULTURES[mix.id] ? CULTURES[mix.id] : null;
+  const c = populationCulture(cultureId, pop);
+  const m = mix && mix.id !== c.id && CULTURES[mix.id] ? populationCulture(mix.id, pop) : null;
   let specs: PhaseSpec[];
   let shares: number[];
   const nucleus: NucleusSpec = { ...c.nucleus, ...(override?.nucleus ?? {}) };
