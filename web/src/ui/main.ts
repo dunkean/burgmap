@@ -21,7 +21,10 @@ import type { ImportedHeight } from '../gen/terrain/import';
 import { CULTURE_LIST } from '../gen/urban/cultures';
 import { perf, rec, now as pnow } from './perf';
 import { OffscreenBackend, BackendEvents } from './backend';
-import type { DisplayOpts, GDone } from './protocol';
+import type { DisplayOpts, GDone, SettlementMeta } from './protocol';
+import { initSettlementsUI, showSettlementWarnings } from './settlementsPanel';
+import { screenToWorld } from '../render/view';
+import { generateSettlementDetail } from '../gen/pipeline';
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 
@@ -72,7 +75,8 @@ const seedControl = {
   write: (o: Options): void => { seedEl.value = o.seed; },
 };
 registry.add(seedControl);
-registry.add(selectControl(sizeEl, 'size', (v) => v as Options['size']));
+// map extent (preset or custom), population slider and the settlement system (M3c)
+const settlUI = initSettlementsUI(registry, () => opts);
 registry.add(selectControl(reliefEl, 'relief', (v) => v as Options['relief']));
 registry.add(selectControl(coastEl, 'coast', (v) => v as Options['coast']));
 registry.add(selectControl(riverEl, 'river', (v) => v as Options['river']));
@@ -225,7 +229,9 @@ function showStats(stats: Record<string, number | string>, ms: number): void {
   document.title = town ? `${town} - Burgmap` : 'Burgmap';
   genTimeEl.textContent = `Generated in ${(ms / 1000).toFixed(2)} s`;
   const seaPct = Math.round(Number(stats.seaFraction ?? 0) * 100);
-  statusEl.textContent = `terrain ${stats['ms.terrain']} ms, urban ${stats['ms.urban'] ?? 0} ms - ${stats.rivers} rivers, ${stats.lakes} lakes, sea ${seaPct}% - ${stats.roads ?? 0} roads, ${stats.bridges ?? 0} bridges - ${stats['urban.archetype'] ?? ''} pop ${stats['urban.pop'] ?? 0}: ${stats['urban.blocks'] ?? 0} blocks, ${stats['urban.buildings'] ?? 0} buildings`;
+  statusEl.textContent = `terrain ${stats['ms.terrain']} ms, urban ${stats['ms.urban'] ?? 0} ms - ${stats.rivers} rivers, ${stats.lakes} lakes, sea ${seaPct}% - ${stats.roads ?? 0} roads, ${stats.bridges ?? 0} bridges - ${stats['urban.archetype'] ?? ''} pop ${stats['urban.pop'] ?? 0}: ${stats['urban.blocks'] ?? 0} blocks, ${stats['urban.buildings'] ?? 0} buildings`
+    + (Number(stats['settlements'] ?? 0) > 1 ? ` - ${stats['settlements']} settlements (${stats['ms.settlements'] ?? 0} ms)` : '');
+  showSettlementWarnings(stats);
 }
 
 // Thin determinate bar at the top of the map: jumps to each pipeline stage and creeps inside the long ones.
@@ -233,7 +239,7 @@ function showStats(stats: Record<string, number | string>, ms: number): void {
 const loadEl = $('loadbar');
 const loadFill = loadEl.firstElementChild as HTMLElement;
 const STAGE_FRAC: Record<string, [number, number]> = {
-  starting: [0.01, 0.03], terrain: [0.03, 0.09], 'site & roads': [0.09, 0.2], town: [0.2, 0.84],
+  starting: [0.01, 0.03], terrain: [0.03, 0.09], 'site & roads': [0.09, 0.2], town: [0.2, 0.6], settlements: [0.6, 0.68], villages: [0.68, 0.84],
   'fields & woods': [0.85, 0.94], names: [0.94, 0.97],
 };
 let loadPos = 0, loadCeil = 0, loadTick: number | undefined, loadHide: number | undefined;
@@ -269,7 +275,7 @@ const backendEvents: BackendEvents = {
   onStage(id, stage) { if (id === reqId) setBusy(true, stage); },
   onDone(d) {
     if (d.id !== reqId) return;
-    meta = d.meta; doneFor = d.id;
+    meta = d.meta; doneFor = d.id; detailAsked.clear();
     rec('genWorker', d.ms); perf.extra.stats = d.stats;
     showStats(d.stats, d.ms);
     if (finalFor === d.id) setBusy(false);
@@ -288,7 +294,15 @@ const backendEvents: BackendEvents = {
     rec(c.final ? 'sceneFinal' : 'scenePartial', c.sceneMs);
     if (c.final) { finalFor = c.gen; if (doneFor === c.gen) setBusy(false); }
   },
+  onDetail(d) {
+    if (d.id !== reqId) return;
+    const s = meta?.settlements?.[d.index];
+    if (s) s.hasUrban = !d.error;
+    rec('settlementDetail', d.ms);
+    if (d.error) console.error('settlement detail:', d.error);
+  },
   onFrame(f) {
+    maybeDetail(f.view);
     lastLabels = f.labels; if (f.bitmap) perf.extra.lastFrameView = f.view;
     viewer.present(f);
     if (awaitVer && f.ver >= awaitVer && f.bitmap) {
@@ -308,6 +322,7 @@ function spawnWorker(): void {
     const r = e.data;
     if (r.id !== reqId) return;
     if (r.stage) { setBusy(true, r.stage); return; }
+    if (r.detail) { applyDetail(r.detail.index, r.detail.urban, r.detail.bridges); return; }
     workerBusy = false;
     if (r.error) { setBusy(false); genTimeEl.textContent = 'Generation failed'; statusEl.textContent = 'Error: ' + r.error.split('\n')[0]; console.error(r.error); return; }
     show(r.world!, r.stats!, r.ms!);
@@ -323,6 +338,7 @@ function genKey(): string {
 function run(): void {
   if (!backendSettled) return; // the first run starts when the backend probe has answered
   const id = ++reqId;
+  detailAsked.clear();
   lastGenKey = genKey();
   genStart = performance.now();
   setBusy(true, 'starting');
@@ -422,9 +438,70 @@ const canvasEl = $<HTMLCanvasElement>('view');
 const hudEl = $('hud');
 const viewer = createViewer({
   container: map, canvas: canvasEl, minimap: $<HTMLCanvasElement>('minimap'),
-  onFrame: (ms, band, scale) => { perf.frames.push(ms); if (perf.frames.length > 5000) perf.frames.shift(); hudEl.textContent = `${['far', 'mid', 'near'][band]} - ${scale.toFixed(3)} px/m - ${ms.toFixed(1)} ms`; },
+  onFrame: (ms, band, scale) => { maybeDetail(viewer.getView()); perf.frames.push(ms); if (perf.frames.length > 5000) perf.frames.shift(); hudEl.textContent = `${['far', 'mid', 'near'][band]} - ${scale.toFixed(3)} px/m - ${ms.toFixed(1)} ms`; },
 });
 $('fit').addEventListener('click', () => viewer.fit());
+
+// ---------- settlements (M3c): click to focus / to place a listed settlement, lazy detail on zoom ----------
+const detailAsked = new Set<number>();
+/** Settlements of the current map (offscreen mode: the summary sent by the generation worker). */
+function settlementList(): SettlementMeta[] {
+  if (backend) return meta?.settlements ?? [];
+  return (currentWorld?.settlements ?? []).map((s) => ({ index: s.index, key: s.key, name: s.name, cls: s.cls, population: s.population, center: s.center, radius: s.radius, detail: s.detail, hasUrban: !!s.urban || !!s.main }));
+}
+/** Main-thread mode: a settlement plan arrived; merge it and redraw. */
+function applyDetail(index: number, urban: NonNullable<World['urban']>, bridges: NonNullable<World['bridges']>): void {
+  if (!currentWorld?.settlements?.[index]) return;
+  const list = currentWorld.settlements.slice();
+  list[index] = { ...list[index], urban };
+  currentWorld = { ...currentWorld, settlements: list, bridges: [...(currentWorld.bridges ?? []), ...bridges] };
+  sceneCache = null;
+  rerender(true);
+}
+/** Detail level: settlements generated lazily are built when the view comes close enough (in a worker). */
+const DETAIL_SCALE = 0.12;
+function maybeDetail(v: { cx: number; cy: number; scale: number }): void {
+  if (v.scale < DETAIL_SCALE) return;
+  const r = map.getBoundingClientRect();
+  const hw = r.width / (2 * v.scale), hh = r.height / (2 * v.scale);
+  for (const s of settlementList()) {
+    if (s.detail !== 'lazy' || s.hasUrban || detailAsked.has(s.index)) continue;
+    if (Math.abs(s.center.x - v.cx) > hw + s.radius || Math.abs(s.center.y - v.cy) > hh + s.radius) continue;
+    detailAsked.add(s.index);
+    if (backend) backend.detail(reqId, s.index);
+    else if (worker) worker.postMessage({ type: 'detail', id: reqId, index: s.index });
+    else if (currentWorld) {
+      const w = currentWorld, id = reqId;
+      setTimeout(() => { if (id !== reqId) return; const res = generateSettlementDetail(w, s.index); if (res) applyDetail(s.index, res.urban, res.bridges); }, 0);
+    }
+  }
+}
+function focusSettlement(s: SettlementMeta): void {
+  const r = map.getBoundingClientRect();
+  const scale = Math.max(0.05, Math.min(4, Math.min(r.width, r.height) / (5 * Math.max(60, s.radius))));
+  viewer.setView({ cx: s.center.x, cy: s.center.y, scale });
+}
+{
+  let down: { x: number; y: number; t: number } | null = null;
+  map.addEventListener('pointerdown', (e) => { down = { x: e.clientX, y: e.clientY, t: performance.now() }; });
+  map.addEventListener('pointerup', (e) => {
+    if (!down || (e.target as HTMLElement).closest('button')) { down = null; return; }
+    const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y), dt = performance.now() - down.t;
+    down = null;
+    if (moved > 5 || dt > 500) return;
+    const r = map.getBoundingClientRect();
+    const v = viewer.getView();
+    const [x, y] = screenToWorld(v, r.width, r.height, e.clientX - r.left, e.clientY - r.top);
+    if (settlUI.picking !== null) { settlUI.place({ x, y }); return; }
+    let best: SettlementMeta | null = null, bd = Infinity;
+    for (const s of settlementList()) {
+      const d = Math.hypot(s.center.x - x, s.center.y - y);
+      const reach = Math.max(s.radius * 1.1, 14 / v.scale);
+      if (d < reach && d < bd) { bd = d; best = s; }
+    }
+    if (best) focusSettlement(best);
+  });
+}
 $('menuBtn').addEventListener('click', () => $('app').classList.toggle('open'));
 map.addEventListener('pointerdown', () => $('app').classList.remove('open'));
 // debug hook for scripted screenshots (scripts/ui_check.mjs)
@@ -440,6 +517,9 @@ map.addEventListener('pointerdown', () => $('app').classList.remove('open'));
   labels: () => (backend ? lastLabels : (currentRenderer?.lastPlaced() ?? []).map((p) => ({ kind: p.label.kind, text: p.label.text, size: p.size }))),
   /** Center of the settlement (site center / urban footprint centroid). */
   center: () => meta?.center ?? currentWorld?.site?.center ?? { x: (currentWorld?.mapSize ?? meta?.mapSize ?? 0) / 2, y: (currentWorld?.mapSize ?? meta?.mapSize ?? 0) / 2 },
+  /** Settlements of the map (M3c) and a scripted focus on one of them. */
+  settlements: () => settlementList(),
+  focus: (i: number) => { const s = settlementList()[i]; if (s) focusSettlement(s); },
   /** Anchor of a named feature (for scripted zooms). */
   find: (kind: string, n = 0) => meta?.anchors[kind]?.[n] ?? currentWorld?.names?.entries.filter((e) => e.kind === kind)[n]?.anchor ?? null,
 };

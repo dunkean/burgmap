@@ -47,6 +47,8 @@
   #gentime { font-size:12px; color:var(--ink); }
   #map { position:relative; flex:1; overflow:hidden; cursor:grab; touch-action:none; }
   #map.drag { cursor:grabbing; }
+  #map.picking { cursor:crosshair; }
+  .hint.warn { color:#9a3b1b; }
   /* CANVAS-VIEWER styles */
   #view { position:absolute; left:0; top:0; display:block; will-change:transform; transform-origin:50% 50%; }
   #minimap { position:absolute; right:12px; bottom:12px; width:140px; height:140px; border:1px solid var(--line); box-shadow:0 2px 10px rgba(0,0,0,.5); background:#eee2c3; cursor:pointer; }
@@ -100,7 +102,7 @@
 
     <details class="sec" open id="sec-settlement"><summary>Settlement</summary><div class="body">
       <label for="size">Size</label><select id="size"></select>
-      <label for="population">Population (0 = automatic)</label><input id="population" type="number" min="0" max="200000" step="50">
+      <label for="population">Population (0 = automatic)</label><input id="population" type="number" min="0" max="5000000" step="10">
       <label for="roads">Regional roads</label><select id="roads"></select>
     </div></details>
 

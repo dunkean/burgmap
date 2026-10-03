@@ -10,7 +10,7 @@ import { createCanvasRenderer, CanvasRenderer, CanvasLike } from '../render/canv
 import { buildScene, Scene } from '../render/scene';
 import { PALETTES } from '../render/styles';
 import type { World } from '../gen/types';
-import type { RRequest, RResponse, RView, DisplayOpts, WorldMsg, RAttach } from './protocol';
+import type { RRequest, RResponse, RView, DisplayOpts, WorldMsg, RAttach, PortMsg, SettlementMsg } from './protocol';
 
 const ctx = self as unknown as Worker;
 const post = (r: RResponse, transfer: Transferable[] = []): void => ctx.postMessage(r, transfer);
@@ -70,10 +70,23 @@ function onWorld(m: WorldMsg): void {
   announce(rebuild());
 }
 
+/** A lazily generated settlement plan (M3c): merged into the World, the scene is rebuilt. */
+function onSettlement(m: SettlementMsg): void {
+  if (m.gen !== gen || !world) return;
+  const list = world.settlements ? world.settlements.slice() : [];
+  if (!list[m.index]) return;
+  list[m.index] = { ...list[m.index], urban: m.urban };
+  world = { ...world, settlements: list, bridges: [...(world.bridges ?? []), ...m.bridges] };
+  sceneCache = null;
+  announce(rebuild());
+}
+
 function onAttach(m: RAttach): void {
   port?.close();
   gen = m.gen; port = m.port;
-  port.onmessage = (e: MessageEvent<WorldMsg>): void => { try { onWorld(e.data); } catch (err) { post({ type: 'error', error: String((err as Error)?.stack ?? err) }); } };
+  port.onmessage = (e: MessageEvent<PortMsg>): void => {
+    try { if (e.data.type === 'settlement') onSettlement(e.data); else onWorld(e.data as WorldMsg); } catch (err) { post({ type: 'error', error: String((err as Error)?.stack ?? err) }); }
+  };
   // the previous world stays on screen until the first snapshot of the new one arrives
 }
 

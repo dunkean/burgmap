@@ -15,7 +15,7 @@ import { distanceField } from '../core/field';
 import { roadContext, astarFewCrossings, ROAD_WIDTH } from '../roads/regional';
 import { bridgeRoad, attachEnd, clearRibbons, BridgeSeg } from '../roads/junctions';
 import { passability } from '../site/site';
-import type { World, Settlement } from '../types';
+import type { World, Settlement, River } from '../types';
 
 type Road = NonNullable<World['roads']>[number];
 
@@ -57,7 +57,9 @@ export function routeNetwork(world: World, settlements: Settlement[], root: Rng)
     const R = 260 + s.radius;
     forCellsNearPolyline([s.center, s.center], n, n, cell, R, (idx) => { if (riverMain[idx]) pass[idx] = 3; });
   }
+  const tc0 = performance.now();
   const rc = roadContext(terrain, f, r, S, pass);
+  stats['ms.ctx'] = Math.round(performance.now() - tc0);
   const cm = Float32Array.from(rc.cm);
 
   // ---- the main town: junctions outside its footprint, no new road through it except along its own roads
@@ -134,7 +136,7 @@ export function routeNetwork(world: World, settlements: Settlement[], root: Rng)
   stats['edges'] = chosen.length;
 
   // ---- routing
-  const octileTo = (goal: number, k = 0.7) => {
+  const octileTo = (goal: number, k = 1.0) => {
     const gx = goal % n, gy = (goal / n) | 0;
     return (idx: number): number => {
       const dx = Math.abs((idx % n) - gx), dy = Math.abs(((idx / n) | 0) - gy);
@@ -203,6 +205,7 @@ export function routeNetwork(world: World, settlements: Settlement[], root: Rng)
   };
 
   let failed = 0;
+  const tr0 = performance.now();
   for (const e of chosen) {
     // a tree edge between settlements a shortcut already joined is redundant
     if (e.mst && uf.find(e.a) === uf.find(e.b)) continue;
@@ -212,6 +215,7 @@ export function routeNetwork(world: World, settlements: Settlement[], root: Rng)
     const kind = kindFor(Math.min(settlements[from].population, settlements[to].population));
     if (!route(settlements[from].center, from, to, kind)) failed++;
   }
+  stats['ms.route'] = Math.round(performance.now() - tr0);
   // ---- exits: secondary towns near a map edge get their own road out of the map
   for (let k = 1; k < K; k++) {
     const s = settlements[k];
@@ -243,15 +247,24 @@ export function routeNetwork(world: World, settlements: Settlement[], root: Rng)
   if (unreachable.length) warnings.push(`${unreachable.length} settlement(s) could not be reached by road`);
   if (failed) stats['failedEdges'] = failed;
 
+  const tj0 = performance.now();
   // ---- bridges, junctions, ribbons (new roads only; hosts may be any road)
   const isWaterPt = rc.isWaterPt;
   const fresh = roads.map((rd, i) => ({ rd, i })).filter((x) => !x.rd.main);
   const own: BridgeSeg[][] = roads.map(() => []);
+  // only the rivers near a road matter for its bridges (a full scan per 1.5 m sample is slow on big maps)
+  const near: River[][] = roads.map(() => []);
   for (const { rd, i } of fresh) {
-    const res = bridgeRoad(rd.path, { rivers: terrain.rivers, wet: isWaterPt, roadWidth: rd.width }, 3.0);
+    const ids = new Set<number>();
+    forCellsNearPolyline(rd.path, n, n, cell, 3 * cell + 45, (idx) => { const id = rc.sIds[idx]; if (id >= 0) ids.add(id); });
+    near[i] = [...ids].sort((a, b) => a - b).map((id) => terrain.rivers[id]);
+  }
+  for (const { rd, i } of fresh) {
+    const res = bridgeRoad(rd.path, { rivers: near[i], wet: isWaterPt, roadWidth: rd.width }, 3.0);
     rd.path = res.path;
     own[i] = res.bridges;
   }
+  stats['ms.bridge'] = Math.round(performance.now() - tj0);
   const mainBridges = world.bridges ?? [];
   const hostBridges = (hi: number): BridgeSeg[] => (roads[hi].main ? mainBridges.filter((b) => nearestOn(roads[hi].path, b.a).d < 6) : own[hi]);
   const jrng = r.fork('junctions');
@@ -260,8 +273,14 @@ export function routeNetwork(world: World, settlements: Settlement[], root: Rng)
     if (rd.hostB >= 0 && rd.hostB !== i) { const p = attachEnd(rd.path, false, roads[rd.hostB].path, mk(rd.hostB)); if (p) rd.path = p; }
     if (rd.hostA >= 0 && rd.hostA !== i) { const p = attachEnd(rd.path, true, roads[rd.hostA].path, mk(rd.hostA)); if (p) rd.path = p; }
   }
-  for (const { rd, i } of fresh) rd.path = clearRibbons(rd.path, terrain.rivers, own[i]);
+  stats['ms.attach'] = Math.round(performance.now() - tj0) - stats['ms.bridge'];
+  for (const { rd, i } of fresh) {
+    const ids = new Set<number>();
+    forCellsNearPolyline(rd.path, n, n, cell, 3 * cell + 45, (idx) => { const id = rc.sIds[idx]; if (id >= 0) ids.add(id); });
+    rd.path = clearRibbons(rd.path, [...ids].sort((a, b) => a - b).map((id) => terrain.rivers[id]), own[i]);
+  }
   const out: Road[] = fresh.map(({ rd }) => ({ path: rd.path, kind: rd.kind, width: rd.width }));
   stats['roads'] = out.length;
+  stats['ms.finish'] = Math.round(performance.now() - tj0);
   return { roads: out, bridges: fresh.flatMap(({ i }) => own[i]), warnings, stats, unreachable };
 }

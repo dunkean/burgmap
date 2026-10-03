@@ -18,21 +18,30 @@ export interface DisplayOpts { style: MapStyle; contours?: boolean; landuse?: bo
 // ---- M -> G ----
 export interface GRun { type: 'run'; id: number; options: Options; /** snapshot channel to the render worker */ port: MessagePort }
 export interface GExport { type: 'export'; id: number; kind: 'svg' | 'json'; display: DisplayOpts }
-export type GRequest = GRun | GExport;
+/** Lazy detail (M3c): generate the plan of secondary settlement `index` of run `id`. */
+export interface GDetail { type: 'detail'; id: number; index: number }
+export type GRequest = GRun | GExport | GDetail;
+
+/** Settlement summary for the page (labels, click-to-focus, lazy detail requests). */
+export interface SettlementMeta { index: number; key: string; name?: string; cls: string; population: number; center: Vec2; radius: number; detail: string; hasUrban: boolean }
 
 // ---- G -> M ----
 export interface GStage { type: 'stage'; id: number; stage: string }
 export interface GDone {
   type: 'done'; id: number; ms: number; stats: Record<string, number | string>;
   /** Small summary for the page (title, debug hooks); the World itself stays in the workers. */
-  meta: { center: Vec2; anchors: Record<string, Vec2[]>; mapSize: number };
+  meta: { center: Vec2; anchors: Record<string, Vec2[]>; mapSize: number; settlements?: SettlementMeta[] };
 }
+export interface GDetailDone { type: 'detailDone'; id: number; index: number; ms: number; error?: string }
 export interface GError { type: 'error'; id: number; error: string }
 export interface GExported { type: 'exported'; id: number; kind: 'svg' | 'json'; blob?: Blob; error?: string; ms: number }
-export type GResponse = GStage | GDone | GError | GExported;
+export type GResponse = GStage | GDone | GError | GExported | GDetailDone;
 
 // ---- G -> R (snapshot port) ----
 export interface WorldMsg { type: 'world'; gen: number; world: World; final: boolean; stage: string }
+/** A lazily generated settlement plan, merged into the render worker's World. */
+export interface SettlementMsg { type: 'settlement'; gen: number; index: number; urban: NonNullable<World['urban']>; bridges: NonNullable<World['bridges']> }
+export type PortMsg = WorldMsg | SettlementMsg;
 
 // ---- M -> R ----
 export interface RInit { type: 'init'; dpr: number }

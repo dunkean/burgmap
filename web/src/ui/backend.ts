@@ -7,7 +7,7 @@
 import type { Options } from '../gen/options';
 import GenWorker from './worker?worker&inline';
 import RenderWorker from './renderWorker?worker&inline';
-import type { GResponse, GDone, RResponse, RContent, RFrame, DisplayOpts } from './protocol';
+import type { GResponse, GDone, RResponse, RContent, RFrame, DisplayOpts, GDetailDone } from './protocol';
 import type { FrameRequest } from './viewer';
 
 export interface BackendEvents {
@@ -18,6 +18,8 @@ export interface BackendEvents {
   onFrame(f: RFrame): void;
   /** A worker died after startup. */
   onFatal(msg: string): void;
+  /** A lazily requested settlement plan was generated (M3c). */
+  onDetail?(d: GDetailDone): void;
 }
 
 export class OffscreenBackend {
@@ -67,6 +69,7 @@ export class OffscreenBackend {
       switch (m.type) {
         case 'stage': this.ev.onStage(m.id, m.stage); break;
         case 'done': this.busy = false; this.ev.onDone(m); break;
+        case 'detailDone': this.ev.onDetail?.(m); break;
         case 'error': this.busy = false; this.ev.onError(m.id, m.error); break;
         case 'exported': {
           const p = this.pending.get(m.id);
@@ -92,6 +95,12 @@ export class OffscreenBackend {
     this.render.postMessage({ type: 'attach', gen: id, port: ch.port1 }, [ch.port1]);
     this.busy = true;
     this.gen.postMessage({ type: 'run', id, options, port: ch.port2 }, [ch.port2]);
+  }
+
+  /** Lazy detail (M3c): generate settlement `index` of run `id` in the generation worker. */
+  detail(id: number, index: number): void {
+    if (!this.gen || this.busy) return;
+    this.gen.postMessage({ type: 'detail', id, index });
   }
 
   setDisplay(display: DisplayOpts): void { this.render.postMessage({ type: 'display', display }); }

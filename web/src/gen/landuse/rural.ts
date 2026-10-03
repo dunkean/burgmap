@@ -165,9 +165,12 @@ export function generateRural(world: World, root: Rng, mainRoads?: number): { la
     }
     const dRes = distanceField(resSec, n, n, cell);
     const dSec = distanceField(src, n, n, cell, scale);
+    // clearings are not circles: the reach of the fields varies with soil and access (low-frequency warp)
+    const warp = new Noise2D(rr.fork('clearing'));
     for (let i = 0; i < N; i++) {
       if (dRes.dist[i] <= 5 + 0.5 * cell) reserve[i] = 1;
-      const u2 = dSec.dist[i] * dSec.val![i];
+      const wx = ((i % n) + 0.5) * cell, wy = (((i / n) | 0) + 0.5) * cell;
+      const u2 = dSec.dist[i] * dSec.val![i] * (1 + 0.38 * warp.fbm(wx / 650, wy / 650, 3));
       if (u2 < uDist[i]) uDist[i] = u2;
     }
   }

@@ -360,7 +360,14 @@ export function planSettlements(world: World, opts: Options, root: Rng): PlanRes
     const jr = rq.fork('jitter');
     const p = { x: c.p.x + jr.range(-0.3, 0.3) * cell * stride, y: c.p.y + jr.range(-0.3, 0.3) * cell * stride };
     const pi = Math.min(n - 1, Math.max(0, Math.floor(p.y / cell))) * n + Math.min(n - 1, Math.max(0, Math.floor(p.x / cell)));
-    const center = water[pi] ? c.p : p;
+    const relaxed = (chosen as { relax: number }).relax;
+    let center = water[pi] || (!q.position && !okAgainst(p, q.pop, relaxed)) ? c.p : p;
+    if (q.position) {
+      // a fixed position is kept exactly when it is on dry land
+      const gp = { x: Math.min(S - 1, Math.max(1, q.position.x)), y: Math.min(S - 1, Math.max(1, q.position.y)) };
+      const gi = Math.min(n - 1, Math.floor(gp.y / cell)) * n + Math.min(n - 1, Math.floor(gp.x / cell));
+      center = water[gi] ? c.p : gp;
+    }
     const archetype = q.siteType && matches(q.siteType, c.i, ext, center) ? q.siteType : archetypeAt(c.i, ext, center);
     const cls = classOfPop(q.pop);
     placed.push({

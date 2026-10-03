@@ -163,7 +163,16 @@ export function generateSettlementUrban(world: World, s: Settlement): Settlement
     site: settlementSite(world, s), roads: roadsFor(world, s), bridges: bridges0,
   };
   const n0 = bridges0.length;
-  const res = generateUrban(sub, rng);
-  const urban = clipUrban(res.layer, s.region);
+  // on coarse terrain grids (big maps) the region of a tiny hamlet can round down to nothing: the plan is then
+  // made for a slightly bigger population (same streams, deterministic) and keeps its real population
+  let res = generateUrban(sub, rng);
+  for (const k of [2, 4]) {
+    if (res.layer.buildings.length || s.population * k > 400) break;
+    sub.roads = roadsFor(world, s);
+    sub.bridges = bridges0.map((b) => ({ ...b }));
+    sub.options = { ...options, population: s.population * k };
+    res = generateUrban(sub, rng);
+  }
+  const urban = clipUrban({ ...res.layer, population: s.population }, s.region);
   return { urban, bridges: (sub.bridges ?? []).slice(n0), stats: res.stats };
 }
