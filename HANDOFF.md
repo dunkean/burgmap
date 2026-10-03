@@ -1,6 +1,6 @@
 # Burgmap — handoff
 
-State of the project at the pause (2026-10-04), how it is organised, how to work on it, and what is left.
+State of the project at the pause (2026-10-04, updated after the final merges), how it is organised, how to work on it, and what is left.
 
 - **Live site:** https://dunkean.github.io/burgmap/
 - **Repository:** https://github.com/dunkean/burgmap. Local `master` is pushed to remote `main`. The built site lives on the `gh-pages` branch.
@@ -92,6 +92,13 @@ GITHUB_TOKEN_FILE=/d/Workspace/dunk_token bash scripts/deploy_pages.sh   # build
   - Mixing by phase, sector or blend.
 - **Options:** custom map size (600 m – 40 km), population (10 – 5 M), settlements (auto / counts / list with click-to-place), sprawl factor (0.5–2), castles (0–3), walls (none, single, double), suburbs, shanty towns, site type.
 - **Landmarks:** castle, cathedral close, palace, monasteries, parish churches, places, port with quays, shipyard, rope walk, bridges every 250–500 m, mills, nuisance trades, arena.
+- **Bug-fix pass at the pause:**
+  - crash on large coastal maps (`boundedCost` mixed float32 and float64, fixed and fuzzed);
+  - settlements sparser: 136 → 28 on a 20 km map;
+  - streets, roads and tracks clipped to land;
+  - subtle earth-toned rural tracks (`pal.rural` token);
+  - no white settlement circles;
+  - the plan override and culture mix no longer leak when switching culture.
 - **Megacities:** above `eagerPop`, the macro plan is eager (~1 s for 1 M, ~2.4 s for 5 M) and quarters are detailed lazily on zoom.
 - **Performance (Node):**
 
@@ -99,7 +106,7 @@ GITHUB_TOKEN_FILE=/d/Workspace/dunk_token bash scripts/deploy_pages.sh   # build
 |---|---|
 | town urban stage | ~0.9–1.1 s |
 | city urban stage | ~3 s |
-| 10 km map with 44 settlements | ~7 s |
+| 10 km map (auto settlements) | ~7 s |
 | 20 km map | ~15 s |
 | 40 km lazy, first display | ~7 s |
 
@@ -107,16 +114,20 @@ GITHUB_TOKEN_FILE=/d/Workspace/dunk_token bash scripts/deploy_pages.sh   # build
 
 0. **Bugs in `bug.md`** (repo root, maintained by the user) come first.
 
-1. **Megacity polish.** An agent was working on this at the pause; check `git log` and `POLISH.md`. The items:
-   - polygonal walls instead of smooth ovals, and a less "dartboard" layout (eccentric, terrain-driven rings and asymmetric successive walls);
-   - absorbed towns with a real presence;
-   - streets that continue across arterials;
-   - a city citadel, canals and specialised districts;
-   - secondary cities above 50 k routed through the lazy path;
-   - a stand-in fabric that varies by quarter, and faster filling of visible quarters.
+1. **Megacity leftovers.** Done at the pause:
+   - polygonal eccentric walls and asymmetric successive enceintes;
+   - fused towns with real presence;
+   - a citadel, university and craft districts, elite parks, canals in flat river cities;
+   - anchor points so streets continue across arterials (about half of them line up);
+   - secondary cities ≥ 40 k on the lazy path.
+
+   Left:
+   - quarter detail costs about 0.2 s per quarter, so a mid-zoom view with hundreds of quarters takes minutes to fill (needs several workers, or changes to shared plot and access code that would break byte-identity for small towns);
+   - village greens are triangular;
+   - stand-in blocks look coarse when zoomed in;
+   - a 5 M city can reach the map edge.
 2. **Test-suite health.**
-   - `tests/urban.cultures.city.test.ts` was reported as very slow or possibly hanging when run inside the full suite (all other files passed: 561 tests). Run it alone and investigate.
-   - The full suite takes about 20 min; consider splitting it into fast and slow projects.
+   - The full suite takes about 20 min. `tests/urban.cultures.city.test.ts` alone takes about 18 min: it is slow, not hung, with 70 tests passing. Consider splitting it into fast and slow vitest projects.
 3. **Performance.**
    - The 10 km map is at 7.3 s against a 6 s target. About 2 s of that is terrain, which cannot be reordered without changing output.
    - Capital-size eager generation is slow (~15 s), which is why the capital preset now uses the lazy path.
@@ -140,7 +151,7 @@ GITHUB_TOKEN_FILE=/d/Workspace/dunk_token bash scripts/deploy_pages.sh   # build
    - Let the user drop waypoints or pins with a note.
    - "Copy link" includes the pins and the current view (e.g. `pins=x,y,note;…&view=cx,cy,scale`).
    - The bug reporter can then give the seed, options and an exact location. The agent reproduces it with `scripts/preview.ts --crop x,y,w` or `ui_check.mjs` at that view.
-8. **Small bridges in town.** Today only main streets bridge rivers. In towns, secondary streets and lanes should also cross small rivers and streams with small bridges or footbridges:
+8. **Small bridges in town** (the bug-fix agent did not get to it). Today only main streets bridge rivers. In towns, secondary streets and lanes should also cross small rivers and streams with small bridges or footbridges:
    - several per stream inside the town, at street continuations;
    - a plank footbridge for lanes and a stone arch for streets;
    - the street network on both banks stays connected.
