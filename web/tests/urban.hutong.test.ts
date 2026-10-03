@@ -71,6 +71,19 @@ describe('Chinese hutong access', () => {
     expect(streets.list).toHaveLength(1);
   });
 
+  it('enters an oblique street normally before turning into the cardinal ward', () => {
+    const { streets, pc } = ward(), k = Math.SQRT1_2;
+    const rotate = (p: { x: number; y: number }) => ({ x: (p.x - p.y) * k, y: (p.x + p.y) * k });
+    pc.lp.pts = pc.lp.pts.map(rotate);
+    streets.list[0].path = streets.list[0].path.map(rotate);
+    expect(culDeSacTree([pc], streets, new Rng('oblique'))).toBeGreaterThan(1);
+    const entry = [{ x: -5, y: -5 }, { x: 185, y: -5 }, { x: 185, y: 0 }, { x: -5, y: 0 }].map(rotate);
+    for (const s of streets.list.slice(1)) expect(mpArea(differenceS(ribbon(s.path, s.widths), pc.lp.pts, entry))).toBeLessThan(0.05);
+    for (const s of streets.list.slice(1)) for (const p of s.path.slice(1)) {
+      expect(pointInRing(pc.lp.pts, p) || distToRing(pc.lp.pts, p) < 0.01).toBe(true);
+    }
+  });
+
   it('shrinks giant under-served p4uefz lots while preserving urban geometry', () => {
     const w = generate(makeOptions({ seed: 'p4uefz', size: 'city', culture: 'chinese', moat: 'no', settlements: 'none' }));
     const u = w.urban!, plots = u.parcels.filter((p) => p.use === 'plot');

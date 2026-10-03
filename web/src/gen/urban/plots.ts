@@ -23,6 +23,7 @@ import { truncateAcute } from './blocks';
 import { sweepLeft } from '../geo/offset';
 import { stitchUnion } from '../geo/stitch';
 import { rayHit, splitByChord, lpoly, isConvex, locate } from '../geo/split';
+import { cutCourtyards } from './courtyards';
 
 export interface Plot {
   poly: Polygon;
@@ -606,5 +607,17 @@ export function cutPlots(
   const plotsF: Plot[] = [];
   const backF: Polygon[] = [];
   for (const c of cellsF) { if (c.plot) { c.plot.poly = c.poly; plotsF.push(c.plot); } else backF.push(c.poly); }
-  return { plots: plotsF, back: backF };
+  if (P.plotOp !== 'siheyuan') return { plots: plotsF, back: backF };
+  // Back-land merges can leave a compound fronting several hutongs with only one recorded facade.
+  // Refine just those oversized lots, using every actual street edge and preserving the exact partition.
+  const refined: Plot[] = [], back = [...backF];
+  const firstRun = Math.max(-1, ...plotsF.map((p) => p.run)) + 1;
+  for (const [i, p] of plotsF.entries()) {
+    if (area(p.poly) <= Math.max(1600, P.houseArea[zone][1] * 1.8)) { refined.push(p); continue; }
+    const parts = cutCourtyards(p.poly, bi, zone, P, streets, rng.fork('siheyuan:' + i));
+    if (parts.plots.length < 2) { refined.push(p); continue; }
+    refined.push(...parts.plots.map((q) => ({ ...q, run: firstRun + i, wealth: p.wealth, fade: p.fade })));
+    back.push(...parts.back);
+  }
+  return { plots: refined, back };
 }

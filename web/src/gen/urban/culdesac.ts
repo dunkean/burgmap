@@ -107,8 +107,11 @@ export function culDeSacTree(pieces: Piece[], streets: Streets, rng: Rng): numbe
             if (d < best) { best = d; horizontal = Math.abs(parentPath[i].y - parentPath[i - 1].y) >= Math.abs(parentPath[i].x - parentPath[i - 1].x); }
           }
         }
-        const bend = horizontal ? { x: e.x, y: q0.y } : { x: q0.x, y: e.y };
-        path = [start, q0, bend, e].filter((p, i, arr) => i === 0 || dist(p, arr[i - 1]) > 0.05);
+        // Oblique gate/river streets need a normal entry before turning cardinal. Turning at the edge
+        // leaves the lane too close to its parent ribbon and rejects every trunk in 35–55° wards.
+        const entry = onStreet ? { x: q0.x + onStreet.nrm.x * (gapB + 1), y: q0.y + onStreet.nrm.y * (gapB + 1) } : q0;
+        const bend = horizontal ? { x: e.x, y: entry.y } : { x: entry.x, y: e.y };
+        path = [start, q0, entry, bend, e].filter((p, i, arr) => i === 0 || dist(p, arr[i - 1]) > 0.05);
       } else if (stop > 22 && rng.chance(0.55)) {
         const m = { x: (q0.x + e.x) / 2, y: (q0.y + e.y) / 2 };
         const off = rng.range(-0.22, 0.22) * stop;

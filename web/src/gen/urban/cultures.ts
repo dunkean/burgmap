@@ -49,12 +49,13 @@ M['medina-souk'] = morph('medina-souk', M['medina'], {
 });
 
 M['chinese'] = morph('chinese', MORPHOLOGIES['bastide'], {
-  // Deep ordinary wards also gain hutongs: keep courtyard lots shallow, not just river-clipped back land.
+  // Deep wards gain hutongs; oversized frontage lots are refined into accessible courtyard compounds.
   streets: ['axis', 'grid', 'wardWalls'], closeOp: 'hutong', accessDepth: 27, plotOp: 'siheyuan', buildingOp: 'pavilionCompound', orientation: 'cardinal', deepFill: true,
   gridSpacing: [240, 240], laneSpacing: [58, 125], wardArea: 26000, gridSkew: 0, fieldNoise: 0,
   blockSize: { core: [9000, 16000], middle: [9000, 16000], edge: [9000, 16000], faubourg: [4500, 14000] },
   minBlock: 1500, minWidth: 22, widthByRank: [14, 10, 7, 4.5, 3],
   frontage: { core: [14, 22], middle: [14, 22], edge: [15, 24] }, plotDepth: { core: [22, 34], middle: [22, 34], edge: [24, 36] }, plotTilt: 0,
+  houseArea: { core: [350, 900], middle: [350, 900], edge: [450, 1100] },
   coverage: { core: [0.5, 0.62], middle: [0.5, 0.62], edge: [0.45, 0.58] }, footprintConformity: { core: 0.1, middle: 0.1, edge: 0.1, faubourg: 0.3 },
   density: { core: 170, middle: 160, edge: 140, faubourg: 60 },
   arch: { typology: 'siheyuan-hall', roof: 'tiled-hip', storeys: [1, 1], material: 'brick' },
@@ -117,6 +118,7 @@ M['dwarven'] = morph('dwarven', MORPHOLOGIES['bastide'], {
 M['chinese-suburb'] = morph('chinese-suburb', EO, {
   streets: ['radials', 'organicInfill'], plotOp: 'siheyuan', buildingOp: 'pavilionCompound', extraRadials: false,
   frontage: { faubourg: [14, 22], village: [22, 40] }, plotDepth: { faubourg: [22, 34], village: [30, 50] },
+  houseArea: { faubourg: [450, 1200], village: [600, 2000] },
   coverage: { faubourg: [0.4, 0.55], village: [0.2, 0.35] }, arch: { typology: 'siheyuan-hall', roof: 'tiled-hip', storeys: [1, 1], material: 'brick' },
 });
 

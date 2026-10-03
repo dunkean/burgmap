@@ -78,15 +78,37 @@ function lateral(poly: Polygon, f: { fa: Vec2; t: Vec2; n: Vec2 }, d: number): [
  * The orthogonal part of a lot: lateral bounds [u0, u1] valid from the frontage to depth `D` (the deepest depth at
  * which the lot keeps ≥ 80 % of its frontage width), so skewed or tapering lot backs do not shrink the layout.
  */
-function usable(pl: Plot, f: { fa: Vec2; t: Vec2; n: Vec2; W: number; D: number }): { u0: number; u1: number; D: number } | null {
-  const L0 = lateral(pl.poly, f, Math.min(1, f.D / 2));
+function usable(pl: Plot, f: { fa: Vec2; t: Vec2; n: Vec2; W: number; D: number }, connected = false): { u0: number; u1: number; D: number } | null {
+  // A notched hutong lot can intersect a depth line in several separate intervals. Its global lateral
+  // envelope spans an alley/outside land and yields no halls. Follow only the interval reached from its front.
+  const section = (d: number, lo: number, hi: number): [number, number] | null => {
+    if (!connected) return lateral(pl.poly, f, d);
+    const hits: number[] = [];
+    const nc = (p: Vec2) => (p.x - f.fa.x) * f.n.x + (p.y - f.fa.y) * f.n.y;
+    for (let i = 0; i < pl.poly.length; i++) {
+      const a = pl.poly[i], b = pl.poly[(i + 1) % pl.poly.length], da = nc(a) - d, db = nc(b) - d;
+      if ((da <= 0 && db > 0) || (db <= 0 && da > 0)) {
+        const k = da / (da - db), x = a.x + (b.x - a.x) * k, y = a.y + (b.y - a.y) * k;
+        hits.push((x - f.fa.x) * f.t.x + (y - f.fa.y) * f.t.y);
+      }
+    }
+    hits.sort((a, b) => a - b);
+    let best: [number, number] | null = null;
+    for (let i = 0; i + 1 < hits.length; i += 2) {
+      const a = Math.max(lo, hits[i]), b = Math.min(hi, hits[i + 1]);
+      if (b > a && (!best || b - a > best[1] - best[0])) best = [a, b];
+    }
+    return best;
+  };
+  const L0 = section(Math.min(1, f.D / 2), 0, f.W);
   if (!L0) return null;
   let u0 = L0[0], u1 = L0[1], D = Math.min(1, f.D / 2);
   for (let d = 2; d <= f.D - 0.5; d += 1) {
-    const L = lateral(pl.poly, f, d);
+    const L = section(d, u0, u1);
     if (!L) break;
     const a = Math.max(u0, L[0]), b = Math.min(u1, L[1]);
-    if (b - a < 0.8 * (L0[1] - L0[0])) break;
+    const minimum = connected ? Math.min(0.8 * (L0[1] - L0[0]), Math.max(9, 0.5 * (L0[1] - L0[0]))) : 0.8 * (L0[1] - L0[0]);
+    if (b - a < minimum) break;
     u0 = a; u1 = b; D = d;
   }
   return u1 - u0 > 2 ? { u0, u1, D: Math.min(f.D, D + 0.5) } : null;
@@ -235,7 +257,7 @@ function pavilionCompound(pl: Plot, P: MorphologyParams, rng: Rng): ArchBldg[] {
   const f = frame(pl);
   if (!f) return [];
   // lateral bounds valid over the usable depth (orthogonal halls); a tapering lot back stays garden
-  const us = usable(pl, f);
+  const us = usable(pl, f, true);
   if (!us) return [];
   const D = us.D;
   const u0 = us.u0 + 0.05, u1 = us.u1 - 0.05;
@@ -244,15 +266,26 @@ function pavilionCompound(pl: Plot, P: MorphologyParams, rng: Rng): ArchBldg[] {
   const hall = (poly: Polygon | null, typ: string, storeys = 1) => {
     if (poly) out.push({ poly, kind: 'house', arch: typ, roof: P.arch.roof, material: P.arch.material, storeys, orientation: -Math.PI / 2 });
   };
-  if (Wi < 9 || D < 14) {
-    hall(rectIn(pl, f, u0, u1, 0.3, Math.min(D - 0.6, 10)), 'siheyuan-hall');
+  const range = (a: number, b: number, c: number, d: number, typ: string) => {
+    // Wide shallow lots and long side ranges are rows of rooms, not matchsticks to discard wholesale.
+    const W = b - a, H = d - c, horizontal = W >= H;
+    if (Math.min(W, H) < MIN_BW) return;
+    const count = Math.max(1, Math.ceil(Math.max(W, H) / (3.5 * Math.min(W, H))));
+    for (let i = 0; i < count; i++) {
+      const step = (horizontal ? W : H) / count, gap = count > 1 ? 0.4 : 0;
+      hall(rectIn(pl, f, horizontal ? a + i * step + gap : a, horizontal ? a + (i + 1) * step - gap : b,
+        horizontal ? c : c + i * step + gap, horizontal ? d : c + (i + 1) * step - gap), typ);
+    }
+  };
+  if (Wi < 9 || D < 20) {
+    range(u0, u1, 0.3, Math.min(D - 0.6, 10), 'siheyuan-hall');
     return out;
   }
   const front0 = 0.3, back1 = D - 0.3;
   // gate range along the lane, the gate (2.6–3.2 m) in one corner
   const gs = rng.range(4.6, 5.4), gap = rng.range(2.6, 3.2);
   const gateLeft = rng.chance(0.5);
-  hall(rectIn(pl, f, gateLeft ? u0 + gap : u0, gateLeft ? u1 : u1 - gap, front0, front0 + gs), 'siheyuan-gate-range');
+  range(gateLeft ? u0 + gap : u0, gateLeft ? u1 : u1 - gap, front0, front0 + gs, 'siheyuan-gate-range');
   // courts in file: each ~14–20 m deep (court + its cross hall)
   const avail = back1 - (front0 + gs);
   const n = Math.max(1, Math.min(4, Math.round(avail / rng.range(15, 19))));
@@ -267,17 +300,17 @@ function pavilionCompound(pl: Plot, P: MorphologyParams, rng: Rng): ArchBldg[] {
     const c0 = d + (j === 0 ? rng.range(1.2, 2.4) : 0), c1 = d + step - hd;
     // side halls flank the court (rooms off the court, gaps at the corners)
     if (c1 - c0 >= 6) {
-      if (both || eastSide) hall(rectIn(pl, f, u1 - sw, u1, c0 + 0.6, c1 - 0.6), 'siheyuan-side-hall');
-      if (both || !eastSide) hall(rectIn(pl, f, u0, u0 + sw, c0 + 0.6, c1 - 0.6), 'siheyuan-side-hall');
+      if (both || eastSide) range(u1 - sw, u1, c0 + 0.6, c1 - 0.6, 'siheyuan-side-hall');
+      if (both || !eastSide) range(u0, u0 + sw, c0 + 0.6, c1 - 0.6, 'siheyuan-side-hall');
     }
     // the cross hall: the main hall with its ear rooms on the last court, middle halls before it; a side passage
     // (1.8 m, beside the hall) leads on to the next court
     const pass = j < n - 1 || rear ? 1.8 : 0;
     const pl0 = (j % 2 === 0) === gateLeft;
-    hall(rectIn(pl, f, pl0 ? u0 + pass : u0, pl0 ? u1 : u1 - pass, c1, c1 + hd), j === n - 1 ? 'siheyuan-main-hall' : 'siheyuan-middle-hall');
+    range(pl0 ? u0 + pass : u0, pl0 ? u1 : u1 - pass, c1, c1 + hd, j === n - 1 ? 'siheyuan-main-hall' : 'siheyuan-middle-hall');
     d += step;
   }
-  if (rear) hall(rectIn(pl, f, u0, u1, back1 - rear, back1), 'siheyuan-rear-range');
+  if (rear) range(u0, u1, back1 - rear, back1, 'siheyuan-rear-range');
   return out;
 }
 

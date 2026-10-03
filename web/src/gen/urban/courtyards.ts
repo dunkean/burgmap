@@ -85,6 +85,10 @@ export function cutCourtyards(block: Polygon, bi: number, zone: Zone, P: Morphol
   const [amin, amax] = P.houseArea[zone];
   const tiltMax = P.streetOp === 'grid' ? 0 : (8 * Math.PI) / 180;
   const minW = Math.max(6, Math.sqrt(amin) * 0.55);
+  // Existing Chinese plots may have valid 12–20° perimeter corners; retaining one must not veto every cut.
+  const angleFloor = P.plotOp === 'siheyuan' ? 12 * Math.PI / 180 : 0.35;
+  const usableFront = (f: ReturnType<typeof frontLen>): boolean => f.len >= 3.5 &&
+    (P.plotOp !== 'siheyuan' || !!f.best && dist(f.best[0], f.best[1]) >= 12);
   const done: Polygon[] = [];
   const queue: Polygon[] = [B];
   let guard = 0;
@@ -110,9 +114,9 @@ export function cutCourtyards(block: Polygon, bi: number, zone: Zone, P: Morphol
         const [X, Y] = [res[0].pts, res[1].pts];
         const aX = area(X), aY = area(Y);
         if (Math.min(aX, aY) < amin * 0.55) continue;
-        if (frontLen(X, F).len < 3.5 || frontLen(Y, F).len < 3.5) continue;
+        if (!usableFront(frontLen(X, F)) || !usableFront(frontLen(Y, F))) continue;
         if (shapeOf(X).w < minW || shapeOf(Y).w < minW) continue;
-        if (minAng(X) < 0.35 || minAng(Y) < 0.35) continue;
+        if (minAng(X) < angleFloor || minAng(Y) < angleFloor) continue;
         // courtyard lots are compact (inward-facing houses), not deep strips
         const sX = shapeOf(X), sY = shapeOf(Y);
         if (Math.max(sX.asp, sY.asp) > 4.5) continue;
