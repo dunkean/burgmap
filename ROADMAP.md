@@ -8,7 +8,7 @@ This checklist reconciles the open work in `BUGS.md`, `HANDOFF.md` §7 and `web/
 - [x] Biomes: selectable climates, water-dependent cultivation, vegetation, consistent SVG/Canvas rendering, share links (`1508eb4`; six inspected previews, browser control/link, typecheck/build, targeted suites).
 - [x] Chinese moats: optional, terrain-aware, dry gates and double-wall crossings; separate defensive reserves, SVG/Canvas water holes (`6f78c19`; Astra + Opus 5.5 reviews before 39 passing tests, typecheck/build, inspected PNG and browser On/Off/link checks).
 - [x] Chinese wards: accessible cardinal hutongs and irregular siheyuan compounds (`d0b5f99`, `5dd7025`). Oversized plots are split on real frontage; pavilion ranges stay in connected lot sections. Astra + Opus 5.5 reviewed code and before/after images before final verification: 46 targeted tests, typecheck/build and browser checks passed. Sparse residential area on `p4uefz` fell from 163,522 to 28,605 m².
-- [ ] Empty Japanese/Roman quarters on `p4uefz`: distinguish intentional gardens from inaccessible or discarded urban land.
+- [ ] Empty Japanese/Roman quarters on `p4uefz`: ghost reserve fixed in `0340ace` (139,847 m² released; 42 passing tests, typecheck/build/browser, both reviews). Roman's inspected riverbank gardens are intentional and its footprint/geometry are unchanged. Japanese served but underbuilt Bukeyashiki crescent and western merchant plot remain; Opus visual review keeps this bug open.
 - [ ] Venetian waterways: eliminate isolated river/canal ends.
 - [ ] Stilt towns: adapt footprints and boardwalks to shores, channels and relief.
 - [ ] Rural green seams: subdued boundaries between fields in both renderers.
