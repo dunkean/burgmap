@@ -1,0 +1,30 @@
+# Bugs and feedback
+
+## How to report a bug (optional helper)
+
+1. Open the map that shows the problem (any seed, size, culture, style).
+2. Move the mouse to the spot: the corner readout shows its map coordinates in meters (x, y from the top-left) and the zoom.
+3. Drop a pin on each problem place: use the "Pin" button (or Alt-click), then type a short note in the popover. Pins are listed in the "Pins" panel section.
+4. Press "Copy bug report" and paste the result here (or to the agent). It holds the link (options, pins and view), the seed and options, the pins with coordinates and notes, and the command that reproduces each spot:
+   `npm run preview:png -- --seed S --size Z --opt k=v --crop x,y,w --out out/bug.png`
+5. "Copy link" alone shares the exact map, the pins and the view (`pins=x,y,note;...&view=cx,cy,scale`). Pins and the view never change the generation.
+
+Agents: fix entries in order, then mark each one fixed with the commit hash (e.g. `→ fixed in abc1234`). Never delete or rewrite the user's text.
+
+## List (written by the user)
+
+- La légende n'apparait plus
+- Les shanty towns doivent avoir des formes de maison/tentes plus réalistes
+- Quand il n'y a pas de rue qui séparent des zones de batiments, la jointure entre les zones produit des batiments qui s'overlap parfois ou qui on des formes vraiment bizarres. Il faut ptet merge les zones avant de mettre les batiments ou trouver une heuristique pour adapter la forme ou eviter l'overlap. (testé en "medieval organic")
+- Il faut ajouter des biomes (désert, foret, etc.)
+- les douves autour de "chinese walled city" en bleu, coupent tout n'importe comment. D'ailleurs douves devrait être une option mais bien pensée. La c'est un polygone border bleu qui entoure géométriquement la ville au dessus de tout les autres objets. Autre choses, certains quartier en "chinese" sont quasi vide et identiques, c'est bizarre.
+- "japanese castle town" (seed=p4uefz&size=city&culture=japanese-jokamachi&legend=1): j'ai des surface totalement vide (que relief) collées à la ville. Est-ce normal ? (idem en seed=p4uefz&size=city&culture=roman-core&legend=1 et peut être d'autres)
+- En mode inca, le rendu des terrasses est dégueulasse. Il faut le revoir
+- Retire les "up to metropolis", il faudra que tout marche
+- "Venitian lagoon" certaines rivieres ne sont pas connectés à rien
+- "Stilt town" se construit au dessus des rivieres et tout. Il faut quand meme adapter au relief/eau
+- "barbarian (germanic village)" est hideux. Les patatoides font tout la meme taille, les maison sont trop similaire, la cloture est trop géometrique au rendu on dirait des patates.
+- En fait tous les barbarian sont médiocres (le sol est un patch marron), on a 4 fois le meme village. Il faut raffiner et adapter à l'environnement, et revoir la diversité et le rendu
+- Idem "North Ring": il faut arreter de copier le meme style poru les villages périphérique. comme les tribus. Soit y a de la diversité, soit y en a qu'un seul, idem pour Kraal, Native American
+- Maya city, rendu horrible - rien de va. cest pas fini ni testé comme boulot Idem pour Khmer, Celtic oppidum, Halfling Shire, Native Americans (les deux)
+- orcish war camp merite une meilleur texture sous les tentes

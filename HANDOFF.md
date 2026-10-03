@@ -38,7 +38,7 @@ GITHUB_TOKEN_FILE=/d/Workspace/dunk_token bash scripts/deploy_pages.sh   # build
 | `web/URBAN_MORPHOLOGY.md` | culture system: phases, morphologies, operators, mixing, scale ladder 10 → 5 M, megacity LOD (§3d) |
 | `web/URBAN_LANDMARKS.md` | landmark lot claiming, catalogue, port, suburbs, shanty towns |
 | `web/REGION_SETTLEMENTS.md` | multiple settlements per map, settlement planner, road network |
-| `bug.md` (repo root) | **the user's bug list, written by the user.** Read it first at every session. Fix the listed bugs and mark each one as fixed with the commit hash. Never delete the user's entries. |
+| `BUGS.md` (repo root) | **the user's bug list, written by the user.** Read it first at every session. Fix the listed bugs and mark each one as fixed with the commit hash. Never delete the user's entries. |
 | `web/POLISH.md` | user feedback backlog, with open and done items |
 
 ## 4. Code map (`web/src`)
@@ -112,7 +112,7 @@ GITHUB_TOKEN_FILE=/d/Workspace/dunk_token bash scripts/deploy_pages.sh   # build
 
 ## 7. What is left (priority order)
 
-0. **Bugs in `bug.md`** (repo root, maintained by the user) come first.
+0. **Bugs in `BUGS.md`** (repo root, maintained by the user) come first.
 
 1. **Megacity leftovers.** Done at the pause:
    - polygonal eccentric walls and asymmetric successive enceintes;
@@ -146,7 +146,7 @@ GITHUB_TOKEN_FILE=/d/Workspace/dunk_token bash scripts/deploy_pages.sh   # build
    - size and wealth: cottage with a shed up to a large manor farm with barns, dovecote and walled yard;
    - terrain: bank barns on slopes, raised farms on wet ground;
    - orientation toward the track, south-facing yards, and an orchard or garden placed by context.
-7. **Debug and feedback tooling in the UI.** DONE (cursor coordinates in meters, pins with notes, `pins=`/`view=` in the link, "Copy bug report"; see `bug.md` and `web/src/ui/share.ts`). Original brief:
+7. **Debug and feedback tooling in the UI.** DONE (cursor coordinates in meters, pins with notes, `pins=`/`view=` in the link, "Copy bug report"; see `BUGS.md` and `web/src/ui/share.ts`). Original brief:
    - Show the map coordinates (meters) under the cursor and of the last click.
    - Let the user drop waypoints or pins with a note.
    - "Copy link" includes the pins and the current view (e.g. `pins=x,y,note;…&view=cx,cy,scale`).

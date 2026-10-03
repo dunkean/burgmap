@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-The active project is **Burgmap**, the serverless TypeScript generator in `web/`. Start with `HANDOFF.md` at the repository root. It covers the state of the project, the commands, the code map, the invariants and the remaining work. Then read **`bug.md`**, the user's bug list, which has priority: fix its entries and mark each with the commit hash, without deleting the user's text. Then read the design documents in `web/` (`ARCHITECTURE.md`, `URBAN_GEOMETRY.md`, `URBAN_MORPHOLOGY.md`, `URBAN_LANDMARKS.md`, `REGION_SETTLEMENTS.md`, `POLISH.md`).
+The active project is **Burgmap**, the serverless TypeScript generator in `web/`. Start with `HANDOFF.md` at the repository root. It covers the state of the project, the commands, the code map, the invariants and the remaining work. Then read **`BUGS.md`**, the user's bug list, which has priority: fix its entries and mark each with the commit hash, without deleting the user's text. Then read the design documents in `web/` (`ARCHITECTURE.md`, `URBAN_GEOMETRY.md`, `URBAN_MORPHOLOGY.md`, `URBAN_LANDMARKS.md`, `REGION_SETTLEMENTS.md`, `POLISH.md`).
 
 ## Commands (in `web/`)
 
