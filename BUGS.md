@@ -35,3 +35,5 @@ Agents: fix entries in order, then mark each one fixed with the commit hash (e.g
 - sans town wall, le tour des villes est vraiment pas beau à cause de la couleur uniforme du background des quartiers. Sur les quatiers periphériques ca serait bien que le rendu "hors ville" se merge ou remplace le fond de texture des quarties.
 - Les estuaires ont toujours une forme arrondi. Il faut plus de diversité donc juste un élargement de la riviere.
 - De très nimbreux town plan construire les quartiers sur l'eau sans en tenir compte. Il faut corriger
+- pouvoir choisir le centroid de la ville (et potentiellement de villages autour)
+- lignes de contours et interne des champs scale avec la taille de l'image. Sur de très grande map ca devient hideux.
