@@ -25,13 +25,14 @@ import type { ReserveApi, ReservedLot } from './primary';
 import { Mask, siteLot, gridAround } from './m4/site';
 import { giveAccess, phaseAt, type M4State } from './m4/reserve';
 import { mpArea } from '../geo/bool';
+import { connectedWaterways } from './waterways';
+import { lockedWaterways } from './lockwater';
 
 const overlap = (A: Polygon, B: Polygon): boolean => A.some((q) => pointInRing(B, q)) || B.some((q) => pointInRing(A, q));
 const meanW = (s: StreetRec): number => s.widths.reduce((a, b) => a + b, 0) / s.widths.length;
 
 /** The streets dug as canals: the rank-2 cuts of the quarters (level 2, ids from `l2`: not the primary streets). */
-let L2_FIRST = 0;
-export const isCanal = (s: StreetRec): boolean => s.id >= L2_FIRST && s.ribbon && s.rank === 2 && s.role === 'street' && s.path.length >= 2;
+const isCanal = (s: StreetRec, l2First: number): boolean => s.id >= l2First && s.ribbon && s.rank === 2 && s.role === 'street' && s.path.length >= 2;
 
 /** Nearest point of a polyline: the point, its tangent and the distance. */
 function onPath(pl: Polyline, p: Vec2): { q: Vec2; t: Vec2; d: number } {
@@ -47,122 +48,71 @@ function onPath(pl: Polyline, p: Vec2): { q: Vec2; t: Vec2; d: number } {
   return best;
 }
 
-/** Direction of a polyline at its end k (0 = start, 1 = end), pointing out of the line. */
-function endDir(pl: Polyline, k: 0 | 1): Vec2 {
-  const a = k ? pl[pl.length - 2] : pl[1], b = k ? pl[pl.length - 1] : pl[0];
-  const l = dist(a, b) || 1;
-  return { x: (b.x - a.x) / l, y: (b.y - a.y) / l };
-}
-
 /**
  * Canals and footbridges: the water down every canal (with fondamenta 1.2–2 m wide on most, houses straight on the
  * water on some), extended across a land street where the canal goes on beyond it (a bridge carries the street),
  * and a footbridge wherever a calle ends on a canal with a fondamenta (or another calle) across.
  */
-export function lagoonWaterways(streets: Streets, rng: Rng, isWater: (p: Vec2) => boolean, l2First: number, locks = false): UrbanLine[] {
-  L2_FIRST = l2First;
+export function lagoonWaterways(streets: Streets, rng: Rng, isWater: (p: Vec2) => boolean, l2First: number, locks = false,
+  canOutlet?: (path: Polyline, width: number) => boolean): UrbanLine[] {
+  if (locks) return lockedWaterways(streets, rng, isWater, l2First, true);
   const out: UrbanLine[] = [];
-  const canals = streets.list.filter(isCanal);
+  const network = connectedWaterways(streets, streets.list.filter((s) => isCanal(s, l2First)), isWater, canOutlet);
+  const canals = network.canals;
   if (!canals.length) return out;
-  const land = streets.list.filter((s) => s.ribbon && !isCanal(s) && s.path.length >= 2);
+  const land = streets.list.filter((s) => s.ribbon && !canals.includes(s) && s.path.length >= 2);
   const fond = new Map<number, number>();
-  for (const c of canals) fond.set(c.id, rng.chance(0.72) ? Math.min(2, Math.max(1.2, meanW(c) * 0.18)) : 0.25);
-  const water = (c: StreetRec) => Math.max(2.2, meanW(c) - 2 * (fond.get(c.id) ?? 0));
+  for (const c of canals) {
+    const desired = rng.chance(0.72) ? Math.min(2, Math.max(1.2, meanW(c) * 0.18)) : 1.2;
+    fond.set(c.id, Math.min(desired, (Math.min(...c.widths) - 2.2) / 2));
+  }
+  const water = (c: StreetRec) => Math.max(2.2, Math.min(...c.widths) - 2 * (fond.get(c.id) ?? 0));
+  const wetPaths = [...canals.map((c) => ({ path: c.path, width: water(c), street: c.id })), ...network.connectors];
+  const submerged = (p: Vec2) => isWater(p) || wetPaths.some((c) => onPath(c.path, p).d < c.width / 2 + 0.1);
   const bridges: { a: Vec2; b: Vec2; w: number }[] = [];
-  const addBridge = (c: Vec2, d: Vec2, len: number, w: number) => {
-    if (bridges.some((b) => dist({ x: (b.a.x + b.b.x) / 2, y: (b.a.y + b.b.y) / 2 }, c) < 6)) return;
-    bridges.push({ a: { x: c.x - d.x * len / 2, y: c.y - d.y * len / 2 }, b: { x: c.x + d.x * len / 2, y: c.y + d.y * len / 2 }, w });
+  const addBridge = (at: Vec2, channel: typeof wetPaths[number], w: number) => {
+    const r = onPath(channel.path, at), d = { x: -r.t.y, y: r.t.x }, len = channel.width + 2.4;
+    // At a wet T junction the old crossing direction lands inside the new outlet. Move a few
+    // metres along the same canal to join real dry quays, without covering occupied blocks.
+    for (const offset of [0, 3, -3, 6, -6, 9, -9, 12, -12]) {
+      const c = { x: r.q.x + r.t.x * offset, y: r.q.y + r.t.y * offset };
+      if (onPath(channel.path, c).d > 0.1) continue;
+      const a = { x: c.x - d.x * len / 2, y: c.y - d.y * len / 2 }, b = { x: c.x + d.x * len / 2, y: c.y + d.y * len / 2 };
+      const landings = [a, b].flatMap((p) => [-0.5, 0, 0.5].map((t) => ({ x: p.x + r.t.x * w * t, y: p.y + r.t.y * w * t })));
+      if (landings.some(submerged) || (canOutlet && !canOutlet([a, b], w))) continue;
+      if (bridges.some((b) => dist({ x: (b.a.x + b.b.x) / 2, y: (b.a.y + b.b.y) / 2 }, c) < 6)) return;
+      bridges.push({ a, b, w }); return;
+    }
   };
   for (const c of canals) {
     const cw = water(c);
-    let pl = c.path.slice();
-    for (const k of [0, 1] as const) {
-      const e = k ? pl[pl.length - 1] : pl[0];
-      const dOut = endDir(c.path, k);
-      // what the canal ends on: another canal (the waters meet), a land street (crossed by a bridge when the canal
-      // goes on beyond it), or the edge of the town
-      let host: StreetRec | null = null, hd = 1.2;
-      for (const s of streets.list) {
-        if (s === c || !s.ribbon || s.path.length < 2) continue;
-        const r = onPath(s.path, e);
-        if (r.d < hd) { hd = r.d; host = s; }
-      }
-      if (!host) {
-        // (the canal reaches the river or the sea at the edge of the town: it runs out into it)
-        if ([2, 5].some((d) => isWater({ x: e.x + dOut.x * d, y: e.y + dOut.y * d }))) {
-          const ext = { x: e.x + dOut.x * 6, y: e.y + dOut.y * 6 };
-          pl = k ? [...pl, ext] : [ext, ...pl];
-        }
-        continue;
-      }
-      const hw = meanW(host) / 2;
-      if (isCanal(host)) {
-        const ext = { x: e.x + dOut.x * hw * 0.8, y: e.y + dOut.y * hw * 0.8 };
-        pl = k ? [...pl, ext] : [ext, ...pl];
-        continue;
-      }
-      // a canal beyond the street (another canal ending at the same point from the other side)?
-      const beyond = canals.some((o) => o !== c && [o.path[0], o.path[o.path.length - 1]].some((q) => dist(q, e) < 2.5 && ((q.x - e.x) * dOut.x + (q.y - e.y) * dOut.y) > -0.5) && o.id !== c.id);
-      const r = onPath(host.path, e);
-      // (a quay street with the river or the sea behind it: the canal runs out into the open water)
-      const toWater = !beyond && [hw + 2.5, hw + 6].some((d) => isWater({ x: e.x + dOut.x * d, y: e.y + dOut.y * d }));
-      if (toWater) {
-        const ext = { x: e.x + dOut.x * (hw + 4), y: e.y + dOut.y * (hw + 4) };
-        pl = k ? [...pl, ext] : [ext, ...pl];
-        addBridge(e, r.t, cw + 2.4, Math.max(3, hw * 2 - 0.6));
-      } else if (beyond) {
-        const ext = { x: e.x + dOut.x * (hw + 0.5), y: e.y + dOut.y * (hw + 0.5) };
-        pl = k ? [...pl, ext] : [ext, ...pl];
-        // the street's bridge over the canal
-        addBridge(e, r.t, cw + 2.4, Math.max(3, hw * 2 - 0.6));
-      } else {
-        // the canal stops short of the street (a rounded end at the fondamenta)
-        const back = hw + cw / 2 + 0.3;
-        const L = dist(pl[k ? pl.length - 1 : 0], pl[k ? pl.length - 2 : 1]);
-        if (L > back + 2) {
-          const q = { x: e.x - dOut.x * back, y: e.y - dOut.y * back };
-          pl = k ? [...pl.slice(0, -1), q] : [q, ...pl.slice(1)];
-        }
+    const pl = c.path.slice();
+    // An arterial crossing a canal's mouth needs a bridge even when the mouth is between its vertices.
+    for (const e of [pl[0], pl[pl.length - 1]]) {
+      if (isWater(e)) continue;
+      for (const host of land) {
+        const r = onPath(host.path, e);
+        if (r.d < 1.2) { addBridge(e, { path: pl, width: cw, street: c.id }, Math.max(2.2, Math.min(4, meanW(host) - 0.4))); break; }
       }
     }
     out.push({ kind: 'canal', path: pl, width: cw });
-    // locks (gnomish canals): a pair of gates across the water every ~80 m, the chamber between them
-    if (locks) {
-      let acc = 0, next = rng.range(25, 45);
-      for (let i = 1; i < pl.length; i++) {
-        const a = pl[i - 1], b = pl[i], l = dist(a, b);
-        while (acc + l >= next) {
-          const t = (next - acc) / l;
-          const t2 = Math.min(1, (next + 7 - acc) / l);
-          const n = { x: -(b.y - a.y) / l, y: (b.x - a.x) / l };
-          for (const tt of [t, t2]) {
-            const q = { x: a.x + (b.x - a.x) * tt, y: a.y + (b.y - a.y) * tt };
-            out.push({ kind: 'lock-gate', path: [{ x: q.x - n.x * cw / 2, y: q.y - n.y * cw / 2 }, { x: q.x + n.x * cw / 2, y: q.y + n.y * cw / 2 }], width: 0.8 });
-          }
-          next += rng.range(70, 95);
-        }
-        acc += l;
-      }
-    }
   }
-  // footbridges: a calle ending on a canal crosses it when a fondamenta or another lane is there to land on
+  for (const channel of network.connectors) out.push({ kind: 'canal', path: channel.path, width: channel.width });
+  // Cross the entire final wet network, including narrow calli ending midway along an outlet.
+  // A channel's own street follows its quays; its bends alone do not require bridges.
   for (const s of land) {
-    if (s.rank < 2 || s.role === 'close') continue;
-    for (const k of [0, 1] as const) {
-      const e = k ? s.path[s.path.length - 1] : s.path[0];
-      let host: StreetRec | null = null, hd = 1.2;
-      for (const c of canals) { const r = onPath(c.path, e); if (r.d < hd) { hd = r.d; host = c; } }
-      if (!host) continue;
-      const cw = water(host);
-      const r = onPath(host.path, e);
-      const n = { x: -r.t.y, y: r.t.x };
-      const dOut = endDir(s.path, k);
-      const across = n.x * dOut.x + n.y * dOut.y >= 0 ? n : { x: -n.x, y: -n.y };
-      const far = { x: e.x + across.x * (meanW(host) / 2 + 1.5), y: e.y + across.y * (meanW(host) / 2 + 1.5) };
-      const fondFar = (fond.get(host.id) ?? 0) > 1;
-      const laneFar = land.some((o) => o !== s && o.rank >= 2 && [o.path[0], o.path[o.path.length - 1]].some((q) => dist(q, far) < 9));
-      if (!fondFar && !laneFar) continue;
-      addBridge(e, across, cw + 2.2, Math.max(2.2, Math.min(4, meanW(s) - 0.4)));
+    for (let i = 0; i < s.path.length; i++) {
+      const e = s.path[i];
+      if (isWater(e)) continue;
+      const next = s.path[i ? i - 1 : 1], length = dist(e, next);
+      if (length < 0.01) continue;
+      const direction = { x: (next.x - e.x) / length, y: (next.y - e.y) / length };
+      for (const channel of wetPaths) {
+        if (channel.street === s.id) continue;
+        const r = onPath(channel.path, e);
+        if (r.d >= 1.2 || Math.abs(direction.x * r.t.y - direction.y * r.t.x) < 0.2) continue;
+        addBridge(r.q, channel, Math.max(2.2, Math.min(4, meanW(s) - 0.4)));
+      }
     }
   }
   for (const b of bridges) out.push({ kind: 'footbridge', path: [b.a, b.b], width: b.w });
@@ -325,4 +275,3 @@ export function registerVenice(): void {
   registered = true;
   registerBuilders({ campo, 'doge-basilica': dogeBasilica, 'doge-palace': dogePalace, arsenal });
 }
-

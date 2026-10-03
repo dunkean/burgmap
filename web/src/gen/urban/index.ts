@@ -17,7 +17,8 @@ import { makeCtx } from './context';
 import { choosePopulation, chooseArchetype, planServedPhases, planFaubourgs, EnclosurePlan, zonesFor, PhaseInput, dilate } from './phases';
 import { buildPrimary, Quarter } from './primary';
 import { Streets, LAB_OPEN, LAB_WALL } from './streets';
-import { mpArea, MultiPoly, differenceS, intersectionS } from '../geo/bool';
+import { mpArea, MultiPoly, differenceS, differenceSafeS, intersectionS } from '../geo/bool';
+import { ribbon } from '../geo/offset';
 import { GuidanceField } from './field';
 import { splitQuarter, addCloses, carveBlocks, buildRibbonIndex, Piece, CarvedBlock } from './blocks';
 import { culDeSacTree } from './culdesac';
@@ -948,7 +949,20 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   // ---- hill towns: stair treads on the lanes that climb the slope
   if (hints.stairs) lines.push(...stairLanes(ctx, streets));
   // ---- lagoon towns: water down the canals, footbridges where the calli cross them
-  if (hints.lagoon) lines.push(...lagoonWaterways(streets, rng.fork('canals'), ctx.isWater, l2First, !!hints.locks));
+  if (hints.lagoon) {
+    const wet = ctx.water.map((w) => ({ w, box: bboxOf(w.outer) }));
+    const isWet = (p: Vec2) => wet.some(({ w, box }) => p.x >= box.x0 && p.x <= box.x1 && p.y >= box.y0 && p.y <= box.y1 &&
+      pointInRing(w.outer, p) && !w.holes.some((h) => pointInRing(h, p)));
+    const occupied = new GridIndex<Polygon>(40);
+    for (const b of carved) occupied.insertPts(b.poly, b.poly);
+    const canOutlet = (path: Polyline, width: number) => {
+      const strip = ribbon(path, width), box = bboxOf(strip);
+      const near = occupied.query(box.x0, box.y0, box.x1, box.y1);
+      return areaOf(strip) > 0.05 && (!near.length ||
+        areaOf(strip) - mpArea(differenceSafeS(strip, near.map((outer) => ({ outer, holes: [] })))) < 0.05);
+    };
+    lines.push(...lagoonWaterways(streets, rng.fork('canals'), hints.locks ? ctx.isWater : isWet, l2First, !!hints.locks, canOutlet));
+  }
   // ---- Persian city: the vaulted bazaar spine through the old town, the qanats across the fields
   if (hints.bazaarRoof && archetype === 'town') lines.push(...bazaarRoofs(streets, eplan.phases.slice(0, Math.min(2, eplan.phases.length)).flatMap((p) => p.region), nucleus));
   if (hints.qanats && archetype !== 'hamlet') lines.push(...qanats(ctx, prim.footprint, rng.fork('qanats'), pop < 3000 ? 2 : pop < 15000 ? 3 : 4));
