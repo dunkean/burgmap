@@ -144,7 +144,7 @@ function buildingsSvg(ub: NonNullable<World['urban']>, U: Palette['urban'], lw: 
 const GROUND_USES = new Set(['bailey', 'causeway', 'ghat', 'castle-honmaru', 'compound:castle-honmaru', 'bailey-gate', 'esplanade']);
 /** Fences of camps and villages (width m): byre, yard, pen and orda fences, palisade lines inside a village. */
 const CAMP_FENCES: Record<string, number> = { 'kraal-fence': 1.1, 'yard-fence': 0.45, 'pen-fence': 0.5, 'orda-fence': 0.8, palisade: 1.2 };
-const WALL_LINES: Record<string, number> = { stands: 2.4, dome: 0.6, gallery: 2.2, 'zigzag-wall': 2.4, 'canal-wall': 1, 'pyramid-step': 0.5, 'stall-row': 2.2,  'compound-wall': 1, 'citadel-wall': 2.4, 'stone-wall': 1.8, prakara: 1.6, 'ward-wall': 1.8 };
+const WALL_LINES: Record<string, number> = { bank: 0.8, stands: 2.4, dome: 0.6, gallery: 2.2, 'zigzag-wall': 2.4, 'canal-wall': 1, 'pyramid-step': 0.5, 'stall-row': 2.2,  'compound-wall': 1, 'citadel-wall': 2.4, 'stone-wall': 1.8, prakara: 1.6, 'ward-wall': 1.8 };
 
 /** Compound grounds, water pieces (moats, tanks) and the moat outside the town wall (drawn under the buildings). */
 function cultureUnderlay(ub: NonNullable<World['urban']>, pal: Palette, lw: (m: number, px: number) => string): string {
@@ -168,7 +168,7 @@ function cultureUnderlay(ub: NonNullable<World['urban']>, pal: Palette, lw: (m: 
   const canalsL = (ub.lines ?? []).filter((l) => l.kind === 'canal');
   for (const l of canalsL) s += `<path d="${pathD(l.path, false)}" fill="none" stroke="${pal.riverFill}" stroke-width="${f1(l.width ?? 2)}" stroke-linecap="round" stroke-linejoin="round"/>`;
   // cornfields round a native village: corn hills in rows
-  const corn = ub.landmarks.filter((l) => l.kind === 'cornfield' || l.kind === 'terrace-field');
+  const corn = ub.landmarks.filter((l) => l.kind === 'cornfield' || l.kind === 'terrace-field' || l.kind === 'garden-bed');
   if (corn.length) {
     const d = corn.map((l) => pathD(l.poly, true)).join('');
     s += `<defs><pattern id="p-ucorn" patternUnits="userSpaceOnUse" width="3" height="3" patternTransform="rotate(12)"><circle cx="1.5" cy="1.5" r="0.45" fill="${U.gardenInk}" opacity="0.6"/></pattern></defs>`;

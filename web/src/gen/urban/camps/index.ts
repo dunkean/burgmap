@@ -233,6 +233,7 @@ export function assemble(world: World, parts: CampOut[], culture: Culture, morph
     layer.water!.push(...part.water);
     layer.sites!.push(...part.sites);
     layer.squares.push(...part.squares);
+    if (part.trees) layer.trees!.push(...part.trees);
     for (const o of part.outline) regions.push({ outer: o, holes: [] });
     for (const q of part.quarters) regions.push({ outer: q, holes: [] });
   }

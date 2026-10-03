@@ -33,7 +33,7 @@ import type { CompoundOut } from '../compounds';
 import { placeRect } from '../m4/kit';
 
 export interface YardVariant {
-  id: 'germanic' | 'celtic' | 'norse' | 'maya' | 'oppidum';
+  id: 'germanic' | 'celtic' | 'norse' | 'maya' | 'oppidum' | 'halfling';
   /** Inhabitants per farmstead. */
   per: number;
   yardA: Range;
@@ -49,6 +49,8 @@ export const YARD_VARIANTS: Record<string, YardVariant> = {
   germanic: { id: 'germanic', per: 11, yardA: [1300, 2400], pathW: 3.4, occupancy: 1, radius: yardRadius(11, [1300, 2400], 1) },
   celtic: { id: 'celtic', per: 7, yardA: [650, 1300], pathW: 2.8, occupancy: 1, radius: yardRadius(7, [650, 1300], 1) },
   oppidum: { id: 'oppidum', per: 10, yardA: [1400, 2800], pathW: 3.2, occupancy: 0.8, radius: yardRadius(10, [1400, 2800], 0.8) },
+  // (the Shire: hedged gardens on gentle hills, smials dug into the banks, lanes winding between them)
+  halfling: { id: 'halfling', per: 5.5, yardA: [900, 1700], pathW: 3, occupancy: 0.85, radius: yardRadius(5.5, [900, 1700], 0.85) },
   maya: { id: 'maya', per: 7, yardA: [1000, 1900], pathW: 2.8, occupancy: 0.55, radius: yardRadius(7, [1000, 1900], 0.55) },
   norse: { id: 'norse', per: 14, yardA: [2600, 5200], pathW: 3.2, occupancy: 0.32, radius: yardRadius(14, [2600, 5200], 0.32) },
 };
@@ -96,7 +98,7 @@ export function yardsVillage(cc: CampCtx, c: Vec2, pop: number, v: YardVariant, 
   const wob = (t: number) => (v.id === 'celtic' ? 0.04 : 0.08) * nz.noise(Math.cos(t) * 1.3 + 5, Math.sin(t) * 1.3 + 5);
   // the enclosure line at offset `off` outward: an oval (or circle) for a village; for an oppidum the brow of its
   // hill (the line where the ground falls away, smoothed), so the ramparts follow the contours
-  let ringAt = (off: number): Polygon => ringAt(off);
+  let ringAt = (off: number): Polygon => ellipse(c, R * Math.sqrt(aspect) + off, R / Math.sqrt(aspect) + off, ang, 96, wob);
   if (v.id === 'oppidum') {
     const N = 72, hc = ctx.heightAt(c);
     const raw: number[] = [];
@@ -351,9 +353,10 @@ export function yardsVillage(cc: CampCtx, c: Vec2, pop: number, v: YardVariant, 
       if (isCentre && v.id === 'germanic') { out.parcels.push({ poly: pc.poly, use: 'meadow', block: bi }); out.squares.push(pc.poly); continue; }
       if (core.has(pc.tag)) { plazaGroup(out, pc.poly, bi, isCentre, c, rng.fork('plaza:' + pc.tag)); continue; }
       if (isCentre && v.id === 'oppidum') { sanctuary(out, pc.poly, bi); continue; }
+      if (isCentre && v.id === 'halfling') { partyField(out, pc.poly, bi, rng.fork('party')); continue; }
       if (!occ.has(pc.tag) || fr.len < 3.2 || area(pc.poly) < 160) { out.parcels.push({ poly: pc.poly, use: 'garden', block: bi }); continue; }
       out.parcels.push({ poly: pc.poly, use: 'plot', block: bi });
-      if (isCentre || (v.id === 'germanic' && chief.length === 0 && touchesCell(pc.tag, centreCell, edges))) chief.push(pi);
+      if (isCentre || ((v.id === 'germanic' || v.id === 'halfling') && chief.length === 0 && touchesCell(pc.tag, centreCell, edges))) chief.push(pi);
       farmstead(out, pi, pc.poly, v, chief.includes(pi), fr.mid, rng.fork('farm:' + bi + ':' + pc.tag));
     }
   }
@@ -413,6 +416,36 @@ function farmstead(out: CampOut, pi: number, yard: Polygon, v: YardVariant, chie
     placed.push(poly);
     out.buildings.push({ poly, kind, parcel: pi, arch, roof, storeys: 1, material, orientation });
   };
+  if (v.id === 'halfling') {
+    // a smial dug into the bank at the back of the garden, its round door to the lane; the garden in front, a
+    // shed, fruit trees; a hedge round the garden, open at the gate (the inn by the party field is bigger)
+    const ins = inscribed(yard, [], 0.5);
+    const toward = frontMid ? { x: frontMid.x - ins.c.x, y: frontMid.y - ins.c.y } : { x: 0, y: 1 };
+    const tl = Math.hypot(toward.x, toward.y) || 1;
+    const u = { x: toward.x / tl, y: toward.y / tl };
+    const a = Math.atan2(u.y, u.x) + Math.PI / 2;
+    const L0 = chief ? r.range(20, 26) : r.range(11, 16), W0 = chief ? r.range(11, 13) : r.range(7, 9);
+    const back = { x: ins.c.x - u.x * ins.r * 0.35, y: ins.c.y - u.y * ins.r * 0.35 };
+    const sm = fitIn(yard, (q, s2) => apsidal(q, a, L0 * s2, W0 * Math.max(0.8, s2), 6), placed, { margin: 2, gap: 0, minScale: 0.6, cands: [back, ins.c] });
+    if (!sm) return;
+    push(sm, chief ? 'landmark' : 'house', chief ? 'inn' : 'smial', 'dome', 'turf', a);
+    if (chief) out.landmarks.push({ kind: 'inn', poly: sm });
+    // the bank the smial is dug into: hachures behind it
+    out.lines.push({ kind: 'bank', path: sm.filter((q) => (q.x - ins.c.x) * u.x + (q.y - ins.c.y) * u.y < -0.5), width: 0.8 });
+    const sh = fitIn(yard, (q, s2) => rect(q, a, 4 * s2, 3 * s2), placed, { margin: 1.2, gap: 2.5, minScale: 0.85 });
+    if (sh && r.chance(0.6)) push(sh, 'outbuilding', 'garden-shed', 'gable', 'timber');
+    // the vegetable garden in front of the door, fruit trees round the garden
+    const bed = rect({ x: ins.c.x + u.x * ins.r * 0.45, y: ins.c.y + u.y * ins.r * 0.45 }, a, Math.min(14, ins.r * 1.1), Math.min(7, ins.r * 0.5));
+    if (bed.every((q) => pointInRing(yard, q)) && !placed.some((p) => p.some((q) => pointInRing(bed, q)) || bed.some((q) => pointInRing(p, q)))) out.landmarks.push({ kind: 'garden-bed', poly: bed });
+    out.trees = out.trees ?? [];
+    for (let k = 0; k < r.int(1, 4); k++) {
+      const tq = { x: ins.c.x + r.range(-1, 1) * ins.r * 0.8, y: ins.c.y + r.range(-1, 1) * ins.r * 0.8 };
+      const tr = r.range(2.5, 4);
+      if (pointInRing(yard, tq) && !placed.some((p) => pointInRing(p, tq) || p.some((q) => dist(q, tq) < tr + 0.5))) out.trees.push({ x: tq.x, y: tq.y, r: tr });
+    }
+    for (const pl of openRing(yard, frontMid ? [{ p: frontMid, width: 2.6 }] : [])) out.lines.push({ kind: 'hedge', path: pl, width: 1.6 });
+    return;
+  }
   if (v.id === 'maya') {
     // a houselot (solar): two to four rooms on low platforms round a patio, the house garden round them
     const ins = inscribed(yard, [], 0.5).c;
@@ -541,4 +574,14 @@ function sanctuary(out: CampOut, poly: Polygon, bi: number): void {
     out.landmarks.push({ kind: 'sanctuary', poly: sqr(1) });
   }
   out.sites.push({ id: 'sanctuary', kind: 'sanctuary', role: 'worship', lot: poly, anchor: ins.c });
+}
+
+/** The party field of a halfling village: open grass with the party tree in the middle. */
+function partyField(out: CampOut, poly: Polygon, bi: number, r: Rng): void {
+  out.parcels.push({ poly, use: 'meadow', block: bi });
+  out.squares.push(poly);
+  const ins = inscribed(poly, [], 0.5);
+  out.trees = out.trees ?? [];
+  if (ins.r > 8) out.trees.push({ x: ins.c.x + r.range(-2, 2), y: ins.c.y + r.range(-2, 2), r: Math.min(9, ins.r * 0.35) });
+  out.landmarks.push({ kind: 'party-field', poly });
 }

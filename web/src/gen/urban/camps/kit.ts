@@ -36,6 +36,8 @@ export interface CampOut {
   outline: Polygon[];
   /** Open places drawn as squares (named). */
   squares: Polygon[];
+  /** Trees (orchards, the party tree). */
+  trees?: { x: number; y: number; r: number }[];
 }
 
 export const emptyCamp = (): CampOut => ({ quarters: [], streets: [], blocks: [], parcels: [], buildings: [], lines: [], walls: [], landmarks: [], water: [], sites: [], outline: [], squares: [] });

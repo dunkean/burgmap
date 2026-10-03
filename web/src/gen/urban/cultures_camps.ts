@@ -22,6 +22,7 @@ const M: Record<string, MorphologyParams> = {
   khmer: morph('khmer', { arch: { typology: 'stilt-house', roof: 'gable', storeys: [1, 1], material: 'wood' }, density: { core: 62, middle: 62, edge: 62, faubourg: 62, village: 62 } }),
   oppidum: morph('oppidum', { arch: { typology: 'roundhouse', roof: 'thatch-round', storeys: [1, 1], material: 'wattle' }, density: { core: 45, middle: 45, edge: 45, faubourg: 45, village: 45 } }),
   orcish: morph('orcish', { arch: { typology: 'orc-hut', roof: 'conical', storeys: [1, 1], material: 'hide' }, density: { core: 90, middle: 90, edge: 90, faubourg: 90, village: 90 } }),
+  halfling: morph('halfling', { arch: { typology: 'smial', roof: 'dome', storeys: [1, 1], material: 'turf' }, density: { core: 32, middle: 32, edge: 32, faubourg: 32, village: 32 } }),
   'nomad-camp': morph('nomad-camp', { arch: { typology: 'ger', roof: 'dome', storeys: [1, 1], material: 'felt' }, density: { core: 60, middle: 60, edge: 60, faubourg: 60, village: 60 } }),
 };
 Object.assign(MORPHOLOGIES, M);
@@ -82,6 +83,12 @@ export const CAMP_CULTURES: Culture[] = [
     ...campBase('orcish', 'Orcish war camp', 'orcish'), fantasy: true,
     scale: { min: 'hamlet', max: 'town' }, camp: { layout: 'ring', variant: 'orc' },
     sitePrefs: { flatness: 0.8, weights: { hilltop: 1.6, valley: 1.2, plain: 1, harbor: 0.3 } },
+  },
+  {
+    ...campBase('halfling', 'Halfling shire', 'halfling'), fantasy: true,
+    scale: { min: 'hamlet', max: 'village' }, camp: { layout: 'yards', variant: 'halfling' },
+    render: { towerShape: 'round', plotLines: false },
+    sitePrefs: { flatness: 0.7, weights: { hilltop: 1.6, valley: 1.4, plain: 1, harbor: 0.2 } },
   },
   {
     ...campBase('kraal', 'Kraal (African homestead)', 'kraal'),

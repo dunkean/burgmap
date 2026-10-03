@@ -54,7 +54,8 @@ Each culture gets a `scale` range: the settlement classes it can produce. [x] `s
   - [~] Remaining fantasy presets from §3c: halfling, orcish, gnomish, stilt-town, wizard city, necropolis.
     - [x] `orcish` (camps/ring.ts): stake-palisade rings, huts packed anyhow, arena, warlord's hall on its mound, totems.
     - [x] `necropolis` (cultures_cities.ts, tomb operator, fantasy.ts): walled cardinal grid of tomb lots (mausolea, tholoi, obelisks over the graves), processional avenue to the great stepped mausoleum, charnel houses.
-    - [ ] halfling, gnomish, stilt-town, wizard city: not shipped yet.
+    - [x] `halfling` (camps/yards.ts): hedged gardens along winding lanes, smials dug into the banks, vegetable beds and fruit trees, the inn by the party field and its party tree.
+    - [ ] gnomish, stilt-town, wizard city: not shipped yet.
 
 ## Global settlement parameter
 - [x] **Sprawl / density factor** (`sprawl` ∈ 0.5 … 2, default 1). It multiplies the extent for a given population, lowers coverage, loosens plots, makes gardens more frequent and spreads faubourgs and suburbs. Below 1 it gives a compact dense town. It must interact with the culture defaults (a medina stays dense relative to its own baseline). Expose it in the UI and the URL. (Done: `applySprawl` in morphology.ts scales densities, coverage, infill, plot sizes, blocks, gaps and courtyards per culture; faubourg share and spread; camps loosen their rows and yards. Plan panel slider, `sprawl=` in the URL, tests/urban.sprawl.test.ts.)

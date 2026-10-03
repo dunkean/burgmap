@@ -80,6 +80,11 @@ export const SIGNATURES: Record<string, (w: World) => void> = {
     expect(arches(w).get('roundhouse') ?? 0, 'oppidum: roundhouses').toBeGreaterThan(2);
     expect(lineKinds(w).has('rampart'), 'oppidum: ramparts').toBe(true);
   },
+  halfling: (w) => {
+    expect(arches(w).get('smial') ?? 0, 'halfling: smials').toBeGreaterThan(3);
+    expect(lineKinds(w).has('hedge'), 'halfling: hedgerows').toBe(true);
+    expect((w.urban!.trees ?? []).length, 'halfling: trees').toBeGreaterThan(3);
+  },
   'nomad-camp': (w) => {
     const a = arches(w);
     expect(a.get('ger') ?? 0, 'nomad: gers').toBeGreaterThan(8);
@@ -116,6 +121,7 @@ const CASES: [string, SizeName[]][] = [
   ['maya', ['hamlet', 'village', 'town', 'city']],
   ['khmer', ['hamlet', 'village', 'town', 'city']],
   ['orcish', ['hamlet', 'village', 'town']],
+  ['halfling', ['hamlet', 'village', 'town']],
   ['celtic-oppidum', ['hamlet', 'village', 'town']],
   ['barbarian', ['hamlet', 'village', 'town']],
   ['barbarian-celtic', ['hamlet', 'village', 'town']],
