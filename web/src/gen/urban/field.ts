@@ -13,8 +13,25 @@ import type { UrbanCtx } from './context';
 import type { Streets } from './streets';
 import type { MorphologyParams } from './morphology';
 import { segSegT } from '../geo/poly';
+import { GridIndex } from '../geo/spatial';
 
 const TAU = Math.PI * 2;
+
+/** Edge grid of a ring (the streamlines of a split test it every 5 m); kept while the ring is unchanged. */
+const RING_EDGES = new WeakMap<Vec2[], { n: number; sum: number; idx: GridIndex<number> }>();
+function ringEdges(ring: Vec2[]): { idx: GridIndex<number> } {
+  // (validated by a coordinate checksum: a ring edited in place is re-indexed)
+  let sum = 0;
+  for (let i = 0; i < ring.length; i++) sum += ring[i].x * (i + 1) + ring[i].y * (i + 7);
+  let e = RING_EDGES.get(ring);
+  if (!e || e.n !== ring.length || e.sum !== sum) {
+    const idx = new GridIndex<number>(16);
+    for (let i = 0; i < ring.length; i++) idx.insertSeg(ring[i], ring[(i + 1) % ring.length], i);
+    e = { n: ring.length, sum, idx };
+    RING_EDGES.set(ring, e);
+  }
+  return e;
+}
 
 export class GuidanceField {
   private noise: Noise2D;
@@ -147,18 +164,22 @@ export class GuidanceField {
     const out: Vec2[] = [p];
     let cur = p, head = h;
     const maxTurn = (maxTurnPer10m * step) / 10;
+    const re = ringEdges(ring);
     for (let s = 0; s < maxLen; s += step) {
       const target = this.follow(cur, head);
       let d = target - head;
       d = Math.max(-maxTurn, Math.min(maxTurn, d));
       head += d;
       const nx = { x: cur.x + Math.cos(head) * step, y: cur.y + Math.sin(head) * step };
-      // exit test
+      // exit test (the ring edges near the step, from a grid of the edges kept per ring: the same first hit)
       let bt = Infinity;
-      for (let i = 0; i < ring.length; i++) {
-        const r = segSegT(cur, nx, ring[i], ring[(i + 1) % ring.length]);
+      const x0 = Math.min(cur.x, nx.x) - 1e-6, x1 = Math.max(cur.x, nx.x) + 1e-6, y0 = Math.min(cur.y, nx.y) - 1e-6, y1 = Math.max(cur.y, nx.y) + 1e-6;
+      re.idx.forEachIn(x0, y0, x1, y1, (i) => {
+        const a = ring[i], b = ring[(i + 1) % ring.length];
+        if (Math.max(a.x, b.x) < x0 || Math.min(a.x, b.x) > x1 || Math.max(a.y, b.y) < y0 || Math.min(a.y, b.y) > y1) return;
+        const r = segSegT(cur, nx, a, b);
         if (r && r.t > 1e-9 && r.t < bt) bt = r.t;
-      }
+      });
       if (bt < Infinity) {
         out.push({ x: cur.x + (nx.x - cur.x) * bt, y: cur.y + (nx.y - cur.y) * bt });
         return out;
