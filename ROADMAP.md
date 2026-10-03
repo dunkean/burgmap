@@ -16,6 +16,8 @@ This checklist reconciles the open work in `BUGS.md`, `HANDOFF.md` §7 and `web/
 - [x] Open-town edges (`7074c2a`): small served fringe lanes, lower edge density and garden gaps; rural cover reaches the exact footprint while farms keep their safe reserve. Astra + actual Opus 5.5 approved every code amendment before testing and accepted wide/detail/Canvas images. Thirteen focused and nine field tests, typecheck/build, seven culture diagnostics and three live zooms passed; single/double/elf hedge-walled output remains byte-identical. P4 gains four fringe quarters and 29 garden gaps without parcel overlaps or lost frontage.
 - [ ] Tribal cultures at large populations: grow a primitive urban settlement appropriate to population and culture rather than repeating isolated tribes (new user report in `BUGS.md`).
 - [ ] Open-town ground: blend countryside texture into peripheral quarters instead of a uniform urban background (new user report in `BUGS.md`, after the primitive-city fix).
+- [ ] Estuary variety: generate several mouth shapes, including a river that simply widens instead of a round basin (new user report).
+- [ ] Water-aware town plans: audit every family and keep ordinary quarters and houses on dry land, with explicit exceptions for suitable water architecture (new user report).
 
 ## Scale, performance and test health
 

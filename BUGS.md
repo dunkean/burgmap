@@ -33,3 +33,5 @@ Agents: fix entries in order, then mark each one fixed with the commit hash (e.g
 - dans les open town, il faut que la frontière ne soit pas tracée nette. Mais que les maison déborde hors du cadre de la ville un peu. → fixed in 7074c2a (served irregular fringe lanes, garden gaps and countryside meeting exact lots; both source/image reviews, 22 tests, typecheck/build, walled identity and live zooms passed)
 - Les cultures qui sont faites pour être en tribus (genre nordic), lorsqu'on demande du gros, il faut faire une ville primitive au lieu des tribus. En gros on adapte l'archi urbaine à la taille de la pop + culture
 - sans town wall, le tour des villes est vraiment pas beau à cause de la couleur uniforme du background des quartiers. Sur les quatiers periphériques ca serait bien que le rendu "hors ville" se merge ou remplace le fond de texture des quarties.
+- Les estuaires ont toujours une forme arrondi. Il faut plus de diversité donc juste un élargement de la riviere.
+- De très nimbreux town plan construire les quartiers sur l'eau sans en tenir compte. Il faut corriger
