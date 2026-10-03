@@ -62,13 +62,55 @@ export function neighbors8(g: { w: number; h: number }, i: number, out: number[]
   return n;
 }
 
+/**
+ * Can a running (sliding-window) sum over the float32 values `a[off + k*stride]`, k < len, be computed exactly in
+ * doubles? True when every value is a multiple of 2^E (E = lowest set bit over the line) and the largest partial
+ * sum, bounded by (2r+2)·max|v|, stays below 2^(53+E): all sums are then exact, so the sliding window gives the
+ * same doubles as summing each window from scratch.
+ */
+const F32 = new Float32Array(1), U32 = new Uint32Array(F32.buffer);
+function exactLine(a: Float32Array, off: number, stride: number, len: number, radius: number): boolean {
+  let E = 1e9, M = 0;
+  for (let k = 0, i = off; k < len; k++, i += stride) {
+    const v = a[i];
+    if (v === 0) continue;
+    F32[0] = v;
+    const b = U32[0];
+    const e = (b >>> 23) & 255;
+    if (e === 255) return false;
+    let m = b & 0x7fffff;
+    if (e) m |= 0x800000;
+    const low = (e ? e - 150 : -149) + (31 - Math.clz32(m & -m));
+    if (low < E) E = low;
+    const av = v < 0 ? -v : v;
+    if (av > M) M = av;
+  }
+  if (M === 0) return true;
+  return (2 * radius + 2) * M <= Math.pow(2, 53 + E);
+}
+
 /** Separable box blur; returns a new grid. */
 export function blurGrid(g: Grid, radius: number, passes = 2): Grid {
   const w = g.w, h = g.h;
   let src = Float32Array.from(g.data);
   const tmp = new Float32Array(w * h);
+  const acc = new Float64Array(w);
+  const colOk = new Uint8Array(w);
   for (let p = 0; p < passes; p++) {
     for (let y = 0; y < h; y++) {
+      const row = y * w;
+      if (exactLine(src, row, 1, w, radius)) {
+        // sliding window (exact): same sums as the per-pixel loop below
+        let s = 0;
+        for (let k = 0; k <= radius && k < w; k++) s += src[row + k];
+        for (let x = 0; x < w; x++) {
+          const n = Math.min(w - 1, x + radius) - Math.max(0, x - radius) + 1;
+          tmp[row + x] = s / n;
+          if (x + radius + 1 < w) s += src[row + x + radius + 1];
+          if (x - radius >= 0) s -= src[row + x - radius];
+        }
+        continue;
+      }
       for (let x = 0; x < w; x++) {
         let s = 0, n = 0;
         for (let k = -radius; k <= radius; k++) { const xx = x + k; if (xx >= 0 && xx < w) { s += src[y * w + xx]; n++; } }
@@ -76,11 +118,26 @@ export function blurGrid(g: Grid, radius: number, passes = 2): Grid {
       }
     }
     const out = new Float32Array(w * h);
+    for (let x = 0; x < w; x++) {
+      colOk[x] = exactLine(tmp, x, w, h, radius) ? 1 : 0;
+      if (!colOk[x]) continue;
+      let s = 0;
+      for (let k = 0; k <= radius && k < h; k++) s += tmp[k * w + x];
+      acc[x] = s;
+    }
     for (let y = 0; y < h; y++) {
+      const n = Math.min(h - 1, y + radius) - Math.max(0, y - radius) + 1;
+      const add = y + radius + 1 < h ? (y + radius + 1) * w : -1, sub = y - radius >= 0 ? (y - radius) * w : -1;
       for (let x = 0; x < w; x++) {
-        let s = 0, n = 0;
-        for (let k = -radius; k <= radius; k++) { const yy = y + k; if (yy >= 0 && yy < h) { s += tmp[yy * w + x]; n++; } }
-        out[y * w + x] = s / n;
+        if (colOk[x]) {
+          out[y * w + x] = acc[x] / n;
+          if (add >= 0) acc[x] += tmp[add + x];
+          if (sub >= 0) acc[x] -= tmp[sub + x];
+          continue;
+        }
+        let s = 0, nn = 0;
+        for (let k = -radius; k <= radius; k++) { const yy = y + k; if (yy >= 0 && yy < h) { s += tmp[yy * w + x]; nn++; } }
+        out[y * w + x] = s / nn;
       }
     }
     src = out;
