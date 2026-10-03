@@ -70,6 +70,12 @@ export function segPolyDist(a: Vec2, b: Vec2, poly: Polygon): number {
 /** Samples inside a polygon (grid of `step` m) and on its boundary (every step / 2 m). */
 export function samplePoly(poly: Polygon, step: number): Vec2[] {
   const out: Vec2[] = [];
+  forSamples(poly, step, (p) => { out.push(p); return true; });
+  return out;
+}
+
+/** The samples of `samplePoly`, in the same order, to a visitor that may stop early (returns false if stopped). */
+export function forSamples(poly: Polygon, step: number, fn: (p: Vec2) => boolean): boolean {
   const bb = bboxOf(poly);
   // scanlines: the inside intervals of each row (even–odd crossings), sampled on the same lattice
   const xs: number[] = [];
@@ -82,15 +88,15 @@ export function samplePoly(poly: Polygon, step: number): Vec2[] {
     xs.sort((u, v) => u - v);
     for (let t = 0; t + 1 < xs.length; t += 2) {
       const k0 = Math.ceil((xs[t] - bb.x0 - step / 2) / step), k1 = Math.floor((xs[t + 1] - bb.x0 - step / 2) / step);
-      for (let k = Math.max(0, k0); k <= k1; k++) { const x = bb.x0 + step / 2 + k * step; if (x < bb.x1) out.push({ x, y }); }
+      for (let k = Math.max(0, k0); k <= k1; k++) { const x = bb.x0 + step / 2 + k * step; if (x < bb.x1 && !fn({ x, y })) return false; }
     }
   }
   for (let i = 0; i < poly.length; i++) {
     const a = poly[i], b = poly[(i + 1) % poly.length];
     const n = Math.max(1, Math.ceil(dist(a, b) / (step / 2)));
-    for (let k = 0; k < n; k++) out.push({ x: a.x + ((b.x - a.x) * k) / n, y: a.y + ((b.y - a.y) * k) / n });
+    for (let k = 0; k < n; k++) if (!fn({ x: a.x + ((b.x - a.x) * k) / n, y: a.y + ((b.y - a.y) * k) / n })) return false;
   }
-  return out;
+  return true;
 }
 
 /** Share of the polygon's samples that lie in water (terrain grid). */

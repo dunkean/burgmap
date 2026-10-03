@@ -12,20 +12,52 @@ import type { MultiPoly } from '../../geo/bool';
 import type { UrbanCtx } from '../context';
 import type { Streets } from '../streets';
 import { bboxOf } from '../../geo/poly';
-import { rasterizePolys } from '../../geo/raster';
-import { samplePoly, clearOfStreets, polysNear } from './lots';
+import { forSamples, clearOfStreets, polysNear } from './lots';
 
-/** Raster membership test of a region (cell `c` m). */
+/**
+ * Raster membership test of a region (cell `c` m) on the map's lattice. Only the window of the region's box is
+ * stored (a 40 km map would need 10^7+ cells per mask); the cells are the ones `rasterizePolys` would set on the
+ * whole lattice.
+ */
 export class Mask {
   readonly n: number; readonly cell: number; readonly data: Uint8Array;
+  private x0 = 0; private y0 = 0; private w = 0; private h = 0;
   constructor(size: number, m: MultiPoly, cell = 4) {
     this.cell = cell;
     this.n = Math.ceil(size / cell);
-    this.data = rasterizePolys(m.flatMap((ph) => [ph.outer, ...ph.holes]), this.n, this.n, cell);
+    const rings = m.flatMap((ph) => [ph.outer, ...ph.holes]);
+    let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
+    for (const r of rings) for (const q of r) { if (q.x < bx0) bx0 = q.x; if (q.x > bx1) bx1 = q.x; if (q.y < by0) by0 = q.y; if (q.y > by1) by1 = q.y; }
+    if (!isFinite(bx0)) { this.data = new Uint8Array(0); return; }
+    const n = this.n;
+    const c0 = Math.max(0, Math.floor(bx0 / cell - 0.5)), c1 = Math.min(n - 1, Math.ceil(bx1 / cell - 0.5));
+    const r0 = Math.max(0, Math.floor(by0 / cell - 0.5)), r1 = Math.min(n - 1, Math.ceil(by1 / cell - 0.5));
+    if (c1 < c0 || r1 < r0) { this.data = new Uint8Array(0); return; }
+    this.x0 = c0; this.y0 = r0; this.w = c1 - c0 + 1; this.h = r1 - r0 + 1;
+    this.data = new Uint8Array(this.w * this.h);
+    // rasterizePolys on the whole lattice, restricted to the window
+    const xs: number[] = [];
+    for (let r = r0; r <= r1; r++) {
+      const y = (r + 0.5) * cell;
+      xs.length = 0;
+      for (const p of rings) {
+        for (let i = 0, j = p.length - 1; i < p.length; j = i++) {
+          const a = p[i], b = p[j];
+          if ((a.y > y) !== (b.y > y)) xs.push(a.x + ((y - a.y) * (b.x - a.x)) / (b.y - a.y));
+        }
+      }
+      xs.sort((a, b) => a - b);
+      for (let k = 0; k + 1 < xs.length; k += 2) {
+        const ca = Math.max(0, Math.ceil(xs[k] / cell - 0.5)), cb = Math.min(n - 1, Math.floor(xs[k + 1] / cell - 0.5));
+        for (let c = ca; c <= cb; c++) this.data[(r - r0) * this.w + (c - c0)] = 1;
+      }
+    }
   }
   has(p: Vec2): boolean {
     const i = Math.floor(p.x / this.cell), j = Math.floor(p.y / this.cell);
-    return i >= 0 && j >= 0 && i < this.n && j < this.n && this.data[j * this.n + i] === 1;
+    if (!(i >= 0 && j >= 0 && i < this.n && j < this.n)) return false;
+    const u = i - this.x0, v = j - this.y0;
+    return u >= 0 && v >= 0 && u < this.w && v < this.h && this.data[v * this.w + u] === 1;
   }
 }
 
@@ -65,14 +97,16 @@ export function siteLot(ctx: UrbanCtx, streets: Streets, spec: LotSpec, rng: Rng
       const poly = spec.shape(c, ang, k);
       const bb = bboxOf(poly);
       if (bb.x0 < 5 || bb.y0 < 5 || bb.x1 > S - 5 || bb.y1 > S - 5) continue;
-      const smp = samplePoly(poly, 12);
-      let ok = true, wet = 0;
-      for (const p of smp) {
-        if (spec.within && !spec.within.has(p)) { ok = false; break; }
-        if (spec.outside && spec.outside.has(p)) { ok = false; break; }
+      // (samples visited lazily: the first one outside the allowed regions settles it)
+      let wet = 0, cnt = 0;
+      const ok = forSamples(poly, 12, (p) => {
+        if (spec.within && !spec.within.has(p)) return false;
+        if (spec.outside && spec.outside.has(p)) return false;
         if (ctx.isWater(p)) wet++;
-      }
-      if (!ok || wet > (spec.wet ?? 0) * smp.length) continue;
+        cnt++;
+        return true;
+      });
+      if (!ok || wet > (spec.wet ?? 0) * cnt) continue;
       if (spec.avoid.some((a) => polysNear(poly, a, spec.gap))) continue;
       if (!clearOfStreets(poly, streets, spec.margin, spec.ignore)) continue;
       return { poly, c, ang, k, s: spec.score(poly, c, ang, k) + 0.05 * rng.float() };
