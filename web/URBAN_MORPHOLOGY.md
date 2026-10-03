@@ -160,6 +160,8 @@ Population is a continuous option (log slider). The class is derived from it, an
 - A cache (LRU) of generated districts. The "full detail export" of a megacity can be done tile by tile.
 - Hamlets up to cities (< 50 k) may still generate everything eagerly.
 
+**Implemented** (`urban/mega/`, see ARCHITECTURE.md "Megacity scaling"): main settlements above `eagerPop` (default 40 000) get the macro plan + lazy quarters; at or below it the eager town stage runs unchanged. The lazy unit is the *quarter* (the piece between arterials, 4–15 ha), seed `fork('quarter:' + id)`.
+
 ## 4. Mixing
 
 - **By phase (discrete)**: `phases: [{morphology:'roman-core'}, {morphology:'european-organic'}, {morphology:'european-organic', ribbon:true}]`. This covers most historical cases (colonial extensions, conquered cities, planned new towns attached to old ones).
