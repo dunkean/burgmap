@@ -199,27 +199,53 @@ export function inscribed(outer: Polygon, holes: Polygon[] = [], precision = 0.5
   const w = bb.x1 - bb.x0, h = bb.y1 - bb.y0;
   const cellSize = Math.min(w, h);
   if (cellSize <= 0) return { c: outer[0], r: 0 };
+  // (flat coordinates; the same arithmetic as pointInRing / distToSeg, without a point object per edge)
+  const RX = rings.map((r) => Float64Array.from(r, (q) => q.x)), RY = rings.map((r) => Float64Array.from(r, (q) => q.y));
   const sd = (x: number, y: number): number => {
     let inside = false, md = Infinity;
-    for (const r of rings) {
-      for (let i = 0, j = r.length - 1; i < r.length; j = i++) {
-        const a = r[i], b = r[j];
-        if ((a.y > y) !== (b.y > y) && x < ((b.x - a.x) * (y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
-        const d = distToSeg({ x, y }, a, b);
+    for (let ri = 0; ri < RX.length; ri++) {
+      const X = RX[ri], Y = RY[ri], m = X.length;
+      for (let i = 0, j = m - 1; i < m; j = i++) {
+        const ax = X[i], ay = Y[i], bx = X[j], by = Y[j];
+        if ((ay > y) !== (by > y) && x < ((bx - ax) * (y - ay)) / (by - ay) + ax) inside = !inside;
+        const dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy;
+        const t = l2 === 0 ? 0 : Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / l2));
+        const d = Math.hypot(x - ax - t * dx, y - ay - t * dy);
         if (d < md) md = d;
       }
     }
     return inside ? md : -md;
   };
-  interface Cell { x: number; y: number; h: number; d: number; max: number }
-  const mk = (x: number, y: number, hh: number): Cell => { const d = sd(x, y); return { x, y, h: hh, d, max: d + hh * Math.SQRT2 }; };
-  const queue: Cell[] = [];
+  interface Cell { x: number; y: number; h: number; d: number; max: number; seq: number }
+  let seq = 0;
+  const mk = (x: number, y: number, hh: number): Cell => { const d = sd(x, y); return { x, y, h: hh, d, max: d + hh * Math.SQRT2, seq: seq++ }; };
+  // max-heap on `max`, ties to the earliest pushed (the pop order of the former sorted array: an insertion went
+  // before its equals and pops came from the end)
+  const heap: Cell[] = [];
+  const above = (a: Cell, b: Cell): boolean => a.max > b.max || (a.max === b.max && a.seq < b.seq);
   const push = (c: Cell) => {
-    // binary insertion by max (ascending); pop from end = largest
-    let lo = 0, hi = queue.length;
-    while (lo < hi) { const m = (lo + hi) >> 1; if (queue[m].max < c.max) lo = m + 1; else hi = m; }
-    queue.splice(lo, 0, c);
+    let i = heap.length;
+    heap.push(c);
+    while (i > 0) { const p = (i - 1) >> 1; if (!above(c, heap[p])) break; heap[i] = heap[p]; i = p; }
+    heap[i] = c;
   };
+  const pop = (): Cell => {
+    const top = heap[0], last = heap.pop()!;
+    const m = heap.length;
+    if (m) {
+      let i = 0;
+      for (;;) {
+        let c = 2 * i + 1;
+        if (c >= m) break;
+        if (c + 1 < m && above(heap[c + 1], heap[c])) c++;
+        if (!above(heap[c], last)) break;
+        heap[i] = heap[c]; i = c;
+      }
+      heap[i] = last;
+    }
+    return top;
+  };
+  const queue = { get length() { return heap.length; }, pop };
   let hh = cellSize / 2;
   for (let x = bb.x0; x < bb.x1; x += cellSize) for (let y = bb.y0; y < bb.y1; y += cellSize) push(mk(x + hh, y + hh, hh));
   // centroid-ish seed
@@ -230,7 +256,7 @@ export function inscribed(outer: Polygon, holes: Polygon[] = [], precision = 0.5
   if (bbc.d > best.d) best = bbc;
   let guard = 0;
   while (queue.length && guard++ < 4000) {
-    const c = queue.pop()!;
+    const c = queue.pop();
     if (c.d > best.d) best = c;
     if (c.max - best.d <= precision) continue;
     hh = c.h / 2;
