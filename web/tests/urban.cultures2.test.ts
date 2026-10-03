@@ -65,7 +65,7 @@ export const SIGNATURES: Record<string, (w: World) => void> = {
   },
   khmer: (w) => {
     const u = w.urban!;
-    expect(u.blockInfo.some((b) => b.compound === 'temple-mountain'), 'khmer: temple-mountain at the centre').toBe(true);
+    expect(u.blockInfo.some((b) => b.compound === 'temple-mountain' || b.compound === 'prasat'), 'khmer: temple-mountain at the centre (a prasat for a village)').toBe(true);
     expect(arches(w).get('stilt-house') ?? 0, 'khmer: stilt houses').toBeGreaterThan(5);
     expect(lineKinds(w).has('moat'), 'khmer: moat').toBe(true);
     expect(u.landmarks.filter((l) => l.kind === 'pond').length, 'khmer: ponds').toBeGreaterThan(3);

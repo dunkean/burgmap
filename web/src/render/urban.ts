@@ -5,6 +5,7 @@ import type { Polygon } from '../gen/core/geom';
 import type { Palette } from './styles';
 import { f1, pathD } from './util';
 import { area } from '../gen/geo/poly';
+import { FENCE_STYLE } from './scene';
 
 const phD = (p: PolyH): string => pathD(p.outer, true) + p.holes.map((h) => pathD(h, true)).join('');
 
@@ -145,30 +146,26 @@ function buildingsSvg(ub: NonNullable<World['urban']>, U: Palette['urban'], lw: 
 const GROUND_USES = new Set(['bailey', 'causeway', 'ghat', 'castle-honmaru', 'compound:castle-honmaru', 'bailey-gate', 'esplanade']);
 /** Fences of camps and villages (width m): byre, yard, pen and orda fences, palisade lines inside a village. */
 const CAMP_FENCES: Record<string, number> = { 'kraal-fence': 1.1, 'yard-fence': 0.45, 'pen-fence': 0.5, 'orda-fence': 0.8, palisade: 1.2, 'turf-wall': 2.2, albarrada: 0.9 };
-/**
- * Fences drawn as fences: a thin rail line with its posts (a dash pattern of short wide strokes), stakes close
- * together for a palisade; a turf wall is a low grassy bank; a dry-stone wall a row of stones. [rail, post width,
- * post length, gap] in meters.
- */
-export const FENCE_STYLE: Record<string, [number, number, number, number]> = {
-  'yard-fence': [0.16, 0.55, 0.45, 2.4], 'pen-fence': [0.14, 0.45, 0.4, 1.8], 'orda-fence': [0.2, 0.7, 0.55, 1.6],
-  palisade: [0.3, 1.05, 0.55, 0.28], 'kraal-fence': [0.3, 1.15, 0.8, 0.5],
-};
+/** Fences drawn as fences: a rail line with its posts (stakes close together for a palisade); a turf wall is a low
+ * grassy bank; a dry-stone wall a row of stones. */
 function fenceSvg(k: string, d: string, pal: Palette, lw: (m: number, px: number) => string): string {
   const U = pal.urban;
   if (k === 'turf-wall') return `<path d="${d}" fill="none" stroke="${mixHex(pal.grass, U.wall, 0.35)}" stroke-opacity="0.42" stroke-width="${lw(2.2, 0.8)}"/><path d="${d}" fill="none" stroke="${U.wall}" stroke-opacity="0.45" stroke-width="${lw(0.16, 0.15)}"/>`;
-  if (k === 'albarrada') return `<path d="${d}" fill="none" stroke="${U.wall}" stroke-opacity="0.55" stroke-width="${lw(0.85, 0.3)}" stroke-dasharray="0.9 0.45" stroke-linecap="round"/>`;
+  if (k === 'albarrada') return `<path d="${d}" fill="none" stroke="${U.wall}" stroke-opacity="0.4" stroke-width="${lw(0.85, 0.3)}" stroke-dasharray="0.9 0.45" stroke-linecap="round"/>`;
   const [rail, pw, pl, gap] = FENCE_STYLE[k] ?? FENCE_STYLE['yard-fence'];
   return `<path d="${d}" fill="none" stroke="${U.wall}" stroke-opacity="0.8" stroke-width="${lw(rail, 0.18)}"/><path d="${d}" fill="none" stroke="${U.wall}" stroke-opacity="0.9" stroke-width="${f1(pw)}" stroke-dasharray="${pl} ${gap}" stroke-linecap="butt"/>`;
 }
-const WALL_LINES: Record<string, number> = { 'arcane-circle': 0.5, 'lock-gate': 0.8, bank: 0.8, stands: 2.4, dome: 0.6, gallery: 2.2, 'zigzag-wall': 2.4, 'canal-wall': 1, 'pyramid-step': 0.5, 'stall-row': 2.2,  'compound-wall': 1, 'citadel-wall': 2.4, 'stone-wall': 1.8, prakara: 1.6, 'ward-wall': 1.8 };
+const WALL_LINES: Record<string, number> = { 'arcane-circle': 0.5, 'lock-gate': 0.8, bank: 0.8, stands: 2.4, dome: 0.6, gallery: 2.2, 'zigzag-wall': 2.4, 'canal-wall': 1, 'pyramid-step': 0.5, 'stall-row': 2.2,  'compound-wall': 1, 'citadel-wall': 2.4, 'stone-wall': 1.8, prakara: 1.6, 'ward-wall': 1.8, platform: 0.4, stela: 1.1, 'sacbe-edge': 0.5, balustrade: 1 };
 
 /** Compound grounds, water pieces (moats, tanks) and the moat outside the town wall (drawn under the buildings). */
 function cultureUnderlay(ub: NonNullable<World['urban']>, pal: Palette, lw: (m: number, px: number) => string): string {
   const U = pal.urban;
   let s = '';
   const moats = (ub.lines ?? []).filter((l) => l.kind === 'moat');
-  if (moats.length) s += `<path class="u-moat" d="${moats.map((l) => pathD(l.path, !!l.closed)).join('')}" fill="none" stroke="${pal.riverFill}" stroke-width="${f1(moats[0].width ?? 8)}" stroke-linejoin="miter"/>`;
+  // (one path per width: a city moat and the moats of its temples differ)
+  const moatW = new Map<number, string>();
+  for (const l of moats) { const w = l.width ?? 8; moatW.set(w, (moatW.get(w) ?? '') + pathD(l.path, !!l.closed)); }
+  for (const [w, d] of moatW) s += `<path class="u-moat" d="${d}" fill="none" stroke="${pal.riverFill}" stroke-width="${f1(w)}" stroke-linejoin="miter"/>`;
   const grounds = ub.parcels.filter((p) => (typeof p.use === 'string' && p.use.startsWith('compound:')) || GROUND_USES.has(p.use));
   if (grounds.length) s += `<path class="u-compounds" d="${grounds.map((p) => pathD(p.poly, true)).join('')}" fill="${U.place}"/>`;
   const sahn = ub.landmarks.filter((l) => l.kind === 'sahn');
@@ -223,6 +220,7 @@ function cultureOverlay(ub: NonNullable<World['urban']>, pal: Palette, lw: (m: n
     else if (k === 'andene') s += `<path d="${d}" fill="none" stroke="${U.wall}" stroke-width="${lw(0.9, 0.4)}" stroke-opacity="0.75"/>`;
     else if (k === 'thorn-fence') s += `<path d="${d}" fill="none" stroke="${pal.treeInk ?? '#4a6a3a'}" stroke-width="${lw(2.2, 0.8)}" stroke-opacity="0.85" stroke-dasharray="1.3 0.9" stroke-linecap="round"/>`;
     else if (CAMP_FENCES[k]) s += fenceSvg(k, d, pal, lw);
+    else if (k === 'bund') s += `<path d="${d}" fill="none" stroke="${U.plotLine}" stroke-opacity="0.35" stroke-width="${lw(0.4, 0.1)}" stroke-linecap="butt"/>`;
     else if (k === 'roof-line') s += `<path d="${d}" fill="none" stroke="${U.massEdge}" stroke-opacity="0.7" stroke-width="${lw(0.2, 0.08)}" stroke-linecap="butt"/>`;
     else if (k === 'rampart') s += `<path d="${d}" fill="none" stroke="${U.garden}" stroke-width="${lw(7, 1.4)}" stroke-opacity="0.9"/><path d="${d}" fill="none" stroke="${U.wall}" stroke-width="${lw(0.6, 0.3)}"/>`;
     else if (k === 'ditch') s += `<path d="${d}" fill="none" stroke="${U.wall}" stroke-width="${lw(4, 0.9)}" stroke-opacity="0.35"/>`;
@@ -254,11 +252,15 @@ function cultureOverlay(ub: NonNullable<World['urban']>, pal: Palette, lw: (m: n
 }
 
 /** Parcel uses of an open-ground settlement drawn as grass (yards, paddocks), gardens and open greens. */
-export const OPEN_GRASS_USES = ['plot', 'pen', 'commons'];
+export const OPEN_GRASS_USES = ['pen', 'commons'];
 export const OPEN_GREEN_USES = ['meadow', 'green'];
 /** Trampled earth of the paths of an open-ground settlement (between the rural track ink and the street colour). */
 export const pathEarth = (pal: Palette): string => mixHex(pal.trackFill, pal.urban.street, 0.52);
 export const yardEarthTone = (pal: Palette): string => mixHex(pal.farmYard, pal.trackFill, 0.12);
+/** Opaque ground of a walled open-ground city: the paper under a light meadow tint. */
+export const openGroundBase = (pal: Palette): string => mixHex(pal.paper, pal.land.meadow, 0.35);
+/** Width (m) of the grass band drawn round the quarters of an open-ground settlement. */
+export const OPEN_HALO = 12;
 
 /**
  * Open ground (camps, barbarian and native villages): no street space or block fill. Yards and paddocks are grass
@@ -270,6 +272,12 @@ function openGroundSvg(ub: NonNullable<World['urban']>, pal: Palette, lw: (m: nu
   const mul = pal.landBlend === 'multiply' ? ' style="mix-blend-mode:multiply"' : '';
   let s = `<defs><pattern id="p-utuft" patternUnits="userSpaceOnUse" width="11" height="9"><path d="M2.5 4.5l-0.8-1.9M2.5 4.5v-2.1M2.5 4.5l0.8-1.9M8 8.4l-0.8-1.9M8 8.4l0.8-1.9" stroke="${pal.grass}" stroke-width="0.35" fill="none" stroke-linecap="round" opacity="0.75"/></pattern></defs>`;
   const of = (uses: string[]) => ub.parcels.filter((p) => uses.includes(p.use)).map((p) => pathD(p.poly, true)).join('');
+  // the settlement's ground: its quarters and a band round them, grass (the land use keeps a margin round the
+  // footprint: without this the terrain shows through it as a bare patch)
+  const ground = ub.quarters.map((q) => pathD(q.poly.outer, true)).join('');
+  // (a walled city hides the regional roads under it: its ground is opaque, the meadow tint laid on the paper)
+  if (ground && ub.walls?.length) s += `<path class="u-ground-base" d="${ub.quarters.map((q) => pathD(q.poly.outer, true)).join('')}" fill="${openGroundBase(pal)}"/>`;
+  if (ground) s += `<g class="u-ground"><path d="${ground}" fill="${pal.land.meadow}" fill-opacity="${f1(pal.landOpacity * 0.8)}" stroke="${pal.land.meadow}" stroke-opacity="${f1(pal.landOpacity * 0.8)}" stroke-width="${OPEN_HALO * 2}" stroke-linejoin="round"${mul}/><path d="${ground}" fill="url(#p-utuft)" stroke="url(#p-utuft)" stroke-width="${OPEN_HALO * 2}" stroke-linejoin="round"/></g>`;
   const grass = of(OPEN_GRASS_USES);
   if (grass) s += `<g class="u-yards-grass"><path d="${grass}" fill="${pal.land.pasture}" fill-opacity="${f1(pal.landOpacity * 0.85)}"${mul}/><path d="${grass}" fill="url(#p-utuft)"/></g>`;
   const green = of(OPEN_GREEN_USES);
@@ -365,8 +373,8 @@ export function urbanLayer(world: World, pal: Palette, u: number, debug: boolean
   const mains = ub.streets.filter((st) => st.rank <= 1 && st.role !== 'close' && !secondary.has(st));
   const minW = 2.4 * u;
   const wide = mains.filter((st) => st.width < minW);
-  if (wide.length) s += `<path class="u-main-streets"${stilts || !(world.terrain.coastline.length || world.terrain.lakes.some((l) => l.length >= 3)) ? '' : ' clip-path="url(#landclip)"'} d="${wide.map((st) => pathD(st.path, false)).join('')}" fill="none" stroke="${U.street}" stroke-width="${f1(minW)}" stroke-linecap="round" stroke-linejoin="round"/>`;
-  if (!stilts) s += `<path class="u-block-edges" d="${ub.blocks.map((b) => pathD(b, true)).join('')}" fill="none" stroke="${U.blockEdge}" stroke-width="${lw(U.blockEdgeW, 0.3)}"/>`;
+  if (wide.length && !open) s += `<path class="u-main-streets"${stilts || !(world.terrain.coastline.length || world.terrain.lakes.some((l) => l.length >= 3)) ? '' : ' clip-path="url(#landclip)"'} d="${wide.map((st) => pathD(st.path, false)).join('')}" fill="none" stroke="${U.street}" stroke-width="${f1(minW)}" stroke-linecap="round" stroke-linejoin="round"/>`;
+  if (!stilts && !open) s += `<path class="u-block-edges" d="${ub.blocks.map((b) => pathD(b, true)).join('')}" fill="none" stroke="${U.blockEdge}" stroke-width="${lw(U.blockEdgeW, 0.3)}"/>`;
   // small bridges over the streams (true size, by kind: footbridges, arches, fords), over the street space
   s += townBridgesSvg(world.bridges ?? [], pal);
   for (const w of ub.walls ?? []) s += wallSvg(w, U.wall, U.wallFill, U.wallScale, U.towerScale);

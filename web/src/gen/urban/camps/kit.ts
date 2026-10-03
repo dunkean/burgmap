@@ -38,6 +38,8 @@ export interface CampOut {
   squares: Polygon[];
   /** Trees (orchards, the party tree). */
   trees?: { x: number; y: number; r: number }[];
+  /** The quarters are disjoint and dry, and there is no outline: the footprint is the quarters themselves (no union). */
+  disjoint?: boolean;
 }
 
 export const emptyCamp = (): CampOut => ({ quarters: [], streets: [], blocks: [], parcels: [], buildings: [], lines: [], walls: [], landmarks: [], water: [], sites: [], outline: [], squares: [] });

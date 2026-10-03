@@ -91,15 +91,25 @@ export const URBAN_PARCEL_USES = {
   ditch: ['ditch'],
   /** Compound grounds (also any `compound:*`). */
   grounds: ['bailey', 'causeway', 'ghat', 'castle-honmaru', 'compound:castle-honmaru', 'bailey-gate', 'esplanade'],
+  /** Open ground (camps and barbarian villages, `renderHints.openGround`): yards and paddocks as grass, greens, gardens, fields. */
+  openGrass: ['pen', 'commons'],
+  openGreen: ['meadow', 'green'],
+  openGarden: ['garden'],
+  openField: ['field'],
 } as const;
-export const URBAN_LANDMARK_KINDS = ['sahn', 'garth', 'chinampa-canal', 'baray', 'pond', 'chinampa', 'cornfield', 'terrace-field', 'garden-bed', 'cemetery', 'tenshu-base', 'mebon'] as const;
+export const URBAN_LANDMARK_KINDS = ['sahn', 'garth', 'chinampa-canal', 'baray', 'pond', 'chinampa', 'cornfield', 'terrace-field', 'garden-bed', 'cemetery', 'tenshu-base', 'mebon', 'yard-earth'] as const;
 /** Building kinds with a dedicated look (the rest are ordinary roofs). */
 export const URBAN_BUILDING_KINDS = ['church', 'cathedral', 'landmark', 'house'] as const;
 /** Plan-line widths (m) of the generic wall-like kinds, and of camp / village fences (same tables as urban.ts). */
-export const WALL_LINE_W: Record<string, number> = { 'arcane-circle': 0.5, 'lock-gate': 0.8, bank: 0.8, stands: 2.4, dome: 0.6, gallery: 2.2, 'zigzag-wall': 2.4, 'canal-wall': 1, 'pyramid-step': 0.5, 'stall-row': 2.2, 'compound-wall': 1, 'citadel-wall': 2.4, 'stone-wall': 1.8, prakara: 1.6, 'ward-wall': 1.8 };
-export const CAMP_FENCE_W: Record<string, number> = { 'kraal-fence': 1.1, 'yard-fence': 0.45, 'pen-fence': 0.5, 'orda-fence': 0.8, palisade: 1.2 };
+export const WALL_LINE_W: Record<string, number> = { 'arcane-circle': 0.5, 'lock-gate': 0.8, bank: 0.8, stands: 2.4, dome: 0.6, gallery: 2.2, 'zigzag-wall': 2.4, 'canal-wall': 1, 'pyramid-step': 0.5, 'stall-row': 2.2, 'compound-wall': 1, 'citadel-wall': 2.4, 'stone-wall': 1.8, prakara: 1.6, 'ward-wall': 1.8, platform: 0.4, stela: 1.1, 'sacbe-edge': 0.5, balustrade: 1 };
+export const CAMP_FENCE_W: Record<string, number> = { 'kraal-fence': 1.1, 'yard-fence': 0.45, 'pen-fence': 0.5, 'orda-fence': 0.8, palisade: 1.2, 'turf-wall': 2.2, albarrada: 0.9 };
+/** Fences drawn as fences (same table as urban.ts): [rail width, post width, post length, gap] in meters. */
+export const FENCE_STYLE: Record<string, [number, number, number, number]> = {
+  'yard-fence': [0.16, 0.55, 0.45, 2.4], 'pen-fence': [0.14, 0.45, 0.4, 1.8], 'orda-fence': [0.2, 0.7, 0.55, 1.6],
+  palisade: [0.3, 1.05, 0.55, 0.28], 'kraal-fence': [0.3, 1.15, 0.8, 0.5],
+};
 /** Plan-line kinds with their own rule (anything else falls back to the wall-like stroke). */
-export const URBAN_SPECIAL_LINES = ['moat', 'canal', 'hedge', 'track', 'weir', 'parterre', 'footpath', 'ghat-steps', 'terrace', 'andene', 'thorn-fence', 'rampart', 'ditch', 'footbridge', 'bazaar-roof', 'qanat', 'qanat-shaft', 'hachure'] as const;
+export const URBAN_SPECIAL_LINES = ['moat', 'canal', 'hedge', 'track', 'weir', 'parterre', 'footpath', 'ghat-steps', 'terrace', 'andene', 'thorn-fence', 'rampart', 'ditch', 'footbridge', 'bazaar-roof', 'qanat', 'qanat-shaft', 'hachure', 'roof-line', 'bund'] as const;
 export const URBAN_LINE_KINDS: readonly string[] = [...URBAN_SPECIAL_LINES, ...Object.keys(WALL_LINE_W), ...Object.keys(CAMP_FENCE_W)];
 
 export const LAND_ORDER: LandKind[] = ['meadow', 'marsh', 'pasture', 'commons', 'forest', 'garden', 'orchard', 'field'];
@@ -275,6 +285,13 @@ export function buildScene(world0: World, tileSize = TILE_SIZE): Scene {
     addPoly('u-plazas', parcelsOf([...PU.plazas]));
     addPoly('u-grounds', ur.parcels.filter((p) => (typeof p.use === 'string' && p.use.startsWith('compound:')) || (PU.grounds as readonly string[]).includes(p.use)).map((p) => p.poly));
     addPoly('u-ditch', parcelsOf([...PU.ditch]));
+    if (ur.renderHints?.openGround && !ur.renderHints?.stilts) {
+      addPoly('u-open-grass', parcelsOf([...PU.openGrass]));
+      addPoly('u-open-green', parcelsOf([...PU.openGreen]));
+      addPoly('u-open-garden', parcelsOf([...PU.openGarden]));
+      addPoly('u-open-field', parcelsOf([...PU.openField]));
+      addPoly('u-yard-earth', ur.landmarks.filter((l) => l.kind === 'yard-earth').map((l) => l.poly));
+    }
     const lmOf = (...k: string[]): Polygon[] => ur.landmarks.filter((l) => k.includes(l.kind)).map((l) => l.poly);
     addPoly('u-sahn', lmOf('sahn'));
     addPoly('u-garth', lmOf('garth'));
@@ -322,7 +339,7 @@ export function buildScene(world0: World, tileSize = TILE_SIZE): Scene {
       crosses.push([{ x: cx - r, y: cy }, { x: cx + r, y: cy }], [{ x: cx, y: cy - r * 1.4 }, { x: cx, y: cy + r }]);
     }
     addLines('church-cross', 'cross', 'cross', 0.9, crosses);
-    addPoly('landmarks', ur.landmarks.map((l) => l.poly));
+    addPoly('landmarks', ur.landmarks.filter((l) => l.kind !== 'yard-earth').map((l) => l.poly));
     // streets by rank and (rounded) width so each layer shares one stroke width; the streets of the secondary
     // settlements (villages, hamlets) are kept in their own layers ('vstreet-*'): the renderer never draws them as
     // far-zoom arterials

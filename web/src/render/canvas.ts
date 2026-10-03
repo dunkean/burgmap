@@ -13,7 +13,7 @@ import { bridgeShapes, isKinded, type BridgeShapes } from './townbridges';
 import type { World, LandKind, Vec2 } from '../gen/types';
 import { PALETTES, Palette, MapStyle, ruralInk } from './styles';
 import { renderTerrainRaster } from './raster';
-import { buildScene, Scene, PolyLayer, LineLayer, TextureLayer, textureMarks, LAND_ORDER, WALL_LINE_W, CAMP_FENCE_W } from './scene';
+import { buildScene, Scene, PolyLayer, LineLayer, TextureLayer, textureMarks, LAND_ORDER, WALL_LINE_W, CAMP_FENCE_W, FENCE_STYLE } from './scene';
 import { renderView } from '../gen/settlements/merge';
 import { selectLod, lineWidth, Lod, BAND_MIN_EDGE, WAY_SCALE } from './lod';
 import { View, viewRect, Rect4 } from './view';
@@ -507,8 +507,49 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
     } else {
       // street space = the quarters; blocks, places and masses are laid on top
       const stilts = !!world.urban?.renderHints?.stilts;
+      // open ground (camps, barbarian villages): no street space or block fill (same rules as render/urban.ts)
+      const open = !!world.urban?.renderHints?.openGround && !stilts;
+      const earth = mixHex(pal.trackFill, U.street, 0.52);
       const near = lod.band >= 2;
-      if (stilts) {
+      if (open) {
+        const tuft = near ? getPattern(ctx, 'tuft', 11, 9, 0, (c, k) => {
+          c.globalAlpha = 0.75; c.strokeStyle = pal.grass; c.lineWidth = 0.35 * k; c.beginPath();
+          for (const [x, y] of [[2.5, 4.5], [8, 8.4]]) { c.moveTo(x * k, y * k); c.lineTo((x - 0.8) * k, (y - 1.9) * k); c.moveTo(x * k, y * k); c.lineTo((x + 0.8) * k, (y - 1.9) * k); }
+          c.stroke();
+        }) : null;
+        const tint = (name: string, color: string, alpha: number, pat: CanvasPattern | null): void => {
+          const l = polyL(name);
+          if (!l) return;
+          if (pal.landBlend === 'multiply') ctx.globalCompositeOperation = 'multiply';
+          fillPolys(name, color, alpha);
+          ctx.globalCompositeOperation = 'source-over';
+          if (pat) { ctx.fillStyle = pat; for (const p of polyPaths(l)) ctx.fill(p, 'evenodd'); }
+        };
+        // the settlement's ground: its quarters and a band round them (the land use keeps a margin round the footprint)
+        {
+          const gl = polyL('u-streets');
+          // (a walled city hides the regional roads under it: its ground is opaque)
+          if (gl && world.urban?.walls?.length) fillPolys('u-streets', mixHex(pal.paper, pal.land.meadow, 0.35), 1, 'nonzero');
+          if (gl) {
+            if (pal.landBlend === 'multiply') ctx.globalCompositeOperation = 'multiply';
+            ctx.globalAlpha = pal.landOpacity * 0.8; ctx.fillStyle = pal.land.meadow; ctx.strokeStyle = pal.land.meadow; ctx.lineWidth = 24; ctx.lineJoin = 'round';
+            const gp = polyPaths(gl);
+            // (one path for all: overlapping bands do not darken)
+            const all = new Path2D();
+            for (const p of gp) all.addPath(p);
+            ctx.fill(all, 'nonzero'); ctx.stroke(all);
+            ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+          }
+        }
+        tint('u-open-grass', pal.land.pasture, pal.landOpacity * 0.85, tuft);
+        tint('u-open-green', pal.land.meadow, pal.landOpacity, tuft);
+        tint('u-open-garden', pal.land.garden, pal.landOpacity, null);
+        tint('u-open-field', pal.land.field, pal.landOpacity, null);
+        fillPolys('u-yard-earth', mixHex(pal.farmYard, pal.trackFill, 0.12), 0.85);
+        // paths: trampled earth (wide causeways keep the street colour)
+        strokeLines(uStreets.filter((l) => !(l.width >= 6.5 && Number(l.kind.slice(1, 2)) <= 1)), earth, (l) => Math.max(1.2, l.width * 0.92, 0.8 / sc), 0.8);
+        strokeLines(uStreets.filter((l) => l.width >= 6.5 && Number(l.kind.slice(1, 2)) <= 1), U.street, (l) => Math.max(1.2, l.width * 0.92, 0.8 / sc));
+      } else if (stilts) {
         // a stilt town has no ground: boardwalks as planks over the water and the marsh
         strokeLines(uStreets, pal.bridgeInk, (l) => Math.max(1.6, l.width + 0.2, 1.4 / sc), 1, [], 'butt');
         strokeLines(uStreets, pal.bridgeDeck, (l) => Math.max(1, l.width - 0.7, 0.9 / sc), 1, [], 'butt');
@@ -534,10 +575,12 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
         c.moveTo(3.7 * k, 3.1 * k); c.lineTo(3.7 * k, 3.9 * k); c.moveTo(3.3 * k, 3.4 * k); c.lineTo(4.1 * k, 3.4 * k); c.stroke();
       }) : null;
       paved('u-places', U.place, pave);
-      paved('u-greens', U.garden, gardenPat, 0.6);
-      paved('u-yards', U.garden, gravePat);
-      if (!stilts) fillPolys('u-blocks', U.yard);
-      paved('u-meadows', U.garden, gardenPat, 0.45);
+      if (!open) {
+        paved('u-greens', U.garden, gardenPat, 0.6);
+        paved('u-yards', U.garden, gravePat);
+        if (!stilts) fillPolys('u-blocks', U.yard);
+        paved('u-meadows', U.garden, gardenPat, 0.45);
+      }
       paved('u-plazas', U.place, pave);
       const cornPat = near ? getPattern(ctx, 'corn', 3, 3, 12, (c, k) => { c.globalAlpha = 0.6; c.fillStyle = U.gardenInk; c.beginPath(); c.arc(1.5 * k, 1.5 * k, 0.45 * k, 0, TAU); c.fill(); }) : null;
       paved('u-cornfields', pal.land.field, cornPat);
@@ -553,7 +596,7 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
       if (polyL('u-ditch')) { paved('u-ditch', U.garden, gardenPat); strokePolys('u-ditch', U.plotLine, lw(0.3, 0.3)); }
       paved('u-cemetery', U.garden, gravePat);
       if (polyL('u-bases')) { fillPolys('u-bases', U.wallFill); strokePolys('u-bases', U.wall, lw(0.4, 0.5)); }
-      paved('u-backland', U.garden, world.urban?.renderHints?.graves ? gravePat : gardenPat);
+      if (!open) paved('u-backland', U.garden, world.urban?.renderHints?.graves ? gravePat : gardenPat);
       // building masses (courtyards are holes -> evenodd), with a soft drop shadow when zoomed in
       const masses = polyL('u-masses');
       if (lod.buildings && masses) {
@@ -636,10 +679,14 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
           const one = (color: string, width: number, alpha = 1, dash: number[] = [], cap: CanvasLineCap = 'round'): void => strokeLines([l], color, () => width, alpha, dash, cap);
           if (k === 'moat' || k === 'canal') continue;
           else if (k === 'hedge') one(treeInk, lw(2.6, 0.8), 0.8, fine ? [3, 1.5] : [], 'butt');
-          else if (k === 'track') one(U.street, lw(3, 0.6));
+          else if (k === 'track') one(open ? earth : U.street, lw(open ? 2.6 : 3, 0.6), open ? 0.75 : 1);
           else if (k === 'weir') one(U.wall, lw(1.4, 0.5), 1, fine ? [1.2, 0.6] : [], 'butt');
           else if (k === 'parterre') { if (fine) one(U.plotLine, lw(0.5, 0.4)); }
-          else if (k === 'footpath') { if (fine) one(U.street, lw(1.4, 0.6)); }
+          else if (k === 'footpath') { if (fine) one(open ? earth : U.street, lw(1.4, 0.6)); }
+          else if (k === 'roof-line') { if (near) one(U.massEdge, lw(0.2, 0.3), 0.7, [], 'butt'); }
+          else if (k === 'bund') { if (fine) one(U.plotLine, lw(0.4, 0.3), 0.35, [], 'butt'); }
+          else if (k === 'turf-wall') { one(mixHex(pal.grass, U.wall, 0.35), lw(2.2, 0.8), 0.42); if (fine) one(U.wall, lw(0.16, 0.3), 0.45); }
+          else if (k === 'albarrada') one(U.wall, lw(0.85, 0.4), 0.4, fine ? [0.9, 0.45] : []);
           else if (k === 'ghat-steps') { if (fine) one(U.plotLine, lw(0.3, 0.4)); }
           else if (k === 'terrace') one(U.wall, lw(1.6, 0.8));
           else if (k === 'andene') one(U.wall, lw(0.9, 0.5), 0.75);
@@ -662,8 +709,15 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
           else if (k === 'qanat-shaft') { ctx.fillStyle = U.garden; for (const p of linePaths(l)) ctx.fill(p, 'evenodd'); one(U.wall, lw(0.7, 0.5)); }
           else if (k === 'hachure') { if (fine) one(U.wall, lw(0.55, 0.5), 0.85, [], 'butt'); }
           else if (CAMP_FENCE_W[k] !== undefined) {
-            if (k === 'kraal-fence' || k === 'palisade') one(U.wall, lw(CAMP_FENCE_W[k], 0.4), 0.9);
-            else if (fine) one(U.wall, lw(CAMP_FENCE_W[k], 0.3), 0.9, [1.6, 0.8]);
+            // a rail with its posts (stakes close together for a palisade); zoomed out, a thin line
+            const st = FENCE_STYLE[k] ?? FENCE_STYLE['yard-fence'];
+            const far = !fine && k !== 'palisade' && k !== 'kraal-fence';
+            if (far) { if (lod.band >= 1) one(U.wall, lw(st[0], 0.3), 0.6); }
+            else {
+              one(U.wall, lw(st[0], 0.35), 0.8);
+              if (near) one(U.wall, st[1], 0.9, [st[2], st[3]], 'butt');
+              else if (k === 'palisade' || k === 'kraal-fence') one(U.wall, lw(st[1], 0.5), 0.75);
+            }
           }
           else one(U.wall, lw(WALL_LINE_W[k] ?? 1, 0.8), 1, [], 'square');
         }
@@ -694,9 +748,9 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
       const thin = mainsOf(lod.band === 1 ? 2 : 1).filter((l) => l.width * sc < minPx(l));
       ctx.save();
       if (land && !stilts) ctx.clip(land, 'evenodd');
-      strokeLines(thin, U.street, (l) => minPx(l) / sc);
+      strokeLines(thin, open ? earth : U.street, (l) => minPx(l) / sc, open ? 0.8 : 1);
       ctx.restore();
-      if (!stilts) strokePolys('block-edges', U.blockEdge, lw(U.blockEdgeW, 0.3));
+      if (!stilts && !open) strokePolys('block-edges', U.blockEdge, lw(U.blockEdgeW, 0.3));
       if (polyL('landmarks') && near) strokePolys('landmarks', U.landmark, lw(0.6, 0.6), 0.5, [px(5), px(3)]);
       // zoomed out: the landmark sites (wells, crosses, markets, compounds' named buildings) as a solid outline of at
       // least ~1.8 px, so the small ones stay visible on the full map

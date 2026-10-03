@@ -31,6 +31,7 @@ import { germanicVillage } from './germanic';
 import { norseFarms } from './norse';
 import { celticVillage } from './celtic';
 import { satellite } from './satellites';
+import { mayaCity } from './maya';
 
 export interface CampSpec {
   layout: 'ring' | 'yards' | 'longhouses' | 'pueblo' | 'ringfort' | 'khmer' | 'stilts' | 'warcamp';
@@ -189,6 +190,7 @@ function plan(cc: CampCtx, spec: CampSpec, c: Vec2, pop: number, rng: Rng): Camp
     case 'yards': if (spec.variant === 'germanic') return germanicVillage(cc, c, pop, rng);
       if (spec.variant === 'norse') return norseFarms(cc, c, pop, rng);
       if (spec.variant === 'celtic') return celticVillage(cc, c, pop, rng);
+      if (spec.variant === 'maya') return mayaCity(cc, c, pop, rng);
       return yardsVillage(cc, c, pop, YARD_VARIANTS[spec.variant] ?? YARD_VARIANTS.germanic, rng);
     case 'longhouses': return longhouseVillage(cc, c, pop, rng);
     case 'pueblo': return puebloSettlement(cc, c, pop, rng);
@@ -221,7 +223,7 @@ export function generateCamp(world: World, root: Rng, culture: Culture, pop0: nu
   const roadAngle = mainRoadAngleOf(world);
   // the main camp stands on dry ground: beside the stream rather than astride it (a short way leads from the road)
   let main = ctx.center;
-  const rDry = culture.id === 'barbarian-celtic' && !satMain && pops[0] >= 150 ? r0 : spec.variant === 'germanic' || spec.variant === 'norse' || satMain ? Math.min(r0 * 0.5, 90) : r0 * (spec.layout === 'yards' || spec.layout === 'longhouses' ? 1.3 : spec.layout === 'khmer' ? 1.15 : 1.05);
+  const rDry = spec.variant === 'maya' ? 90 : culture.id === 'barbarian-celtic' && !satMain && pops[0] >= 150 ? r0 : spec.variant === 'germanic' || spec.variant === 'norse' || satMain ? Math.min(r0 * 0.5, 90) : r0 * (spec.layout === 'yards' || spec.layout === 'longhouses' ? 1.3 : spec.layout === 'khmer' ? 1.15 : 1.05);
   // (a stilt town wants the water: it is sited on the shore by its layout)
   // (a hillfort or an oppidum: the whole enclosure dry, on the highest ground near the site)
   const fort = !satMain && ((culture.id === 'barbarian-celtic' && pops[0] >= 150) || culture.id === 'celtic-oppidum');
@@ -333,13 +335,15 @@ export function assemble(world: World, parts: CampOut[], culture: Culture, morph
     culture: culture.id, cultures: [culture.id], renderHints: { ...culture.render }, lines: [], trees: [], water: [], sites: [], quays: [],
   };
   const regions: PolyH[] = [];
+  const direct: PolyH[] = [];
   for (const part of parts) {
     const q0 = layer.quarters.length, b0 = layer.blocks.length, p0 = layer.parcels.length;
+    const byQ = new Map<number, Polygon[]>();
+    for (const b of part.blocks) { if (!byQ.has(b.quarter)) byQ.set(b.quarter, []); byQ.get(b.quarter)!.push(b.poly); }
     part.quarters.forEach((q, qi) => {
-      const mine = part.blocks.filter((b) => b.quarter === qi).map((b) => b.poly);
-      let ss: MultiPoly = [{ outer: q, holes: [] }];
-      if (mine.length) ss = differenceS(ss, unionMany(mine, 24, true));
-      layer.quarters.push({ poly: { outer: q, holes: [] }, phase: 1, zone: 'village', streetSpace: ss.map((p) => ({ outer: p.outer, holes: p.holes })) });
+      const mine = byQ.get(qi) ?? [];
+      // (the street space as the quarter with its blocks as holes, as the street engine gives it: no boolean)
+      layer.quarters.push({ poly: { outer: q, holes: [] }, phase: 1, zone: 'village', streetSpace: [{ outer: q, holes: mine }] });
     });
     part.blocks.forEach((b) => {
       layer.blocks.push(b.poly);
@@ -355,6 +359,7 @@ export function assemble(world: World, parts: CampOut[], culture: Culture, morph
     layer.sites!.push(...part.sites);
     layer.squares.push(...part.squares);
     if (part.trees) layer.trees!.push(...part.trees);
+    if (part.disjoint) { for (const q of part.quarters) direct.push({ outer: q, holes: [] }); for (const o of part.outline) regions.push({ outer: o, holes: [] }); continue; }
     for (const o of part.outline) regions.push({ outer: o, holes: [] });
     for (const q of part.quarters) regions.push({ outer: q, holes: [] });
   }
@@ -371,6 +376,7 @@ export function assemble(world: World, parts: CampOut[], culture: Culture, morph
   let foot: MultiPoly = regions.length ? unionS(regions) : [];
   if (water.length) foot = differenceS(foot, water);
   foot = foot.filter((ph) => area(ph.outer) > 50);
+  foot = [...foot, ...direct];
   layer.footprintH = foot.map((p) => ({ outer: p.outer, holes: p.holes }));
   layer.footprint = foot.map((p) => p.outer);
   layer.phases = [{ id: 1, kind: 'village', zone: 'village', region: layer.footprintH, walled: !!layer.walls?.length, fossil: false }];

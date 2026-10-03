@@ -77,7 +77,7 @@ export const CAMP_CULTURES: Culture[] = [
     // (Angkor Thom: the moated square, the temple-mountain at the crossing of the avenues, the barays)
     ...campBase('khmer', 'Khmer city (Angkor)', 'khmer'),
     scale: { min: 'hamlet', max: 'megacity' }, camp: { layout: 'khmer', variant: 'angkor' },
-    render: { towerShape: 'square', plotLines: true },
+    render: { towerShape: 'square', plotLines: false, openGround: true },
     sitePrefs: { flatness: 2.4, weights: { plain: 2.5, bridge: 1, hilltop: 0, valley: 0.5, harbor: 0.2 } },
   },
   {
