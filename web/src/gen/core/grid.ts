@@ -150,3 +150,34 @@ export function blurGrid(g: Grid, radius: number, passes = 2): Grid {
   }
   return { w, h, cell: g.cell, data: src };
 }
+
+/**
+ * The k-th smallest value of `a` (0-based), exactly the element `sort()` would put at index k (a numeric typed-array
+ * sort; -0 sorts before +0), found by quickselect on a copy in O(n) instead of a full sort. `a` holds no NaN.
+ */
+export function kthSmallest(a: ArrayLike<number>, k: number): number {
+  const n = a.length;
+  const v = Float64Array.from(a as ArrayLike<number>);
+  let lo = 0, hi = n - 1;
+  while (hi > lo) {
+    // median of three pivot, Hoare-style partition
+    const mid = (lo + hi) >> 1;
+    const x = v[lo], y = v[mid], z = v[hi];
+    const p = x < y ? (y < z ? y : x < z ? z : x) : (x < z ? x : y < z ? z : y);
+    let i = lo, j = hi;
+    while (i <= j) {
+      while (v[i] < p) i++;
+      while (v[j] > p) j--;
+      if (i <= j) { const t = v[i]; v[i] = v[j]; v[j] = t; i++; j--; }
+    }
+    if (k <= j) hi = j;
+    else if (k >= i) lo = i;
+    else break;
+  }
+  const r = v[k];
+  if (r !== 0) return r;
+  // ±0: sorted order is negatives, -0, +0, positives
+  let neg = 0, negZero = 0;
+  for (let i = 0; i < n; i++) { const x = a[i]; if (x < 0) neg++; else if (x === 0 && 1 / x < 0) negZero++; }
+  return k < neg + negZero ? -0 : 0;
+}

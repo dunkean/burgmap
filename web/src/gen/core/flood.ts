@@ -52,15 +52,21 @@ export function priorityFloodFast(h: Float32Array, w: number, hh: number, outlet
     }
   }
   let no = 0;
+  // neighbour offsets in D8 order (interior cells skip the bounds tests; same visiting order)
+  const DX = D8.map((d) => d[0]), DY = D8.map((d) => d[1]);
+  const OFF = D8.map((d) => d[1] * w + d[0]);
   while (hn > 0) {
     const c = pop();
     order[no++] = c;
     const cx = c % w, cy = (c / w) | 0;
     const fc = filled[c];
+    const inner = cx > 0 && cy > 0 && cx < w - 1 && cy < hh - 1;
     for (let k = 0; k < 8; k++) {
-      const nx = cx + D8[k][0], ny = cy + D8[k][1];
-      if (nx < 0 || ny < 0 || nx >= w || ny >= hh) continue;
-      const n = ny * w + nx;
+      if (!inner) {
+        const nx = cx + DX[k], ny = cy + DY[k];
+        if (nx < 0 || ny < 0 || nx >= w || ny >= hh) continue;
+      }
+      const n = c + OFF[k];
       if (closed[n]) continue;
       closed[n] = 1;
       const v = h[n];

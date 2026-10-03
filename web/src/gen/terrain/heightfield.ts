@@ -1,6 +1,6 @@
 import { Rng } from '../core/rng';
 import { Noise2D } from '../core/noise';
-import { Grid, createGrid } from '../core/grid';
+import { Grid, createGrid, kthSmallest } from '../core/grid';
 import { mountainRelief } from './erosion';
 import type { Options, Relief } from '../options';
 import { importedHeightfield } from './import';
@@ -192,14 +192,12 @@ export function generateHeightfield(
   // Shift so that the 1st percentile sits at the relief's minimum elevation (no rescale: slopes stay physical).
   const [lo] = RELIEF_RANGE[relief];
   {
-    const sorted = Float32Array.from(H).sort();
-    const p1 = sorted[Math.floor(sorted.length * 0.01)];
+    const p1 = kthSmallest(H, Math.floor(H.length * 0.01));
     for (let i = 0; i < H.length; i++) H[i] = Math.max(0.3, lo + (H[i] - p1));
   }
   let hi = 0;
   {
-    const sorted = Float32Array.from(H).sort();
-    hi = sorted[Math.floor(sorted.length * 0.99)];
+    hi = kthSmallest(H, Math.floor(H.length * 0.99));
   }
 
   // Coast

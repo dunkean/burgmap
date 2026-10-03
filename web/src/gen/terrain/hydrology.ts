@@ -2,7 +2,7 @@ import { Rng } from '../core/rng';
 import { Noise2D } from '../core/noise';
 import { MinHeap } from '../core/pq';
 import { priorityFloodFast, type FloodResult } from '../core/flood';
-import { Grid, createGrid, sampleGrid, slopeGrid, blurGrid, D8, D8_DIST } from '../core/grid';
+import { Grid, createGrid, sampleGrid, slopeGrid, blurGrid, D8, D8_DIST, kthSmallest } from '../core/grid';
 import { Vec2, Polyline, Polygon, chaikin, simplify, resample, polylineLength, dist, polygonArea, polygonContains, distToPolyline } from '../core/geom';
 import { Options, SIZE_PRESETS, RiverOpt } from '../options';
 import type { TerrainLayer, River } from '../types';
@@ -472,8 +472,8 @@ function incise(height: Grid, amp: number, strength: number): void {
     raw[i] = r;
     if ((i & 3) === 0) vals.push(r);
   }
-  vals.sort((a, b) => a - b);
-  const norm = vals.length ? vals[Math.floor(vals.length * 0.985)] : 1;
+  // (the 98.5th percentile: an order statistic, no full sort)
+  const norm = vals.length ? kthSmallest(vals, Math.floor(vals.length * 0.985)) : 1;
   const depthMax = amp * strength;
   const fine = createGrid(height.w, height.h, height.cell);
   for (let i = 0; i < N; i++) fine.data[i] = depthMax * Math.min(1.4, raw[i] / (norm || 1));
