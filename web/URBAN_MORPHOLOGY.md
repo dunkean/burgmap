@@ -162,6 +162,21 @@ Population is a continuous option (log slider). The class is derived from it, an
 
 **Implemented** (`urban/mega/`, see ARCHITECTURE.md "Megacity scaling"): main settlements above `eagerPop` (default 40 000) get the macro plan + lazy quarters; at or below it the eager town stage runs unchanged. The lazy unit is the *quarter* (the piece between arterials, 4–15 ha), seed `fork('quarter:' + id)`.
 
+Plan form (`mega/plan.ts`, `mega/rings.ts`):
+- Growth lines are cost isolines weighted per direction: growth is favoured along the river or the shore and the main roads, and each phase leans to its own side. Some later lines are partial: on one sector they *are* the older line (shared vertices), as with Paris's walls.
+- Every line is a max-deviation polygon whose vertices sit on high ground. Towers stand at the vertices and every 60–85 m along the runs. A stretch shared with an older standing wall is drawn once. Fused towns are 7–11-sided enceintes.
+- Radials wander, and some fork off an older road outside its gate.
+- City-rank elements:
+  - a citadel on the best defensible site (`m4-castle`, curtain drawn by the plan);
+  - university quarters near the cathedral or across the water;
+  - a collegiate church in each fused town;
+  - tanneries and mills by the water outside the walls;
+  - elite parks toward the palace;
+  - in lowland river cities, a canal down a former wall boulevard.
+- Arterials carry deterministic `anchors`. Quarter detail starts its first streets there, so streets continue across the arterial.
+- The stand-in fabric varies grain, orientation and built form by age and density. The worker pre-details the old core in the background.
+- Secondary settlements above the threshold get the same path when their lazy detail is built (quarter keys `si·MEGA_KEY + q`).
+
 ## 4. Mixing
 
 - **By phase (discrete)**: `phases: [{morphology:'roman-core'}, {morphology:'european-organic'}, {morphology:'european-organic', ribbon:true}]`. This covers most historical cases (colonial extensions, conquered cities, planned new towns attached to old ones).
