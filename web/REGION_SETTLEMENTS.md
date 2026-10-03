@@ -14,7 +14,8 @@ A map holds a **settlement system**, not a single town. Larger maps get a main t
 
 ## Automatic settlement system (central-place logic)
 
-- **Densities** (pre-industrial Europe, tunable): rural density 20–40 inh/km² outside towns. Villages of 150–600 inh spaced 2–4 km apart, hamlets of 15–80 inh in between, isolated farmsteads. Market towns of 1–5 k spaced 15–25 km apart, so they appear only on large maps.
+- **Densities** (a sparse, legible hierarchy rather than the full rural density, which cluttered big maps): villages of 150–600 inh some 3–6 km apart, their count sublinear in the usable area (`area^0.8 / 7`, ~14 on 300 km²); hamlets of 20–80 inh, half as many as villages, only on the best-scored third of the land; few labelled farmsteads (the others are implicit in the fields). Market towns of 1–5 k spaced 15–25 km apart, so they appear only on large maps.
+- **Automatic mode only**: spacing is widened by `AUTO_SPREAD` (1.3), and villages, hamlets and farmsteads keep `AUTO_MAIN_CLEAR` (2.5) main-town radii away from its center: its faubourgs and suburbs cover that ring. Explicit counts and lists keep the plain spacing with relaxation.
 - **Spacing (Christaller-like)**:
   - the main settlement first;
   - then secondary ones by decreasing size, each placed by site archetype scoring (water, flat dry land, crossings) with a minimum distance growing with both populations;

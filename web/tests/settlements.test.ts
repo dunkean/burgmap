@@ -4,6 +4,7 @@ import { generate, generateSettlementDetail } from '../src/gen/pipeline';
 import { makeOptions, toQuery, fromQuery, settlementsToString, Options } from '../src/gen/options';
 import type { World } from '../src/gen/types';
 import { unreachable, overlaps, spacingViolations } from './settlementCheck';
+import { autoCounts, AUTO_MAIN_CLEAR } from '../src/gen/settlements/planner';
 
 const T = 600000;
 const summary = (w: World) => (w.settlements ?? []).map((s) => ({ key: s.key, pop: s.population, cls: s.cls, culture: s.culture, x: Math.round(s.center.x * 10) / 10, y: Math.round(s.center.y * 10) / 10, name: s.name }));
@@ -98,6 +99,35 @@ describe('settlement list', () => {
   it('warns when the land cannot hold the requested settlements', () => {
     const w = generate(makeOptions({ seed: '2', mapSize: 2000, population: 300, settlements: { counts: { city: 0, town: 2, village: 12, hamlet: 0, farmstead: 0 } } }));
     expect(String(w.stats['settlements.warning'] ?? '')).toMatch(/could not be placed|relaxed/);
+    expect(overlaps(w)).toEqual([]);
+  }, T);
+});
+
+describe('automatic settlement system', () => {
+  it('counts grow sublinearly with the area and stay sparse', () => {
+    const a = autoCounts(80, 2500, 'hills'), b = autoCounts(300, 20000, 'hills'), c = autoCounts(1300, 20000, 'hills');
+    // villages some 3-6 km apart: one per ~15-30 km2 of usable land at 300 km2
+    expect(b.village).toBeGreaterThanOrEqual(8);
+    expect(b.village).toBeLessThanOrEqual(20);
+    expect(b.village / 300).toBeGreaterThan(c.village / 1300);
+    expect(a.village / 80).toBeGreaterThan(b.village / 300);
+    for (const k of [a, b, c]) {
+      expect(k.hamlet).toBeLessThanOrEqual(k.village);
+      expect(k.farmstead).toBeLessThanOrEqual(k.village);
+    }
+  });
+  it('a 20 km coastal city map: no crash, a sparse hierarchy, the outskirts left to the main town', () => {
+    const w = generate(fromQuery('seed=2&map=20000&coast=S&size=city'));
+    const S = w.settlements!;
+    const main = S[0];
+    const sec = S.filter((s) => !s.main);
+    const n = (cls: string) => sec.filter((s) => s.cls === cls).length;
+    expect(sec.length).toBeLessThanOrEqual(40);
+    expect(n('village')).toBeGreaterThanOrEqual(6);
+    expect(n('hamlet')).toBeLessThanOrEqual(n('village'));
+    expect(n('farmstead')).toBeLessThanOrEqual(n('village'));
+    for (const s of sec) if (s.cls !== 'town' && s.cls !== 'city') expect(Math.hypot(s.center.x - main.center.x, s.center.y - main.center.y)).toBeGreaterThanOrEqual(AUTO_MAIN_CLEAR * main.radius);
+    expect(spacingViolations(w)).toEqual([]);
     expect(overlaps(w)).toEqual([]);
   }, T);
 });
