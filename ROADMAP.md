@@ -20,8 +20,12 @@ This checklist reconciles the open work in `BUGS.md`, `HANDOFF.md` §7 and `web/
 - [ ] Water-aware town plans: audit every family and keep ordinary quarters and houses on dry land, with explicit exceptions for suitable water architecture (new user report).
 - [ ] Settlement placement: allow choosing the main city centre and centres of surrounding villages (new user report).
 - [ ] Large-map strokes: bound contour and field-interior strokes so they do not grow ugly with image/map extent (new user report).
+- [ ] Dense houses: fix overlapping footprints, arbitrary cuts and inconsistent geometry in tightly built quarters (new user report; dedicated parallel agent).
+- [ ] Road backgrounds: correct misplaced white ground patches, especially in the countryside (new user report).
 
 ## Scale, performance and test health
+
+Bug fixes take priority. The user requested a preliminary performance study, without committing to a Rust port: see `PERFORMANCE_STUDY.md` for measured generation, scene preparation, frame and export costs and the proposed profiling targets.
 
 - [ ] Megacity quarter detail: responsive loading at intermediate zoom, bounded memory, stable independent seeded results.
 - [ ] Absorbed village greens: plausible village places rather than accidental triangles.
