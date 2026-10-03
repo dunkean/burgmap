@@ -17,6 +17,7 @@ import { makeCtx } from './context';
 import { choosePopulation, chooseArchetype, planServedPhases, planFaubourgs, EnclosurePlan, zonesFor, PhaseInput, dilate } from './phases';
 import { buildPrimary, Quarter } from './primary';
 import { Streets, LAB_OPEN, LAB_WALL } from './streets';
+import { addOpenFringe, openEdgeFade, streetStrips } from './openfringe';
 import { mpArea, MultiPoly, differenceS, differenceSafeS, intersectionS } from '../geo/bool';
 import { ribbon } from '../geo/offset';
 import { GuidanceField } from './field';
@@ -475,6 +476,27 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     for (const [k, v] of Object.entries(sb.stats)) stats['sb.' + k] = v;
     stats['ms.streamBridges'] = Math.round((performance.now() - tsb) * 10) / 10;
   }
+  // Small extensions grow from connected street ends after the core's cuts are frozen.
+  const fringeQuarters = new Set<number>();
+  if (!eplan.walled && archetype === 'town' && flags.suburbs !== 'none') {
+    const protect: MultiPoly = [
+      ...prim.quarters.map((q) => ({ outer: q.lp.pts, holes: [] })),
+      ...castlesAll.map((c) => ({ outer: c.lot, holes: [] })),
+      ...(world.roads ?? []).filter((r) => r.kind !== 'track').flatMap((r) => streetStrips(r.path, r.width + 2)),
+      ...(world.bridges ?? []).flatMap((b) => streetStrips([b.a, b.b], b.width + 2)),
+      ...streets.list.filter((s) => s.ribbon).flatMap((s) => streetStrips(s.path, s.widths)),
+    ];
+    const fringe = addOpenFringe(ctx, prim, streets, nPh + 1, faubMorph, culture.id, rng.fork('openFringe'), protect);
+    for (const q of fringe) {
+      const qi = prim.quarters.length;
+      fringeQuarters.add(qi);
+      prim.quarters.push(q);
+      pieces.push(splitQuarter(ctx, q, qi, streets, field, { nucleus, gridAngle: mainAngle, terrainAngle, waterAngle: WATER_ANGLE }, rng.fork('q:' + qi)));
+    }
+    field.P = null;
+    stats['openFringe.quarters'] = fringe.length;
+    stats['quarters'] = prim.quarters.length;
+  }
   const t3 = performance.now();
   let demoted = 0;
   for (const st of streets.list) if (!streets.connected.has(st.id) && st.ribbon) { streets.demote(st.id); demoted++; }
@@ -640,16 +662,22 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   // (the wall distance only matters below 380 m: the fade is 1 beyond; an index of the ring edges finds it)
   const encIdx = new GridIndex<{ a: Vec2; b: Vec2 }>(40);
   for (const r of encRingsF) for (let i = 0; i < r.length; i++) encIdx.insertSeg(r[i], r[(i + 1) % r.length], { a: r[i], b: r[(i + 1) % r.length] });
-  const faubFade = (p: Vec2): number => {
+  const edgeDistance = (p: Vec2): number => {
     let d = 0;
     if (encRingsF.length) {
       d = Infinity;
       encIdx.forEachIn(p.x - 381, p.y - 381, p.x + 381, p.y + 381, (sg) => { const e = distToSeg(p, sg.a, sg.b); if (e < d) d = e; });
       if (d > 381) d = 1e9;
     }
-    const f = Math.max(0, Math.min(1, (d - 50) / 330));
+    return d;
+  };
+  const faubFade = (p: Vec2): number => {
+    const f = Math.max(0, Math.min(1, (edgeDistance(p) - 50) / 330));
     return subK ? Math.min(1, 0.12 + 1.35 * f) : f;
   };
+  const openBand = Math.max(30, Math.min(90, 0.18 * Math.sqrt(mpArea(eplan.enclosure) / Math.PI)));
+  const edgeFade = (p: Vec2, fringe: boolean): number => fringe ? 0.65 + 0.25 * Math.min(1, edgeDistance(p) / 100)
+    : !eplan.walled && archetype === 'town' && eplan.enclosure.some((ph) => pointInRing(ph.outer, p) && !ph.holes.some((h) => pointInRing(h, p))) ? openEdgeFade(edgeDistance(p), openBand) : 0;
   // the quay apron piece nearest the nucleus carries the fish market and the customs house
   let firstQuay = -1;
   carved.forEach((b, bi) => { if (b.lot && lotKind.get(b.lot) === 'm4-quay' && (firstQuay < 0 || dist(interiorPoint(b.poly), nucleus) < dist(interiorPoint(carved[firstQuay].poly), nucleus))) firstQuay = bi; });
@@ -688,7 +716,11 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
       : P.plotOp === 'garden' ? { plots: [], back: [b.poly] }
       : cutPlots(b.poly, bi, b.zone, infill, Pb, streets, br, wealthAt);
     for (const p of r.plots) p.wealth = wealthAt({ x: (p.front[0].x + p.front[1].x) / 2, y: (p.front[0].y + p.front[1].y) / 2 }, p.rank);
-    if (fade > 0) for (const p of r.plots) p.fade = faubFade({ x: (p.front[0].x + p.front[1].x) / 2, y: (p.front[0].y + p.front[1].y) / 2 });
+    for (const p of r.plots) {
+      const front = { x: (p.front[0].x + p.front[1].x) / 2, y: (p.front[0].y + p.front[1].y) / 2 };
+      const taper = P.faubFade !== false ? edgeFade(front, fringeQuarters.has(b.quarter)) : 0;
+      if (fade > 0 || taper > 0) p.fade = Math.max(fade > 0 ? faubFade(front) : 0, taper);
+    }
     const tb1 = performance.now() - tb0;
     if (tb1 > slowest.ms) { slowest.ms = tb1; slowest.bi = bi; slowest.n = b.poly.length; }
     // inns at the gates: a few plots along the entrance road merged into one courtyard inn lot
@@ -760,6 +792,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   const accessPlaces = (): Polygon[] => parcels.filter((p) => ['place', 'market', 'quay', 'green'].includes(String(p.use))).map((p) => p.poly);
   const plotBld: ArchBldg[][] = plots.map(() => []);
   const tBo = performance.now();
+  let openGardens = 0;
   plots.forEach((pl, pi) => {
     const pr = rng.fork('pl:' + pi);
     const cov = Math.max(0, Math.min(1, (blockInfill[pl.block] + pr.range(-0.03, 0.03)) * (1 - 0.4 * (pl.fade ?? 0))));
@@ -767,6 +800,12 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     const fm = { x: (pl.front[0].x + pl.front[1].x) / 2, y: (pl.front[0].y + pl.front[1].y) / 2 };
     const onQuay = quays.length > 0 && !!streets.nearest(fm, 10, (st) => st.role === 'quay');
     const craft = craftAt && dist(fm, craftAt) < 170;
+    const gap = plotMorph[pi].faubFade !== false && !onQuay && !first && !craft ? edgeFade(fm, false) : 0;
+    if (gap > 0 && pr.fork('openGap').chance(0.5 * gap)) {
+      plotGardens.push(pl.poly);
+      openGardens++;
+      return;
+    }
     for (const b of buildOn(pl, cov, plotMorph[pi], pr, courtHint(pl))) {
       if (b.kind === 'garden') { plotGardens.push(b.poly); continue; }
       if (first && b.kind === 'house') { b.arch = 'smithy'; first = false; }
@@ -781,6 +820,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   });
   // ---- access: every building touches the street or open ground reached from it (passages shared by two plots)
   stats['ms.buildOn'] = Math.round(performance.now() - tBo);
+  if (openGardens) stats['openEdge.gardens'] = openGardens;
   const tAcc = performance.now();
   {
     const streetAt = makeStreetAt(streets.list.filter((st) => st.ribbon).map((st) => ({ path: st.path, widths: st.widths, width: st.widths[0] })), accessPlaces());

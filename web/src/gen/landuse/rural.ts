@@ -8,7 +8,7 @@ import { Vec2, Polygon, Polyline, chaikin, simplify, polygonArea, polygonCentroi
 import { distanceField, forCellsNearPolyline, smoothstep } from '../core/field';
 import { marchingSquares } from '../terrain/contour';
 import { rasterizePolys } from '../geo/raster';
-import { unionS } from '../geo/bool';
+import { differenceSafeS, mpArea, unionS } from '../geo/bool';
 import { partitionRegion, pruneWays, FieldCtx, FieldNet } from './fields';
 import type { World, LandArea, LandKind, Farmstead, LandUseLayer, PolyH } from '../types';
 import { FARM_SIZES, farmSize, farmType, layoutFarm, placeFarm, frameOf, segRectDist, type FarmContext, type LocalFarm } from './farms';
@@ -151,6 +151,11 @@ export function generateRural(world: World, root: Rng, mainRoads?: number, strip
   const reserveCost = 1.25 * site.reserveRadius;
   const costC = site.cost.data;
   const reserve = new Uint8Array(N);
+  // Farm placement keeps its full safety reserve. Vegetation can meet an open town much more closely.
+  const openTown = world.urban?.archetype === 'town' && !world.urban.renderHints?.openGround && !world.urban.renderHints?.stilts
+    && !(world.urban.walls ?? []).some((w) => !w.role || w.role === 'town' || w.role === 'outer')
+    && !world.urban.phases.some((p) => p.walled) && !(world.urban.lines ?? []).some((l) => l.kind === 'hedge');
+  let coverReserve: Uint8Array | null = null;
   const uDist = new Float32Array(N);
   const builtFoot = world.urban?.footprintH ?? [];
   const foot = world.urban?.ruralReserve?.length ? unionS(builtFoot, world.urban.ruralReserve) : builtFoot;
@@ -158,10 +163,16 @@ export function generateRural(world: World, root: Rng, mainRoads?: number, strip
     const rings: Polygon[] = [];
     for (const ph of foot) { rings.push(ph.outer); for (const hl of ph.holes) rings.push(hl); }
     rasterizePolys(rings, n, n, cell, reserve);
+    if (openTown) coverReserve = reserve.slice();
     const margin = (world.urban?.walls?.length ? 14 : 5) + 0.5 * cell;
     const dRes = distanceField(reserve, n, n, cell, costC);
     for (let i = 0; i < N; i++) {
       if (dRes.dist[i] <= margin) reserve[i] = 1;
+      if (coverReserve && dRes.dist[i] <= margin) {
+        const wx = ((i % n) + 0.5) * cell, wy = (((i / n) | 0) + 0.5) * cell;
+        const coverMargin = 0.5 * cell + 2 + noise.noise(wx / 40, wy / 40);
+        if (dRes.dist[i] <= coverMargin) coverReserve[i] = 1;
+      }
       uDist[i] = Math.max(0, Math.min(1e5, costC[i]) - (dRes.val![i] || 0));
     }
   } else {
@@ -200,7 +211,7 @@ export function generateRural(world: World, root: Rng, mainRoads?: number, strip
     // clearings are not circles: the reach of the fields varies with soil and access (low-frequency warp)
     const warp = new Noise2D(rr.fork('clearing'));
     for (let i = 0; i < N; i++) {
-      if (dRes.dist[i] <= 5 + 0.5 * cell) reserve[i] = 1;
+      if (dRes.dist[i] <= 5 + 0.5 * cell) { reserve[i] = 1; if (coverReserve) coverReserve[i] = 1; }
       const wx = ((i % n) + 0.5) * cell, wy = (((i / n) | 0) + 0.5) * cell;
       const u2 = dSec.dist[i] * dSec.val![i] * (1 + 0.38 * warp.fbm(wx / 650, wy / 650, 3));
       if (u2 < uDist[i]) uDist[i] = u2;
@@ -459,7 +470,7 @@ export function generateRural(world: World, root: Rng, mainRoads?: number, strip
   const u1 = 0.05 * Lm + 30, u2 = 0.11 * Lm, u3 = 0.42 * Lm, u4 = 0.55 * Lm;
   for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
     const i = y * n + x;
-    if (terrain.water[i] || f.dWater[i] < 1.45 * cell || excl[i] || reserve[i] || farmMask[i] === 1) continue;
+    if (terrain.water[i] || f.dWater[i] < 1.45 * cell || excl[i] || (coverReserve ?? reserve)[i] || farmMask[i] === 1) continue;
     const wx = (x + 0.5) * cell, wy = (y + 0.5) * cell;
     const sl = slopeL[i];
     const hab = f.hab[i], dW = f.dWater[i];
@@ -593,7 +604,26 @@ export function generateRural(world: World, root: Rng, mainRoads?: number, strip
       };
     });
   };
-  const warpRegion = (rg: Region): Region[] => [{ outer: warpRing(rg.outer), holes: rg.holes.map(warpRing) }];
+  const coverFoot = coverReserve ? foot.map((poly) => ({ poly, box: bbox(poly.outer) })) : [];
+  const warpRegion = (rg: Region): Region[] => {
+    const warped = { outer: warpRing(rg.outer), holes: rg.holes.map(warpRing) };
+    if (!coverReserve) return [warped];
+    const box = bbox(warped.outer);
+    const near = coverFoot.filter(({ box: b }) => b.minX <= box.maxX && b.maxX >= box.minX && b.minY <= box.maxY && b.maxY >= box.minY).map(({ poly }) => poly);
+    if (!near.length) return [warped];
+    // Raster centres and smoothing cannot protect tiny lots or holes exactly. Clip before field partitioning.
+    const clipped = differenceSafeS([warped], near);
+    if (!clipped.length) {
+      // A fail-closed cut must not silently erase countryside. Look for actual interior land that was lost.
+      let lost = false;
+      for (let y = 0; y < 16 && !lost; y++) for (let x = 0; x < 16; x++) {
+        const p = { x: box.minX + (x + 0.5) * (box.maxX - box.minX) / 16, y: box.minY + (y + 0.5) * (box.maxY - box.minY) / 16 };
+        if (polygonContains(warped.outer, p) && !warped.holes.some((h) => polygonContains(h, p)) && !near.some((ph) => polygonContains(ph.outer, p) && !ph.holes.some((h) => polygonContains(h, p)))) { lost = true; break; }
+      }
+      if (lost) stats['lu.clipDropped'] = Number(stats['lu.clipDropped'] ?? 0) + 1;
+    }
+    return clipped.filter((ph) => mpArea([ph]) >= 0.4 * minArea);
+  };
   const wins = Array.from({ length: 10 }, () => ({ x0: n, y0: n, x1: -1, y1: -1, any: 0 }));
   for (let y = 0, i = 0; y < n; y++) for (let x = 0; x < n; x++, i++) {
     const k = cls[i];
