@@ -5,6 +5,7 @@ import { fieldHedges, fieldHedgeStyle } from './hedges';
 import type { Vec2 } from '../gen/core/geom';
 import { type Palette, ruralInk } from './styles';
 import { f1, pathD } from './util';
+import { regionalBridgeSurface, regionalRoadSurface } from './roadSurfaces';
 
 /** Land-use tints multiply over the hillshaded terrain so relief stays readable under them (browsers; resvg falls back to plain alpha). Dark styles blend normally. */
 const mul = (pal: Palette): string => (pal.landBlend === 'multiply' ? ' style="mix-blend-mode:multiply"' : '');
@@ -194,7 +195,6 @@ export function roadsLayer(world: World, pal: Palette, u: number): string {
   const roads = world.roads;
   if (!roads || !roads.length) return '';
   const s = Math.max(1, u * 0.85);
-  const edge = 1.3 * Math.max(0.8, s);
   const kinds: ('track' | 'minor' | 'major')[] = ['track', 'minor', 'major'];
   const by = (k: string) => roads.filter((r) => r.kind === k).map((r) => pathD(r.path, false)).join('');
   let out = '<g class="layer-roads" fill="none" stroke-linecap="round" stroke-linejoin="round">';
@@ -218,12 +218,12 @@ export function roadsLayer(world: World, pal: Palette, u: number): string {
     const d = by(k);
     if (!d) continue;
     // hierarchy: cased major roads, thinner minor roads, tracks as thin dashed earth lines
-    const w = k === 'major' ? 8 : k === 'minor' ? 3.6 : 3;
     if (k === 'track') {
       out += `<path d="${d}" stroke="${ruralInk(pal)}" stroke-width="${f1(Math.max(1.6, 0.6 * s))}" stroke-dasharray="${f1(6 * s)} ${f1(3.5 * s)}" stroke-linecap="butt" stroke-opacity="${pal.rural.track}"/>`;
     } else {
-      out += `<path d="${d}" stroke="${pal.roadEdge}" stroke-width="${f1(w * s + 2 * edge * (k === 'major' ? 1 : 0.6))}"/>`;
-      out += `<path d="${d}" stroke="${pal.roadFill}" stroke-width="${f1(w * s)}"/>`;
+      const road = regionalRoadSurface(k, 1 / u);
+      out += `<path d="${d}" stroke="${pal.roadEdge}" stroke-width="${f1(road.casing)}"/>`;
+      out += `<path d="${d}" stroke="${pal.roadFill}" stroke-width="${f1(road.fill)}"/>`;
     }
   }
   // bridges
@@ -233,10 +233,11 @@ export function roadsLayer(world: World, pal: Palette, u: number): string {
     for (const b of br) {
       // (small town bridges, footbridges, arches and fords, are drawn at true size over the street space: urban.ts)
       if (isKinded(b)) continue;
-      const sh = bridgeShape(b.a, b.b, b.width * s + 1, 1.5 * s);
+      const bridge = regionalBridgeSurface(b.width, 1 / u);
+      const sh = bridgeShape(b.a, b.b, bridge.deck, bridge.pad);
       out += `<path d="${sh.deck}" fill="${pal.bridgeDeck}" stroke="none"/>` +
-        `<path d="${sh.rails}" stroke="${pal.bridgeInk}" stroke-width="${f1(1.1 * s)}" stroke-linecap="butt"/>` +
-        `<path d="${sh.ends}" stroke="${pal.bridgeInk}" stroke-width="${f1(1.4 * s)}" stroke-linecap="butt"/>`;
+        `<path d="${sh.rails}" stroke="${pal.bridgeInk}" stroke-width="${f1(bridge.rail)}" stroke-linecap="butt"/>` +
+        `<path d="${sh.ends}" stroke="${pal.bridgeInk}" stroke-width="${f1(Math.max(1.4, u))}" stroke-linecap="butt"/>`;
     }
     out += '</g>';
   }

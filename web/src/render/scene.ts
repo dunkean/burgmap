@@ -10,6 +10,7 @@ import { seaWithIslands } from './util';
 import { farmPlots, farmRidges, treePolys } from './farms';
 import { fieldHedges } from './hedges';
 import { terraceMarks } from './terraces';
+import { urbanStrokeSpace } from './roadSurfaces';
 import { offsetRibbon, polygonCentroid } from '../gen/core/geom';
 import { pointInRing, orientPos } from '../gen/geo/poly';
 import { TileIndex, boxesOf, chunkPolyline } from './tileindex';
@@ -255,6 +256,7 @@ export function buildScene(world0: World, tileSize = TILE_SIZE): Scene {
     const addH = (name: string, l: PolyH[]): void => addPoly(name, l.map((p) => p.outer), l.map((p) => (p.holes.length ? p.holes : undefined)));
     addPoly('footprint', ur.footprint);
     addPoly('u-streets', ur.quarters.map((q) => q.poly.outer));
+    addH('u-stroke-space', urbanStrokeSpace(ur));
     const parcelsOf = (use: string[]): Polygon[] => ur.parcels.filter((p) => use.includes(p.use)).map((p) => p.poly);
     const PU = URBAN_PARCEL_USES;
     addPoly('u-places', parcelsOf([...PU.places]));

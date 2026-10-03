@@ -15,6 +15,7 @@ import { Palette, MapStyle, ruralInk } from './styles';
 import { biomePalette } from './biomes';
 import { fieldHedgeStyle } from './hedges';
 import { TERRACE_STROKES as TS, terraceDetailAlpha } from './terraces';
+import { regionalBridgeSurface, regionalRoadSurface } from './roadSurfaces';
 import { renderTerrainRaster } from './raster';
 import { buildScene, Scene, PolyLayer, LineLayer, TextureLayer, textureMarks, LAND_ORDER, WALL_LINE_W, CAMP_FENCE_W, FENCE_STYLE } from './scene';
 import { renderView } from '../gen/settlements/merge';
@@ -480,7 +481,8 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
     if (land) ctx.clip(land, 'evenodd');
     // hierarchy: cased major roads; thinner cased minor roads; tracks as thin dashed earth lines from mid zoom only
     const roads = linesOf((l) => l.role === 'road' && l.kind !== 'track' && (lod.minorRoads || l.kind === 'major'));
-    roadGroup(roads, (l) => (l.kind === 'major' ? 1.6 : 0.8), (l) => (l.kind === 'major' ? 1 : 0.6));
+    strokeLines(roads, pal.roadEdge, (l) => regionalRoadSurface(l.kind === 'major' ? 'major' : 'minor', sc, l.width).casing);
+    strokeLines(roads, pal.roadFill, (l) => regionalRoadSurface(l.kind === 'major' ? 'major' : 'minor', sc, l.width).fill);
     const tracks = linesOf((l) => l.role === 'road' && l.kind === 'track' && lod.band >= 1);
     strokeLines(tracks, ruralInk(pal), () => lw(1.6, 0.9), pal.rural.track, [px(lod.band >= 2 ? 7 : 5), px(lod.band >= 2 ? 4 : 3)], 'butt');
     ctx.restore();
@@ -690,7 +692,10 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
           const one = (color: string, width: number, alpha = 1, dash: number[] = [], cap: CanvasLineCap = 'round'): void => strokeLines([l], color, () => width, alpha, dash, cap);
           if (k === 'moat' || k === 'canal') continue;
           else if (k === 'hedge') one(treeInk, lw(2.6, 0.8), 0.8, fine ? [3, 1.5] : [], 'butt');
-          else if (k === 'track') one(open ? earth : U.street, lw(open ? 2.6 : 3, 0.6), open ? 0.75 : 1);
+          else if (k === 'track') {
+            const rural = !open && !stilts;
+            one(rural ? ruralInk(pal) : open ? earth : U.street, lw(rural ? 1.6 : open ? 2.6 : 3, rural ? 0.9 : 0.6), rural ? pal.rural.track : open ? 0.75 : 1, rural ? [6, 3.5] : [], rural ? 'butt' : 'round');
+          }
           else if (k === 'weir') one(U.wall, lw(1.4, 0.5), 1, fine ? [1.2, 0.6] : [], 'butt');
           else if (k === 'parterre') { if (fine) one(U.plotLine, lw(0.5, 0.4)); }
           else if (k === 'footpath') { if (fine) one(open ? earth : U.street, lw(1.4, 0.6)); }
@@ -763,6 +768,12 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
       const thin = mainsOf(lod.band === 1 ? 2 : 1).filter((l) => l.width * sc < minPx(l));
       ctx.save();
       if (land && !stilts) ctx.clip(land, 'evenodd');
+      if (thin.length && !stilts && !open) {
+        const space = polyL('u-stroke-space');
+        const clip = space && cached('urban-stroke-clip', () => polyPath(P, space, Array.from({ length: space.polys.length }, (_, i) => i), 0));
+        if (clip) ctx.clip(clip, 'nonzero');
+        else thin.length = 0;
+      }
       strokeLines(thin, open ? earth : U.street, (l) => minPx(l) / sc, open ? 0.8 : 1);
       ctx.restore();
       if (!stilts && !open) strokePolys('block-edges', U.blockEdge, lw(U.blockEdgeW, 0.3));
@@ -1028,20 +1039,20 @@ function drawTownBridge(ctx: CanvasRenderingContext2D, sh: BridgeShapes, pal: Pa
 }
 
 function drawBridges(ctx: CanvasRenderingContext2D, world: World, pal: Palette, rect: Rect4, sc: number): void {
-  const s = Math.max(1, (world.mapSize / 1600) * 0.85);
   for (const b of world.bridges ?? []) {
     if (Math.max(b.a.x, b.b.x) < rect.minX || Math.min(b.a.x, b.b.x) > rect.maxX || Math.max(b.a.y, b.b.y) < rect.minY || Math.min(b.a.y, b.b.y) > rect.maxY) continue;
     // small town bridges (footbridges, arches, fords) at true size, by kind
     if (isKinded(b)) { drawTownBridge(ctx, bridgeShapes(b), pal, sc); continue; }
     const dx = b.b.x - b.a.x, dy = b.b.y - b.a.y, l = Math.hypot(dx, dy) || 1;
-    const tx = dx / l, ty = dy / l, nx = -ty, ny = tx, pad = 1.5 * s;
-    const h = (Math.max(b.width * s + 1, 2 / sc)) / 2;
+    const bridge = regionalBridgeSurface(b.width, sc);
+    const tx = dx / l, ty = dy / l, nx = -ty, ny = tx, pad = bridge.pad;
+    const h = bridge.deck / 2;
     const ax = b.a.x - tx * pad, ay = b.a.y - ty * pad, bx = b.b.x + tx * pad, by = b.b.y + ty * pad;
     ctx.beginPath();
     ctx.moveTo(ax + nx * h, ay + ny * h); ctx.lineTo(bx + nx * h, by + ny * h);
     ctx.lineTo(bx - nx * h, by - ny * h); ctx.lineTo(ax - nx * h, ay - ny * h); ctx.closePath();
     ctx.fillStyle = pal.bridgeDeck; ctx.fill();
-    ctx.strokeStyle = pal.bridgeInk; ctx.lineCap = 'butt'; ctx.lineWidth = Math.max(1.1 * s, 1 / sc);
+    ctx.strokeStyle = pal.bridgeInk; ctx.lineCap = 'butt'; ctx.lineWidth = bridge.rail;
     ctx.beginPath();
     ctx.moveTo(ax + nx * h, ay + ny * h); ctx.lineTo(bx + nx * h, by + ny * h);
     ctx.moveTo(ax - nx * h, ay - ny * h); ctx.lineTo(bx - nx * h, by - ny * h);

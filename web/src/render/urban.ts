@@ -3,7 +3,8 @@ import { townBridgesSvg } from './townbridges';
 import { terraceMarks, TERRACE_STROKES as TS } from './terraces';
 import type { World, PolyH, UrbanWall } from '../gen/types';
 import type { Polygon } from '../gen/core/geom';
-import type { Palette } from './styles';
+import { type Palette, ruralInk } from './styles';
+import { urbanStrokeSpace } from './roadSurfaces';
 import { f1, pathD } from './util';
 import { area } from '../gen/geo/poly';
 import { FENCE_STYLE, solidGround } from './scene';
@@ -217,7 +218,10 @@ function cultureOverlay(ub: NonNullable<World['urban']>, pal: Palette, lw: (m: n
   for (const [k, ds] of byKind) {
     const d = ds.join('');
     if (k === 'hedge') s += `<path d="${d}" fill="none" stroke="${pal.treeInk ?? '#4a6a3a'}" stroke-width="${lw(2.6, 0.8)}" stroke-opacity="0.8" stroke-dasharray="3 1.5"/>`;
-    else if (k === 'track') s += `<path d="${d}" fill="none" stroke="${open ? pathEarth(pal) : U.street}" stroke-opacity="${open ? 0.75 : 1}" stroke-width="${lw(open ? 2.6 : 3, 0.6)}" stroke-linecap="round"/>`;
+    else if (k === 'track') {
+      const rural = !open && !ub.renderHints?.stilts;
+      s += `<path d="${d}" fill="none" stroke="${rural ? ruralInk(pal) : open ? pathEarth(pal) : U.street}" stroke-opacity="${rural ? pal.rural.track : open ? 0.75 : 1}" stroke-width="${lw(rural ? 1.6 : open ? 2.6 : 3, rural ? 0.9 : 0.6)}" stroke-linecap="${rural ? 'butt' : 'round'}"${rural ? ' stroke-dasharray="6 3.5"' : ''}/>`;
+    }
     else if (k === 'weir') s += `<path d="${d}" fill="none" stroke="${U.wall}" stroke-width="${lw(1.4, 0.5)}" stroke-dasharray="1.2 0.6"/>`;
     else if (k === 'parterre' || k === 'footpath') s += `<path d="${d}" fill="none" stroke="${k === 'footpath' ? (open ? pathEarth(pal) : U.street) : U.plotLine}" stroke-width="${lw(k === 'footpath' ? 1.4 : 0.5, 0.15)}" stroke-linecap="round"/>`;
     else if (k === 'ghat-steps') s += `<path d="${d}" fill="none" stroke="${U.plotLine}" stroke-width="${lw(0.3, 0.12)}"/>`;
@@ -403,7 +407,11 @@ export function urbanLayer(world: World, pal: Palette, u: number, debug: boolean
   const mains = ub.streets.filter((st) => st.rank <= 1 && st.role !== 'close' && !secondary.has(st));
   const minW = 2.4 * u;
   const wide = mains.filter((st) => st.width < minW);
-  if (wide.length && !open) s += `<path class="u-main-streets"${stilts || !(world.terrain.coastline.length || world.terrain.lakes.some((l) => l.length >= 3)) ? '' : ' clip-path="url(#landclip)"'} d="${wide.map((st) => pathD(st.path, false)).join('')}" fill="none" stroke="${U.street}" stroke-width="${f1(minW)}" stroke-linecap="round" stroke-linejoin="round"/>`;
+  if (wide.length && !open) {
+    if (!stilts) s += `<defs><clipPath id="urban-stroke-clip"><path d="${urbanStrokeSpace(ub).map(phD).join('')}" clip-rule="nonzero"/></clipPath></defs><g clip-path="url(#urban-stroke-clip)">`;
+    s += `<path class="u-main-streets"${stilts || !(world.terrain.coastline.length || world.terrain.lakes.some((l) => l.length >= 3)) ? '' : ' clip-path="url(#landclip)"'} d="${wide.map((st) => pathD(st.path, false)).join('')}" fill="none" stroke="${U.street}" stroke-width="${f1(minW)}" stroke-linecap="round" stroke-linejoin="round"/>`;
+    if (!stilts) s += '</g>';
+  }
   if (!stilts && !open) s += `<path class="u-block-edges" d="${ub.blocks.map((b) => pathD(b, true)).join('')}" fill="none" stroke="${U.blockEdge}" stroke-width="${lw(U.blockEdgeW, 0.3)}"/>`;
   // small bridges over the streams (true size, by kind: footbridges, arches, fords), over the street space
   s += townBridgesSvg(world.bridges ?? [], pal);
