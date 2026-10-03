@@ -17,6 +17,35 @@ export function distanceField(
   const val = carry ? new Float32Array(N) : undefined;
   for (let i = 0; i < N; i++) if (mask[i]) { dist[i] = 0; if (val) val[i] = carry![i]; }
   const S2 = Math.SQRT2;
+  // (the relaxations are written out: same order and arithmetic as dist[i] = min(dist[i], dist[j] + w))
+  if (!val) {
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = y * w + x;
+        let di = dist[i], d: number;
+        if (x > 0) { d = dist[i - 1] + 1; if (d < di) { dist[i] = d; di = dist[i]; } }
+        if (y > 0) {
+          d = dist[i - w] + 1; if (d < di) { dist[i] = d; di = dist[i]; }
+          if (x > 0) { d = dist[i - w - 1] + S2; if (d < di) { dist[i] = d; di = dist[i]; } }
+          if (x < w - 1) { d = dist[i - w + 1] + S2; if (d < di) { dist[i] = d; di = dist[i]; } }
+        }
+      }
+    }
+    for (let y = h - 1; y >= 0; y--) {
+      for (let x = w - 1; x >= 0; x--) {
+        const i = y * w + x;
+        let di = dist[i], d: number;
+        if (x < w - 1) { d = dist[i + 1] + 1; if (d < di) { dist[i] = d; di = dist[i]; } }
+        if (y < h - 1) {
+          d = dist[i + w] + 1; if (d < di) { dist[i] = d; di = dist[i]; }
+          if (x < w - 1) { d = dist[i + w + 1] + S2; if (d < di) { dist[i] = d; di = dist[i]; } }
+          if (x > 0) { d = dist[i + w - 1] + S2; if (d < di) { dist[i] = d; di = dist[i]; } }
+        }
+      }
+    }
+    for (let i = 0; i < N; i++) dist[i] *= cell;
+    return { dist, val };
+  }
   const relax = (i: number, j: number, wgt: number) => {
     const d = dist[j] + wgt;
     if (d < dist[i]) { dist[i] = d; if (val) val[i] = val[j]; }
