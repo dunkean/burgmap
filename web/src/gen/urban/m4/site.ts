@@ -97,18 +97,21 @@ export function siteLot(ctx: UrbanCtx, streets: Streets, spec: LotSpec, rng: Rng
       const poly = spec.shape(c, ang, k);
       const bb = bboxOf(poly);
       if (bb.x0 < 5 || bb.y0 < 5 || bb.x1 > S - 5 || bb.y1 > S - 5) continue;
-      // (samples visited lazily: the first one outside the allowed regions settles it)
+      // (the tests are independent predicates, cheapest / most selective first: other lots, the registered streets,
+      // then the samples, visited lazily — the first one outside the allowed regions, or in water when none is
+      // allowed, settles it)
+      if (spec.avoid.some((a) => polysNear(poly, a, spec.gap))) continue;
+      if (!clearOfStreets(poly, streets, spec.margin, spec.ignore)) continue;
+      const wetOk = spec.wet ?? 0;
       let wet = 0, cnt = 0;
       const ok = forSamples(poly, 12, (p) => {
         if (spec.within && !spec.within.has(p)) return false;
         if (spec.outside && spec.outside.has(p)) return false;
-        if (ctx.isWater(p)) wet++;
+        if (ctx.isWater(p)) { wet++; if (!(wetOk > 0)) return false; }
         cnt++;
         return true;
       }, true);
-      if (!ok || wet > (spec.wet ?? 0) * cnt) continue;
-      if (spec.avoid.some((a) => polysNear(poly, a, spec.gap))) continue;
-      if (!clearOfStreets(poly, streets, spec.margin, spec.ignore)) continue;
+      if (!ok || wet > wetOk * cnt) continue;
       return { poly, c, ang, k, s: spec.score(poly, c, ang, k) + 0.05 * rng.float() };
     }
     return null;
