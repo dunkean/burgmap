@@ -29,6 +29,6 @@ Agents: fix entries in order, then mark each one fixed with the commit hash (e.g
 - Maya city, rendu horrible - rien de va. cest pas fini ni testé comme boulot Idem pour Khmer, Celtic oppidum, Halfling Shire, Native Americans (les deux) → fixed in 4d99db4, 415772a, 87065a2, d9294b9
 - orcish war camp merite une meilleur texture sous les tentes → fixed in 264fc02
 - Entre certains champs y a un trait vert, c'est pas beau et trop visible. → fixed in 5c504a6 (subdued shared SVG/Canvas hedge boundaries, sparse trees, disabled-style and biome support; reviewed before/after and three live zooms)
-- Les traits de terrasses sont pas jolis non 
+- Les traits de terrasses sont pas jolis non  → fixed in f30671b (thin retaining walls, spaced transverse hachures and real stair treads in SVG/Canvas; reviewed Inca and dwarven at wide and close zooms)
 - dans les open town, il faut que la frontière ne soit pas tracée nette. Mais que les maison déborde hors du cadre de la ville un peu.
 - Les cultures qui sont faites pour être en tribus (genre nordic), lorsqu'on demande du gros, il faut faire une ville primitive au lieu des tribus. En gros on adapte l'archi urbaine à la taille de la pop + culture
