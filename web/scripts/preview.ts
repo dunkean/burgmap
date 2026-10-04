@@ -35,12 +35,13 @@ if (focus > 0 && world.site) {
   crop = { x: Math.max(0, Math.min(world.mapSize - w, c.x - w / 2)), y: Math.max(0, Math.min(world.mapSize - w, c.y - w / 2)), w };
 }
 const t1 = performance.now();
-const svg = renderSvg(world, { style: opts.style, debug });
+const fullWidth = crop ? Math.round(width * world.mapSize / crop.w) : width;
+const svg = renderSvg(world, { style: opts.style, debug, width: fullWidth });
 const t2 = performance.now();
 let png: Uint8Array;
 if (crop) {
   // render the whole map at a matching scale and cut the window out (resvg panics on offset viewBoxes when zoomed)
-  const full = Math.round((width * world.mapSize) / crop.w);
+  const full = fullWidth;
   const img = new Resvg(svg, { fitTo: { mode: 'width', value: full }, font: { loadSystemFonts: true } }).render();
   const k = img.width / world.mapSize;
   const x0 = Math.round(crop.x * k), y0 = Math.round(crop.y * k), cw = Math.round(crop.w * k);

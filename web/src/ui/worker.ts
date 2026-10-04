@@ -128,7 +128,7 @@ function doExport(m: GExport): void {
         mctx.font = fontString(st, s, FONT_STACKS[d.style]);
         return mctx.measureText(t).width;
       };
-      const svg = renderSvg(lastWorld, { style: d.style, contours: d.contours, landuse: d.landuse, labels: d.labels !== false, legend: !!d.legend, measure });
+      const svg = renderSvg(lastWorld, { width: m.width, style: d.style, contours: d.contours, landuse: d.landuse, labels: d.labels !== false, legend: !!d.legend, measure });
       blob = new Blob([svg], { type: 'image/svg+xml' });
     }
     post({ type: 'exported', id: m.id, kind: m.kind, blob, ms: performance.now() - t0 });

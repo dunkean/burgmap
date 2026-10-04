@@ -11,6 +11,7 @@ import { polygonCentroid } from '../src/gen/core/geom';
 import { ribbon } from '../src/gen/geo/offset';
 import { generate } from '../src/gen/pipeline';
 import { makeOptions } from '../src/gen/options';
+import { urbanNaturalGround } from '../src/gen/landuse/urbanGround';
 import { checkWorld } from './urbanCheck';
 import '../src/gen/urban/cultures';
 
@@ -179,7 +180,11 @@ describe('open settlement fringe', () => {
     expect(report.noFrontage).toBe(0);
     expect(report.bldgOutside).toBeLessThanOrEqual(0.05);
     expect(report.orphanMain).toBe(0);
-    const landOverlap = w.landuse!.areas.reduce((sum, a) => sum + mpArea(intersectionS([{ outer: a.poly, holes: a.holes ?? [] }], w.urban!.footprintH)), 0);
+    const forbiddenNatural = differenceS(w.urban!.footprintH, urbanNaturalGround(w));
+    // The occupation mask permits natural cover, while agriculture and occupied urban land stay reserved.
+    const naturalKinds = new Set(['forest', 'meadow', 'pasture', 'commons', 'marsh']);
+    const landOverlap = w.landuse!.areas.reduce((sum, a) => sum + mpArea(intersectionS([{ outer: a.poly, holes: a.holes ?? [] }],
+      naturalKinds.has(a.kind) ? forbiddenNatural : w.urban!.footprintH)), 0);
     expect(landOverlap).toBeLessThanOrEqual(0.05);
     expect(w.stats['landuse.ms.lu.vector']).toEqual(expect.any(Number));
     expect(Number(w.stats['landuse.lu.clipDropped'] ?? 0)).toBe(0);

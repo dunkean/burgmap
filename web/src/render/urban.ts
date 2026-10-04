@@ -1,4 +1,6 @@
 /** SVG rendering of the urban layer (streets as space, blocks, plots, building masses, walls). */
+import { countryKind, countryPatternSvg, fringeStreetWidth, fringePath, FRINGE_ORDER, FRINGE_PAINT, type CountryFringe } from './countryside';
+import { naturalLanduseLayer } from './landuse';
 import { townBridgesSvg } from './townbridges';
 import { terraceMarks, TERRACE_STROKES as TS } from './terraces';
 import type { World, PolyH, UrbanWall } from '../gen/types';
@@ -342,7 +344,7 @@ function openGroundSvg(ub: NonNullable<World['urban']>, pal: Palette, lw: (m: nu
   return s;
 }
 
-export function urbanLayer(world: World, pal: Palette, u: number, debug: boolean): string {
+export function urbanLayer(world: World, pal: Palette, u: number, debug: boolean, fringe: CountryFringe = { bands: [], ground: [], streets: [] }, raster = true, landuse = world.options.landuse, naturalGround: PolyH[] = [], contours = world.options.contours): string {
   if (debug) return urbanDebugLayer(world, u);
   const ub = world.urban;
   if (!ub) return '';
@@ -387,6 +389,39 @@ export function urbanLayer(world: World, pal: Palette, u: number, debug: boolean
     const d = ub.backLand.map(phD).join('');
     s += `<g class="u-gardens"><path d="${d}" fill="${U.garden}"/><path d="${d}" fill="url(#${ub.renderHints?.graves ? 'p-ugrave' : 'p-ugarden'})"/></g>`;
   }
+  }
+  // Restore countryside over the two urban ground fills, before parcel hairlines, water and roofs; dedicated grounds are excluded.
+  if (fringe.bands.some((b) => b.length)) {
+    const kind = countryKind(world.options.biome);
+    s += `<defs>${countryPatternSvg(pal)}<g id="country-fringe-streets" fill="none" stroke-linecap="round" stroke-linejoin="round">`;
+    for (const st of fringe.streets) s += `<path d="${pathD(st.path, false)}" stroke="${U.street}" stroke-width="${f1(fringeStreetWidth(st.width))}"/>`;
+    s += '</g></defs><g class="u-country-fringe">';
+    FRINGE_ORDER.forEach((i) => {
+      const pieces = fringe.bands[i] ?? [];
+      if (!pieces.length) return;
+      const d = fringePath(pieces), id = `country-fringe-${i}`;
+      s += `<defs><clipPath id="${id}"><path d="${d}" clip-rule="evenodd"/></clipPath></defs><g clip-path="url(#${id})">`;
+      const alpha = FRINGE_PAINT[i];
+      s += raster ? `<use href="#terrain-ground" xlink:href="#terrain-ground" opacity="${alpha}"/>` : `<path d="${d}" fill="${pal.paper}" opacity="${alpha}" fill-rule="evenodd"/>`;
+      if (landuse) {
+        s += `<path d="${d}" fill="${pal.land[kind]}" fill-opacity="${pal.landOpacity * alpha}" fill-rule="evenodd"${pal.landBlend === 'multiply' ? ' style="mix-blend-mode:multiply"' : ''}/>`;
+        if (pal.tex[kind]) s += `<path d="${d}" fill="url(#p-country-ground)" opacity="${alpha}" fill-rule="evenodd"/>`;
+      }
+      s += '</g>';
+    });
+    s += `<defs><clipPath id="country-street-clip"><path d="${fringePath(fringe.ground)}" clip-rule="evenodd"/></clipPath></defs><use href="#country-fringe-streets" xlink:href="#country-fringe-streets" clip-path="url(#country-street-clip)"/></g>`;
+  }
+  // Exact occupation mask: restore the real terrain and its natural cover deep inside empty residential land.
+  if (naturalGround.length) {
+    const d = naturalGround.map((p) => pathD(orientPos(p.outer), true) + p.holes.map((h) => pathD(orientPos(h).slice().reverse(), true)).join('')).join('');
+    s += `<defs><clipPath id="urban-natural-ground"><path d="${d}" clip-rule="nonzero"/></clipPath></defs><g class="u-natural-ground" clip-path="url(#urban-natural-ground)">`;
+    s += raster ? '<use href="#terrain-ground" xlink:href="#terrain-ground"/>' : `<path d="${d}" fill="${pal.paper}" fill-rule="nonzero"/>`;
+    if (contours) s += '<use href="#terrain-contour-ground" xlink:href="#terrain-contour-ground"/>';
+    if (landuse) s += naturalLanduseLayer(world, pal, u, naturalGround);
+    // Regional roads retain their exact style/export width where it exceeds the physical occupation guard.
+    s += '<use href="#regional-road-ground" xlink:href="#regional-road-ground"/></g>';
+  }
+  if (!open) {
   // plot hairlines first: the buildings cover them, so they read on yards and gardens only (cadastre style)
   const plotD = ub.renderHints?.plotLines === false ? '' : ub.parcels.filter((p) => p.use === 'plot').map((p) => pathD(p.poly, true)).join('');
   if (plotD) s += `<path class="u-plots" d="${plotD}" fill="none" stroke="${U.plotLine}" stroke-opacity="${f1(U.plotAlpha * 0.75)}" stroke-width="${lw(U.plotW, 0.05)}"/>`;

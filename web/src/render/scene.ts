@@ -5,6 +5,7 @@
  */
 import type { World, LandKind, Polygon, Polyline, Vec2, PolyH } from '../gen/types';
 import { contourSet } from './contours';
+import { countrysideFringe, fringeStreetWidth } from './countryside';
 import { renderView } from '../gen/settlements/merge';
 import { seaWithIslands } from './util';
 import { farmPlots, farmRidges, treePolys } from './farms';
@@ -254,6 +255,18 @@ export function buildScene(world0: World, tileSize = TILE_SIZE): Scene {
   const ur = world.urban;
   if (ur) {
     const addH = (name: string, l: PolyH[]): void => addPoly(name, l.map((p) => p.outer), l.map((p) => (p.holes.length ? p.holes : undefined)));
+    const fringe = countrysideFringe(world0);
+    fringe.bands.forEach((pieces, i) => addH('u-country-fringe-' + i, pieces));
+    addH('u-country-fringe', fringe.ground);
+    addH('u-natural-ground', (world0.landuse?.naturalGround ?? []).map((p) => ({ outer: orientPos(p.outer),
+      holes: p.holes.map((h) => orientPos(h).slice().reverse()) })));
+    const fringeStreets = new Map<number, Polyline[]>();
+    for (const st of fringe.streets) {
+      const width = fringeStreetWidth(st.width);
+      const paths = fringeStreets.get(width) ?? [];
+      paths.push(st.path); fringeStreets.set(width, paths);
+    }
+    for (const [width, paths] of fringeStreets) addLines('country-street-' + width, 'fringe-street', 'street', width, paths);
     addPoly('footprint', ur.footprint);
     addH('u-streets', ur.quarters.map((q) => ({ outer: orientPos(q.poly.outer), holes: q.poly.holes.map((h) => orientPos(h).slice().reverse()) })));
     addH('u-stroke-space', urbanStrokeSpace(ur));

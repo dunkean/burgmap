@@ -3,6 +3,8 @@ import { renderView } from '../gen/settlements/merge';
 import { Vec2, chaikin, simplify, offsetRibbon } from '../gen/core/geom';
 import { marchingSquares } from '../gen/terrain/contour';
 import { contourSet, ContourSet } from './contours';
+import { MAP_STROKES, svgMapStroke } from './strokes';
+import { countrysideFringe } from './countryside';
 import { Palette, MapStyle } from './styles';
 import { biomePalette } from './biomes';
 import { renderTerrainRaster, pngDataUrl } from './raster';
@@ -17,6 +19,8 @@ import { FONT_STACKS } from './labelStyles';
 import type { Measure } from './mapLabels';
 
 export interface RenderOptions {
+  /** Actual export width in pixels; sets decorative hairline weight. Defaults to the 1600 px design size, matching the default bounded hairline scale. */
+  width?: number;
   style?: MapStyle; contours?: boolean; raster?: boolean; landuse?: boolean; debug?: boolean;
   /** Name labels (default: world.options.labels !== false), legend (default: world.options.legend) and cartouche (default on). */
   labels?: boolean; legend?: boolean; cartouche?: boolean;
@@ -24,14 +28,13 @@ export interface RenderOptions {
   measure?: Measure;
 }
 
-function contourLayer(world: World, pal: Palette, u: number): string {
+function contourLayer(world: World, pal: Palette, u: number, scale: number): string {
   const cs = contourSet(world, u);
   const dOf = (l: ContourSet['thin']): string => l.map((c) => pathD(c.pts, c.closed)).join('');
   const thin = dOf(cs.thin), index = dOf(cs.index);
-  const sw = 0.55 * u;
-  return `<g class="layer-contours" fill="none" stroke="${pal.contour}" stroke-linejoin="round" stroke-linecap="round">` +
-    (thin ? `<path d="${thin}" stroke-width="${f1(sw)}" opacity="${pal.contourOpacity * 0.7}"/>` : '') +
-    (index ? `<path d="${index}" stroke-width="${f1(sw * pal.contourIndexW)}" opacity="${pal.contourOpacity}"/>` : '') +
+  return `<g id="terrain-contour-ground" class="layer-contours" fill="none" stroke="${pal.contour}" stroke-linejoin="round" stroke-linecap="round">` +
+    (thin ? `<path d="${thin}" ${svgMapStroke(MAP_STROKES.contour, scale)} opacity="${pal.contourOpacity * 0.7}"/>` : '') +
+    (index ? `<path d="${index}" ${svgMapStroke(MAP_STROKES.contourIndex, scale, pal.contourIndexW / 1.6)} opacity="${pal.contourOpacity}"/>` : '') +
     '</g>';
 }
 
@@ -70,21 +73,23 @@ export function renderSvg(world0: World, opts: RenderOptions = {}): string {
   const pal = biomePalette(style, world.options.biome);
   const S = world.mapSize;
   const u = S / 1600;
+  const width = opts.width !== undefined && Number.isFinite(opts.width) ? Math.max(1, opts.width) : 1600;
+  const scale = width / S;
   const t = world.terrain;
   const parts: string[] = [];
-  parts.push(`<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 ${S} ${S}" width="${S}" height="${S}" data-seed="${world.seed}" data-style="${style}">`);
+  parts.push(`<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 ${S} ${S}" width="${width}" height="${width}" data-seed="${world.seed}" data-style="${style}">`);
   parts.push(`<defs><clipPath id="mapclip"><rect x="0" y="0" width="${S}" height="${S}"/></clipPath></defs>`);
   parts.push(`<rect x="0" y="0" width="${S}" height="${S}" fill="${pal.paper}"/>`);
   parts.push('<g clip-path="url(#mapclip)">');
 
   if (opts.raster !== false) {
     const r = renderTerrainRaster(world, pal);
-    parts.push(`<g class="layer-terrain"><image x="0" y="0" width="${S}" height="${S}" preserveAspectRatio="none" xlink:href="${pngDataUrl(r.png)}"/></g>`);
+    parts.push(`<g class="layer-terrain"><image id="terrain-ground" x="0" y="0" width="${S}" height="${S}" preserveAspectRatio="none" xlink:href="${pngDataUrl(r.png)}"/></g>`);
   }
   if (pal.grid) parts.push(gridSvg(world, pal, u));
-  if (opts.contours ?? world.options.contours) parts.push(contourLayer(world, pal, u));
+  if (opts.contours ?? world.options.contours) parts.push(contourLayer(world, pal, u, scale));
 
-  if (opts.landuse ?? world.options.landuse) parts.push(landuseLayer(world, pal, u));
+  if (opts.landuse ?? world.options.landuse) parts.push(landuseLayer(world, pal, u, scale));
 
   // rivers: casing first, then fill so confluences merge cleanly
   const minW = 1.1 * u;
@@ -122,9 +127,9 @@ export function renderSvg(world0: World, opts: RenderOptions = {}): string {
   const lakeD = t.lakes.filter((p) => p.length >= 3).map((p) => pathD(p, true)).join('');
   const masked = seaD.length > 0 || lakeD.length > 0;
   if (masked) parts.push(`<clipPath id="landclip"><path d="M-50 -50H${S + 50}V${S + 50}H-50Z${seaD.join('')}${lakeD}" clip-rule="evenodd"/></clipPath>`);
-  parts.push(masked ? `<g clip-path="url(#landclip)">${roadsLayer(world, pal, u)}</g>` : roadsLayer(world, pal, u));
+  parts.push(`<g id="regional-road-ground"${masked ? ' clip-path="url(#landclip)"' : ''}>${roadsLayer(world, pal, u)}</g>`);
   if (world.urban) {
-    parts.push(urbanLayer(world, pal, u, !!opts.debug));
+    parts.push(urbanLayer(world, pal, u, !!opts.debug, opts.debug ? { bands: [], ground: [], streets: [] } : countrysideFringe(world0), opts.raster !== false, opts.landuse ?? world.options.landuse, opts.debug ? [] : (world0.landuse?.naturalGround ?? []), opts.contours ?? world.options.contours));
     if (!opts.debug) { parts.push(shadowSvg(world, pal, u)); parts.push(litSvg(world, pal, u)); }
   } else parts.push(siteLayer(world, pal, u, !!opts.debug));
 

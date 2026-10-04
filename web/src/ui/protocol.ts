@@ -17,7 +17,7 @@ export interface DisplayOpts { style: MapStyle; contours?: boolean; landuse?: bo
 
 // ---- M -> G ----
 export interface GRun { type: 'run'; id: number; options: Options; /** snapshot channel to the render worker */ port: MessagePort }
-export interface GExport { type: 'export'; id: number; kind: 'svg' | 'json'; display: DisplayOpts; /** megacity: generate the detail of every quarter first (slow) */ full?: boolean }
+export interface GExport { type: 'export'; id: number; kind: 'svg' | 'json'; display: DisplayOpts; /** Actual SVG raster export width in pixels; omitted for intrinsic SVG. */ width?: number; /** megacity: generate the detail of every quarter first (slow) */ full?: boolean }
 /** Lazy detail (M3c): generate the plan of secondary settlement `index` of run `id`. */
 export interface GDetail { type: 'detail'; id: number; index: number }
 /**

@@ -117,12 +117,12 @@ export class OffscreenBackend {
   request(r: FrameRequest): void { this.render.postMessage({ type: 'view', ...r }); }
 
   /** Build the SVG / JSON of the current world in the generation worker. */
-  export(kind: 'svg' | 'json', display: DisplayOpts, full = false): Promise<Blob> {
+  export(kind: 'svg' | 'json', display: DisplayOpts, full = false, width?: number): Promise<Blob> {
     return new Promise((resolve, reject) => {
       if (!this.gen || this.busy) { reject(new Error('the map is still being generated')); return; }
       const id = ++this.exportId;
       this.pending.set(id, { resolve, reject });
-      this.gen.postMessage({ type: 'export', id, kind, display, full });
+      this.gen.postMessage({ type: 'export', id, kind, display, full, width });
     });
   }
 }

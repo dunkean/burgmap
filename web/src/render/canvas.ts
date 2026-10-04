@@ -14,6 +14,8 @@ import type { World, LandKind, Vec2 } from '../gen/types';
 import { Palette, MapStyle, ruralInk } from './styles';
 import { biomePalette } from './biomes';
 import { fieldHedgeStyle } from './hedges';
+import { CANVAS_MAP_STROKES as MAP_STROKES, mapStrokeWidth } from './strokes';
+import { NATURAL_LAND_KINDS, countryKind, FRINGE_ORDER, FRINGE_PAINT } from './countryside';
 import { TERRACE_STROKES as TS, terraceDetailAlpha } from './terraces';
 import { regionalBridgeSurface, regionalRoadSurface } from './roadSurfaces';
 import { renderTerrainRaster } from './raster';
@@ -150,7 +152,7 @@ function defaultCreateCanvas(w: number, h: number): CanvasLike | null {
 export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: MapStyle | Palette, deps: CanvasRendererDeps = {}): CanvasRenderer {
   const world = renderView(world0);
   const pal = biomePalette(style, world.options.biome);
-  const scene = deps.scene ?? buildScene(world, deps.tileSize);
+  const scene = deps.scene ?? buildScene(world0, deps.tileSize);
   const S = world.mapSize;
   const now = deps.now ?? (() => (typeof performance !== 'undefined' ? performance.now() : Date.now()));
   const P: new () => Path2D = deps.Path2D ?? (globalThis as unknown as { Path2D: new () => Path2D }).Path2D;
@@ -359,6 +361,16 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
 
     // 1. terrain
     const tex = getTerrain();
+    const drawVisibleTerrain = (): void => {
+      if (!tex) return;
+      const x = Math.max(0, rect.minX), y = Math.max(0, rect.minY);
+      const w = Math.min(S, rect.maxX) - x, h = Math.min(S, rect.maxY) - y;
+      if (w <= 0 || h <= 0) return;
+      const tw = Number((tex as { width?: unknown }).width), th = Number((tex as { height?: unknown }).height);
+      if (Number.isFinite(tw) && Number.isFinite(th) && tw > 0 && th > 0) {
+        ctx.drawImage(tex, x * tw / S, y * th / S, w * tw / S, h * th / S, x, y, w, h);
+      } else ctx.drawImage(tex, 0, 0, S, S);
+    };
     if (tex) {
       ctx.imageSmoothingEnabled = true;
       (ctx as { imageSmoothingQuality?: string }).imageSmoothingQuality = 'high';
@@ -380,7 +392,7 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
     if (world.options.contours) {
       for (const l of linesOf((x) => x.role === 'contour')) {
         const idx = l.kind === 'index';
-        strokeLines([l], pal.contour, () => (idx ? 0.7 * pal.contourIndexW * 0.9 : 0.7) / sc, idx ? pal.contourOpacity : pal.contourOpacity * 0.7);
+        strokeLines([l], pal.contour, () => mapStrokeWidth(idx ? MAP_STROKES.contourIndex : MAP_STROKES.contour, sc, idx ? pal.contourIndexW / 1.6 : 1), idx ? pal.contourOpacity : pal.contourOpacity * 0.7);
       }
     }
     for (const kind of LAND_ORDER) {
@@ -395,9 +407,9 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
       }
       multiply(false);
       if (kind === 'field' && lod.strips && lod.band >= 2) {
-        for (let k = 0; k < 4; k++) strokePolys('stripT' + k, pal.furrow, lw(0.28 * Math.max(1, u), 0.5), pal.furrowAlpha * 0.85);
+        for (let k = 0; k < 4; k++) strokePolys('stripT' + k, pal.furrow, mapStrokeWidth(MAP_STROKES.strip, sc), pal.furrowAlpha * 0.85);
       }
-      if (kind === 'field' && lod.strips) strokePolys('furlong-edges', pal.furrow, lw(0.45 * Math.max(1, u), 0.6), 0.55);
+      if (kind === 'field' && lod.strips) strokePolys('furlong-edges', pal.furrow, mapStrokeWidth(MAP_STROKES.furlong, sc), 0.55);
       if (kind === 'forest' && lod.strips) strokePolys(name, pal.treeInk, lw(0.7, 0.8), pal.tex.forest ? 0.5 : 0.35);
       if ((kind === 'orchard' || kind === 'garden') && lod.strips) strokePolys(name, pal.hedge, lw(0.8, 0.8), 0.7);
     }
@@ -406,7 +418,7 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
     // (never paper-white bands across the fields), and the ways only show from mid-close zoom on.
     if (luOn && lod.strips) {
       const rk = ruralInk(pal);
-      strokeLines(linesOf((l) => l.name === 'headlands'), pal.furrow, () => lw(0.6, 0.5), pal.rural.headland, [], 'butt');
+      strokeLines(linesOf((l) => l.name === 'headlands'), pal.furrow, () => mapStrokeWidth(MAP_STROKES.headland, sc), pal.rural.headland, [], 'butt');
       if (sc >= WAY_SCALE) {
         const ways = linesOf((l) => l.name === 'field-ways');
         strokeLines(ways, rk, () => lw(1.4, 0.8), pal.rural.way, lod.band >= 2 ? [px(6), px(4)] : [], 'butt');
@@ -591,6 +603,74 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
         paved('u-meadows', U.garden, gardenPat, 0.45);
       }
       paved('u-plazas', U.place, pave);
+      {
+        const kind = countryKind(world.options.biome);
+        const ruralPattern = near && luOn && pal.tex[kind] ? getPattern(ctx, 'country-ground', 26, 20, 0, (c, k) => {
+          c.globalAlpha = 0.6; c.strokeStyle = pal.grass; c.lineWidth = 0.4 * k; c.lineCap = 'round'; c.beginPath();
+          for (const [x, y] of [[5, 8], [18, 17]]) { c.moveTo(x * k, y * k); c.lineTo((x - 1.2) * k, (y - 2.4) * k); c.moveTo(x * k, y * k); c.lineTo((x + 1.2) * k, (y - 2.4) * k); }
+          c.stroke(); c.globalAlpha = 0.5; c.fillStyle = pal.grass; c.beginPath(); c.arc(15 * k, 5 * k, 0.55 * k, 0, TAU); c.fill();
+        }) : null;
+        FRINGE_ORDER.forEach((i) => {
+          const alpha = FRINGE_PAINT[i];
+          const l = polyL('u-country-fringe-' + i);
+          if (!l) return;
+          const ids = l.index.query(rect);
+          if (!ids.length) return;
+          const p = cached(l.name + '|clip', () => polyPath(P, l, l.polys.map((_, id) => id), 0));
+          if (p) {
+            ctx.save(); ctx.clip(p, 'evenodd'); ctx.globalAlpha = alpha;
+            if (tex) drawVisibleTerrain();
+            else { ctx.fillStyle = pal.paper; ctx.fill(p, 'evenodd'); }
+            if (luOn) {
+              multiply(true); ctx.globalAlpha = alpha * pal.landOpacity; ctx.fillStyle = pal.land[kind]; ctx.fill(p, 'evenodd'); multiply(false);
+              if (ruralPattern) { ctx.fillStyle = ruralPattern; ctx.globalAlpha = alpha; ctx.fill(p, 'evenodd'); }
+            }
+            ctx.globalAlpha = 1;
+            ctx.restore();
+          }
+        });
+        ctx.globalAlpha = 1;
+        const fringe = polyL('u-country-fringe');
+        if (fringe && fringe.index.query(rect).length) {
+          const clip = cached(fringe.name + '|clip', () => polyPath(P, fringe, fringe.polys.map((_, id) => id), 0));
+          if (clip) {
+            ctx.save(); ctx.clip(clip, 'evenodd');
+            strokeLines(linesOf((x) => x.role === 'fringe-street'), U.street, (x) => x.width);
+            ctx.restore();
+          }
+        }
+      }
+
+      const natural = polyL('u-natural-ground');
+      if (natural && natural.index.query(rect).length) {
+        const clip = cached(natural.name + '|clip', () => polyPath(P, natural, natural.polys.map((_, id) => id), 0));
+        if (clip) {
+          ctx.save(); ctx.clip(clip, 'nonzero'); ctx.globalAlpha = 1;
+          if (tex) drawVisibleTerrain();
+          else { ctx.fillStyle = pal.paper; ctx.fill(clip, 'nonzero'); }
+          if (world.options.contours) for (const l of linesOf((x) => x.role === 'contour')) {
+            const index = l.kind === 'index';
+            strokeLines([l], pal.contour, () => mapStrokeWidth(index ? MAP_STROKES.contourIndex : MAP_STROKES.contour, sc, index ? pal.contourIndexW / 1.6 : 1), index ? pal.contourOpacity : pal.contourOpacity * 0.7);
+          }
+          if (luOn) {
+            for (const kind of NATURAL_LAND_KINDS) {
+              const name = 'lu-' + kind;
+              multiply(true); fillPolys(name, pal.land[kind], kind === 'forest' ? 0.7 : luAlpha); multiply(false);
+              if (kind === 'forest' && lod.strips) strokePolys(name, pal.treeInk, lw(0.7, 0.8), pal.tex.forest ? 0.5 : 0.35);
+            }
+            if (lod.textures) for (const tl of scene.textures) {
+              if ((NATURAL_LAND_KINDS as readonly string[]).includes(tl.kind) && pal.tex[tl.kind]) fs.textureTiles += drawTexture(ctx, tl, rect, band, lw);
+            }
+          }
+          // Keep the original cased/dashed regional-road rendering within the restored ground.
+          if (land) ctx.clip(land, 'evenodd');
+          strokeLines(roads, pal.roadEdge, (l) => regionalRoadSurface(l.kind === 'major' ? 'major' : 'minor', sc, l.width).casing);
+          strokeLines(roads, pal.roadFill, (l) => regionalRoadSurface(l.kind === 'major' ? 'major' : 'minor', sc, l.width).fill);
+          strokeLines(tracks, ruralInk(pal), () => lw(1.6, 0.9), pal.rural.track, [px(lod.band >= 2 ? 7 : 5), px(lod.band >= 2 ? 4 : 3)], 'butt');
+          ctx.restore();
+        }
+      }
+
       const cornPat = near ? getPattern(ctx, 'corn', 2.6, 2.6, 12, (c, k) => { c.globalAlpha = 0.75; c.fillStyle = U.gardenInk; c.beginPath(); c.arc(1.3 * k, 1.3 * k, 0.6 * k, 0, TAU); c.fill(); }) : null;
       if (polyL('u-terraces')) { const tt = mixHex(pal.land.meadow, pal.land.garden, 0.4); fillPolys('u-terraces', tt); strokePolys('u-terraces', tt, lw(1.5, 0.5)); }
       paved('u-cornfields', mixHex(pal.land.field, U.gardenInk, 0.14), cornPat);

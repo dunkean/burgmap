@@ -8,7 +8,8 @@ import { Vec2, Polygon, Polyline, chaikin, simplify, polygonArea, polygonCentroi
 import { distanceField, forCellsNearPolyline, smoothstep } from '../core/field';
 import { marchingSquares } from '../terrain/contour';
 import { rasterizePolys } from '../geo/raster';
-import { differenceSafeS, mpArea, unionS } from '../geo/bool';
+import { differenceSafeS, intersectionS, mpArea, unionS } from '../geo/bool';
+import { urbanNaturalGround } from './urbanGround';
 import { partitionRegion, pruneWays, FieldCtx, FieldNet } from './fields';
 import type { World, LandArea, LandKind, Farmstead, LandUseLayer, PolyH } from '../types';
 import { FARM_SIZES, farmSize, farmType, layoutFarm, placeFarm, frameOf, segRectDist, type FarmContext, type LocalFarm } from './farms';
@@ -23,6 +24,7 @@ const K_NONE = 0;
 const KINDS: (LandKind | null)[] = [null, 'field', 'meadow', 'pasture', 'forest', 'orchard', 'garden', 'marsh', 'commons', 'field'];
 /** CLOSE: enclosed ground (hedged closes: bocage, farm closes, assarts); it becomes fields or pasture. */
 const C = { NONE: 0, FIELD: 1, MEADOW: 2, PASTURE: 3, FOREST: 4, ORCHARD: 5, GARDEN: 6, MARSH: 7, COMMONS: 8, CLOSE: 9 } as const;
+const NATURAL_CLASSES: readonly number[] = [C.FOREST, C.MEADOW, C.PASTURE, C.COMMONS, C.MARSH];
 
 /** Rectangle polygon centered at (cx, cy) with long axis at `ang`. */
 function rect(cx: number, cy: number, len: number, wid: number, ang: number): Polygon {
@@ -179,6 +181,7 @@ export function generateRural(world: World, root: Rng, mainRoads?: number, strip
     for (let i = 0; i < N; i++) { if (costC[i] <= reserveCost) reserve[i] = 1; uDist[i] = Math.min(1e5, costC[i]) - reserveCost; }
   }
 
+  const coverFootprints: PolyH[] = [...foot];
   // ---- other settlements: their footprints (or projected extents) are reserved; their own rings join the main ones
   // (distance from the nearest settlement edge, rescaled to the main ring scale by the settlement's own ring scale)
   if (secondary.length) {
@@ -191,6 +194,7 @@ export function generateRural(world: World, root: Rng, mainRoads?: number, strip
       let ownFoot: PolyH[] = st.detail === 'farmstead' ? [{ outer: circleRing(st.center, 20), holes: [] }]
         : st.urban?.footprintH.length ? st.urban.footprintH : st.extent.length >= 3 ? [{ outer: st.extent, holes: [] }] : [];
       if (st.urban?.ruralReserve?.length) ownFoot = unionS(ownFoot, st.urban.ruralReserve);
+      coverFootprints.push(...ownFoot);
       for (const ph of ownFoot) rings.push(ph.outer, ...ph.holes);
       if (!rings.length) continue;
       rasterizePolys(rings, n, n, cell, own);
@@ -566,6 +570,33 @@ export function generateRural(world: World, root: Rng, mainRoads?: number, strip
     }
   }
 
+  // Keep the existing rural/agricultural classification intact, then extend neighbouring natural cover
+  // into the shared permission. Whole-footprint reserve still excludes farms, gardens and field networks.
+  const naturalGround = urbanNaturalGround(world);
+  if (naturalGround.length) {
+    if (!coverReserve) coverReserve = reserve.slice();
+    const naturalMask = new Uint8Array(N);
+    // Rasterise each rectangle independently: overlapping permissions must combine by union, never XOR.
+    for (const piece of naturalGround) rasterizePolys([piece.outer], n, n, cell, naturalMask);
+    const sources = Uint8Array.from(cls, (k) => k ? 1 : 0);
+    const nearest = distanceField(sources, n, n, cell, cls).val!;
+    for (let i = 0; i < N; i++) {
+      if (!naturalMask[i] || cls[i] || terrain.water[i] || f.dWater[i] < 1.45 * cell || excl[i] || farmMask[i] === 1) continue;
+      const nearby = nearest[i];
+      if (!nearby) continue;
+      const sl = slopeL[i], dW = f.dWater[i], hab = f.hab[i], prom = H[i] - hb[i];
+      let kind = nearby === C.FOREST || nearby === C.MEADOW || nearby === C.PASTURE || nearby === C.COMMONS || nearby === C.MARSH
+        ? KINDS[nearby]! : 'pasture' as LandKind;
+      if (sl > pastureMax || (prom > promHi * 1.15 && sl > fieldMax)) kind = 'forest';
+      else if (kind === 'marsh' && (hab >= 4.5 || dW >= 240)) kind = 'meadow';
+      if (biome !== 'temperate') {
+        const wx = ((i % n) + 0.5) * cell, wy = (((i / n) | 0) + 0.5) * cell;
+        kind = biomeLandKind(kind, biome, { water: dW, hab, slope: sl, soil: soilAt((wx / cell) - 0.5, (wy / cell) - 0.5), settlement: uDist[i], arableRadius: u3 });
+      }
+      if (['forest', 'meadow', 'pasture', 'commons', 'marsh'].includes(kind)) cls[i] = KINDS.indexOf(kind);
+    }
+  }
+
   stats['ms.lu.classes'] = Math.round(performance.now() - tClass);
   // ---- vectorize (polygon edges get a position-based domain warp: natural, wavering edges that stay shared between classes)
   const areas: LandArea[] = [];
@@ -604,8 +635,9 @@ export function generateRural(world: World, root: Rng, mainRoads?: number, strip
       };
     });
   };
-  const coverFoot = coverReserve ? foot.map((poly) => ({ poly, box: bbox(poly.outer) })) : [];
-  const warpRegion = (rg: Region): Region[] => {
+  const coverFoot = coverReserve ? coverFootprints.map((poly) => ({ poly, box: bbox(poly.outer) })) : [];
+  const naturalPieces = naturalGround.map((poly) => ({ poly, box: bbox(poly.outer) }));
+  const warpRegion = (rg: Region, kind: number): Region[] => {
     const warped = { outer: warpRing(rg.outer), holes: rg.holes.map(warpRing) };
     if (!coverReserve) return [warped];
     const box = bbox(warped.outer);
@@ -622,7 +654,12 @@ export function generateRural(world: World, root: Rng, mainRoads?: number, strip
       }
       if (lost) stats['lu.clipDropped'] = Number(stats['lu.clipDropped'] ?? 0) + 1;
     }
-    return clipped.filter((ph) => mpArea([ph]) >= 0.4 * minArea);
+    const outside = clipped.filter((ph) => mpArea([ph]) >= 0.4 * minArea);
+    if (!NATURAL_CLASSES.includes(kind)) return outside;
+    const permission = naturalPieces.filter(({ box: b }) => b.minX <= box.maxX && b.maxX >= box.minX && b.minY <= box.maxY && b.maxY >= box.minY).map(({ poly }) => poly);
+    // The permission is inside residential plots, disjoint from outside. Keep small run rectangles:
+    // their decomposition must not create an accidental minimum-area threshold for vegetation.
+    return [...outside, ...intersectionS([warped], permission).filter((ph) => mpArea([ph]) > 0.01)];
   };
   const wins = Array.from({ length: 10 }, () => ({ x0: n, y0: n, x1: -1, y1: -1, any: 0 }));
   for (let y = 0, i = 0; y < n; y++) for (let x = 0; x < n; x++, i++) {
@@ -636,7 +673,7 @@ export function generateRural(world: World, root: Rng, mainRoads?: number, strip
     if (!wins[k].any) continue;
     const ind = new Float32Array(N);
     for (let i = 0; i < N; i++) if (cls[i] === k) ind[i] = 1;
-    const regions = vectorize(ind, n, n, cell, minArea, wins[k]).flatMap(warpRegion);
+    const regions = vectorize(ind, n, n, cell, minArea, wins[k]).flatMap((rg) => warpRegion(rg, k));
     for (const rg of regions) {
       if (k === C.FIELD) fieldRegions.push(rg);
       else if (k === C.CLOSE) closeRegions.push(rg);
@@ -723,6 +760,7 @@ export function generateRural(world: World, root: Rng, mainRoads?: number, strip
   stats['fieldHa'] = Math.round(fieldArea / 1e4);
   for (const [k, v] of Object.entries(counts)) stats['n.' + k] = v;
   void K_NONE; void smoothstep; void ({} as Polyline);
-  const layer: LandUseLayer & FieldNetExtras = { areas, farmsteads, reserve: reservePolys, ways: net.ways, headlands: net.headlands };
+  const layer: LandUseLayer & FieldNetExtras = { areas, farmsteads, reserve: reservePolys, ways: net.ways, headlands: net.headlands,
+    ...(naturalGround.length ? { naturalGround } : {}) };
   return { layer, stats };
 }

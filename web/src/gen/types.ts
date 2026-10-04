@@ -124,6 +124,8 @@ export interface LandUseLayer {
   farmsteads: Farmstead[];
   /** Outline(s) of the urban reserve (kept free of rural land use). */
   reserve: Polygon[];
+  /** Permission generated with these areas; late settlement detail must not invent uncovered render patches. */
+  naturalGround?: PolyH[];
 }
 
 /** Polygon with holes (all rings positively oriented). */

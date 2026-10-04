@@ -235,8 +235,8 @@ const svgMeasure = (t: string, s: number, st: Parameters<typeof fontString>[0]):
   measureCtx.font = fontString(st, s, FONT_STACKS[opts.style]);
   return measureCtx.measureText(t).width;
 };
-const currentSvg = (): string => (currentWorld
-  ? renderSvg(currentWorld, { style: mapStyle(), contours: opts.contours, landuse: opts.landuse, labels: opts.labels !== false, legend: !!opts.legend, measure: svgMeasure })
+const currentSvg = (width?: number): string => (currentWorld
+  ? renderSvg(currentWorld, { width, style: mapStyle(), contours: opts.contours, landuse: opts.landuse, labels: opts.labels !== false, legend: !!opts.legend, measure: svgMeasure })
   : '');
 
 /** (Re)build the renderer from the current world and the display options. */
@@ -704,10 +704,10 @@ async function exportFile(name: string, data: Blob | string, mime: string): Prom
   }
 }
 /** SVG / JSON of the current world as a Blob: built in the generation worker (offscreen mode) so the page never blocks, or here. */
-async function buildExport(kind: 'svg' | 'json', full = false): Promise<Blob> {
+async function buildExport(kind: 'svg' | 'json', full = false, width?: number): Promise<Blob> {
   const t = pnow();
   let blob: Blob;
-  if (backend) blob = await backend.export(kind, display(), full);
+  if (backend) blob = await backend.export(kind, display(), full, width);
   else {
     if (!currentWorld) throw new Error('nothing to export yet');
     if (full && currentWorld.urban?.macro) {
@@ -717,7 +717,7 @@ async function buildExport(kind: 'svg' | 'json', full = false): Promise<Blob> {
     }
     await new Promise((r) => setTimeout(r, 30)); // let the progress message paint before the synchronous build
     blob = kind === 'svg'
-      ? new Blob([currentSvg()], { type: 'image/svg+xml' })
+      ? new Blob([currentSvg(width)], { type: 'image/svg+xml' })
       : new Blob([worldToJson(currentWorld)], { type: 'application/json' });
   }
   rec(kind === 'svg' ? 'exportSvg' : 'exportJson', pnow() - t);
@@ -756,7 +756,7 @@ exportJsonBtn.addEventListener('click', () => {
 exportPngBtn.addEventListener('click', () => {
   void withProgress(exportPngBtn, 'Rendering PNG...', async () => {
     const tP = pnow();
-    const svgBlob = await buildExport('svg');
+    const svgBlob = await buildExport('svg', false, 3000);
     rec('pngSvg', pnow() - tP);
     // rasterize through an <img> (the browser decodes the SVG off the UI path as far as it can)
     const png = await new Promise<Blob | null>((resolve) => {
