@@ -41,6 +41,8 @@ import { registerByzantine } from '../byzantine';
 import { registerVenice } from '../venice';
 import { registerPersian } from '../persian';
 import { registerOttoman } from '../ottoman';
+import { registerSwahili, swahiliDoorLines } from '../swahili';
+import { registerPrimitiveFeatures, primitiveGardenLines, halflingGardenTrees } from '../primitive_features';
 import { registerSahel } from '../sahel';
 import { registerHanse } from '../hanse';
 import { registerKorea } from '../korea';
@@ -68,7 +70,8 @@ function runtime(world: World, M: MacroPlan): Runtime {
   const wallIdx = new GridIndex<{ a: Vec2; b: Vec2 }>(60);
   for (const r of M.wallRings) for (let i = 0; i < r.length; i++) wallIdx.insertSeg(r[i], r[(i + 1) % r.length], { a: r[i], b: r[(i + 1) % r.length] });
   registerM4(); registerInca(); registerAztec(); registerRussian(); registerFantasy(); registerByzantine(); registerVenice();
-  registerPersian(); registerOttoman(); registerSahel(); registerHanse(); registerKorea();
+  registerPersian(); registerOttoman(); registerSwahili(); registerSahel(); registerHanse(); registerKorea();
+  registerPrimitiveFeatures();
   rt = { ctx, base: new Rng(M.seedKey), morphs, sbox, wallIdx };
   RT.set(M, rt);
   return rt;
@@ -104,7 +107,7 @@ export function megaHosts(world: World): { si: number; u: UrbanLayer; M: MacroPl
 }
 
 const RANK_W = [0.26, 0.18, 0.02, -0.12, -0.2];
-const LOT_SITE: Record<string, UrbanSite['role']> = { 'm4-palace': 'power', 'm4-cathedral-close': 'worship', 'm4-monastery': 'worship' };
+const LOT_SITE: Record<string, UrbanSite['role']> = { 'm4-palace': 'power', 'm4-cathedral-close': 'worship', 'm4-monastery': 'worship', 'swahili-juma-mosque': 'worship', 'swahili-mosque': 'worship', 'swahili-fort': 'power', 'swahili-merchant-house': 'civic', 'cattle-kraal': 'civic', 'chieftain-hall': 'power', 'kiva-plaza': 'worship' };
 
 /**
  * The detail of macro quarter `id` of the World's megacity plan: an urban layer holding only that quarter's own
@@ -206,7 +209,7 @@ export function megaQuarterDetail(world: World, key: number): UrbanLayer | null 
     landmarks.push(...out.landmarks);
     carved[bi].kind = kind === 'church' || kind === 'parish-church' ? 'church' : out.parcels[0].use === 'place' ? 'place' : 'compound';
     compoundOf[bi] = kind;
-    if (LOT_SITE[kind]) sites.push({ id: kind.replace(/^m4-/, '') + ':' + id + ':' + bi, kind: kind.replace(/^m4-/, ''), role: LOT_SITE[kind], lot: carved[bi].poly, anchor: innerPoint(carved[bi].poly), culture: mq.culture });
+    if (Object.prototype.hasOwnProperty.call(LOT_SITE, kind)) sites.push({ id: kind.replace(/^m4-/, '') + ':' + id + ':' + bi, kind: kind.replace(/^m4-/, ''), role: LOT_SITE[kind], lot: carved[bi].poly, anchor: innerPoint(carved[bi].poly), culture: mq.culture });
     return true;
   };
   const orient = P.orientation === 'cardinal' ? 0 : P.orientation === 'terrain' ? M.terrainAngle : P.orientation === 'water' ? M.waterAngle : M.mainAngle;
@@ -259,7 +262,7 @@ export function megaQuarterDetail(world: World, key: number): UrbanLayer | null 
     for (const gp of r.back) parcels.push({ poly: gp, use: 'garden', block: bi, zone: b.zone });
   });
   // the market hall (or town hall with its belfry) on the main square
-  if (!host.renderHints?.primitive) {
+  if (!host.renderHints?.primitive && host.culture !== 'swahili-stone-town') {
     const mi = parcels.findIndex((p) => p.use === 'market');
     if (mi >= 0) { const hb = marketHall(parcels[mi].poly, mq.nucleus === 0 ? pop : 9000, rng.fork('hall')); if (hb) buildings.push({ ...hb, parcel: mi }); }
   }
@@ -289,7 +292,7 @@ export function megaQuarterDetail(world: World, key: number): UrbanLayer | null 
     const onQuay = port && !!local.nearest(fm, 10, (st) => st.role === 'quay');
     for (const b of buildOn(pl, cov, P, pr, courtHint(pl))) {
       if (b.kind === 'garden') { plotGardens.push(b.poly); continue; }
-      if (onQuay && b.kind === 'house' && P.buildingOp !== 'venetian' && P.buildingOp !== 'primitive') { b.arch = 'warehouse'; b.storeys = 3; }
+      if (onQuay && b.kind === 'house' && P.buildingOp !== 'venetian' && P.buildingOp !== 'primitive') { b.arch = b.arch === 'swahili-stone-house' ? 'swahili-seafront-house' : 'warehouse'; b.storeys = 3; }
       else if (craft && b.kind === 'house' && P.buildingOp !== 'primitive') b.arch = 'craft-workshop';
       plotBld[pi].push(b);
     }
@@ -397,6 +400,9 @@ export function megaQuarterDetail(world: World, key: number): UrbanLayer | null 
     path: s.path, width: s.widths.reduce((a, b) => a + b, 0) / s.widths.length, widths: s.widths,
     kind: s.rank <= 1 ? 'main' : s.rank <= 2 ? 'street' : 'alley', rank: s.rank, role: s.role, phase: s.phase,
   }));
+  if (host.renderHints?.carvedDoors) lines.push(...swahiliDoorLines(buildings, parcels));
+  if (host.renderHints?.primitive) lines.push(...primitiveGardenLines(mq.culture, parcels));
+  if (host.renderHints?.primitive && mq.culture === 'halfling') trees.push(...halflingGardenTrees(parcels, buildings));
   const layer: UrbanLayer = {
     footprint: [], footprintH: [], streets, blocks: carved.map((b) => b.poly), parcels, buildings, walls, landmarks, squares: [],
     archetype: 'town', population: mq.pop, morphology: P.id, phases: [], quarters: [],

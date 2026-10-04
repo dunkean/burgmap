@@ -79,7 +79,7 @@ export const URBAN_LANDMARK_KINDS = ['sahn', 'garth', 'chinampa-canal', 'baray',
 /** Building kinds with a dedicated look (the rest are ordinary roofs). */
 export const URBAN_BUILDING_KINDS = ['church', 'cathedral', 'landmark', 'house'] as const;
 /** Plan-line widths (m) of the generic wall-like kinds, and of camp / village fences (same tables as urban.ts). */
-export const WALL_LINE_W: Record<string, number> = { 'arcane-circle': 0.5, 'lock-gate': 0.8, bank: 0.8, stands: 2.4, dome: 0.6, gallery: 2.2, 'zigzag-wall': 2.4, 'canal-wall': 1, 'pyramid-step': 0.5, 'stall-row': 2.2, 'compound-wall': 1, 'citadel-wall': 2.4, 'stone-wall': 1.8, prakara: 1.6, 'ward-wall': 1.8, platform: 0.4, stela: 1.1, 'sacbe-edge': 0.5, balustrade: 1, 'round-door': 0.35, 'drying-rack': 0.6 };
+export const WALL_LINE_W: Record<string, number> = { 'arcane-circle': 0.5, 'lock-gate': 0.8, bank: 0.8, stands: 2.4, dome: 0.6, gallery: 2.2, 'zigzag-wall': 2.4, 'canal-wall': 1, 'pyramid-step': 0.5, 'stall-row': 2.2, 'compound-wall': 1, 'citadel-wall': 2.4, 'stone-wall': 1.8, prakara: 1.6, 'ward-wall': 1.8, platform: 0.4, stela: 1.1, 'sacbe-edge': 0.5, balustrade: 1, 'round-door': 0.35, 'carved-door': 0.25, 'veranda-edge': 0.35, colonnade: 0.25, 'drying-rack': 0.6 };
 export const CAMP_FENCE_W: Record<string, number> = { 'kraal-fence': 1.1, 'yard-fence': 0.45, 'pen-fence': 0.5, 'orda-fence': 0.8, palisade: 1.2, 'turf-wall': 2.2, albarrada: 0.9 };
 /** Fences drawn as fences (same table as urban.ts): [rail width, post width, post length, gap] in meters. */
 export const FENCE_STYLE: Record<string, [number, number, number, number]> = {

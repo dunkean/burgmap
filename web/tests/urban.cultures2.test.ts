@@ -4,6 +4,9 @@ import { makeOptions, SizeName } from '../src/gen/options';
 import { expectInvariants } from './cultureCases';
 import type { World } from '../src/gen/types';
 import { obb } from '../src/gen/geo/poly';
+import { populationCulture } from '../src/gen/urban/culture';
+import { resolveMorph } from '../src/gen/urban/morphology';
+import { unreachableBuildings } from './accessCheck';
 
 // New village and camp cultures (POLISH.md "New cultures"): the URBAN_GEOMETRY §6 invariants on hamlets, villages
 // and the degraded large sizes (a cluster of villages), plus the plan signature of each culture.
@@ -105,7 +108,15 @@ export const SIGNATURES: Record<string, (w: World) => void> = {
     expect(a.get('chieftain-hall') ?? 0, "germanic: the chieftain's hall").toBeGreaterThan(0);
     expect((a.get('sunken-hut') ?? 0) + (a.get('granary-on-posts') ?? 0), 'germanic: sunken huts and granaries').toBeGreaterThan(1);
     expect(lineKinds(w).has('yard-fence'), 'germanic: fenced yards').toBe(true);
-    expect(w.urban!.streets.every((s) => s.width <= 6), 'germanic: paths, no streets').toBe(true);
+    const u = w.urban!, c = populationCulture('barbarian', u.population);
+    if (c.camp) expect(u.streets.every((s) => s.width <= 6), 'germanic camp: paths, no streets').toBe(true);
+    else {
+      // 4fb1626 gives grown towns a ranked street recipe, including its existing local width jitter.
+      const P = resolveMorph(c.core.morphology), maxWidth = Math.max(...P.widthByRank) * P.widthScale * (1 + P.widthJitter);
+      expect(u.streets.some((s) => s.role === 'radial'), 'germanic town: real serving streets').toBe(true);
+      for (const s of u.streets) for (const width of s.widths ?? [s.width]) expect(width, 'germanic town: recipe width cap').toBeLessThanOrEqual(maxWidth + 1e-7);
+      expect(unreachableBuildings(w).n, 'germanic town: every dwelling remains served').toBe(0);
+    }
   },
   'barbarian-celtic': (w) => {
     const a = arches(w);
@@ -144,8 +155,17 @@ describe('village and camp cultures', () => {
       expectInvariants(w);
       expect(w.urban!.culture).toBe(culture);
       if (size !== 'hamlet' || culture !== 'barbarian-norse') SIGNATURES[culture]?.(w);
-      // above the culture's class (village): a cluster of villages, not a town
-      if (size === 'town' && !['barbarian-norse', 'native-pueblo', 'maya', 'khmer', 'orcish', 'celtic-oppidum', 'stilt-town'].includes(culture)) expect(Number(w.stats['urban.camps']), 'a cluster of villages').toBeGreaterThan(1);
+      // 4fb1626 introduced population-aware urban growth. Actual camp presets still form clusters;
+      // above the culture's threshold the contract is one connected, served town retaining its native features.
+      if (size === 'town' && !['barbarian-norse', 'native-pueblo', 'maya', 'khmer', 'orcish', 'celtic-oppidum', 'stilt-town'].includes(culture)) {
+        if (populationCulture(culture, w.urban!.population).camp) expect(Number(w.stats['urban.camps']), 'a cluster of villages').toBeGreaterThan(1);
+        else {
+          expect(w.stats['urban.camps']).toBeUndefined();
+          expect(w.urban!.archetype).toBe('town');
+          expect(w.urban!.streets.some((s) => s.role === 'radial')).toBe(true);
+          expect(unreachableBuildings(w).n, 'every dwelling remains served').toBe(0);
+        }
+      }
     });
   }
 });

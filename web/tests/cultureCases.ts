@@ -32,6 +32,7 @@ export const CULTURE_CASES: CultureCase[] = [
   { label: 'sahel', culture: 'sahel', seeds: ['1', '2'] },
   { label: 'hanseatic', culture: 'hanseatic', seeds: ['1', '2'] },
   { label: 'korean', culture: 'korean', seeds: ['1', '2'] },
+  { label: 'swahili-stone-town', culture: 'swahili-stone-town', seeds: ['1', '2'] },
   { label: 'wizard-city', culture: 'wizard-city', seeds: ['1', '2'] },
   { label: 'gnomish', culture: 'gnomish', seeds: ['1', '2'] },
   { label: 'roman-core+european-organic', culture: 'roman-core', mix: 'european-organic:0.6:phases' },
@@ -70,6 +71,12 @@ export function expectSignature(c: CultureCase, w: World): void {
   const compounds = new Set(u.blockInfo.map((b) => b.compound).filter(Boolean));
   expect(u.culture, 'culture recorded').toBe(c.culture);
   switch (c.label) {
+    case 'swahili-stone-town':
+      expect(has('swahili-stone-house') || has('swahili-seafront-house'), 'Swahili: coral-stone courtyard houses').toBe(true);
+      expect(has('swahili-juma-mosque'), 'Swahili: distinct flat-roofed Friday mosque').toBe(true);
+      expect(u.buildings.some((b) => b.arch === 'swahili-stone-house' && !!b.courtyards?.length), 'Swahili: open internal courts').toBe(true);
+      expect(['great-mosque', 'm4-cathedral-close', 'parish-church', 'church'].some((kind) => compounds.has(kind)) || has('parish-church'), 'Swahili: own worship catalogue').toBe(false);
+      break;
     case 'medina':
       expect(closes, 'medina: a tree of dead-end derbs').toBeGreaterThan(15);
       expect(has('courtyard-house'), 'medina: courtyard houses').toBe(true);

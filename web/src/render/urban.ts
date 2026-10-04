@@ -159,7 +159,7 @@ function fenceSvg(k: string, d: string, pal: Palette, lw: (m: number, px: number
   const [rail, pw, pl, gap] = FENCE_STYLE[k] ?? FENCE_STYLE['yard-fence'];
   return `<path d="${d}" fill="none" stroke="${U.wall}" stroke-opacity="0.8" stroke-width="${lw(rail, 0.18)}"/><path d="${d}" fill="none" stroke="${U.wall}" stroke-opacity="0.9" stroke-width="${f1(pw)}" stroke-dasharray="${pl} ${gap}" stroke-linecap="butt"/>`;
 }
-const WALL_LINES: Record<string, number> = { 'arcane-circle': 0.5, 'lock-gate': 0.8, bank: 0.8, stands: 2.4, dome: 0.6, gallery: 2.2, 'zigzag-wall': 2.4, 'canal-wall': 1, 'pyramid-step': 0.5, 'stall-row': 2.2,  'compound-wall': 1, 'citadel-wall': 2.4, 'stone-wall': 1.8, prakara: 1.6, 'ward-wall': 1.8, platform: 0.4, stela: 1.1, 'sacbe-edge': 0.5, balustrade: 1, 'round-door': 0.35, 'drying-rack': 0.6 };
+const WALL_LINES: Record<string, number> = { 'arcane-circle': 0.5, 'lock-gate': 0.8, bank: 0.8, stands: 2.4, dome: 0.6, gallery: 2.2, 'zigzag-wall': 2.4, 'canal-wall': 1, 'pyramid-step': 0.5, 'stall-row': 2.2,  'compound-wall': 1, 'citadel-wall': 2.4, 'stone-wall': 1.8, prakara: 1.6, 'ward-wall': 1.8, platform: 0.4, stela: 1.1, 'sacbe-edge': 0.5, balustrade: 1, 'round-door': 0.35, 'carved-door': 0.25, 'veranda-edge': 0.35, colonnade: 0.25, 'drying-rack': 0.6 };
 
 /** Compound grounds, water pieces (moats, tanks) and the moat outside the town wall (drawn under the buildings). */
 function cultureUnderlay(ub: NonNullable<World['urban']>, pal: Palette, lw: (m: number, px: number) => string): string {

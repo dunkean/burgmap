@@ -176,7 +176,9 @@ function courtyardHouse(pl: Plot, P: MorphologyParams, rng: Rng, cov = 0.93, sub
   if (!f || A < 42) return solid();
   // the patio takes ~14–24 % of the lot (≥ 9 m²) at the medina's dense baseline, more on looser land (coverage
   // lowered by the sprawl): the deepest room ring that still leaves it. (Large enough to read on a town plan.)
-  const want = Math.max(10, A * Math.max(0.12, Math.min(0.42, 0.155 + 0.55 * (0.95 - cov) + rng.range(-0.02, 0.06))));
+  const courtShare = P.courtyardShare ? Math.min(0.5, rng.range(...P.courtyardShare) + 0.55 * Math.max(0, 0.85 - cov))
+    : Math.max(0.12, Math.min(0.42, 0.155 + 0.55 * (0.95 - cov) + rng.range(-0.02, 0.06)));
+  const want = Math.max(10, A * courtShare);
   const courts = new Map<number, Polygon>();
   const ringFor = (axis: Vec2): ReturnType<typeof courtyardRing> => {
     for (let rd = P.roomDepth[1] + 1.5; rd >= 2.3; rd *= 0.92) {
@@ -659,8 +661,17 @@ function konak(pl: Plot, cov: number, P: MorphologyParams, rng: Rng): ArchBldg[]
   if (!ground) return out;
   let house = ground;
   if (a1 - a0 > 8 && rng.chance(0.55)) {
-    const cikma = rectIn(pl, f, a0 + (a1 - a0) * rng.range(0.25, 0.4), a1 - (a1 - a0) * rng.range(0.1, 0.25), 0.05, 0.7, 1);
-    if (cikma) { const u = union(ground, cikma); if (u.length === 1 && !u[0].holes.length && polyInside(pl.poly, u[0].outer)) house = cleanRing(u[0].outer, 0.005, 0.5, 0.002, false); }
+    // The cikma is a shallow part of a usable house, never a standalone dwelling. The dwelling-width guard
+    // of rectIn used to reject its 0.65 m depth unconditionally. Clip the component, then validate the whole.
+    const parts = clipPlot(pl.poly, rectHP(f, a0 + (a1 - a0) * rng.range(0.25, 0.4), a1 - (a1 - a0) * rng.range(0.1, 0.25), 0.05, 0.7), isConvex(pl.poly, 1e-3));
+    if (parts.length === 1 && area(parts[0]) > 1) {
+      const u = union(ground, parts[0]);
+      if (u.length === 1 && !u[0].holes.length) {
+        const joined = cleanRing(u[0].outer, 0.005, 0.5, 0.002, false);
+        const shape = shapeOf(joined);
+        if (isSimple(joined) && polyInside(pl.poly, joined) && area(joined) >= area(ground) && shape.w >= MIN_BW && shape.asp <= 4.05) house = joined;
+      }
+    }
   }
   put(house, 'ottoman-wooden-house', 'house', (pl.wealth ?? 0.4) > 0.5 ? 3 : 2);
   // the L wing along the side away from the gate (the haremlik) on wide, deep lots

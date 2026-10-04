@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { populationCulture, getCulture, resolvePlan } from '../src/gen/urban/culture';
-import { PRIMITIVE_GROWTH } from '../src/gen/urban/cultures_primitive';
+import { PRIMITIVE_GROWTH, PRIMITIVE_NUCLEI } from '../src/gen/urban/cultures_primitive';
 import { primitiveHouse } from '../src/gen/urban/primitive';
 import { shapeOkObb } from '../src/gen/urban/access';
 import { resolveMorph } from '../src/gen/urban/morphology';
@@ -22,7 +22,8 @@ describe('population-aware primitive towns', () => {
       const city = populationCulture(id, growth.minPop);
       expect(city.camp).toBeUndefined();
       expect(city.id).toBe(id);
-      expect(city.nucleus.kind).toBe('market');
+      expect(city.nucleus.kind).toBe(PRIMITIVE_NUCLEI[id]?.kind ?? 'market');
+      if (PRIMITIVE_NUCLEI[id]) expect(city.nucleus).toEqual(PRIMITIVE_NUCLEI[id]);
       expect(resolvePlan(id, growth.minPop).phases[0].morph.id).toBe(id + '-town');
       expect(resolvePlan(id, growth.minPop).phases[0].morph.arch).toEqual(resolveMorph(base.core.morphology).arch);
       expect(populationCulture(id, 10)).toBe(base);

@@ -50,6 +50,8 @@ export interface NucleusSpec {
   area: Range | 'market';
   /** A claimed compound lot (landmark builder) rather than an open place. */
   compound: boolean;
+  /** Culture-specific compound builder; otherwise the kind selects the generic builder. */
+  builder?: string;
   /** Width of the street around it (m). */
   ring: number;
   orientation?: 'road' | 'cardinal' | 'qibla' | 'terrain' | 'water';
@@ -112,6 +114,8 @@ export interface RenderHints {
   locks?: boolean;
   /** Stilt town: boardwalks drawn as planks, the lots over the water left unfilled (the water shows). */
   stilts?: boolean;
+  /** Carved double doors at the actual entrances of coral-stone courtyard houses. */
+  carvedDoors?: boolean;
 }
 export interface SettlementForm {
   /** Village / hamlet layout: EO rule (street or nucleated village), a walled compact block, a grove, terraces. */
@@ -212,6 +216,8 @@ export function resolvePlan(cultureId: string, pop: number, mix?: CultureMix | n
   let specs: PhaseSpec[];
   let shares: number[];
   const nucleus: NucleusSpec = { ...c.nucleus, ...(override?.nucleus ?? {}) };
+  // A user changing the nucleus kind asks for that kind's programme, unless they also name a custom builder.
+  if (override?.nucleus?.kind && override.nucleus.kind !== c.nucleus.kind && override.nucleus.builder === undefined) delete nucleus.builder;
   let faubRef: MorphRef | null = c.faubourg;
   let faubShare = c.faubShare;
   if (override?.phases?.length) {

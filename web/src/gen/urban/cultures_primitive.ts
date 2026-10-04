@@ -1,5 +1,5 @@
 /** Scale transitions for tribal villages: one connected town, without replacing their architecture with rows. */
-import type { Culture, EnclosureShape } from './culture';
+import type { Culture, EnclosureShape, NucleusSpec } from './culture';
 import { MORPHOLOGIES, EO_BASE, deepMerge, resolveMorph, type MorphologyParams, type Zone } from './morphology';
 
 interface Growth {
@@ -31,6 +31,13 @@ export const PRIMITIVE_GROWTH: Record<string, Growth> = {
 const zones = ['core', 'middle', 'edge', 'faubourg', 'village'] as const;
 const byZone = <T>(make: (zone: Zone, i: number) => T): Record<Zone, T> => Object.fromEntries(zones.map((z, i) => [z, make(z, i)])) as Record<Zone, T>;
 
+/** Native civic cores remain real reserved compounds when the surrounding village becomes a street town. */
+export const PRIMITIVE_NUCLEI: Record<string, NucleusSpec> = {
+  kraal: { kind: 'precinct', builder: 'cattle-kraal', shape: 'circle', area: [1200, 3600], compound: true, ring: 4.5, orientation: 'terrain' },
+  barbarian: { kind: 'precinct', builder: 'chieftain-hall', shape: 'rect', area: [1000, 2200], compound: true, ring: 4.5, orientation: 'road' },
+  'native-pueblo': { kind: 'precinct', builder: 'kiva-plaza', shape: 'circle', area: [1000, 2400], compound: true, ring: 4.5, orientation: 'terrain' },
+};
+
 /** Adds plain-data recipes only; the original village morphology and preset fields remain intact. */
 export function attachUrbanGrowth(cultures: Culture[]): void {
   for (const c of cultures) {
@@ -59,7 +66,7 @@ export function attachUrbanGrowth(cultures: Culture[]): void {
     MORPHOLOGIES[id] = town;
     const enclosure = { shape: g.shape, wall: g.wall, fossil: 'street' as const, orientation: g.orientation, ...(g.aspect ? { aspect: g.aspect } : {}) };
     c.urbanGrowth = { minPop: g.minPop, recipe: {
-      nucleus: { kind: 'market', shape: c.id === 'norse-ringfort' || g.layout === 'grid' ? 'rect' : 'circle', area: [900, 1800], compound: false, ring: 4.5, orientation: g.orientation },
+      nucleus: PRIMITIVE_NUCLEI[c.id] ?? { kind: 'market', shape: c.id === 'norse-ringfort' || g.layout === 'grid' ? 'rect' : 'circle', area: [900, 1800], compound: false, ring: 4.5, orientation: g.orientation },
       core: { morphology: id, enclosure }, ring: { morphology: id, enclosure: { ...enclosure, shape: g.shape === 'circle' ? 'circle' : 'organic' } },
       phaseCount: [[0, 1], [8000, 2], [40000, 3], [250000, 4]],
       faubourg: id, faubShare: [0.14, 0.12],

@@ -15,12 +15,13 @@
  * Royal Square are compound blocks; every other block is cut into exact rectangles (the lot ring along its dykes,
  * the paddy inside).
  */
-import type { Vec2, Polygon } from '../../core/geom';
+import type { Vec2, Polygon, Polyline } from '../../core/geom';
 import type { Rng } from '../../core/rng';
 import type { UrbanStreet } from '../../types';
-import { orientPos, pointInRing, inscribed, area, bboxOf } from '../../geo/poly';
-import { intersectionS, differenceS } from '../../geo/bool';
+import { orientPos, pointInRing, inscribed, area, bboxOf, segSegT } from '../../geo/poly';
+import { intersectionS, differenceS, tryIntersection, mpArea } from '../../geo/bool';
 import { wetArea } from '../waterland';
+import { ribbon } from '../../geo/offset';
 import type { CampCtx } from './index';
 import { snapRing, CampOut, emptyCamp, street, carveBlocks, pathRibbons, cutExact, FrontIndex, rect, fits, fitIn, openRing, pieces } from './kit';
 import { pyramid } from '../aztec';
@@ -30,6 +31,46 @@ import { wallFeatures } from '../walls';
 const sq = (c: Vec2, h: number): Polygon => orientPos([{ x: c.x - h, y: c.y - h }, { x: c.x + h, y: c.y - h }, { x: c.x + h, y: c.y + h }, { x: c.x - h, y: c.y + h }]);
 const box = (x0: number, y0: number, x1: number, y1: number): Polygon => orientPos([{ x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 }]);
 const ring = (p: Polygon): Vec2[] => p.concat([p[0]]);
+
+/** Cut the 10 m moat around a village prasat by its actual 6 m causeway, including oblique/corner crossings.
+ * The centreline exclusion reserves half the moat width as well, so neither the water band nor round caps
+ * can intrude on the road. Only this village fallback uses it; the cardinal city moat keeps its old geometry. */
+export function prasatMoatPaths(center: Vec2, causeway: [Vec2, Vec2]): Polyline[] {
+  const [from, stop] = causeway, length = Math.hypot(stop.x - from.x, stop.y - from.y);
+  if (length < 1e-6) return [];
+  const dx = (stop.x - from.x) / length, dy = (stop.y - from.y) / length;
+  const clearance = ribbon([{ x: from.x - 5.01 * dx, y: from.y - 5.01 * dy },
+    { x: stop.x + 5.01 * dx, y: stop.y + 5.01 * dy }], 16.02);
+  const moat = sq(center, 37), paths: Polyline[] = [];
+  let current: Polyline = [];
+  for (let i = 0; i < moat.length; i++) {
+    const a = moat[i], b = moat[(i + 1) % moat.length], ts = [0, 1];
+    for (let j = 0; j < clearance.length; j++) {
+      const hit = segSegT(a, b, clearance[j], clearance[(j + 1) % clearance.length]);
+      if (hit && hit.t > 1e-9 && hit.t < 1 - 1e-9) ts.push(hit.t);
+    }
+    ts.sort((a, b) => a - b);
+    const at = (t: number): Vec2 => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+    for (let j = 1; j < ts.length; j++) {
+      if (ts[j] - ts[j - 1] < 1e-9) continue;
+      if (pointInRing(clearance, at((ts[j - 1] + ts[j]) / 2))) {
+        if (current.length > 1) paths.push(current);
+        current = [];
+      } else {
+        if (!current.length) current.push(at(ts[j - 1]));
+        current.push(at(ts[j]));
+      }
+    }
+  }
+  if (current.length > 1) paths.push(current);
+  if (paths.length > 1) {
+    const first = paths[0], last = paths[paths.length - 1];
+    if (Math.hypot(first[0].x - last.at(-1)!.x, first[0].y - last.at(-1)!.y) < 1e-8) {
+      paths[0] = last.concat(first.slice(1)); paths.pop();
+    }
+  }
+  return paths;
+}
 
 export function khmerCity(cc: CampCtx, c: Vec2, pop: number, rng: Rng): CampOut {
   if (pop < 1200) return khmerVillage(cc, c, pop, rng);
@@ -409,14 +450,45 @@ function khmerVillage(cc: CampCtx, c: Vec2, pop: number, rng: Rng): CampOut {
       fillDykeBlock(out, bi, b, front, hr.fork('b' + bi), false, false);
     }
   }
-  const pe = P(x1 + 52, 0);
-  // the prasat at the east (or south) end, in its moated court, a causeway from the road
-  {
+  // The original end may lie across a river. Keep it when usable, otherwise search real road ends for a dry
+  // moated court with a dry causeway. The shrine is a reserved quarter, never placed over house lots or water.
+  const original = P(x1 + 52, 0);
+  const ends = roads.flatMap((road) => [road.path[0], road.path[road.path.length - 1]]);
+  const nearest = ends.reduce((best, p) => Math.hypot(p.x - original.x, p.y - original.y) < Math.hypot(best.x - original.x, best.y - original.y) ? p : best);
+  const candidates = [{ center: original, from: nearest }];
+  for (const road of roads) for (const end of [0, road.path.length - 1]) {
+    const from = road.path[end], near = road.path[end === 0 ? 1 : end - 1];
+    const len = Math.hypot(from.x - near.x, from.y - near.y) || 1, dx = (from.x - near.x) / len, dy = (from.y - near.y) / len;
+    for (const offset of [0, -70, 70]) candidates.push({ from, center: { x: from.x + dx * 48 - dy * offset, y: from.y + dy * 48 + dx * offset } });
+  }
+  for (const { center: pe, from } of candidates) {
     const tcx = pe.x, tcy = pe.y;
-    const court = snapRing(sq({ x: tcx, y: tcy }, 30));
-    if (!court.some((q) => ctx.isWater(q))) {
+    const courtQuarter = snapRing(sq({ x: tcx, y: tcy }, 30));
+    const reserve = sq(pe, 44), bb = bboxOf(reserve);
+    const extent = Math.max(Math.abs(from.x - tcx), Math.abs(from.y - tcy));
+    if (extent <= 30) continue;
+    const stop = { x: tcx + (from.x - tcx) * 30 / extent, y: tcy + (from.y - tcy) * 30 / extent };
+    const causeway: [Vec2, Vec2] = [from, stop], crossing = ribbon(causeway, [6, 6]);
+    if (bb.x0 < 10 || bb.y0 < 10 || bb.x1 > ctx.mapSize - 10 || bb.y1 > ctx.mapSize - 10 || wetArea(reserve, ctx.water) > 0.01 || wetArea(crossing, ctx.water) > 0.01) continue;
+    const occupied = [...out.quarters, ...(cc.avoid ?? [])];
+    const occupiedHit = (p: Polygon, tolerance: number): boolean => occupied.some((q) => {
+      const hit = tryIntersection(q, p);
+      return hit.failed || mpArea(hit.pieces) > tolerance;
+    });
+    // Reserve the whole moat and its bank, not just the inner 60 m court.
+    if (occupiedHit(reserve, 0.01) || occupiedHit(crossing, 0.05)) continue;
+    const moatPaths = prasatMoatPaths(pe, causeway);
+    if (!moatPaths.length || moatPaths.some((path) => {
+      const hit = tryIntersection(ribbon(path, 10), crossing);
+      return hit.failed || mpArea(hit.pieces) > 0.01;
+    })) continue;
+    // An oblique flat road cap can enter the court by a small triangle. Reserve that street piece exactly.
+    const courtBlocks = carveBlocks(courtQuarter, pathRibbons([street(causeway, 6, 1, 'radial')]), []);
+    const court = courtBlocks.find((b) => pointInRing(b, pe));
+    if (!court || courtBlocks.length !== 1) continue;
+    {
       const qi = out.quarters.length;
-      out.quarters.push(court); out.outline.push(sq({ x: tcx, y: tcy }, 44));
+      out.quarters.push(courtQuarter); out.outline.push(sq({ x: tcx, y: tcy }, 44));
       const bi = out.blocks.length;
       out.blocks.push({ poly: court, kind: 'compound', compound: 'prasat', quarter: qi });
       const pi = out.parcels.length;
@@ -424,9 +496,11 @@ function khmerVillage(cc: CampCtx, c: Vec2, pop: number, rng: Rng): CampOut {
       const pr = sq({ x: tcx, y: tcy }, 7);
       out.buildings.push({ poly: pr, kind: 'landmark', parcel: pi, arch: 'prasat', roof: 'pyramidal', material: 'stone', storeys: 3 });
       out.lines.push({ kind: 'pyramid-step', path: ring(sq({ x: tcx, y: tcy }, 4.2)), width: 0.5 }, { kind: 'gallery', path: ring(sq({ x: tcx, y: tcy }, 20)), width: 1.2 });
-      for (const pl of openRing(sq({ x: tcx, y: tcy }, 37), [{ p: horiz ? { x: tcx - 37, y: tcy } : { x: tcx, y: tcy - 37 }, width: 6 }])) out.lines.push({ kind: 'moat', path: pl, width: 10 });
+      for (const path of moatPaths) out.lines.push({ kind: 'moat', path, width: 10 });
       out.landmarks.push({ kind: 'prasat', poly: pr });
       out.sites.push({ id: 'prasat', kind: 'prasat', role: 'worship', lot: court, anchor: { x: tcx, y: tcy } });
+      out.streets.push(street(causeway, 6, 1, 'radial'));
+      break;
     }
   }
   return out;
