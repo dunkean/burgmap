@@ -2,7 +2,7 @@
 
 This checklist reconciles the open work in `BUGS.md`, `HANDOFF.md` §7 and `web/POLISH.md`. A task is complete only after its implementation and relevant geometry, visual, UI and performance checks pass. Keep open user bug reports unchanged; remove resolved entries from BUGS.md after validation, as requested by the user. Record completed work here and in Git history.
 
-Current review gate: Astra, actual Claude Opus 5.5 and actual Claude Sonnet 5.5 must all approve each substantial source change or amendment before tests, typecheck, build or generation of the modified code.
+Current review gate: Astra, actual Claude Opus 5.5 and actual Claude Sonnet 5.5 review coherent, substantial implementation blocks before validation. Bundle related changes and fixes into that review; do not launch a separate triple review for every minor typing or fixture adjustment. Re-review material algorithm or geometry changes as a complete block.
 
 ## User bugs, in priority order
 
@@ -35,7 +35,7 @@ Bug fixes take priority. The user requested a preliminary performance study, wit
 - [ ] Stand-in fabric: useful intermediate detail before exact quarters arrive.
 - [ ] Five-million population: contain the full settlement on the map, with explicit extent handling when needed.
 - [ ] Fast/slow test projects and commands; run the entire suite before completion.
-- [ ] Resolve existing density-suite failures: town seed 3 middle coverage remains below 70%; city seeds 1–6 include intentionally small `m4-shanty` huts below the suite's blanket 4.5 m threshold. Compare against the intended morphology before changing expectations. On `ca1713c` versus `87fb4af`, all 53 narrow hut polygons are identical and middle coverage improves from 0.628895 to 0.638876. No new dense-house failure was accepted.
+- [ ] Resolve existing density-suite failures: town seed 3 middle coverage remains below 70%; city seeds 1–6 contain 53 `m4-shanty` huts below 4.5 m. Their initial fitting already enforces 4.5 m, but the final `realHut` decoration lacks that guard; do not exempt them or weaken the assertion. On `ca1713c` versus `87fb4af`, all 53 narrow hut polygons are identical and middle coverage improves from 0.628895 to 0.638876. No new dense-house failure was accepted.
 - [ ] Ten-kilometre generation: reach the six-second target, retaining established output for pure optimisations.
 - [ ] Check capital loading and Medina/Persian town budgets on a quiet machine.
 
