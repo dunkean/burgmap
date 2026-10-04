@@ -50,3 +50,41 @@ differ by at most 3.2 mm from the prior 24-input grouping on these cases. Stress
 tests no longer exhaust the heap. The p4 first scene still adds roughly 1.53 s;
 this is a measured remaining optimisation target, not a subsecond result. Warm
 measurements include cache reuse and must not be presented as cold costs.
+
+## Current generation after the bug fixes
+
+The root agent measured seven cases on frozen source `cf02820` (documentation
+HEAD `e9a5df2`), with other agents' generation and tests paused. These are Node
+`generate()` timings, excluding hashing, saved-world serialization and rendering.
+Except for the repeated p4 case, each row is one preliminary sample. Options,
+stage timings and whole-world hashes are saved in ignored
+`web/out/current-generation-study/results.json`; binary Worlds are kept alongside
+it for subsequent profiling. Timing statistics are excluded from the hashes.
+
+| Case | Generate | Terrain | Main urban | Secondary detail | Rural land use |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 10 km city, p4uefz | 11.65 s | 2.10 s | 4.54 s | 0.71 s | 2.48 s |
+| 10 km city, 42 | 11.45 s | 2.23 s | 3.81 s | 1.03 s | 1.92 s |
+| 10 km city, 4 | 11.32 s | 2.52 s | 3.79 s | 1.04 s | 2.09 s |
+| 10 km town, 4 | 8.71 s | 2.67 s | 1.24 s | 1.20 s | 1.73 s |
+| Capital preset, 4 | 4.70 s | 1.54 s | 0.18 s (macro) | 0 | 1.13 s |
+| Medina town, 4 | 3.85 s | 0.98 s | 1.07 s | 0.17 s | 0.47 s |
+| Persian town, 4 | 5.49 s | 0.95 s | 0.92 s | 2.14 s | 0.43 s |
+
+All 10 km cases have twelve settlements. These samples are not directly
+comparable with the original study's smaller, single-settlement Worlds. The p4
+repeat took 11.46 s before artifact storage ran out of disk space and 11.65 s
+after storage was restored; its non-statistical World hash stayed identical.
+
+The six-second 10 km generation target remains unmet. The Medina and Persian
+**main urban stages** are below their 1.5 s budget on this seed; their complete
+maps take longer. The capital preset uses 99 lazy macro quarters, so its initial
+generation does not include exact houses. Persian secondary detail deserves
+separate profiling. For the p4 region, plot construction (0.99 s), access (0.67 s),
+rural vectorization (0.80 s) and fields (0.83 s) are useful concrete targets.
+These nested costs belong to the stages above and must not be added again.
+
+Generation remains the largest measured cost on these cases. A renderer-only
+Rust port cannot remove terrain, urban partition or rural-generation time;
+targeted geometry optimizations should be assessed with output hashes before
+choosing a new language or graphics backend.
