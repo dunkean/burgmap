@@ -4,6 +4,7 @@ import { isKinded } from './townbridges';
 import type { World, LandArea, LandKind, Farmstead, PolyH } from '../gen/types';
 import { farmRidges } from './farms';
 import { fieldHedges, fieldHedgeStyle } from './hedges';
+import { furrowDegrees, furrowOffset, furrowSpacing } from './furrows';
 import type { Vec2 } from '../gen/core/geom';
 import { type Palette, ruralInk } from './styles';
 import { f1, pathD } from './util';
@@ -81,11 +82,11 @@ function patterns(world: World, pal: Palette, s: number, scale: number): string 
   const seen = new Set<number>();
   for (const a of world.landuse?.areas ?? []) {
     if (a.kind !== 'field' || a.stripAngle === undefined) continue;
-    seen.add(Math.round((a.stripAngle * 180) / Math.PI) % 180);
+    seen.add(furrowDegrees(a.stripAngle));
   }
-  const sp = Math.max(2.4, 1.5 * s);
+  const sp = furrowSpacing(world.mapSize);
   for (const deg of seen) {
-    pat(`p-fur-${deg}`, 40, sp, `<path d="M0 ${f1(sp / 2)}H40" stroke="${pal.furrow}" ${svgMapStroke(MAP_STROKES.furrow, scale)} opacity="${pal.furrowAlpha}"/>`, ` patternTransform="rotate(${deg})"`);
+    pat(`p-fur-${deg}`, 40, sp, `<path d="M0 ${f1(furrowOffset(world.mapSize))}H40" stroke="${pal.furrow}" ${svgMapStroke(MAP_STROKES.furrow, scale)} opacity="${pal.furrowAlpha}"/>`, ` patternTransform="rotate(${deg})"`);
   }
   return `<defs>${out.join('')}</defs>`;
 }
@@ -108,7 +109,7 @@ export function landuseLayer(world: World, pal: Palette, u: number, scale = 1600
       let fi = 0;
       for (const a of list) {
         if (!a.strips || a.stripAngle === undefined) continue;
-        const deg = Math.round((a.stripAngle * 180) / Math.PI) % 180;
+        const deg = furrowDegrees(a.stripAngle);
         let all = '';
         a.strips.forEach((st, i) => { const d = pathD(st, true); all += d; tone[(i * 5 + fi * 3 + (i >> 2)) & 3] += d; });
         fi++;

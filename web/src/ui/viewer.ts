@@ -20,6 +20,7 @@ export interface ViewerOptions {
   canvas: HTMLCanvasElement;
   minimap?: HTMLCanvasElement;
   onFrame?: (ms: number, band: number, scale: number) => void;
+  onError?: (error: Error) => void;
   /** The (clamped) view of the frame about to be shown, with the container size: overlays (pins) follow it. */
   onView?: (v: View, w: number, h: number) => void;
 }
@@ -35,7 +36,8 @@ export interface Viewer {
   setRenderer(r: CanvasRenderer, mapSize: number, keepView?: boolean): void;
   /** Async mode: frames come from `src` (a worker); call `present` for every answer. */
   setSource(src: FrameSource): void;
-  present(f: PresentedFrame): void;
+  /** Rejecting an obsolete answer still releases the in-flight request and closes its bitmaps. */
+  present(f: PresentedFrame, accept?: boolean): boolean;
   /** The drawn content changed (new world snapshot, style...): request a new frame; refit if the map size changed (or `keepView` is false). */
   contentChanged(mapSize: number, keepView: boolean, markerColor?: string): void;
   fit(): void;
@@ -75,7 +77,7 @@ export function createViewer(o: ViewerOptions): Viewer {
     if (minimap) {
       const mw = Math.round(minimap.clientWidth || 140);
       const px = Math.round(mw * dpr);
-      if (minimap.width !== px) { minimap.width = px; minimap.height = px; miniBase = null; force = true; } // the worker redraws it at the new size
+      if (minimap.width !== px) { minimap.width = px; minimap.height = px; miniBase?.close(); miniBase = null; force = true; } // the worker redraws it at the new size
     }
   };
   const invalidate = (): void => {
@@ -126,9 +128,11 @@ export function createViewer(o: ViewerOptions): Viewer {
       return;
     }
     if (!renderer) return;
-    const st = renderer.draw(view);
-    if (minimap) renderer.drawMinimap(minimap, view, w, h);
-    o.onFrame?.(st.ms, st.band, view.scale);
+    try {
+      const st = renderer.draw(view);
+      if (minimap) renderer.drawMinimap(minimap, view, w, h);
+      o.onFrame?.(st.ms, st.band, view.scale);
+    } catch (error) { o.onError?.(error instanceof Error ? error : new Error(String(error))); }
   }
   const set = (v: View): void => { view = clampView(v, mapSize, w, h); invalidate(); };
   const fit = (): void => set(fitView(mapSize, w, h));
@@ -228,13 +232,25 @@ export function createViewer(o: ViewerOptions): Viewer {
       invalidate();
     },
     setSource(src) { source = src; force = true; },
-    present(f) {
+    present(f, accept = true) {
       if (f.seq === inflight) inflight = 0;
+      if (!accept) { f.bitmap?.close(); f.mini?.close(); invalidate(); return false; }
+      let presented = false;
       if (f.mini) { miniBase?.close(); miniBase = f.mini; }
       if (f.bitmap) {
         bmCtx ??= canvas.getContext('bitmaprenderer');
         if (bmCtx) {
           bmCtx.transferFromImageBitmap(f.bitmap); // sets the canvas size to the bitmap's (w*dpr x h*dpr)
+          presented = true;
+        } else {
+          const c = canvas.getContext('2d');
+          if (c) {
+            canvas.width = Math.max(1, Math.round(f.w * f.dpr)); canvas.height = Math.max(1, Math.round(f.h * f.dpr));
+            c.drawImage(f.bitmap, 0, 0); presented = true;
+          }
+          f.bitmap.close();
+        }
+        if (presented) {
           canvas.style.width = f.w + 'px'; canvas.style.height = f.h + 'px';
           shown = { view: f.view, w: f.w, h: f.h };
           applyTransform();
@@ -243,6 +259,7 @@ export function createViewer(o: ViewerOptions): Viewer {
       }
       drawMiniOverlay();
       invalidate(); // sends the next request if the view moved meanwhile
+      return presented;
     },
     contentChanged(size2, keepView, markerColor) {
       const sizeChanged = size2 !== mapSize;
@@ -256,6 +273,7 @@ export function createViewer(o: ViewerOptions): Viewer {
     getView: () => view,
     destroy() {
       destroyed = true; ro.disconnect(); window.removeEventListener('keydown', key);
+      miniBase?.close(); miniBase = null;
       if (raf) cancelAnimationFrame(raf);
     },
   };

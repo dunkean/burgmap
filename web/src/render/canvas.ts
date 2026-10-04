@@ -14,6 +14,8 @@ import type { World, LandKind, Vec2 } from '../gen/types';
 import { Palette, MapStyle, ruralInk } from './styles';
 import { biomePalette } from './biomes';
 import { fieldHedgeStyle } from './hedges';
+import { furrowLines, furrowSpacing } from './furrows';
+import { orientPos } from '../gen/geo/poly';
 import { CANVAS_MAP_STROKES as MAP_STROKES, mapStrokeWidth } from './strokes';
 import { NATURAL_LAND_KINDS, countryKind, FRINGE_ORDER, FRINGE_PAINT } from './countryside';
 import { TERRACE_STROKES as TS, terraceDetailAlpha } from './terraces';
@@ -21,7 +23,7 @@ import { regionalBridgeSurface, regionalRoadSurface } from './roadSurfaces';
 import { renderTerrainRaster } from './raster';
 import { buildScene, Scene, PolyLayer, LineLayer, TextureLayer, textureMarks, LAND_ORDER, WALL_LINE_W, CAMP_FENCE_W, FENCE_STYLE } from './scene';
 import { renderView } from '../gen/settlements/merge';
-import { selectLod, lineWidth, Lod, BAND_MIN_EDGE, WAY_SCALE } from './lod';
+import { selectLod, lineWidth, Lod, BAND_MIN_EDGE, WAY_SCALE, FURROW_MIN_PX, FURROW_HOLDER_BUDGET } from './lod';
 import { View, viewRect, Rect4 } from './view';
 import { Label, placeLabels } from './labels';
 import { buildMapLabels, placeMapLabels, MapLabel, PlacedMapLabel, estimateWidth } from './mapLabels';
@@ -50,6 +52,8 @@ export interface FrameStats {
   band: number; scale: number; ms: number;
   tilesDrawn: number; bigDrawn: number; pathsBuilt: number; pathCache: number;
   buildingsCandidate: number; buildingsDrawn: boolean; textureTiles: number;
+  /** Dedicated furrow records (three paths each); separate from the shared tile path cache. */
+  furrowCache?: number; furrowsDrawn?: number;
 }
 
 export interface Overlays { labels: boolean; legend: boolean; cartouche: boolean }
@@ -96,6 +100,15 @@ const TEX: Record<string, TexSpec> = {
 const TEX_SALT: Record<string, number> = { forest: 11, orchard: 23, meadow: 37, pasture: 41, marsh: 53, commons: 67 };
 
 type PathMap = Map<string, Path2D | null>;
+type FurrowPaths = { holder: Path2D; strips: Path2D; lines: Path2D };
+const FURROW_CACHE_MAX = FURROW_HOLDER_BUDGET * 2;
+
+function addRing(path: Path2D, ring: Vec2[]): void {
+  if (ring.length < 3) return;
+  path.moveTo(ring[0].x, ring[0].y);
+  for (let i = 1; i < ring.length; i++) path.lineTo(ring[i].x, ring[i].y);
+  path.closePath();
+}
 
 function polyPath(P: new () => Path2D, l: PolyLayer, ids: ArrayLike<number>, minEdge: number): Path2D | null {
   const path = new P();
@@ -160,6 +173,7 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
   const u = S / 1600; // same unit as svg.ts, used for a few decorative widths
 
   const cache: PathMap = new Map();
+  const furrowCache = new Map<number, FurrowPaths>();
   let built = 0;
   let labels: Label[] = [];
   const overlays: Overlays = { labels: world.options.labels !== false, legend: !!world.options.legend, cartouche: true };
@@ -211,6 +225,24 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
       }
     }
     return p;
+  }
+
+  /** One bounded LRU record per holder, so plough textures never evict paths used by other map layers. */
+  function furrowPaths(i: number): FurrowPaths {
+    let paths = furrowCache.get(i);
+    if (paths) { furrowCache.delete(i); furrowCache.set(i, paths); return paths; }
+    const a = scene.furrows!.areas[i], holder = new P(), strips = new P(), lines = new P();
+    addRing(holder, orientPos(a.poly));
+    for (const hole of a.holes ?? []) addRing(holder, orientPos(hole).slice().reverse());
+    for (const strip of a.strips) addRing(strips, orientPos(strip));
+    for (const line of furrowLines(a.poly, S, a.angle)) { lines.moveTo(line[0].x, line[0].y); lines.lineTo(line[1].x, line[1].y); }
+    paths = { holder, strips, lines }; built += 3;
+    furrowCache.set(i, paths);
+    if (furrowCache.size > FURROW_CACHE_MAX) {
+      const oldest = furrowCache.keys().next().value;
+      if (oldest !== undefined) furrowCache.delete(oldest);
+    }
+    return paths;
   }
 
   // ---- offscreen bitmaps -------------------------------------------------------------
@@ -401,11 +433,34 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
       if (!polyL(name)) continue;
       multiply(true);
       fillPolys(name, pal.land[kind], kind === 'forest' ? 0.7 : luAlpha);
+      multiply(false);
+      // Actual parallel plough lines, anchored like the SVG pattern. Suppress subpixel moire at far zoom.
+      if (kind === 'field' && lod.strips && pal.furrowAlpha > 0 && scene.furrows && furrowSpacing(S) * sc >= 1.5) {
+        const fade = Math.min(1, (furrowSpacing(S) * sc - 1.5) / 1.5);
+        const visible: number[] = [], boxes = scene.furrows.index.boxes;
+        // TileIndex.query returns sorted unique ids. Cull by precomputed projected bbox before allocating paths.
+        for (const i of scene.furrows.index.query(rect)) {
+          const b = i * 4;
+          if (Math.min(boxes[b + 2] - boxes[b], boxes[b + 3] - boxes[b + 1]) * sc < FURROW_MIN_PX) continue;
+          visible.push(i);
+          if (visible.length > FURROW_HOLDER_BUDGET) break;
+        }
+        // Skip the entire plough texture over budget rather than rendering an arbitrary subset of fields.
+        if (visible.length <= FURROW_HOLDER_BUDGET) for (const i of visible) {
+          const { holder, strips, lines } = furrowPaths(i);
+          ctx.save(); ctx.clip(holder); ctx.clip(strips);
+          ctx.strokeStyle = pal.furrow; ctx.lineWidth = mapStrokeWidth(MAP_STROKES.furrow, sc);
+          ctx.globalAlpha = pal.furrowAlpha * fade; ctx.lineCap = 'butt'; ctx.stroke(lines); ctx.restore();
+          fs.furrowsDrawn = (fs.furrowsDrawn ?? 0) + 1;
+        }
+      }
       if (kind === 'field' && lod.strips) {
+        // SVG tints the ploughed strips after their furrow texture; retain that compositing order.
+        multiply(true);
         const mk = [0.5, 0.75, 0.3, 0.9];
         for (let k = 0; k < 4; k++) if (pal.stripAlpha[k & 1] > 0) fillPolys('stripT' + k, k & 1 ? pal.stripB : pal.stripA, Math.min(1, pal.stripAlpha[k & 1] * mk[k]));
+        multiply(false);
       }
-      multiply(false);
       if (kind === 'field' && lod.strips && lod.band >= 2) {
         for (let k = 0; k < 4; k++) strokePolys('stripT' + k, pal.furrow, mapStrokeWidth(MAP_STROKES.strip, sc), pal.furrowAlpha * 0.85);
       }
@@ -942,6 +997,7 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
 
     fs.pathsBuilt = built - built0;
     fs.pathCache = cache.size;
+    fs.furrowCache = furrowCache.size; fs.furrowsDrawn ??= 0;
     fs.ms = now() - t0;
     stats = fs;
     return fs;
@@ -1058,7 +1114,7 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
     lastPlaced: () => placedLast,
     drawMinimap,
     lastStats: () => stats,
-    dispose() { cache.clear(); terrainImg = densityImg = undefined; },
+    dispose() { cache.clear(); furrowCache.clear(); terrainImg = densityImg = undefined; },
   };
 }
 
