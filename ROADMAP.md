@@ -35,7 +35,7 @@ Bug fixes take priority. The user requested a preliminary performance study, wit
 - [ ] Stand-in fabric: useful intermediate detail before exact quarters arrive.
 - [ ] Five-million population: contain the full settlement on the map, with explicit extent handling when needed.
 - [ ] Fast/slow test projects and commands; run the entire suite before completion.
-- [ ] Resolve existing density-suite failures: town seed 3 middle coverage remains below 70%; city seeds 1–6 contain 53 `m4-shanty` huts below 4.5 m. Their initial fitting already enforces 4.5 m, but the final `realHut` decoration lacks that guard; do not exempt them or weaken the assertion. On `ca1713c` versus `87fb4af`, all 53 narrow hut polygons are identical and middle coverage improves from 0.628895 to 0.638876. No new dense-house failure was accepted.
+- [x] Density-suite health (`52d71df`): final shanty shapes retain the 4.5 m width/aspect contract, with all 2,143 dwellings kept and all 53 formerly narrow huts corrected. Mature quarters retain their configured coverage instead of cumulative open-edge skips and coverage taper; actual faubourgs, setbacks and access remain. Grouped Astra + actual Opus 5.5 + Sonnet 5.5 reviews preceded validation; 73/73 tests, typecheck/build and inspected matched PNGs passed. Town seed 3 middle coverage is 74.19%, p4uefz 73.05%; all twelve density cases pass unchanged thresholds. Faubourg geometry and the walled control are byte-identical. Full-suite validation remains pending.
 - [ ] Ten-kilometre generation: reach the six-second target, retaining established output for pure optimisations.
 - [ ] Check capital loading and Medina/Persian town budgets on a quiet machine.
 
