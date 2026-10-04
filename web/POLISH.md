@@ -93,6 +93,6 @@ Each culture gets a `scale` range: the settlement classes it can produce. [x] `s
 
 ## UI
 - [~] Loading bar at the top during generation; the current map stays visible.
-- [ ] Farmsteads scattered over the map all look the same: vary type (courtyard farm, longere, longhouse, L/U yard, scattered yard), size/wealth (cottage to manor farm), terrain adaptation and orientation, by culture and region.
-- [ ] UI debug tooling: cursor/click map coordinates (m), droppable waypoints/pins with notes, Copy link carries pins and current view, so bug reports give seed + options + exact location.
-- [ ] In towns, minor streets and lanes must bridge small rivers/streams too (footbridges, small arches), not only main streets.
+- [x] Farmstead variety: 23 cultural types, cottage/manor sizes, slope/wet-ground adaptation and track-facing layout (`landuse/farms.ts`). Audit 2026-10-04: 552 layout combinations and generated placement/culture tests pass; the 46-farm SVG/PNG catalog was inspected.
+- [x] UI debug tooling: cursor/click coordinates, pins with notes and links carrying pins/view (`ui/pins.ts`, `ui/share.ts`). Audit 2026-10-04: real offscreen UI add/edit/focus/delete, Unicode link/view reload and copied bug report with crops pass without regeneration or console errors.
+- [x] Minor-stream bridges: connected lane footbridges and street arches (`urban/streambridges.ts`, shared `render/townbridges.ts`). Audit 2026-10-04: geometry/access/water checks pass across 24 towns; actual seed 1 valley plank bridges were inspected in SVG and Canvas. Fords remain deliberately subtle.

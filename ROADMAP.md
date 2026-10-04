@@ -34,7 +34,7 @@ Bug fixes take priority. The user requested a preliminary performance study, wit
 - [ ] Absorbed village greens: plausible village places rather than accidental triangles.
 - [ ] Stand-in fabric: useful intermediate detail before exact quarters arrive.
 - [ ] Five-million population: contain the full settlement on the map, with explicit extent handling when needed.
-- [ ] Fast/slow test projects and commands; run the entire suite before completion.
+- [ ] Fast/slow test projects and commands; run the entire suite before completion. Projects are implemented: `npm run test:fast` and `npm run test:slow`, while `npm test` runs both. Discovery covers all 59 current suites exactly once (58 fast, one exhaustive city matrix); 11 command-smoke tests and typecheck passed. The full run remains pending integration of the rendering fixes.
 - [x] Density-suite health (`52d71df`): final shanty shapes retain the 4.5 m width/aspect contract, with all 2,143 dwellings kept and all 53 formerly narrow huts corrected. Mature quarters retain their configured coverage instead of cumulative open-edge skips and coverage taper; actual faubourgs, setbacks and access remain. Grouped Astra + actual Opus 5.5 + Sonnet 5.5 reviews preceded validation; 73/73 tests, typecheck/build and inspected matched PNGs passed. Town seed 3 middle coverage is 74.19%, p4uefz 73.05%; all twelve density cases pass unchanged thresholds. Faubourg geometry and the walled control are byte-identical. Full-suite validation remains pending.
 - [ ] Ten-kilometre generation: reach the six-second target, retaining established output for pure optimisations.
 - [ ] Check capital loading and Medina/Persian town budgets on a quiet machine.
@@ -46,7 +46,7 @@ Bug fixes take priority. The user requested a preliminary performance study, wit
 - [ ] Finish map-style polish and field furrows in Canvas.
 - [ ] Make PNG export responsive and show export progress.
 - [ ] Verify loading progress preserves the displayed map.
-- [ ] Audit already-shipped farm variety, bug pins/links and minor-stream bridges; reconcile stale backlog checkboxes with evidence.
+- [x] Audit already-shipped farm variety, bug pins/links and minor-stream bridges (2026-10-04, source `0fd5edf`). Seventeen existing tests passed: 552 farm-layout combinations, generated farm placement/culture cases, share-state independence and 24 towns with minor streams. Root inspected the 46-farm cottage/manor catalog and actual seed 1 valley footbridges in SVG and offscreen Canvas. Real UI pins passed Unicode notes, Alt-click/pin mode, focus, link/view reload, copied bug crops, delete/clear and zero regeneration/errors. Matching stale `POLISH.md` checkboxes are reconciled; source implementations were already shipped.
 
 ## Optional extensions and release
 
