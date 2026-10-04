@@ -85,6 +85,7 @@ Bug fixes take priority. The user requested a preliminary performance study, wit
 
 ## Optional extensions and release
 
+- [x] Archive and remove all 19 secondary worktrees after integrating local code checkpoint `a8c6f14`. Per-file hashes and patches were verified against ZIP backups; readable final evidence and remaining roof fixtures are retained outside the removed worktrees. Only the primary checkout remains registered. Automatic policy refused deletion of a 169-byte generated Vite cache in the old integration directory; root dependencies and user files are preserved.
 - [ ] Ten-kilometre generation: reach the six-second target with measured, output-preserving optimisations. The preliminary study is complete; the speed target remains unmet.
 - [ ] Building roof/3D view and JSON import/editing round trips. Vector JSON export already exists.
 - [ ] Evaluate WebGL and Rust/WASM only if measured rendering/export budgets still require them; the handoff records them as optional.

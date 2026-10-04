@@ -5,6 +5,15 @@ bugs and their evidence are recorded in [ROADMAP.md](ROADMAP.md).
 
 ## Current status
 
+- Local code checkpoint: `a8c6f14`. All 19 secondary worktrees were archived,
+  verified and removed from Git; only the primary checkout remains registered.
+  Readable validation evidence and the remaining roof fixtures are retained at
+  `E:/CodexArtifacts/city-generator-2026-10-04/manual-checkpoint-a8c6f14`;
+  verified ZIP backups are in the sibling `archive` directory. Automatic policy
+  refused deletion of two generated Vite cache files (169 bytes) under the old
+  `D:/Workspace/Self/RPG/city_generator-integration/web/.vite/deps` directory;
+  that unregistered residual directory remains. Root dependencies, the manual
+  preview, `AGENTS.md` and the user's two reproduction scripts are preserved.
 - Live site: https://dunkean.github.io/burgmap/.
 - Repository: https://github.com/dunkean/burgmap. Local `master` publishes to
   remote `main`; the static build publishes to `gh-pages`.
