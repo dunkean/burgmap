@@ -737,8 +737,8 @@ export function terrainForExtent(opts: Options, mapSize: number, root?: Rng): { 
   // ---- clip river ribbons at the shoreline (sea and lakes): cut where a river enters water, keep the mouth point
   for (let k = rivers.length - 1; k >= 0; k--) {
     // A lake on an island is still water; apply sea holes only to the sea, then clip the remaining river at lakes.
-    const seaClipped = clipRiverAtWater(rivers[k], coastline, islands);
-    const clipped = seaClipped && clipRiverAtWater(seaClipped, lakes);
+    const seaClipped = clipRiverAtWater(rivers[k], coastline, islands, { mouth: 'sea' });
+    const clipped = seaClipped && clipRiverAtWater(seaClipped, lakes, [], { mouth: 'lake', lakeAt: (p) => lakeComponentAt(height, comp, keep, p) });
     if (!clipped) rivers.splice(k, 1); else rivers[k] = clipped;
   }
 
@@ -842,7 +842,7 @@ function nearestOnPath(pl: Polyline, p: Vec2): { pt: Vec2; d: number } {
  * Cut a river polyline where it runs into sea/lake polygons: an initial stretch inside water (a lake outlet
  * that starts in its lake) is trimmed to the shore, and the course ends at the first entry into water (the mouth).
  */
-export function clipRiverAtWater(r: River, polys: Polygon[], holes: Polygon[] = []): River | null {
+export function clipRiverAtWater(r: River, polys: Polygon[], holes: Polygon[] = [], destination?: { mouth: 'sea' | 'lake'; lakeAt?: (p: Vec2) => number | undefined }): River | null {
   const inside = (p: Vec2): boolean => polys.some((pg) => polygonContains(pg, p)) && !holes.some((pg) => polygonContains(pg, p));
   const pts = r.path;
   const n = pts.length;
@@ -860,6 +860,7 @@ export function clipRiverAtWater(r: River, polys: Polygon[], holes: Polygon[] = 
     return aInside ? hi : lo; // the outside side
   };
   let start = 0;
+  let mouthPoint: Vec2 | null = null;
   const path: Vec2[] = [], width: number[] = [];
   if (flags[0]) {
     let j = 0;
@@ -871,6 +872,7 @@ export function clipRiverAtWater(r: River, polys: Polygon[], holes: Polygon[] = 
   }
   for (let i = start; i < n; i++) {
     if (flags[i]) {
+      mouthPoint = pts[i];
       const t = cross(pts[i - 1], pts[i], false);
       path.push(lerp(pts[i - 1], pts[i], t)); width.push(r.width[i - 1] + (r.width[i] - r.width[i - 1]) * t);
       break;
@@ -878,5 +880,30 @@ export function clipRiverAtWater(r: River, polys: Polygon[], holes: Polygon[] = 
     path.push(pts[i]); width.push(r.width[i]);
   }
   if (path.length < 2) return null;
-  return { ...r, path, width };
+  // Shore clipping can replace an intended downstream confluence with a genuine sea/lake mouth.
+  // Trimming only a lake outlet's source must keep its original receiving river.
+  const sampledLake = mouthPoint && destination?.mouth === 'lake' ? destination.lakeAt?.(mouthPoint) : undefined;
+  const previousLake = r.mouth === 'lake' && r.endLake !== undefined && r.endLake >= 0 ? r.endLake : undefined;
+  const endLake = sampledLake !== undefined && sampledLake >= 0 ? sampledLake : previousLake;
+  return { ...r, path, width, ...(mouthPoint && destination ? {
+    mouth: destination.mouth, host: undefined,
+    endLake: destination.mouth === 'lake' ? endLake : undefined,
+  } : {}) };
+}
+
+/** Smoothed lake shores may reach a neighbouring dry cell; use only a retained basin component. */
+export function lakeComponentAt(g: Pick<Grid, 'w' | 'h' | 'cell'>, comp: Int32Array, kept: Set<number>, p: Vec2): number | undefined {
+  const x = Math.min(g.w - 1, Math.max(0, Math.floor(p.x / g.cell))), y = Math.min(g.h - 1, Math.max(0, Math.floor(p.y / g.cell)));
+  const direct = comp[y * g.w + x];
+  if (direct >= 0 && kept.has(direct)) return direct;
+  let best = Infinity, id: number | undefined;
+  for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+    const nx = x + dx, ny = y + dy;
+    if (nx < 0 || ny < 0 || nx >= g.w || ny >= g.h) continue;
+    const c = comp[ny * g.w + nx];
+    if (c < 0 || !kept.has(c)) continue;
+    const d = Math.hypot((nx + 0.5) * g.cell - p.x, (ny + 0.5) * g.cell - p.y);
+    if (d < best) { best = d; id = c; }
+  }
+  return id;
 }

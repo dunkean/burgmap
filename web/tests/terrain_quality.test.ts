@@ -62,6 +62,16 @@ describe('lakes', () => {
       for (const seed of ['1', '2', '3', '4']) {
         expect(terrainForExtent(opt(relief, seed, { lakes: 'none' }), 2000).terrain.lakes.length).toBe(0);
         const { terrain: t } = terrainForExtent(opt(relief, seed, { lakes: 'some' }), 2400);
+        for (const inflow of t.rivers.filter((r) => r.mouth === 'lake')) {
+          expect(inflow.endLake, `${relief}/${seed}: lake inflow without a retained component`).toBeGreaterThanOrEqual(0);
+          expect(t.rivers.some((r) => r.source === 'lake' && r.lakeId === inflow.endLake),
+            `${relief}/${seed}: lake inflow does not match its outlet`).toBe(true);
+        }
+        for (const outlet of t.rivers.filter((r) => r.source === 'lake')) {
+          const upstream = t.rivers.filter((r) => r.mouth === 'lake' && r.endLake === outlet.lakeId)
+            .reduce((sum, r) => sum + (r.ext?.at(-1) ?? 0), 0);
+          expect(outlet.ext?.[0] ?? 0, `${relief}/${seed}: lake lost its external inflow`).toBeGreaterThanOrEqual(upstream - 1e-6);
+        }
         const cell = t.height.cell;
         for (const lk of t.lakes) {
           lakes++;
@@ -103,7 +113,8 @@ describe('coast and rivers', () => {
       const main = t.rivers.find((r) => r.main)!;
       const end = main.path[main.path.length - 1];
       let d = Infinity;
-      for (const pg of t.coastline) for (const q of pg) d = Math.min(d, Math.hypot(q.x - end.x, q.y - end.y));
+      // Distance to the actual shore, including long simplified edges between its vertices.
+      for (const pg of t.coastline) d = Math.min(d, distToPolyline(end, pg.concat([pg[0]])));
       expect(d).toBeLessThan(4 * t.height.cell);
     }
   }, 240000);

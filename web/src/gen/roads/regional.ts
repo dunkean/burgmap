@@ -1,7 +1,7 @@
 import type { Rng } from '../core/rng';
 import { Noise2D } from '../core/noise';
 import { MinHeap } from '../core/pq';
-import { D8, D8_DIST, blurGrid } from '../core/grid';
+import { D8, D8_DIST, blurGrid, visitSegmentCells } from '../core/grid';
 import { Vec2, Polyline, chaikin, simplify, polylineLength, dist, resample } from '../core/geom';
 import { smoothstep, forCellsNearPolyline } from '../core/field';
 import { bridgeRoad, attachEnd, clearRibbons } from './junctions';
@@ -231,8 +231,8 @@ export interface RoadContext {
   ribDist: Float32Array;
   isWaterPt: (p: Vec2) => boolean;
   isBankPt: (p: Vec2) => boolean;
-  /** Land-preserving smoothing of a cell path (ends pinned to `startPt` / `endPt` when given). */
-  smoothPath: (cells: number[], startPt: Vec2 | null, endPt: Vec2 | null) => Polyline;
+  /** Land-preserving smoothing, with the untrimmed route retained for safe junction fallback. */
+  smoothPath: (cells: number[], startPt: Vec2 | null, endPt: Vec2 | null, fallbackCells?: number[]) => Polyline | null;
 }
 
 /** Cost grid and path smoother shared by the regional roads and the settlement network (`r` = the stage's rng). */
@@ -287,7 +287,7 @@ export function roadContext(terrain: TerrainLayer, f: SiteFields, r: Rng, mapSiz
 
   const plannedWater = (cells: number[]): Uint8Array => {
     const pw = new Uint8Array(N);
-    for (const c of cells) if (pass[c] >= 2) {
+    for (const c of cells) if (water[c] === 3) {
       const cx = c % n, cy = (c / n) | 0;
       for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
         const x = cx + dx, y = cy + dy;
@@ -299,15 +299,10 @@ export function roadContext(terrain: TerrainLayer, f: SiteFields, r: Rng, mapSiz
   const unplanned = (pl: Polyline, pw: Uint8Array): number => {
     let bad = 0;
     for (let i = 1; i < pl.length; i++) {
-      const a = pl[i - 1], b = pl[i];
-      const L = dist(a, b), m = Math.max(1, Math.ceil(L / 2));
-      for (let k = 0; k <= m; k++) {
-        const t = k / m;
-        const x = Math.min(n - 1, Math.max(0, Math.floor((a.x + (b.x - a.x) * t) / cell)));
-        const y = Math.min(n - 1, Math.max(0, Math.floor((a.y + (b.y - a.y) * t) / cell)));
-        const idx = y * n + x;
-        if (water[idx] && !pw[idx]) bad++;
-      }
+      visitSegmentCells(terrain.height, pl[i - 1], pl[i], (idx) => {
+        // Only planned river crossings can be bridged; nearby sea/lakes remain impassable.
+        if (water[idx] === 1 || water[idx] === 2 || (water[idx] && !pw[idx])) bad++;
+      });
     }
     return bad;
   };
@@ -316,11 +311,42 @@ export function roadContext(terrain: TerrainLayer, f: SiteFields, r: Rng, mapSiz
     const i = Math.min(n - 1, Math.max(0, Math.floor(p.y / cell))) * n + Math.min(n - 1, Math.max(0, Math.floor(p.x / cell)));
     return water[i] !== 0 || ribDist[i] < 0.5 * cell + 3;
   };
-  const smoothPath = (cells: number[], startPt: Vec2 | null, endPt: Vec2 | null): Polyline => {
-    const raw: Vec2[] = cells.map((i) => ({ x: ((i % n) + 0.5) * cell, y: (((i / n) | 0) + 0.5) * cell }));
+  const cellPoint = (i: number): Vec2 => ({ x: ((i % n) + 0.5) * cell, y: (((i / n) | 0) + 0.5) * cell });
+  const idxOf = (p: Vec2): number => Math.min(n - 1, Math.max(0, Math.floor(p.y / cell))) * n + Math.min(n - 1, Math.max(0, Math.floor(p.x / cell)));
+  // Junction anchors can lie several cells beyond a shortened route. Reconnect locally on dry
+  // cells instead of assuming that replacing the final cell centre leaves a safe segment.
+  const connect = (a: Vec2, b: Vec2, pw: Uint8Array): Polyline | null => {
+    if (unplanned([a, b], pw) === 0) return [a, b];
+    const start = idxOf(a), goal = idxOf(b), sx = start % n, sy = (start / n) | 0, gx = goal % n, gy = (goal / n) | 0;
+    if (Math.abs(sx - gx) > 8 || Math.abs(sy - gy) > 8) return null;
+    const x0 = Math.max(0, Math.min(sx, gx) - 4), x1 = Math.min(n - 1, Math.max(sx, gx) + 4);
+    const y0 = Math.max(0, Math.min(sy, gy) - 4), y1 = Math.min(n - 1, Math.max(sy, gy) + 4);
+    const allowed = (i: number) => water[i] === 0 || (water[i] === 3 && pw[i] !== 0);
+    if (!allowed(start) || !allowed(goal)) return null;
+    const parent = new Map<number, number>([[start, -1]]), queue = [start];
+    for (let at = 0; at < queue.length && !parent.has(goal); at++) {
+      const c = queue[at], x = c % n, y = (c / n) | 0;
+      for (const [dx, dy] of [[1, 0], [0, 1], [-1, 0], [0, -1]]) {
+        const nx = x + dx, ny = y + dy, i = ny * n + nx;
+        if (nx < x0 || nx > x1 || ny < y0 || ny > y1 || parent.has(i) || !allowed(i)) continue;
+        parent.set(i, c); queue.push(i);
+      }
+    }
+    if (!parent.has(goal)) return null;
+    const route: number[] = [];
+    for (let i = goal; i >= 0; i = parent.get(i)!) route.push(i);
+    const pl = [a, ...route.reverse().map(cellPoint), b];
+    return unplanned(pl, pw) === 0 ? pl : null;
+  };
+  const smoothPath = (cells: number[], startPt: Vec2 | null, endPt: Vec2 | null, fallbackCells = cells): Polyline | null => {
+    if (cells.length < 2 || fallbackCells.length < 2) return null;
+    const raw: Vec2[] = cells.map(cellPoint);
     if (startPt) raw[0] = startPt;
     if (endPt) raw[raw.length - 1] = endPt;
-    const pw = plannedWater(cells);
+    // A junction projected onto an existing bridge/ford is already a legitimate river crossing.
+    // Preserve it for attachEnd's dry-junction repair; sea and lake anchors are never authorized.
+    const anchorCells = [startPt, endPt].filter((p): p is Vec2 => p !== null).map(idxOf);
+    const pw = plannedWater([...fallbackCells, ...anchorCells]);
     // land-preserving smoothing: relax the resampled path, never pulling a point into water
     const tries: [number, number][] = [[70, 6], [36, 3.4], [16, 1.8], [6, 1]];
     for (const [iters, disp] of tries) {
@@ -346,7 +372,15 @@ export function roadContext(terrain: TerrainLayer, f: SiteFields, r: Rng, mapSiz
       const p = resample(chaikin(raw, it), 4);
       if (unplanned(p, pw) === 0) return p;
     }
-    return resample(chaikin(raw, 2), 4);
+    const full = fallbackCells.map(cellPoint);
+    const first = startPt ? connect(startPt, full[0], pw) : [full[0]];
+    const last = endPt ? connect(full[full.length - 1], endPt, pw) : [full[full.length - 1]];
+    if (!first || !last) return null;
+    const joined = [...first, ...full.slice(1), ...last.slice(1)];
+    const safeRaw = joined.filter((p, i) => i === 0 || dist(p, joined[i - 1]) > 1e-9);
+    if (unplanned(safeRaw, pw) !== 0) return null;
+    const simple = simplify(safeRaw, 0.35);
+    return unplanned(simple, pw) === 0 ? simple : safeRaw;
   };
 
   return { n, cell, N, H, pass, water, sIds, mainIds, cm, ribDist, isWaterPt, isBankPt, smoothPath };
@@ -435,7 +469,7 @@ export function routeRoads(
     let junction = -1;
     for (let i = 3; i < path.length; i++) if (usedNear[path[i]] && pass[path[i]] === 1) { cut = i + 1; junction = path[i]; break; }
     let cells = path.slice(0, cut);
-    for (const c of cells) used[c] = 1;
+    const fallbackCells = cells;
     const startPt = { ...ex.p };
     if (ex.idx % n === 0) startPt.x = 0; else if (ex.idx % n === n - 1) startPt.x = mapSize;
     else if (ex.idx < n) startPt.y = 0; else startPt.y = mapSize;
@@ -448,7 +482,9 @@ export function routeRoads(
     }
     if (host < 0) endPt = { ...site.center };
     if (cells.length < 2) return;
-    const pl = smoothPath(cells, startPt, endPt);
+    const pl = smoothPath(cells, startPt, endPt, fallbackCells);
+    if (!pl) return;
+    for (const c of fallbackCells) used[c] = 1;
     smoothed.push(pl);
     hostOf.push(host);
     reached.push(host < 0);
@@ -503,6 +539,7 @@ export function routeRoads(
     const cells = astarFewCrossings({ ...baseCfg, cm: cmT, hf: octile, allowBridge: false, discount: 1 }, ia, (i) => i === ib, sIds, mainIds);
     if (!cells) continue;
     const pl = smoothPath(cells, pa, pb);
+    if (!pl) continue;
     if (polylineLength(pl) > 1.4 * dd) continue;
     // reject tracks that hug another road
     let hug = false;

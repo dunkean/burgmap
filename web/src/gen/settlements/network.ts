@@ -179,6 +179,7 @@ export function routeNetwork(world: World, settlements: Settlement[], root: Rng)
     let b = path.length - 1;
     for (let i = a + 1; i < path.length; i++) if (isGoal(path[i])) { b = i; break; }
     let cells = path.slice(a, b + 1);
+    const fallbackCells = cells;
     if (cells.length < 2) {
       if (b === a && fromNode >= 0) { uf.union(fromNode, toNode); return true; }
       return false;
@@ -193,7 +194,8 @@ export function routeNetwork(world: World, settlements: Settlement[], root: Rng)
       if (cells.length > 6) cells = cells.slice(0, cells.length - 2);
     }
     if (cells.length < 2) return false;
-    const pl = rc.smoothPath(cells, startPt, endPt);
+    const pl = rc.smoothPath(cells, startPt, endPt, fallbackCells);
+    if (!pl) return false;
     if (pl.length < 2 || polylineLength(pl) < 8) { if (fromNode >= 0) uf.union(fromNode, toNode); return true; }
     const ri = roads.length;
     const comp = fromNode >= 0 ? fromNode : toNode;

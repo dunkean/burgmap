@@ -1,5 +1,26 @@
 export interface Grid { w: number; h: number; cell: number; data: Float32Array }
 
+/** Visit every cell crossed by a segment, including short corner crossings missed by fixed-distance samples. */
+export function visitSegmentCells(g: Pick<Grid, 'w' | 'h' | 'cell'>, a: { x: number; y: number }, b: { x: number; y: number }, visit: (index: number) => void): void {
+  if (g.w < 1 || g.h < 1 || !(g.cell > 0)) return;
+  const clamp = (v: number, n: number) => Math.max(0, Math.min(n - 1e-9, v / g.cell));
+  const ax = clamp(a.x, g.w), ay = clamp(a.y, g.h), bx = clamp(b.x, g.w), by = clamp(b.y, g.h);
+  let x = Math.floor(ax), y = Math.floor(ay);
+  const ex = Math.floor(bx), ey = Math.floor(by), dx = bx - ax, dy = by - ay;
+  const sx = dx > 0 ? 1 : -1, sy = dy > 0 ? 1 : -1;
+  const dtx = dx ? Math.abs(1 / dx) : Infinity, dty = dy ? Math.abs(1 / dy) : Infinity;
+  let tx = dx > 0 ? (x + 1 - ax) / dx : dx < 0 ? (x - ax) / dx : Infinity;
+  let ty = dy > 0 ? (y + 1 - ay) / dy : dy < 0 ? (y - ay) / dy : Infinity;
+  visit(y * g.w + x);
+  for (let i = 0; (x !== ex || y !== ey) && i < g.w + g.h; i++) {
+    if (Math.abs(tx - ty) < 1e-12) { x += sx; y += sy; tx += dtx; ty += dty; }
+    else if (tx < ty) { x += sx; tx += dtx; }
+    else { y += sy; ty += dty; }
+    if (x < 0 || y < 0 || x >= g.w || y >= g.h) return;
+    visit(y * g.w + x);
+  }
+}
+
 /**
  * Optional side table: a box (cells, inclusive) outside which a grid's data is known to be Infinity (bounded cost
  * fields of the secondary settlements). Loops may skip the rest; absent = no such knowledge.
