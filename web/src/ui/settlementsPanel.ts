@@ -3,10 +3,11 @@
  * secondary settlements (auto / none / counts per class / an editable list with click-on-map placement).
  * Everything goes through the control registry, so the URL, history and regeneration follow like any other option.
  */
-import type { Options, SettlementsOpt, SettlementSpec, CountClass, SiteArchetype } from '../gen/options';
+import type { Options, SettlementsOpt, SettlementSpec, SettlementClass, CountClass, SiteArchetype } from '../gen/options';
 import { COUNT_CLASSES, SITE_ARCHETYPES, mapSizeOf, MAP_SIZE_MIN, MAP_SIZE_MAX, POP_MIN, POP_MAX, settlementsToString, classOfPop } from '../gen/options';
 import { CULTURE_LIST } from '../gen/urban/cultures';
 import type { ControlRegistry } from './controls';
+import { SETTLEMENT_KINDS, withSettlementKind } from './settlementKinds';
 
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, attrs: Record<string, string> = {}, text?: string): HTMLElementTagNameMap[K] => {
   const e = document.createElement(tag);
@@ -157,21 +158,38 @@ export function initSettlementsUI(registry: ControlRegistry, getOpts: () => Opti
       centerAuto.disabled = !o.center;
     },
   });
+  const kindLabel = (population: number): string => SETTLEMENT_KINDS.find((entry) => entry.kind === classOfPop(population))!.label;
+  function syncKind(row: HTMLElement, k: number, population: number): void {
+    row.querySelector<HTMLElement>('[data-role="heading"]')!.textContent = `#${k + 1} - ${kindLabel(population)}`;
+    row.querySelector<HTMLSelectElement>('[data-f="kind"]')!.value = classOfPop(population);
+  }
+  function syncPosition(row: HTMLElement, k: number): void {
+    const position = rows[k].position;
+    row.querySelector<HTMLButtonElement>('[data-role="place"]')!.textContent = picking === k ? 'Click the map...' : position ? `@ ${position.x}, ${position.y}` : 'Place on map';
+    row.querySelector<HTMLButtonElement>('[data-role="auto-position"]')!.disabled = !position;
+  }
   function renderRows(): void {
     rowsEl.textContent = '';
     rows.forEach((it, k) => {
       const r = el('div', { class: 'settl-row', style: 'border:1px solid var(--line);border-radius:4px;padding:5px;display:grid;grid-template-columns:1fr 1fr;gap:4px' });
-      const pop = el('input', { type: 'number', min: String(POP_MIN), max: String(POP_MAX), step: '10', title: 'Population', 'data-k': String(k), 'data-f': 'population' });
+      const kindField = el('div');
+      const kind = el('select', { id: `settl-kind-${k}`, 'data-k': String(k), 'data-f': 'kind' });
+      for (const choice of SETTLEMENT_KINDS) kind.appendChild(el('option', { value: choice.kind }, choice.label));
+      kind.value = classOfPop(it.population);
+      kindField.append(el('label', { for: kind.id }, 'Type'), kind);
+      const popField = el('div');
+      const pop = el('input', { id: `settl-population-${k}`, type: 'number', min: String(POP_MIN), max: String(POP_MAX), step: '1', title: 'Population', 'data-k': String(k), 'data-f': 'population' });
       pop.value = String(it.population);
+      popField.append(el('label', { for: pop.id }, 'Population'), pop);
       const cu = el('select', { title: 'Culture', 'data-k': String(k), 'data-f': 'culture' });
       for (const [v, t] of cultureItems) cu.appendChild(el('option', { value: v }, t));
       cu.value = it.culture ?? '';
       const st = el('select', { title: 'Site type', 'data-k': String(k), 'data-f': 'siteType' });
       for (const [v, t] of siteItems) st.appendChild(el('option', { value: v }, t));
       st.value = it.siteType ?? '';
-      const posB = el('button', { type: 'button', class: 'secondary small', title: 'Click, then click on the map to fix the position' }, picking === k ? 'Click the map...' : it.position ? `@ ${Math.round(it.position.x)}, ${Math.round(it.position.y)}` : 'Place on map');
+      const posB = el('button', { type: 'button', class: 'secondary small', 'data-role': 'place', title: 'Click, then click on the map to fix the position' }, picking === k ? 'Click the map...' : it.position ? `@ ${Math.round(it.position.x)}, ${Math.round(it.position.y)}` : 'Place on map');
       posB.addEventListener('click', () => setPicking(picking === k ? null : k));
-      const clr = el('button', { type: 'button', class: 'secondary small', title: 'Automatic position' }, 'Auto pos.');
+      const clr = el('button', { type: 'button', class: 'secondary small', 'data-role': 'auto-position', title: 'Automatic position' }, 'Auto pos.');
       clr.disabled = !it.position;
       clr.addEventListener('click', () => { rows[k] = { ...rows[k], position: undefined }; renderRows(); fire(box); });
       const rm = el('button', { type: 'button', class: 'secondary small', title: 'Remove' }, 'Remove');
@@ -182,31 +200,49 @@ export function initSettlementsUI(registry: ControlRegistry, getOpts: () => Opti
         inp.value = it.position ? String(it.position[axis]) : '';
         coords.appendChild(inp);
       }
-      const head = el('div', { style: 'grid-column:1 / span 2;font-size:11px;color:var(--ink2)' }, `#${k + 1} - ${classOfPop(it.population)}`);
-      r.append(head, pop, cu, st, posB, coords, clr, rm);
+      const head = el('div', { 'data-role': 'heading', style: 'grid-column:1 / span 2;font-size:11px;color:var(--ink2)' }, `#${k + 1} - ${kindLabel(it.population)}`);
+      r.append(head, kindField, popField, cu, st, posB, coords, clr, rm);
       rowsEl.appendChild(r);
     });
   }
+  // Classification feedback while typing does not commit a population or trigger generation.
+  rowsEl.addEventListener('input', (e) => {
+    const t = e.target as HTMLInputElement;
+    if (t.dataset.f !== 'population' || !t.value) return;
+    const k = Number(t.dataset.k), value = Number(t.value);
+    if (!rows[k] || !Number.isFinite(value) || value <= 0) return;
+    syncKind(t.closest<HTMLElement>('.settl-row')!, k, Math.max(POP_MIN, Math.min(POP_MAX, Math.round(value))));
+  });
   // field edits inside the rows
   rowsEl.addEventListener('change', (e) => {
     const t = e.target as HTMLInputElement | HTMLSelectElement;
     const k = Number(t.dataset.k), f = t.dataset.f;
     if (!Number.isFinite(k) || !rows[k] || !f) return;
-    if (f === 'population') { const v = Number(t.value); if (Number.isFinite(v) && v > 0) rows[k] = { ...rows[k], population: Math.max(POP_MIN, Math.min(POP_MAX, Math.round(v))) }; }
-    else if (f === 'culture') rows[k] = { ...rows[k], culture: t.value || undefined };
+    const row = t.closest<HTMLElement>('.settl-row')!;
+    if (f === 'population') {
+      const v = Number(t.value);
+      if (t.value && Number.isFinite(v) && v > 0) rows[k] = { ...rows[k], population: Math.max(POP_MIN, Math.min(POP_MAX, Math.round(v))) };
+      t.value = String(rows[k].population);
+      syncKind(row, k, rows[k].population);
+    } else if (f === 'kind') {
+      rows[k] = withSettlementKind(rows[k], t.value as SettlementClass);
+      row.querySelector<HTMLInputElement>('[data-f="population"]')!.value = String(rows[k].population);
+      syncKind(row, k, rows[k].population);
+    } else if (f === 'culture') rows[k] = { ...rows[k], culture: t.value || undefined };
     else if (f === 'siteType') rows[k] = { ...rows[k], siteType: (t.value || undefined) as SiteArchetype | undefined };
     else if (f === 'x' || f === 'y') {
       const coords = t.parentElement!;
       const x = coords.querySelector<HTMLInputElement>('[data-f="x"]')!;
       const y = coords.querySelector<HTMLInputElement>('[data-f="y"]')!;
-      if (!x.value && !y.value) { rows[k] = { ...rows[k], position: undefined }; renderRows(); }
+      if (!x.value && !y.value) { rows[k] = { ...rows[k], position: undefined }; syncPosition(row, k); }
       else if (x.value && y.value && Number.isFinite(Number(x.value)) && Number.isFinite(Number(y.value))) {
         rows[k] = { ...rows[k], position: { x: Math.round(Number(x.value)), y: Math.round(Number(y.value)) } };
-        renderRows();
+        x.value = String(rows[k].position!.x); y.value = String(rows[k].position!.y);
+        syncPosition(row, k);
       }
     }
   });
-  addBtn.addEventListener('click', () => { rows.push({ population: rows.length ? 120 : 300 }); renderRows(); fire(box); });
+  addBtn.addEventListener('click', () => { rows.push({ population: 300 }); renderRows(); fire(box); });
   const showMode = (): void => { countsBox.style.display = mode.value === 'counts' ? 'grid' : 'none'; listBox.style.display = mode.value === 'list' ? 'flex' : 'none'; };
   mode.addEventListener('change', () => {
     if (typeof picking === 'number') setPicking(null);
@@ -225,7 +261,7 @@ export function initSettlementsUI(registry: ControlRegistry, getOpts: () => Opti
     return 'auto';
   };
   registry.add({
-    el: box,
+    el: box, live: false,
     read: (o) => ({ ...o, settlements: readSettl() }),
     write: (o) => {
       const s = o.settlements ?? 'auto';
