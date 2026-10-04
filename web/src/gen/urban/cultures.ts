@@ -8,6 +8,7 @@ import { MORPHOLOGIES, EO_BASE, deepMerge } from './morphology';
 import { CAMP_CULTURES } from './cultures_camps';
 import { CITY_CULTURES } from './cultures_cities';
 import { MORE_CULTURES, registerMoreMorphologies } from './cultures_more';
+import { SWAHILI_CULTURE, registerSwahiliMorphologies } from './cultures_swahili';
 
 const EO = EO_BASE;
 const morph = (id: string, base: MorphologyParams, over: Record<string, unknown>): MorphologyParams => deepMerge(base, { ...over, id });
@@ -125,6 +126,7 @@ M['chinese-suburb'] = morph('chinese-suburb', EO, {
 for (const [k, m] of Object.entries(M)) if (k !== 'bastide') { m.gatePlaces = 0; m.crossPlaces = 0; }
 M['roman-castrum'].gatePlaces = 0.4;
 Object.assign(MORPHOLOGIES, M);
+registerSwahiliMorphologies();
 registerMoreMorphologies();
 
 // ---------------------------------------------------------------- cultures
@@ -305,4 +307,4 @@ const BASE_CULTURES: Culture[] = [
   },
 ];
 
-export const CULTURE_LIST: Culture[] = [...BASE_CULTURES, ...CITY_CULTURES, ...MORE_CULTURES, ...CAMP_CULTURES];
+export const CULTURE_LIST: Culture[] = [...BASE_CULTURES, ...CITY_CULTURES, ...MORE_CULTURES, ...CAMP_CULTURES, SWAHILI_CULTURE];

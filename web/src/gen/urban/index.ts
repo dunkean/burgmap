@@ -49,6 +49,8 @@ import { registerByzantine, stairLanes } from './byzantine';
 import { registerVenice, lagoonWaterways, reserveArsenal } from './venice';
 import { registerPersian, bazaarRoofs, qanats } from './persian';
 import { registerOttoman } from './ottoman';
+import { registerSwahili, swahiliDoorLines } from './swahili';
+import { registerPrimitiveFeatures, primitiveBoundaryLines, primitiveGardenLines, halflingGardenTrees } from './primitive_features';
 import { registerSahel } from './sahel';
 import { registerHanse } from './hanse';
 import { registerKorea } from './korea';
@@ -143,6 +145,8 @@ const L2_SITES: Record<string, 'power' | 'worship' | 'market' | 'civic' | 'activ
   maidan: 'market', 'friday-mosque': 'worship', caravanserai: 'market', 'chahar-bagh': 'civic',
   mescit: 'worship', kulliye: 'worship', 'ulu-cami': 'worship', bedesten: 'market',
   'mud-mosque': 'worship', 'sahel-mosque': 'worship', 'sahel-palace': 'power',
+  'swahili-juma-mosque': 'worship', 'swahili-mosque': 'worship', 'swahili-fort': 'power', 'swahili-merchant-house': 'civic',
+  'cattle-kraal': 'civic', 'chieftain-hall': 'power', 'kiva-plaza': 'worship',
   'hall-church': 'worship', rathaus: 'civic',
   'korean-palace': 'power', jongmyo: 'worship', hyanggyo: 'civic', 'korean-temple': 'worship',
   'wizard-tower': 'power', 'mage-tower': 'civic', 'arcane-garden': 'civic', observatory: 'civic',
@@ -215,6 +219,8 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   registerVenice();
   registerPersian();
   registerOttoman();
+  registerSwahili();
+  registerPrimitiveFeatures();
   registerSahel();
   registerHanse();
   registerKorea();
@@ -533,7 +539,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     // suburbs get their own parish churches, near their places and village greens
     const suburbPts = villages.map((v) => v.c);
     const lmList = [...plan.landmarks];
-    if (flags.suburbs === 'many' && archetype === 'town' && plan.culture.id !== 'medina') lmList.push({ role: 'extra', kind: 'parish-church', place: 'suburb', area: [700, 5000], minPop: 0, count: Math.max(1, suburbPts.length + (outerPhase ? 2 : 1)), sep: 200, culture: culture.id });
+    if (flags.suburbs === 'many' && archetype === 'town' && plan.culture.id !== 'medina') lmList.push({ role: 'extra', kind: plan.culture.id === 'swahili-stone-town' ? 'swahili-mosque' : 'parish-church', place: 'suburb', area: [700, 5000], minPop: 0, count: Math.max(1, suburbPts.length + (outerPhase ? 2 : 1)), sep: 200, culture: culture.id });
     for (const lm of lmList) {
       if (pop < lm.minPop || lm.level1) continue;
       // the kasbah is the culture's castle: sited at level 1 by the castle rule (or switched off)
@@ -628,7 +634,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   const claim = (bi: number, kind: string, ang: number): boolean => {
     const out = buildCompound(kind, carved[bi].poly, cxFor(bi, ang));
     if (out.walls) extraWalls.push(...out.walls);
-    if (L2_SITES[kind]) sites.push({ id: kind + ':' + bi, kind, role: L2_SITES[kind], lot: carved[bi].poly, anchor: interiorPoint(carved[bi].poly), culture: blockCulture[bi] ?? culture.id });
+    if (Object.prototype.hasOwnProperty.call(L2_SITES, kind)) sites.push({ id: kind + ':' + bi, kind, role: L2_SITES[kind], lot: carved[bi].poly, anchor: interiorPoint(carved[bi].poly), culture: blockCulture[bi] ?? culture.id });
     if (out.trees) compoundTrees.push(...out.trees);
     if (!out.parcels.length) return false;
     const first = parcels.length;
@@ -648,7 +654,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   const marketBi = carved.findIndex((b) => b.kind === 'market');
   if (prim.market) {
     const mbi = marketBi;
-    const ck = NUCLEUS_COMPOUND[nucleusKind];
+    const ck = nucleusSpec?.builder ?? (Object.prototype.hasOwnProperty.call(NUCLEUS_COMPOUND, nucleusKind) ? NUCLEUS_COMPOUND[nucleusKind] : undefined);
     if (mbi >= 0 && ck) claim(mbi, ck, nucleusIn?.angle ?? mainAngle);
     else landmarks.push({ kind: nucleusKind === 'forum' ? 'forum' : archetype === 'town' ? 'market' : 'green', poly: prim.market });
   }
@@ -706,7 +712,10 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
       const use = lk && LOT_USE[lk] ? LOT_USE[lk] : b.kind === 'market' ? (archetype === 'town' ? 'market' : 'green') : b.kind === 'church' ? 'church' : 'place';
       const pi = parcels.length;
       parcels.push({ poly: b.poly, use, block: bi, zone: b.zone });
-      if (lk) for (const hb of portPieceBuildings(lk, b.poly, lotData.get(b.lot!), nucleus, bi === firstQuay)) buildings.push({ ...hb, parcel: pi });
+      if (lk) for (const hb of portPieceBuildings(lk, b.poly, lotData.get(b.lot!), nucleus, bi === firstQuay)) {
+        const coastalHouse = culture.id === 'swahili-stone-town' && (hb.arch === 'customs-house' || hb.arch === 'fish-market');
+        buildings.push({ ...hb, ...(coastalHouse ? { arch: 'swahili-' + hb.arch, roof: 'flat' as const, material: 'coral-stone' } : {}), parcel: pi });
+      }
       if (lk === 'm4-bridge-houses') for (const hb of bridgeHouses(b.poly, lotData.get(b.lot!) as BridgeHousesData)) if (polyInside(b.poly, hb.poly)) buildings.push({ poly: hb.poly, kind: 'house', parcel: pi, arch: hb.arch, roof: 'gable', material: 'timber', storeys: 3 });
       return;
     }
@@ -817,7 +826,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
       if (b.kind === 'garden') { plotGardens.push(b.poly); continue; }
       if (first && b.kind === 'house') { b.arch = 'smithy'; first = false; }
       // the warehouse row on the quay (merchant quarter) and the craftsmen's quarter by the tanneries
-      if (onQuay && b.kind === 'house' && plotMorph[pi].buildingOp !== 'venetian' && plotMorph[pi].buildingOp !== 'primitive') { b.arch = 'warehouse'; b.storeys = 3; }
+      if (onQuay && b.kind === 'house' && plotMorph[pi].buildingOp !== 'venetian' && plotMorph[pi].buildingOp !== 'primitive') { b.arch = b.arch === 'swahili-stone-house' ? 'swahili-seafront-house' : 'warehouse'; b.storeys = 3; }
       else if (craft && b.kind === 'house' && plotMorph[pi].buildingOp !== 'primitive') b.arch = 'craft-workshop';
       plotBld[pi].push(b);
     }
@@ -1022,6 +1031,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   }
   // ---- elven canopy: trees over the town, clear of the houses
   const trees: UrbanTree[] = [...compoundTrees];
+  if (hints.primitive && culture.id === 'halfling') trees.push(...halflingGardenTrees(parcels, buildings));
   if (hints.canopy) {
     const tr = rng.fork('trees');
     const houses = buildings.map((b) => ({ c: polygonCentroid(b.poly), r: Math.sqrt(areaOf(b.poly) / Math.PI) }));
@@ -1085,6 +1095,8 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     });
     return out;
   };
+  if (hints.carvedDoors) lines.push(...swahiliDoorLines(buildings, parcels));
+  if (hints.primitive) lines.push(...primitiveGardenLines(culture.id, parcels));
   const layer: UrbanLayer = {
     footprint: footprint.map((p) => p.outer),
     footprintH: toPH(footprint),
@@ -1099,7 +1111,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
         return null;
       }
       if (primitivePalisade) {
-        for (const path of wf.pieces) lines.push({ kind: 'palisade', path, width: 1.2 });
+        for (const path of wf.pieces) lines.push(...primitiveBoundaryLines(culture.id, path));
         return null;
       }
       return { path: w.ring, closed: true, towers: wf.towers, gates: w.gates.map((g) => g.p), thickness: wallKind === 'palisade' ? 1.6 : pop > 12000 ? 3.2 : 2.6, gateInfo: w.gates.map((g) => ({ p: g.p, dir: g.dir, width: g.width })), pieces: wf.pieces, gateTowers: wf.gateTowers, towerScale: wf.towerScale, curtains: wf.curtains, towerShape, role: 'town' as const };

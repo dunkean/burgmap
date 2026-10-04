@@ -35,6 +35,7 @@ import { ribbon } from '../../geo/offset';
 import type { MacroPlan, MacroQuarter, MacroStreet, MacroNucleus, MacroDistrict, MacroWant } from './types';
 import { fitRings, segKey } from './rings';
 import { DEFAULT_M4 } from '../m4/index';
+import { primitiveBoundaryLines } from '../primitive_features';
 import { planMoat, naturalBank, moatReserve } from '../moat';
 
 const TAU = Math.PI * 2;
@@ -842,7 +843,7 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
   // the palace city: a large lot in the middle rings, by the water or on high ground, away from the old towns
   const palaceA = Math.max(40000, Math.min(900000, pop * 0.18));
   let palaceP: Vec2 | null = null;
-  if (!primitive) {
+  if (!primitive && culture.id !== 'swahili-stone-town') {
     const pr = rng.fork('palace');
     const h0 = ctx.heightAt(c);
     let bs = -Infinity;
@@ -980,7 +981,7 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
   const lm = rng.fork('landmarks');
   const marketLab = labelOf[marketId];
   const byScore = <T>(list: T[], f: (x: T) => number): T | undefined => { let b: T | undefined, bs = -Infinity; for (const x of list) { const s = f(x); if (s > bs) { bs = s; b = x; } } return b; };
-  const cat = primitive ? undefined : byScore(quarters.filter((q) => q.kind === 'quarter' && q.phase === 1 && q.lab.includes(marketLab)), (q) => Math.min(q.area, 60000) + lm.float() * 5000);
+  const cat = primitive || culture.id === 'swahili-stone-town' ? undefined : byScore(quarters.filter((q) => q.kind === 'quarter' && q.phase === 1 && q.lab.includes(marketLab)), (q) => Math.min(q.area, 60000) + lm.float() * 5000);
   if (cat) {
     cat.wants.push({ kind: 'm4-cathedral-close', place: 'near-nucleus', area: [9000, 30000], data: { kind: 'cathedral-close', ang: 0, Lc: pop > 500000 ? 135 : 115 } });
     cat.district = 'cathedral';
@@ -1039,11 +1040,11 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
   // the fused towns' collegiate church by their market; the university (colleges) across the water from the old
   // town or beside the cathedral close (the Latin Quarter)
   for (let ni = 1; ni < nuclei.length; ni++) {
-    if (primitive || nuclei[ni].kind !== 'town') continue;
+    if (primitive || culture.id === 'swahili-stone-town' || nuclei[ni].kind !== 'town') continue;
     const tq = byScore(quarters.filter((q) => q.kind === 'quarter' && q.nucleus === ni && q.district === 'satellite'), (q) => -dist(ipq(q), nuclei[ni].p) + Math.min(q.area, 40000) / 400);
     if (tq) tq.wants.push({ kind: 'm4-cathedral-close', place: 'near-nucleus', area: [5000, 18000], data: { kind: 'cathedral-close', ang: 0, Lc: 85 } });
   }
-  if (!primitive && pop >= 250000) {
+  if (!primitive && culture.id !== 'swahili-stone-town' && pop >= 250000) {
     const ur = rng.fork('university');
     const catP = cat ? ipq(cat) : c;
     const bank = (p: Vec2): number => (riverAxis === null ? 0 : Math.sign(-Math.sin(riverAxis) * (p.x - c.x) + Math.cos(riverAxis) * (p.y - c.y)));
@@ -1086,6 +1087,10 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
   // parish churches (one quarter in two in the old rings, one in four outside), abbeys in the outer rings
   for (const q of quarters) {
     if (primitive || q.kind !== 'quarter') continue;
+    if (q.culture === 'swahili-stone-town') {
+      if (q.id % 2 === 0) q.wants.push({ kind: 'swahili-mosque', place: 'near-nucleus', area: [650, 2600] });
+      continue;
+    }
     const r = new Rng(rng.seedKey + '\u0001lm:' + q.id);
     const p = q.district === 'village' || q.district === 'satellite' ? 0.8 : q.phase <= 2 ? 0.5 : q.phase <= nR ? 0.3 : 0.22;
     if (r.chance(p)) q.wants.push({ kind: 'parish-church', place: 'near-nucleus', area: [700, 5000] });
@@ -1105,7 +1110,7 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
       for (let i = 0; i < q.pts.length; i++) if (wetEdge[i]) wetL += dist(q.pts[i], q.pts[(i + 1) % q.pts.length]);
       if (wetL < 140) continue;
       if (q.phase > nR) {
-        if (q.phase === nR + 1 && wetL > 220) {
+        if (q.phase === nR + 1 && wetL > 220 && q.culture !== 'swahili-stone-town') {
           // tanners, dyers and mills on the water outside the walls
           q.district = 'craft';
           const r = new Rng(rng.seedKey + '\u0001craft:' + q.id);
@@ -1116,6 +1121,7 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
       // (the harbour quarters: the old town's waterfront, then fewer and fewer outward)
       if (q.phase > 1 && lm.chance(q.phase > nR - nW + 1 ? 0.7 : 0.45)) continue;
       q.district = 'port';
+      if (q.culture === 'swahili-stone-town') q.wants.push({ kind: 'swahili-merchant-house', place: 'edge', area: [900, 3500] });
       // runs of water edges → quay streets
       const n = q.pts.length;
       const s0 = wetEdge.findIndex((wet, i) => wet && !wetEdge[(i - 1 + n) % n]);
@@ -1212,7 +1218,7 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
     }
     const wf = wallFeatures(ring, gates, rng.fork('wall:' + key), ctx.isWater, skip ? (p) => nearW(p) || skip(p) : nearW, spacing);
     if (primitivePalisade) {
-      for (const path of wf.pieces) lines.push({ kind: 'palisade', path, width: 1.2 });
+      for (const path of wf.pieces) lines.push(...primitiveBoundaryLines(culture.id, path));
       return;
     }
     walls.push({ path: ring, closed: true, towers: wf.towers, gates: gates.map((x) => x.p), thickness, gateInfo: gates, pieces: wf.pieces, gateTowers: wf.gateTowers, towerScale: wf.towerScale, curtains: wf.curtains, towerShape, role });
@@ -1304,7 +1310,7 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
   }));
   const macro: MacroPlan = {
     version: 1, seedKey: rng.seedKey, eagerPop, population: pop, center: c, mainAngle, terrainAngle, waterAngle, cityR: ringR[nR], ctxRadius,
-    nucleusCompound: plan.nucleus.kind !== 'none' ? NUCLEUS_COMPOUND[plan.nucleus.kind] : undefined,
+    nucleusCompound: plan.nucleus.kind !== 'none' ? plan.nucleus.builder ?? (Object.prototype.hasOwnProperty.call(NUCLEUS_COMPOUND, plan.nucleus.kind) ? NUCLEUS_COMPOUND[plan.nucleus.kind] : undefined) : undefined,
     streets: mstreets, quarters, nuclei, morphs, wallRings: [...[...standing].sort((a, b) => a - b).map((k) => rings[k - 1]), ...nuclei.filter((nu) => nu.walled && nu.ring).map((nu) => nu.ring!)], rings,
   };
   const marketQ = quarters.find((q) => q.kind === 'market' && q.nucleus === 0);

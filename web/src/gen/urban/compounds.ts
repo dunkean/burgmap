@@ -508,6 +508,8 @@ export const COMPOUND_BUILDERS: Record<string, (lot: Polygon, cx: CompoundCtx) =
 
 /** Builds a compound; unknown kinds leave the lot as one parcel of that use. */
 export function buildCompound(kind: string, lot: Polygon, cx: CompoundCtx): CompoundOut {
+  // Explicit plan builders may name unknown ids; inherited Object keys are not registered programmes.
+  if (!Object.prototype.hasOwnProperty.call(COMPOUND_BUILDERS, kind)) return emptyOut(lot, 'compound:' + kind);
   const b = COMPOUND_BUILDERS[kind];
   if (!b) return emptyOut(lot, 'compound:' + kind);
   const out = b(orientPos(lot), cx);

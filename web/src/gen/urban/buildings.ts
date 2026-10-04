@@ -29,7 +29,7 @@ import { truncateAcute } from './blocks';
 import { burgageHouse } from './houses';
 
 export interface HalfPlane { p: Vec2; n: Vec2 }
-export type BldgKind = 'house' | 'rear' | 'back' | 'barn' | 'shed' | 'garden' | 'hall' | 'landmark' | 'church' | 'cathedral' | 'hut';
+export type BldgKind = 'house' | 'rear' | 'back' | 'barn' | 'shed' | 'garden' | 'hall' | 'landmark' | 'church' | 'cathedral' | 'hut' | 'pit';
 export interface Bldg { poly: Polygon; kind: BldgKind }
 
 export const BLD_STATS = { on: false, zone: 'core', plot: 0, raw: 0, norm: 0, fin: 0 };

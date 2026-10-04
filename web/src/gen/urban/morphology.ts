@@ -17,7 +17,7 @@ export type StreetOpId =
 export type PlotOpId = 'burgage' | 'courtyard' | 'siheyuan' | 'machiya' | 'compound' | 'garden';
 export type BuildingOpId = 'streetFrontRow' | 'courtyardHouse' | 'shopRow' | 'pavilionCompound' | 'yashiki' | 'machiya' | 'detached' | 'treeHouse' | 'hall' | 'longhouse' | 'kancha' | 'yardHouse' | 'tomb' | 'venetian' | 'konak' | 'sahelCompound' | 'giebelhaus' | 'hanok' | 'gnome' | 'primitive';
 export type RoofKind = 'gable' | 'hip' | 'flat' | 'dome' | 'pyramidal' | 'pagoda' | 'thatch-round' | 'none' | 'tiled-hip' | 'conical' | 'barrel' | 'terraced';
-export type Material = 'timber' | 'stone' | 'brick' | 'mud' | 'wood' | 'paper-wood' | 'living-wood' | 'rock' | 'thatch' | 'hide' | 'felt' | 'bark' | 'adobe' | 'turf' | 'earth' | 'wattle';
+export type Material = 'timber' | 'stone' | 'coral-stone' | 'brick' | 'mud' | 'wood' | 'paper-wood' | 'living-wood' | 'rock' | 'thatch' | 'hide' | 'felt' | 'bark' | 'adobe' | 'turf' | 'earth' | 'wattle';
 /** Architecture of a building type (metadata for later rendering / 3D). */
 export interface ArchSpec { typology: string; roof: RoofKind; storeys: Range; material: Material }
 
@@ -44,6 +44,8 @@ export interface MorphologyParams {
   /** Courtyard / compound lots: area range per zone (m²); room depth of courtyard houses (m). */
   houseArea: Record<Zone, Range>;
   roomDepth: Range;
+  /** Explicit open-court share for cultures whose houses need larger internal courts. */
+  courtyardShare?: Range;
   /** Derb/hutong/roji target depth from street access (m); invalid paths are rejected. */
   accessDepth: number;
   /** Twist (radians) added to the radial/tangential field: spiral streets. */
