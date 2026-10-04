@@ -35,11 +35,18 @@ Procedural generator of pre-modern settlements in their landscape. From a seed (
 ```bash
 cd web
 npm install
-npm run dev        # dev server
-npm test           # vitest invariant suites
+npm run dev        # local preview at http://localhost:5173/
+npm run typecheck  # strict TypeScript checks
+npm run test:fast  # development invariants, excluding the exhaustive city matrix
+npm run test:slow  # every culture/mix at city size
+npm test           # both projects: complete invariant suite
 npm run build      # single self-contained dist/index.html (works from file://)
 npm run preview:png -- --seed 42 --size town --out out/x.png
 ```
+
+The full suite includes the long city matrix; allow roughly 20 minutes. Both
+projects use the same assertions and run at most two worker processes. A focused
+suite can still run with `npm test -- tests/urban.determinism.test.ts`.
 
 Design documents:
 - `web/ARCHITECTURE.md`

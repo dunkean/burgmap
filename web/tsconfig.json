@@ -5,5 +5,5 @@
     "lib": ["ES2022", "DOM", "WebWorker"], "types": ["node", "vite/client"],
     "noEmit": true, "isolatedModules": true, "resolveJsonModule": true
   },
-  "include": ["src", "scripts", "tests", "vite.config.ts", "vitest.config.ts"]
+  "include": ["src", "scripts", "tests", "vite.config.ts", "vitest.config.ts", "vitest.workspace.ts"]
 }
