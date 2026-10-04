@@ -14,9 +14,9 @@
  */
 import type { Vec2, Polygon, Polyline } from '../../core/geom';
 import { dist, polygonCentroid, simplify } from '../../core/geom';
-import type { ReserveApi, ReservedLot } from '../primary';
-import { MultiPoly, differenceS, intersectionS, unionS, mpArea } from '../../geo/bool';
-import { area, pointInRing, distToRing, orientPos, isSimple, segSegT } from '../../geo/poly';
+import type { ReserveApi, ReservedLot, WallLine } from '../primary';
+import { MultiPoly, differenceS, intersectionS, unionS, mpArea, tryIntersection, tryDifferenceS } from '../../geo/bool';
+import { area, pointInRing, distToRing, orientPos, isSimple, segSegT, bboxOf } from '../../geo/poly';
 import { insidePieces } from '../../geo/split';
 import { dilate } from '../phases';
 import { rectAt, LineIndex, findConnectorX, plLen, plAt, nearestOnPl } from './lots';
@@ -27,7 +27,11 @@ import { emptyOut, fits, placeRect, type Out } from './kit';
 import { inscribed, obb } from '../../geo/poly';
 import { frameAt } from './lots';
 import type { UrbanBuilding } from '../../types';
-import { waterContains } from '../waterland';
+import { waterContains, waterNear } from '../waterland';
+import { ribbon } from '../../geo/offset';
+import type { UrbanCtx } from '../context';
+import { offsetCurtain } from '../moat';
+import { wallFeatures } from '../walls';
 
 
 export interface PortIn {
@@ -40,6 +44,22 @@ export interface PortIn {
 export interface QuayData { kind: 'quay'; edge: Polyline; seaward: Vec2[]; main: boolean }
 export interface PierData { kind: 'pier' | 'mole' | 'slipway'; base: [Vec2, Vec2]; out: Vec2 }
 export interface YardData { kind: 'shipyard' | 'ropewalk'; ang: number }
+
+/** Physical sea or a channel at least eight metres wide; raster bank cells do not determine navigation. */
+export function portWaterKind(ctx: UrbanCtx, p: Vec2): 'coast' | 'river' | null {
+  if (!waterContains(ctx.water, p)) return null;
+  const t = ctx.terrain;
+  if (t.coastline.some((coast) => pointInRing(coast, p)) && !(t.islands ?? []).some((island) => pointInRing(island, p))) return 'coast';
+  for (const river of t.rivers) {
+    if (river.path.length < 2) continue;
+    const near = nearestOnPl(river.path, p), i = near.i;
+    const length = dist(river.path[i - 1], river.path[i]) || 1;
+    const fraction = dist(river.path[i - 1], near.q) / length;
+    const width = river.width[i - 1] * (1 - fraction) + river.width[i] * fraction;
+    if (width >= 8 && near.d <= width / 2 + 2) return 'river';
+  }
+  return null;
+}
 
 /** Left offset of a polyline by d (per segment line shift, mitred joints, capped). */
 export function offsetLeft(pl: Polyline, d: number): Polyline {
@@ -144,106 +164,298 @@ const ringPoly = (a: Polyline, b: Polyline): Polygon => {
   return r;
 };
 
+/** Retain the boundary order, adding metre-spaced samples only where a bank crosses local search boxes. */
+export function localShoreSamples(boundary: Polygon, boxes: ReturnType<typeof bboxOf>[]): Polygon {
+  const out: Polygon = [];
+  const push = (p: Vec2) => { if (!out.length || dist(out[out.length - 1], p) > 0.001) out.push(p); };
+  for (let i = 0; i < boundary.length; i++) {
+    const a = boundary[i], b = boundary[(i + 1) % boundary.length];
+    const at = (t: number): Vec2 => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+    const spans: [number, number][] = [];
+    for (const box of boxes) {
+      let lo = 0, hi = 1;
+      for (const [v, d, min, max] of [[a.x, b.x - a.x, box.x0, box.x1], [a.y, b.y - a.y, box.y0, box.y1]]) {
+        if (Math.abs(d) < 1e-9) { if (v < min || v > max) hi = -1; }
+        else {
+          const t0 = (min - v) / d, t1 = (max - v) / d;
+          lo = Math.max(lo, Math.min(t0, t1)); hi = Math.min(hi, Math.max(t0, t1));
+        }
+      }
+      if (hi >= lo) spans.push([lo, hi]);
+    }
+    spans.sort((x, y) => x[0] - y[0]);
+    const merged: [number, number][] = [];
+    for (const span of spans) {
+      const previous = merged[merged.length - 1];
+      if (previous && span[0] <= previous[1]) previous[1] = Math.max(previous[1], span[1]); else merged.push(span);
+    }
+    push(a);
+    if (!merged.length) continue;
+    let end = 0;
+    for (const [lo, hi] of merged) {
+      // An unsampled gap still needs a far point so separate local shores cannot become one artificial run.
+      if (lo > end) push(at((end + lo) / 2));
+      const count = Math.max(1, Math.ceil(dist(a, b) * (hi - lo) / 12));
+      for (let k = 0; k <= count; k++) push(at(lo + (hi - lo) * k / count));
+      end = hi;
+    }
+    if (end < 1) push(at((end + 1) / 2));
+  }
+  if (out.length > 1 && dist(out[0], out[out.length - 1]) < 0.001) out.pop();
+  return out;
+}
+
 /** Plans the port; returns its lots (apron, harbour strip, piers, shipyard, slipways, rope walk) or [] if none. */
 export function reservePort(s: M4State, api: ReserveApi, pin: PortIn): ReservedLot[] {
   const ctx = s.ctx;
-  const t = ctx.terrain;
   const r = s.rng.fork('port');
   const pop = s.pop;
   const Lq = pop < 6000 ? r.range(160, 260) : pop < 25000 ? r.range(280, 460) : r.range(420, 650);
   const W = pop < 6000 ? 13 : 16; // quay apron width (stone edge → quay street centre line)
   const Dh = r.range(38, 52); // harbour strip depth
-  const near = new Mask(ctx.mapSize, dilate(api.footprint, 90), 5);
+  const near = new Mask(ctx.mapSize, dilate(api.footprint, 120), 5);
+  const searchBoxes = api.footprint.map((ph) => {
+    const b = bboxOf(ph.outer);
+    return { x0: b.x0 - 130, y0: b.y0 - 130, x1: b.x1 + 130, y1: b.y1 + 130 };
+  });
   const avoidIdx = new LineIndex(pin.avoid.map((a) => ({ path: a.concat([a[0]]), hw: 0 })));
   const bridgeIdx = new LineIndex(pin.bridges.map((b) => ({ path: [b.a, b.b], hw: 6 })));
-  const g = t.height, n = g.w, cell = g.cell;
-  const code = (p: Vec2) => t.water[Math.min(n - 1, Math.max(0, Math.floor(p.y / cell))) * n + Math.min(n - 1, Math.max(0, Math.floor(p.x / cell)))];
-  const riverW = (p: Vec2): number => {
-    let bw = 0, bd = 40;
-    for (const rv of t.rivers) for (let i = 0; i < rv.path.length; i += 2) { const d = dist(rv.path[i], p); if (d < bd) { bd = d; bw = rv.width[i]; } }
-    return bw;
-  };
-  const target = pin.harbor ?? pin.nucleus;
+  // The site's harbour can survive a move of the settlement centre. It is a preference only for a local shore.
+  const target = pin.harbor && near.has(pin.harbor) && dist(pin.harbor, pin.nucleus) <= 420 ? pin.harbor : pin.nucleus;
+  const portCtx = { ...ctx, isWater: (p: Vec2) => waterContains(ctx.water, p) };
   // ---- shore runs near the town, on navigable water, away from the other lots
-  let best: { run: Polyline; d: number } | null = null;
-  for (const ph of ctx.water) for (const ring of [ph.outer, ...ph.holes]) {
+  const candidates: { run: Polyline; d: number; coast: boolean }[] = [];
+  for (const ph of ctx.water) for (const boundary of [ph.outer, ...ph.holes]) {
+    // Long straight banks may have only two vertices within reach. Test frontage by metres, not vertex count.
+    const ring = localShoreSamples(boundary, searchBoxes);
     const m = ring.length;
     if (m < 4) continue;
-    const ok = ring.map((p, i) => {
-      if (!near.has(p) || avoidIdx.dist(p, W + Dh + 25) < W + Dh + 20) return false;
-      if (p.x < 30 || p.y < 30 || p.x > ctx.mapSize - 30 || p.y > ctx.mapSize - 30) return false;
+    const nav = ring.map((p, i) => {
+      // The optional warehouse row is clipped later; it must not veto an otherwise clear apron and access street.
+      if (!near.has(p) || avoidIdx.dist(p, W + 12) < W + 8) return 0;
+      if (p.x < 30 || p.y < 30 || p.x > ctx.mapSize - 30 || p.y > ctx.mapSize - 30) return 0;
       // probe the water next to p
       const a = ring[(i - 1 + m) % m], b = ring[(i + 1) % m];
       const ux = b.x - a.x, uy = b.y - a.y, l = Math.hypot(ux, uy) || 1;
       let q = { x: p.x - (uy / l) * 6, y: p.y + (ux / l) * 6 };
-      if (!waterContains(ctx.water, q)) q = { x: p.x + (uy / l) * 6, y: p.y - (ux / l) * 6 };
-      const c = code(q);
-      if (c === 1) return true;
-      if (c === 3) return riverW(q) >= 8;
-      return false;
+      if (!portCtx.isWater(q)) q = { x: p.x + (uy / l) * 6, y: p.y - (ux / l) * 6 };
+      const kind = portWaterKind(ctx, q);
+      return kind === 'coast' ? 1 : kind === 'river' ? 2 : 0;
     });
+    const ok = nav.map((v) => v !== 0);
     if (!ok.some(Boolean)) continue;
     let s0 = ok.findIndex((v, i) => !v && ok[(i + 1) % m]);
     if (s0 < 0) s0 = 0;
-    let cur: Vec2[] = [];
+    let cur: Vec2[] = [], curKind = 0;
     const flush = () => {
       if (cur.length >= 3 && plLen(cur) >= 90) {
         const d = Math.min(...cur.map((q) => dist(q, target)));
-        if (!best || d < best.d) best = { run: cur, d };
+        candidates.push({ run: cur, d, coast: curKind === 1 });
       }
       cur = [];
     };
-    for (let k = 1; k <= m; k++) { const i = (s0 + k) % m; if (ok[i]) cur.push(ring[i]); else flush(); }
+    for (let k = 1; k <= m; k++) {
+      const i = (s0 + k) % m;
+      if (!nav[i] || (curKind && nav[i] !== curKind)) flush();
+      if (nav[i]) { curKind = nav[i]; cur.push(ring[i]); }
+    }
     flush();
   }
-  if (!best) return [];
-  const run0 = (best as { run: Polyline; d: number }).run;
-  // ---- window of length Lq around the point nearest the target; the shipyard continues beyond one end
-  const cum = [0];
-  for (let i = 1; i < run0.length; i++) cum.push(cum[i - 1] + dist(run0[i - 1], run0[i]));
-  const Ltot = cum[cum.length - 1];
-  let ia = 0;
-  for (let i = 0; i < run0.length; i++) if (dist(run0[i], target) < dist(run0[ia], target)) ia = i;
-  let s0 = Math.max(0, cum[ia] - Lq / 2), s1 = Math.min(Ltot, s0 + Lq);
-  s0 = Math.max(0, s1 - Lq);
-  if (s1 - s0 < 90) return [];
-  const slice = (a: number, b: number): Polyline => {
-    const out = [plAt(run0, a).p];
-    for (let i = 0; i < run0.length; i++) if (cum[i] > a && cum[i] < b) out.push(run0[i]);
-    out.push(plAt(run0, b).p);
-    return out;
-  };
-  const runW = slice(s0, s1);
-  const stq = straighten(runW, 22);
-  const { q: Q, tol } = stq;
-  if (Q.length < 2) return [];
-  // water side: majority of the segment probes
-  let left = 0;
-  for (let i = 1; i < Q.length; i++) {
-    const a = Q[i - 1], b = Q[i], l = dist(a, b) || 1;
-    const m2 = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-    if (ctx.isWater({ x: m2.x - ((b.y - a.y) / l) * (tol + 4), y: m2.y + ((b.x - a.x) / l) * (tol + 4) })) left++; else left--;
+  candidates.sort((a, b) => Number(b.coast) - Number(a.coast) || a.d - b.d);
+  const wq = s.P.widthByRank[1] * s.P.widthScale;
+  const wc = s.P.widthByRank[2] * s.P.widthScale;
+  const walled = api.phases.some((ph) => ph.walled);
+  const noCross = walled ? api.enclosure.map((ph) => ph.outer) : [];
+  const gates = walled ? api.gates.slice() : [];
+  const gateWalls = walled ? api.gateWalls ?? api.enclosure.map((ph) => {
+    const wall: WallLine = { ring: ph.outer, gates: [] };
+    for (const p of api.gates.filter((gate) => distToRing(ph.outer, gate) < 1)) {
+      const road = api.radialLines.filter((path) => path.length >= 2).map((path) => ({ path, at: nearestOnPl(path, p) })).sort((a, b) => a.at.d - b.at.d)[0];
+      if (!road || road.at.d > 1) continue;
+      const a = road.path[road.at.i - 1], b = road.path[road.at.i], length = dist(a, b) || 1;
+      wall.gates.push({ p, dir: { x: (b.x - a.x) / length, y: (b.y - a.y) / length }, width: wc, street: -1 });
+    }
+    return wall;
+  }) : [];
+  const outerWalls = new Map<WallLine, WallLine>();
+  if (s.listsW) for (const wall of gateWalls) {
+    const outer = offsetCurtain(wall, s.listsW);
+    if (outer) { outerWalls.set(wall, outer); noCross.push(outer.ring); gates.push(...outer.gates.map((gate) => gate.p)); }
   }
-  const side = left >= 0 ? 1 : -1; // +1: water on the left of the traversal
-  const Qs = stoneEdge(runW, stq, side); // the stone edge, on the water side of every shore point
-  const K = offsetLeft(Qs, -side * W); // quay street centre line
-  const K2 = offsetLeft(Qs, -side * (W + Dh));
-  let apron = ringPoly(Qs, K);
-  let strip = ringPoly(K, K2);
-  if (apron.length < 3 || strip.length < 3) return [];
-  // stay clear of the market and the other lots; the strip stays on land
+  // Use the same openings and bank cuts as the emitted curtains. A centreline passing a gate does not
+  // establish clearance for the full pavement ribbon, especially on a shallow approach or double wall.
+  const masonry: Polygon[] = [];
+  let provedWalls = true;
+  const thickness = s.wallThickness ?? (pop > 12000 ? 3.2 : 2.6);
+  const nearWater = (p: Vec2) => waterNear(ctx.water, p, 4);
+  for (const [i, wall] of gateWalls.entries()) {
+    for (const [curtain, width] of [[wall, thickness], [outerWalls.get(wall), 1.8]] as const) {
+      if (!curtain || width <= 0) continue;
+      const pieces = wallFeatures(curtain.ring, curtain.gates, s.rng.fork('port-wall-proof:' + i), ctx.isWater, nearWater).pieces;
+      for (const piece of pieces) {
+        const poly = ribbon(piece, width);
+        if (poly.length < 3 || !isSimple(poly) || area(poly) <= 0) provedWalls = false;
+        else masonry.push(poly);
+      }
+    }
+  }
+  const throughGates = (path: Polyline) => {
+    for (const wall of noCross) for (let i = 1; i < path.length; i++) for (let j = 0; j < wall.length; j++) {
+      const hit = segSegT(path[i - 1], path[i], wall[j], wall[(j + 1) % wall.length]);
+      if (!hit) continue;
+      const p = { x: path[i - 1].x + (path[i].x - path[i - 1].x) * hit.t, y: path[i - 1].y + (path[i].y - path[i - 1].y) * hit.t };
+      if (!gates.some((gate) => dist(p, gate) < 10)) return false;
+    }
+    return true;
+  };
+  const gateDirs = (p: Vec2) => gates.filter((gate) => dist(p, gate) > 0.5 && dist(p, gate) <= 420).map((gate) => {
+    const length = dist(p, gate);
+    return { x: (gate.x - p.x) / length, y: (gate.y - p.y) / length };
+  });
+  const dryStreet = (path: Polyline, width: number) => {
+    const poly = ribbon(path, width);
+    if (!provedWalls || poly.length < 3 || !isSimple(poly) || area(poly) <= 0 || !throughGates(path)) return false;
+    for (const occupied of [ctx.water, ...pin.avoid, ...masonry]) {
+      const overlap = tryIntersection(poly, occupied);
+      if (overlap.failed || mpArea(overlap.pieces) > 0.05) return false;
+    }
+    return true;
+  };
+  const shore = ctx.water.flatMap((ph) => [ph.outer, ...ph.holes]);
+  const onShore = (edge: Polyline) => {
+    for (let i = 1; i < edge.length; i++) {
+      const a = edge[i - 1], b = edge[i], count = Math.ceil(dist(a, b) / 5);
+      for (let k = 0; k <= count; k++) {
+        const p = { x: a.x + (b.x - a.x) * k / count, y: a.y + (b.y - a.y) * k / count };
+        if (!shore.some((ring) => distToRing(ring, p) <= 10)) return false;
+      }
+    }
+    return true;
+  };
+  const crossesCurtain = (path: Polyline) => noCross.some((wall) => path.slice(1).some((b, i) =>
+    wall.some((d, j) => !!segSegT(path[i], b, d, wall[(j + 1) % wall.length]))));
+  const portConnector = (from: Vec2, maxLen: number, dirs: Vec2[], preferRank?: number): ReturnType<typeof findConnectorX> => {
+    const direct = findConnectorX(portCtx, api.streets, from, { avoid: pin.avoid, noCross, gates, dirs, maxLen, preferRank });
+    if (direct && !crossesCurtain(direct.path) && dryStreet(direct.path, wc)) return direct;
+    const contacts = gateWalls.flatMap((wall) => wall.gates.map((gate) => ({ wall, gate })))
+      .filter(({ gate }) => dist(from, gate.p) <= maxLen).sort((a, b) => dist(from, a.gate.p) - dist(from, b.gate.p));
+    for (const { wall, gate } of contacts) {
+      const sign = pointInRing(wall.ring, { x: gate.p.x + gate.dir.x * 2, y: gate.p.y + gate.dir.y * 2 }) ? 1 : -1;
+      const inward = { x: gate.dir.x * sign, y: gate.dir.y * sign };
+      const outer = outerWalls.get(wall);
+      const outerGate = outer ? outer.gates.find((g) => g.street === gate.street &&
+        Math.abs((g.p.x - gate.p.x) * inward.y - (g.p.y - gate.p.y) * inward.x) < 0.01) : gate;
+      if (!outerGate) continue;
+      // End on the actual connected radial, inside the throat. Axis contacts use their real connected street.
+      const onGate = api.streets.nearest(gate.p, 1, (street) => api.streets.connected.has(street.id) && (gate.street < 0 || street.id === gate.street));
+      if (!onGate) continue;
+      const street = api.streets.list[onGate.s];
+      for (const throat of [10, 16]) {
+        const outside = { x: outerGate.p.x - inward.x * throat, y: outerGate.p.y - inward.y * throat };
+        const inside = { x: gate.p.x + inward.x * throat, y: gate.p.y + inward.y * throat };
+        const end = nearestOnPl(street.path, inside).q;
+        if (!pointInRing(wall.ring, end)) continue;
+        const path = [from, outside, outerGate.p, gate.p, inside, end]
+          .filter((p, i, all) => !i || dist(p, all[i - 1]) > 0.001);
+        if (plLen(path) > maxLen || !dryStreet(path, wc)) continue;
+        return { path, met: [street.id] };
+      }
+    }
+    return direct && dryStreet(direct.path, wc) ? direct : null;
+  };
+  // Stay clear of the market and other lots; warehouse quarters and shipyards remain on land.
   const clipOut = (poly: Polygon, extra: MultiPoly): Polygon[] => {
     let m: MultiPoly = [{ outer: poly, holes: [] }];
     const cut: Polygon[] = [...pin.avoid, ...(api.market ? [api.market] : [])];
-    if (cut.length) m = differenceS(m, ...cut.map((c): MultiPoly => [{ outer: c, holes: [] }]));
-    if (extra.length) m = differenceS(m, extra);
+    if (cut.length) {
+      const clipped = tryDifferenceS(m, ...cut.map((c): MultiPoly => [{ outer: c, holes: [] }]));
+      if (clipped.failed) return [];
+      m = clipped.pieces;
+    }
+    if (extra.length) {
+      const clipped = tryDifferenceS(m, extra);
+      if (clipped.failed) return [];
+      m = clipped.pieces;
+    }
     return m.filter((ph) => !ph.holes.length && area(ph.outer) > 40).map((ph) => ph.outer);
   };
-  const aprons = clipOut(apron, []);
-  const strips = clipOut(strip, ctx.water);
-  if (!aprons.length) return [];
-  apron = aprons.reduce((x, y) => (area(y) > area(x) ? y : x));
-  void strip;
+  const prepare = (candidate: typeof candidates[number]) => {
+    const run0 = candidate.run;
+    // ---- window of length Lq around the point nearest the target; the shipyard continues beyond one end
+    const cum = [0];
+    for (let i = 1; i < run0.length; i++) cum.push(cum[i - 1] + dist(run0[i - 1], run0[i]));
+    const Ltot = cum[cum.length - 1];
+    let ia = 0;
+    for (let i = 0; i < run0.length; i++) if (dist(run0[i], target) < dist(run0[ia], target)) ia = i;
+    const nq = nearestOnPl(run0, pin.nucleus);
+    const nucleusS = cum[nq.i - 1] + dist(run0[nq.i - 1], nq.q);
+    const windows: [number, number][] = [];
+    for (const scale of [1, 0.75, 0.5]) {
+      const length = Math.min(Ltot, Lq * scale);
+      if (length < 90) continue;
+      for (const centre of [cum[ia], nucleusS, Ltot / 2]) {
+        const start = Math.max(0, Math.min(Ltot - length, centre - length / 2));
+        if (!windows.some(([a, b]) => Math.abs(a - start) < 1 && Math.abs(b - start - length) < 1)) windows.push([start, start + length]);
+      }
+    }
+    const slice = (a: number, b: number): Polyline => {
+      const out = [plAt(run0, a).p];
+      for (let i = 0; i < run0.length; i++) if (cum[i] > a && cum[i] < b) out.push(run0[i]);
+      out.push(plAt(run0, b).p);
+      return out;
+    };
+    for (const [s0, s1] of windows) {
+      const runW = slice(s0, s1);
+      const stq = straighten(runW, 22);
+      const { q: Q, tol } = stq;
+      if (Q.length < 2) continue;
+      // water side: majority of the segment probes
+      let left = 0;
+      for (let i = 1; i < Q.length; i++) {
+        const a = Q[i - 1], b = Q[i], l = dist(a, b) || 1;
+        const m2 = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+        if (portCtx.isWater({ x: m2.x - ((b.y - a.y) / l) * (tol + 4), y: m2.y + ((b.x - a.x) / l) * (tol + 4) })) left++; else left--;
+      }
+      const side = left >= 0 ? 1 : -1; // +1: water on the left of the traversal
+      const Qs = stoneEdge(runW, stq, side); // the stone edge, on the water side of every shore point
+      if (Qs.some((p, i) => i > 0 && dist(Qs[i - 1], p) < 12)) continue;
+      if (!onShore(Qs)) continue;
+      const K = offsetLeft(Qs, -side * W); // quay street centre line
+      if (!dryStreet(K, wq)) continue;
+      const K2 = offsetLeft(Qs, -side * (W + Dh));
+      let apron = ringPoly(Qs, K);
+      const strip = ringPoly(K, K2);
+      if (apron.length < 3 || strip.length < 3) continue;
+      const aprons = clipOut(apron, []);
+      // The optional ordinary harbour quarters must leave the actual standing curtains free. Their
+      // parcels and roofs inherit this exact clipped ownership; the served quay and throat stay intact.
+      const strips = clipOut(strip, [...ctx.water, ...masonry.map((outer) => ({ outer, holes: [] }))]);
+      if (!aprons.length) continue;
+      apron = aprons.reduce((x, y) => (area(y) > area(x) ? y : x));
+      // Prove access before adding any streets: rejected shore windows leave no ghost quay or reserve.
+      let junction = false;
+      for (const st of api.streets.list) {
+        if (!st.ribbon || !api.streets.connected.has(st.id)) continue;
+        for (let i = 1; i < st.path.length && !junction; i++) for (let j = 1; j < K.length && !junction; j++) if (segSegT(st.path[i - 1], st.path[i], K[j - 1], K[j])) junction = true;
+      }
+      let connector: ReturnType<typeof findConnectorX> = null;
+      if (!junction) {
+        const LK = plLen(K);
+        const starts = [nearestOnPl(K, pin.nucleus).q, ...[0.2, 0.5, 0.8].map((f) => plAt(K, LK * f).p), plAt(K, 6).p, plAt(K, LK - 6).p];
+        for (const start of starts) {
+          const res = portConnector(start, 420, gateDirs(start));
+          if (res) { connector = res; break; }
+        }
+        if (!connector) continue;
+      }
+      return { s0, s1, Ltot, slice, Q, Qs, side, K, apron, strips, coast: candidate.coast, connector };
+    }
+    return null;
+  };
+  let chosen: ReturnType<typeof prepare> = null;
+  for (const candidate of candidates) { chosen = prepare(candidate); if (chosen) break; }
+  if (!chosen) return [];
+  const { s0, s1, Ltot, slice, Q, Qs, side, K, apron, strips, coast, connector } = chosen;
   const out: ReservedLot[] = [];
   const phA = phaseAt(api, polygonCentroid(apron));
   // non-radial streets crossing the new pieces cut them (they were band boundaries before)
@@ -268,19 +480,22 @@ export function reservePort(s: M4State, api: ReserveApi, pin: PortIn): ReservedL
     Kp = [...Kp.slice(0, at.i), at.p, ...Kp.slice(at.i)];
     ribStarts.push({ p: at.p, dir });
   }
-  const wq = s.P.widthByRank[1] * s.P.widthScale;
+  if (connector) {
+    const at = nearestOnPl(Kp, connector.path[0]);
+    Kp.splice(at.i, 0, at.q);
+  }
   const kid = api.streets.add(Kp, wq, 1, 'quay', 1);
   const cuts: Polyline[] = [];
-  let connected = false;
   // a radial crossing the quay street (bridge head, harbour road) connects it
-  for (const st of api.streets.list) {
-    if (st.id === kid || !st.ribbon || !api.streets.connected.has(st.id)) continue;
-    for (let i = 1; i < st.path.length && !connected; i++) for (let j = 1; j < Kp.length && !connected; j++) if (segSegT(st.path[i - 1], st.path[i], Kp[j - 1], Kp[j])) connected = true;
+  if (connector) {
+    const id = api.streets.add(connector.path, wc, 2, 'street', 1);
+    api.streets.connected.add(id);
+    for (const met of connector.met) api.streets.connected.add(met);
+    cuts.push(connector.path);
   }
-  if (connected) api.streets.connected.add(kid);
-  const avoidAll = [...pin.avoid];
+  api.streets.connected.add(kid);
   for (const rs of ribStarts) {
-    const res = findConnectorX(ctx, api.streets, rs.p, { avoid: avoidAll, maxLen: 230, dirs: [rs.dir], preferRank: 2 });
+    const res = portConnector(rs.p, 230, [rs.dir, ...gateDirs(rs.p)], 2);
     if (!res) continue;
     // a rib must leave the quay roughly at right angles
     const v = { x: res.path[1].x - rs.p.x, y: res.path[1].y - rs.p.y }, lv = Math.hypot(v.x, v.y) || 1;
@@ -288,21 +503,6 @@ export function reservePort(s: M4State, api: ReserveApi, pin: PortIn): ReservedL
     const id = api.streets.add(res.path, s.P.widthByRank[2] * s.P.widthScale, 2, 'street', 1);
     api.streets.connected.add(id);
     for (const m of res.met) api.streets.connected.add(m);
-    api.streets.connected.add(kid);
-    connected = true;
-    cuts.push(res.path);
-  }
-  if (!connected) {
-    // one connector from the quay point nearest the nucleus
-    const nq = nearestOnPl(Kp, pin.nucleus);
-    const res = findConnectorX(ctx, api.streets, nq.q, { avoid: avoidAll, maxLen: 420 });
-    if (!res) return [];
-    Kp.splice(nq.i, 0, nq.q);
-    api.streets.list[kid].path = Kp;
-    api.streets.list[kid].widths = Kp.map(() => wq);
-    const id = api.streets.add(res.path, s.P.widthByRank[2] * s.P.widthScale, 2, 'street', 1);
-    for (const m of res.met) api.streets.connected.add(m);
-    api.streets.connected.add(id);
     api.streets.connected.add(kid);
     cuts.push(res.path);
   }
@@ -318,7 +518,6 @@ export function reservePort(s: M4State, api: ReserveApi, pin: PortIn): ReservedL
     });
   });
   // ---- piers / moles along the stone edge (river: at most a quarter of the channel)
-  const coast = code(offsetLeft([Q[0], Q[Q.length - 1]], side * 25)[0]) === 1 || ctx.isWater(pin.harbor ?? { x: -1, y: -1 });
   const piers: Polygon[] = [];
   const LQ = plLen(Qs);
   const pierSp = r.range(55, 85);
@@ -333,7 +532,7 @@ export function reservePort(s: M4State, api: ReserveApi, pin: PortIn): ReservedL
     const mole = coast && (k === 0 || k === pierAt.length - 1);
     // free water ahead (channel width for rivers)
     let free = 0;
-    for (let d2 = 2; d2 < 260; d2 += 3) { if (!ctx.isWater({ x: at.p.x + wdir.x * d2, y: at.p.y + wdir.y * d2 })) break; free = d2; }
+    for (let d2 = 2; d2 < 260; d2 += 3) { if (!portCtx.isWater({ x: at.p.x + wdir.x * d2, y: at.p.y + wdir.y * d2 })) break; free = d2; }
     const Lp = Math.min(mole ? r.range(55, 95) : r.range(26, 48), coast ? free - 20 : free * 0.28);
     const wp = mole ? 8 : r.range(6, 8.5);
     if (Lp < 14) return;
@@ -345,7 +544,7 @@ export function reservePort(s: M4State, api: ReserveApi, pin: PortIn): ReservedL
     if (Math.min(dist(at.p, a), dist(at.p, b)) < wp / 2 + 1) return;
     if (bridgeIdx.dist(base, 40) < 30 || piers.some((p) => distToRing(p, base) < 18)) return;
     let wet = true;
-    for (let d2 = 1; d2 <= Lp && wet; d2 += 3) for (const o of [-wp / 2 + 0.5, 0, wp / 2 - 0.5]) if (!ctx.isWater({ x: base.x + wdir.x * d2 + u.x * o, y: base.y + wdir.y * d2 + u.y * o })) wet = false;
+    for (let d2 = 1; d2 <= Lp && wet; d2 += 3) for (const o of [-wp / 2 + 0.5, 0, wp / 2 - 0.5]) if (!portCtx.isWater({ x: base.x + wdir.x * d2 + u.x * o, y: base.y + wdir.y * d2 + u.y * o })) wet = false;
     if (!wet) return;
     piers.push(poly);
     const id = `pier:${k}`;
@@ -388,7 +587,7 @@ export function reservePort(s: M4State, api: ReserveApi, pin: PortIn): ReservedL
               const Ls = r.range(26, 40) + back;
               const poly = rectAt(p, angY, 0, Ls, -4.5, 4.5);
               let wet = true;
-              for (let d2 = back + 2; d2 <= Ls && wet; d2 += 3) if (!ctx.isWater({ x: p.x + wdir.x * d2, y: p.y + wdir.y * d2 })) wet = false;
+              for (let d2 = back + 2; d2 <= Ls && wet; d2 += 3) for (const o of [-4, 0, 4]) if (!portCtx.isWater({ x: p.x + wdir.x * d2 + u.x * o, y: p.y + wdir.y * d2 + u.y * o })) wet = false;
               if (!wet || piers.some((pp) => distToRing(pp, p) < 12)) continue;
               const id = `slipway:${k}`;
               s.lotData.set(id, { kind: 'slipway', base: [p, p], out: wdir } as PierData);

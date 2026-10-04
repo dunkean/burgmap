@@ -12,7 +12,7 @@ import { blurGrid, FINITE_BOX } from '../core/grid';
 import type { SizeName } from '../options';
 import type { Archetype, UrbanZone } from '../types';
 import type { UrbanCtx } from './context';
-import { MultiPoly, PolyH, unionS as union, intersectionS as intersection, differenceS as difference, mpArea } from '../geo/bool';
+import { MultiPoly, PolyH, unionS as union, intersectionS as intersection, differenceS as difference, mpArea, tryDifference, tryIntersection } from '../geo/bool';
 import { area, cleanRing, orientPos, pointInRing, inscribed } from '../geo/poly';
 import { ribbon, sweepLeft } from '../geo/offset';
 import type { MorphologyParams } from './morphology';
@@ -358,6 +358,21 @@ export function regionForArea(ctx: UrbanCtx, fld: PhaseField, targetArea: number
     const sm = blurGrid({ w: W, h: H, cell, data: ind }, rad2, 2).data;
     regs = isoRegions(sm, n, cell, 0.5, Math.min(2500, targetArea * 0.05), win);
   } else regs = isoRegions(v, n, cell, -thr, Math.min(2500, targetArea * 0.05), win);
+  // A tiny hamlet on a coarse regional grid can vanish under the two smoothing passes even when the nucleus
+  // component contains dry, buildable cells. Trace those cells directly only at this scale; the same connectivity,
+  // water clipping and downstream parcel/building checks still apply.
+  if (!regs.length && sorted.length && targetArea <= 12 * cell * cell) {
+    const rank = Math.min(sorted.length - 1, Math.max(0, Math.round(targetArea / (cell * cell))));
+    const mask = new Float32Array(WN);
+    for (let step = 0; step <= 3 && !regs.length; step++) {
+      const level = sorted[Math.min(sorted.length - 1, rank + step)];
+      for (let k = 0; k < WN; k++) {
+        const i = gi(k);
+        mask[k] = isFinite(f[i]) && !ctx.terrain.water[i] && lv[i] < level ? 1 : 0;
+      }
+      regs = isoRegions(mask, n, cell, 0.5, Math.min(2500, targetArea * 0.05), win);
+    }
+  }
   let m: MultiPoly = regs;
   if (ctx.water.length) m = dryPieces(m, ctx.water);
   return keepMain(m, ctx.center, 0.1);
@@ -523,29 +538,38 @@ export function dilate(m: MultiPoly, g: number): MultiPoly {
   return union(m, ...rings.map((r) => [{ outer: r, holes: [] }] as MultiPoly));
 }
 
-export interface RoadIn { path: Polyline; major: boolean }
+export interface RoadIn { path: Polyline; major: boolean; width?: number }
+
+/** Independent settlement/road decisions allow no fringe, a partial fringe, or growth along every suitable road. */
+export function roadFringeGrowth(roads: { major: boolean }[], rng: Rng, thick = 1): boolean[] {
+  if (rng.fork('growth').chance(thick > 1.2 ? 0.08 : 0.18)) return roads.map(() => false);
+  return roads.map((road, i) => rng.fork('road:' + i).chance(road.major ? (thick > 1.2 ? 0.95 : 0.9) : (thick > 1.2 ? 0.8 : 0.65)));
+}
 
 /**
  * Faubourg ribbons along the roads outside the enclosure: the road from its entry point outward, buffered by a
  * per-road depth, minus the dilated enclosure and water.
  */
-export function planFaubourgs(ctx: UrbanCtx, enclosure: MultiPoly, roads: RoadIn[], area: number, glacis: number, rng: Rng, zone: UrbanZone = 'faubourg', thick = 1): { region: MultiPoly; paths: Polyline[] } {
+export function planFaubourgs(ctx: UrbanCtx, enclosure: MultiPoly, roads: RoadIn[], area: number, glacis: number, rng: Rng, zone: UrbanZone = 'faubourg', thick = 1, varyGrowth = true): { region: MultiPoly; paths: Polyline[] } {
   if (area < 1500 || !roads.length) return { region: [], paths: [] };
   const inside = (p: Vec2) => enclosure.some((ph) => pointInRing(ph.outer, p) && !ph.holes.some((h) => pointInRing(h, p)));
-  const cands: { pts: Polyline; w: number }[] = [];
-  for (const rd of roads) {
+  const selected = varyGrowth ? roadFringeGrowth(roads, rng, thick) : roads.map(() => true);
+  const cands: { pts: Polyline; w: number; width: number }[] = [];
+  for (const [ri, rd] of roads.entries()) {
+    if (!selected[ri]) continue;
     // paths run from the map edge towards the center: find the first vertex inside the enclosure
     const pl = rd.path;
     let entry = -1;
     for (let i = 0; i < pl.length; i++) if (inside(pl[i])) { entry = i; break; }
     if (entry <= 0) continue;
     const outward = pl.slice(0, entry + 1).reverse();
-    cands.push({ pts: outward, w: rd.major ? 1 : 0.55 });
+    cands.push({ pts: outward, w: rd.major ? 1 : 0.55, width: rd.width ?? (rd.major ? 7 : 5) });
   }
   if (!cands.length) return { region: [], paths: [] };
   const W = cands.reduce((s, c) => s + c.w, 0);
   const pieces: MultiPoly[] = [];
   const paths: Polyline[] = [];
+  const approaches: Polygon[] = [];
   const blocked = dilate(enclosure, glacis);
   const noise = new Noise2D(rng.fork('faubNoise'));
   for (const c of cands) {
@@ -615,6 +639,9 @@ export function planFaubourgs(ctx: UrbanCtx, enclosure: MultiPoly, roads: RoadIn
       flush();
     }
     paths.push(pts0);
+    // A real public-road throat joins the district to its gate across the glacis. Its width fits inside the
+    // arterial ribbon, so it contributes connected ground without adding house plots in the defensive belt.
+    if (glacis > 0) approaches.push(ribbon(pts0, Math.max(2, c.width - 1)));
   }
   if (!pieces.length) return { region: [], paths: [] };
   let region = union(pieces[0], ...pieces.slice(1));
@@ -622,6 +649,12 @@ export function planFaubourgs(ctx: UrbanCtx, enclosure: MultiPoly, roads: RoadIn
   if (ctx.water.length) region = dryPieces(region, ctx.water);
   void zone;
   region = dropSlivers(region, 1200, 8);
+  for (const approach of approaches) {
+    const neck = tryIntersection(approach, blocked), contact = tryIntersection(approach, region);
+    if (neck.failed || contact.failed || mpArea(contact.pieces) < 1) continue;
+    const outside = tryDifference(neck.pieces, enclosure, ctx.water);
+    if (!outside.failed && outside.pieces.length) region = union(region, outside.pieces);
+  }
   return { region, paths };
 }
 

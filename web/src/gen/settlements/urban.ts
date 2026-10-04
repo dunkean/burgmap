@@ -16,7 +16,7 @@ import { generateUrban } from '../urban';
 import { generateMega } from '../urban/mega/plan';
 import { populationCulture } from '../urban/culture';
 import { EAGER_MAIN_POP } from '../urban/mega/types';
-import { sizeForPop } from '../options';
+import { sizeForPop, optionsForSettlement } from '../options';
 import type { World, Settlement, SiteLayer, UrbanLayer, PolyH } from '../types';
 
 type Road = NonNullable<World['roads']>[number];
@@ -183,12 +183,15 @@ export function generateSettlementUrban(world: World, s: Settlement): Settlement
   if (s.main || s.detail === 'farmstead') return null;
   const rng = new Rng('burgmap:' + world.seed).fork('settlement:' + s.key);
   const o = world.options;
-  const options = {
+  const legacyOptions = {
     ...o, culture: s.culture, population: s.population, size: sizeForPop(s.population), siteType: 'auto' as const, sitePrefs: undefined, center: undefined,
     walls: 'auto' as const, castle: 'auto' as const, castles: 'auto' as const, cathedral: 'auto' as const, palace: 'auto' as const,
     monasteries: 'auto' as const, port: 'auto' as const, arena: 'auto' as const, activities: 'auto' as const, suburbs: 'auto' as const,
     shantytowns: 'auto' as const, cultureMix: null, plan: null, settlements: 'none' as const,
   };
+  const options = o.workflow === 'list'
+    ? { ...optionsForSettlement(o, { population: s.population, culture: s.culture, siteType: s.archetype, position: s.center, options: s.options }), settlements: 'none' as const }
+    : legacyOptions;
   const W = windowOf(s);
   const bridges0 = (world.bridges ?? []).filter((b) => dist(b.a, s.center) < W + 200).map((b) => ({ ...b }));
   const sub: World = {

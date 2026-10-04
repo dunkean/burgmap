@@ -22,7 +22,7 @@ import type { CompoundCtx } from '../compounds';
 import { isoRegions, dilate } from '../phases';
 import { distanceField } from '../../core/field';
 import { rasterizePolys } from '../../geo/raster';
-import { MultiPoly, differenceS, intersectionS, mpArea } from '../../geo/bool';
+import { MultiPoly, differenceS, differenceSafeS, intersectionS, tryDifference, tryIntersection, mpArea } from '../../geo/bool';
 import { area, orientPos, pointInRing, distToRing, bboxOf, cleanRing, inscribed, obb, isSimple } from '../../geo/poly';
 import { stitchUnion } from '../../geo/stitch';
 import { ribbon } from '../../geo/offset';
@@ -71,6 +71,7 @@ export function reserveShanty(s: M4State, api: ReserveApi, si: ShantyIn, amount:
   const dRoad = lineField(si.roads);
   const dNuis = si.nuisance.length ? lineField(si.nuisance.map((p) => p.concat([p[0]]))) : null;
   const hab = ctx.site.fields.hab;
+  const clusters = new Noise2D(r.fork('siting-clusters'));
   const W = { zone: [2.2, 0.6, 0.6, 0.8], bidonville: [0.8, 0.8, 0.6, 1.8], gecekondu: [0.5, 2.0, 0.6, 0.8], riverbank: [0.6, 0.6, 2.2, 0.8] }[kind];
   // value field (lower = less valued); NaN where not allowed
   const v = new Float32Array(n * n).fill(-1e6);
@@ -97,7 +98,11 @@ export function reserveShanty(s: M4State, api: ReserveApi, si: ShantyIn, amount:
     const fringe = dr < 70 ? 0.5 : 0.2;
     const dn = dNuis ? dNuis[i] : 1e9;
     const near = dn < 150 ? 1 - dn / 150 : 0;
-    const value = 1 - (W[0] * glacis + W[1] * steep + W[2] * flood + W[3] * fringe + 1.2 * near) / 3 + 0.25 * Math.min(1, dist(p, si.nucleus) / 1500) + 0.08 * r.float() * 0;
+    // Informal occupation grows in irregular local knots. Distance alone produces a continuous geometric belt
+    // parallel to the curtain; coherent noise changes siting without changing the hut/cell producer's stream.
+    const patch = 0.32 * clusters.fbm(p.x / 75, p.y / 75, 2);
+    const value = 1 - (W[0] * glacis + W[1] * steep + W[2] * flood + W[3] * fringe + 1.2 * near) / 3
+      + 0.25 * Math.min(1, dist(p, si.nucleus) / 1500) + patch;
     v[i] = -value; // isoRegions keeps v > level
     ok++;
   }
@@ -117,25 +122,54 @@ export function reserveShanty(s: M4State, api: ReserveApi, si: ShantyIn, amount:
   }
   // level: the lowest-valued cells adding up to the target area (with a margin for the clipping)
   const vals = Array.from(v).filter((x) => x > -1e5).sort((a, b) => b - a);
-  const k = Math.min(vals.length - 1, Math.floor((target * 3) / (cell * cell)));
-  if (k < 20) return [];
-  const level = vals[k];
-  const regions = isoRegions(v, n, cell, level, 2000);
-  dbg('k', k, 'level', level, 'regions', regions.length, regions.map((r) => Math.round(area(r.outer))));
-  let m: MultiPoly = regions.map((ph) => ({ outer: ph.outer, holes: [] as Polygon[] }));
-  // (the cells were taken ≥ 12 m from the footprint: the footprint itself is enough to cut)
-  m = differenceS(m, s.listsW ? dilate(api.enclosure, s.listsW + 6).concat(api.footprint) : api.footprint);
-  if (ctx.water.length) m = differenceS(m, ctx.water);
   const roadRb = si.roads.map((pl) => ribbon(pl, 18)).filter((rb) => rb.length >= 3).map((rb) => [{ outer: rb, holes: [] }] as MultiPoly);
-  if (roadRb.length) m = differenceS(m, ...roadRb);
-  if (si.avoid.length) m = differenceS(m, ...si.avoid.map((p) => [{ outer: p, holes: [] }] as MultiPoly));
-  const pcs = m.filter((ph) => !ph.holes.length && area(ph.outer) > 4000).sort((a, b) => area(b.outer) - area(a.outer));
-  dbg('pieces', m.length, m.map((ph) => [Math.round(area(ph.outer)), ph.holes.length]));
+  const blocked = [s.listsW ? dilate(api.enclosure, s.listsW + 6).concat(api.footprint) : api.footprint,
+    ctx.water, ...roadRb, ...si.avoid.map((p) => [{ outer: p, holes: [] }] as MultiPoly)].filter((m) => m.length);
+  const first = Math.floor((target * 3) / (cell * cell));
+  if (Math.min(vals.length - 1, first) < 20) return [];
+  const minLotArea = 8000;
+  let pcs: MultiPoly = [], admitted = 0;
+  // Noise can divide the first percentile into undersized islands even when ample dry land exists. Grow the
+  // same value-ranked clusters a bounded amount until real admitted lots recover the requested lot area.
+  // Keep the best available land if physical exclusions prevent the target; never switch to a uniform wall band.
+  // Prefer three ~8 m cell modules across a taper. If no such cluster exists at any bounded percentile,
+  // admit physically viable two-row land instead; retain the same substantial area and exact dry ownership.
+  for (const openingRadius of [12, 8]) {
+    for (const factor of [1, 1.35, 1.8, 2.4, 3.2]) {
+      const k = Math.min(vals.length - 1, Math.floor(first * factor));
+      const regions = isoRegions(v, n, cell, vals[k], 2000);
+      const dry = differenceSafeS(regions, ...blocked);
+      const candidates: MultiPoly = [];
+      for (const ph of dry) {
+        if (ph.holes.length || area(ph.outer) < minLotArea) continue;
+        // Keep roughly a hundred cells per cluster so clipped tips cannot dominate its housing. The bounded
+        // value relaxation recovers resident land in larger knots before any huts are made.
+        const boundary = ribbon(ph.outer.concat([ph.outer[0]]), 2 * openingRadius);
+        const core = tryDifference([ph], boundary);
+        if (core.failed || !core.pieces.length) continue;
+        const opened = tryIntersection(dilate(core.pieces, openingRadius), [ph]);
+        if (opened.failed) continue;
+        for (const body of opened.pieces) {
+          if (body.holes.length || area(body.outer) < minLotArea) continue;
+          const cleaned = orientPos(cleanRing(body.outer, 0.5, 2));
+          const contained = tryIntersection(cleaned, body);
+          if (contained.failed) continue;
+          candidates.push(...contained.pieces.filter((p) => !p.holes.length && area(p.outer) >= minLotArea));
+        }
+      }
+      candidates.sort((a, b) => area(b.outer) - area(a.outer));
+      const capacity = candidates.reduce((sum, ph) => sum + area(ph.outer), 0);
+      if (capacity > admitted) { pcs = candidates; admitted = capacity; }
+      dbg('k', k, 'regions', regions.length, 'admitted', admitted);
+      if (admitted >= target || k === vals.length - 1) break;
+    }
+    if (admitted > 0) break;
+  }
   const out: ReservedLot[] = [];
   let total = 0;
   for (const ph of pcs) {
     if (total >= target) break;
-    const lot = orientPos(cleanRing(ph.outer, 0.5, 2));
+    const lot = orientPos(ph.outer);
     if (lot.length < 3) continue;
     const c = polygonCentroid(lot);
     const acc = giveAccess(s, api, lot, { mode: 'none', toward: si.nucleus, width: 3, rank: 4, maxLen: 200 }, si.avoid);

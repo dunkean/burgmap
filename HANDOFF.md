@@ -13,7 +13,8 @@ bugs and their evidence are recorded in [ROADMAP.md](ROADMAP.md).
 - `AGENTS.md` already existed and was preserved. The user's later instruction
   supersedes its older bug-retention sentence: remove resolved reports from
   `BUGS.md` only after reviews, tests and visual verification.
-- Current integrated source: `5c104595f0a1e1d18f6d38c7aa44aee41be6c2cd`.
+- Published checkpoint: `54072c1`, containing the integrated source
+  `5c104595f0a1e1d18f6d38c7aa44aee41be6c2cd`.
   Typecheck and build pass. The grouped integration remedy passed 174 targeted
   tests in eight files on `258339c`; the final boundary correction passed 65
   tests in the two affected files, including the real q13 and five-million cases.
@@ -23,8 +24,31 @@ bugs and their evidence are recorded in [ROADMAP.md](ROADMAP.md).
   current provisional/detail frames. Local manual preview: http://localhost:5173/.
 - On 2026-10-04 the user requested manual testing before the full suite and
   stopped optimisation/performance passes. Do not start the full suite or further
-  performance work until the user asks. The final full-suite rerun and release
-  publication remain deferred; the current live site is the previous release.
+  performance work until the user asks. The final full-suite rerun remains
+  deferred. The user subsequently requested publication of this manual checkpoint:
+  remote `main` is `54072c1`, and `gh-pages` is `de0d038` (2026-10-04).
+  The live HTML matches the clean committed-source build byte for byte; native
+  Chrome loads the published Persian village with 276 buildings, 250 parcels,
+  Swahili registration and no page errors. This publication is not a full-suite
+  certificate.
+- Local checkpoint: reviewed 40-path source tree `923a5cad` (geometry
+  `18d1c47` plus the scoped hidden-control CSS correction). The new Environment /
+  Settlements workflow has a general theme, independent instance overrides and
+  positions, explicit Generate buttons and an applied-state URL/UID. Native
+  main/offscreen and offline checks pass; final root panel visibility is verified.
+- Final focused validation: 30 roof, 22 port and 11 M4 tests pass, alongside
+  11 density-repair and two density-health tests, including the 53 historical
+  huts. The preceding reviewed gate passed 64 workflow/render/road-fringe
+  checks. Typecheck and the final root build pass. Original intermediate
+  failures and their attribution remain archived; these are targeted results,
+  not a full-suite certificate. Seven resolved reports were removed from
+  BUGS.md after their relevant reviews, tests and actual views.
+- Remaining user report: whole roofs near settlement limits and walls. The
+  exact-union transfer fixes additional real cases, including standing-wall
+  dwelling 683, but the four reference maps retain 21 exposed/wall cuts. Keep
+  the original report unchanged; bounded candidate failure does not prove
+  that safe land reassignment is impossible. New source is available locally
+  at http://localhost:5173/ and has not been republished after `54072c1`.
 
 The Persian native certificate compares the same Chrome before/after: 276
 buildings and 250 parcels are preserved, with seven corrected roof tips and

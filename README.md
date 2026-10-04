@@ -34,6 +34,23 @@ Procedural generator of pre-modern settlements in their landscape. From a seed (
 - **Output**: nine map styles, labels, legend, bug pins and SVG / PNG / JSON
   export. Interactive Canvas uses offscreen rendering and bounded detail caches.
 
+## Generation workflow
+
+Start with **Environment**: choose map extent, biome, relief, coast and rivers,
+then generate a landscape without settlements, roads or farms.
+
+In **Settlements**, choose an automatic region (20,000 inhabitants in the main
+settlement by default), or add individual instances including the main one.
+Each instance can choose its properties, automatic placement, coordinates or
+**Place on map**. The **General theme** supplies shared defaults; changing one
+instance overrides only edited fields. **Use general theme** restores inheritance
+while retaining its population and chosen position.
+
+Generation controls edit a draft. Apply it with the appropriate **Generate**
+button; display controls can still update the current map. **Copy link** shares
+the generated state, including its stable generation UID, pins and view. Terrain
+image pixels require importing again after a shared-link reload.
+
 ## Development
 
 ```bash

@@ -18,7 +18,8 @@ import { distanceField, forCellsNearPolyline, smoothstep } from '../core/field';
 import { rasterizePolys } from '../geo/raster';
 import type { World, Settlement, SiteArchetype } from '../types';
 import {
-  Options, SettlementClass, CountClass, COUNT_CLASSES, SettlementSpec, classOfPop, mapSizeOf, SettlementCounts,
+  Options, SettlementClass, CountClass, COUNT_CLASSES, SettlementSpec, SettlementOverrides, SitePrefs,
+  classOfPop, mapSizeOf, SettlementCounts,
 } from '../options';
 import { getCulture } from '../urban/culture';
 import { BIG_RIVER_W } from '../site/site';
@@ -60,7 +61,7 @@ export function extentGap(pa: number, pb: number): number {
   return extentRadius(pa) + extentRadius(pb) + 60 + 0.25 * Math.max(extentRadius(pa), extentRadius(pb));
 }
 
-export interface PlanRequest { key: string; cls: CountClass | SettlementClass; pop: number; culture: string; siteType?: SiteArchetype; position?: Vec2; explicit: boolean }
+export interface PlanRequest { key: string; cls: CountClass | SettlementClass; pop: number; culture: string; siteType?: SiteArchetype; position?: Vec2; options?: SettlementOverrides; explicit: boolean }
 export interface PlanResult { settlements: Settlement[]; warnings: string[]; requested: number; ms?: Record<string, number> }
 
 const logUniform = (r: Rng, [a, b]: [number, number]): number => Math.round(a * Math.pow(b / a, r.float()));
@@ -88,17 +89,21 @@ export const AUTO_SMALL_TOP = 0.35;
 
 /** Requests in placement order (stable keys). */
 export function settlementRequests(opts: Options, usableKm2: number, mainPop: number, root: Rng): PlanRequest[] {
-  const s = opts.settlements ?? 'auto';
+  const s = opts.workflow === 'automatic' ? 'auto' : opts.settlements ?? 'auto';
   if (s === 'none') return [];
   const out: PlanRequest[] = [];
   if (typeof s === 'object' && 'list' in s) {
     s.list.forEach((it: SettlementSpec, k) => {
-      out.push({ key: String(k), cls: classOfPop(it.population), pop: it.population, culture: it.culture ?? opts.culture, siteType: it.siteType, position: it.position, explicit: true });
+      if (opts.workflow === 'list' && k === 0) return;
+      out.push({ key: String(k), cls: classOfPop(it.population), pop: it.population, culture: it.culture ?? opts.culture,
+        siteType: it.siteType, position: it.position, options: it.options, explicit: true });
     });
     return out;
   }
   const counts = s === 'auto' ? autoCounts(usableKm2, mainPop, opts.relief) : s.counts;
   for (const cls of COUNT_CLASSES) {
+    // Area limits the number of places; in automatic mode the main settlement also bounds their hierarchy.
+    if (s === 'auto' && CLASS_POP[cls][0] >= mainPop) continue;
     const n = Math.max(0, Math.round(counts[cls] ?? 0));
     for (let j = 0; j < n; j++) {
       const key = cls + ':' + j;
@@ -156,7 +161,7 @@ export function voronoiRegions(centers: Vec2[], S: number): Polygon[] {
 /**
  * Plan all settlements. `world` holds the terrain, the main site, the main roads and the main urban layer.
  */
-export function planSettlements(world: World, opts: Options, root: Rng): PlanResult {
+export function planSettlements(world: World, opts: Options, root: Rng, mainOptions: Options = opts): PlanResult {
   const terrain = world.terrain, site = world.site!;
   const S = mapSizeOf(opts);
   const { w: n, cell } = terrain.height;
@@ -174,9 +179,10 @@ export function planSettlements(world: World, opts: Options, root: Rng): PlanRes
   for (const ph of foot) footArea += Math.abs(polygonArea(ph.outer));
   const mainR = Math.max(extentRadius(mainPop) * 0.6, Math.sqrt(footArea / Math.PI) * 1.15, site.reserveRadius);
   const main: Settlement = {
-    key: 'main', index: 0, main: true, cls: classOfPop(mainPop), population: mainPop, culture: opts.culture, center: site.center,
+    key: 'main', index: 0, main: true, cls: classOfPop(mainPop), population: mainPop, culture: mainOptions.culture, center: site.center,
     archetype: site.archetype, radius: mainR, extent: [], region: [], detail: 'main', urban: world.urban,
     crossing: site.crossing, harbor: site.harbor,
+    ...(opts.workflow === 'list' ? { fixed: !!mainOptions.center } : {}),
   };
 
   // ---- fields shared by all candidates
@@ -217,6 +223,11 @@ export function planSettlements(world: World, opts: Options, root: Rng): PlanRes
   const usableKm2 = (usable * 2 * cell * cell) / 1e6;
 
   const reqs = settlementRequests(opts, usableKm2, mainPop, root);
+  // Automatic companions may together have at most the main settlement's population. Explicit counts and lists
+  // describe a user-chosen composition and are deliberately exempt from this regional budget.
+  let remainingAutoPopulation = mainPop;
+  const prefsFor = (q: PlanRequest): SitePrefs =>
+    q.options?.sitePrefs ?? (opts.workflow === 'list' && q.culture === opts.culture ? opts.sitePrefs : undefined) ?? getCulture(q.culture).sitePrefs ?? {};
   const noise = new Noise2D(r.fork('noise'));
 
   // ---- candidate grid (~40–60 m stride)
@@ -248,11 +259,11 @@ export function planSettlements(world: World, opts: Options, root: Rng): PlanRes
   };
 
   /** Static score of a candidate for a class / culture (independent of the other settlements). */
-  const scoreOf = (i: number, pop: number, culture: string): number => {
+  const scoreOf = (i: number, pop: number, culture: string, override?: SitePrefs): number => {
     const p = pos(i);
     const ext = extentRadius(pop);
     const cu = getCulture(culture);
-    const prefs = cu.sitePrefs ?? {};
+    const prefs = override ?? cu.sitePrefs ?? {};
     const mountain = prefs.mountainFace ?? 0, wood = prefs.woodland ?? 0;
     // hard constraints: dry land, map margin, not too steep (dwarves and elves tolerate more), buildable ground
     const edge = Math.min(p.x, p.y, S - p.x, S - p.y);
@@ -290,16 +301,16 @@ export function planSettlements(world: World, opts: Options, root: Rng): PlanRes
   const placed: Settlement[] = [main];
   const sorted = new Map<string, { i: number; s: number }[]>();
   let tSort = 0;
-  const sortedFor = (pop: number, culture: string): { i: number; s: number }[] => {
+  const sortedFor = (pop: number, culture: string, prefs?: SitePrefs): { i: number; s: number }[] => {
     // one ranking per (class band, culture): the score only depends on them
     const band = pop < 15 ? 0 : pop < 100 ? 1 : pop < 1000 ? 2 : pop < 20000 ? 3 : 4;
-    const key = band + '|' + culture;
+    const key = band + '|' + culture + '|' + JSON.stringify(prefs ?? null);
     let l = sorted.get(key);
     if (!l) {
       const ts = performance.now();
       const rep = [8, 40, 300, 3000, 30000][band];
       l = [];
-      for (const i of cand) { const s = scoreOf(i, rep, culture); if (s > -Infinity) l.push({ i, s }); }
+      for (const i of cand) { const s = scoreOf(i, rep, culture, prefs); if (s > -Infinity) l.push({ i, s }); }
       l.sort((a, b) => b.s - a.s || a.i - b.i);
       sorted.set(key, l);
       tSort += performance.now() - ts;
@@ -375,12 +386,13 @@ export function planSettlements(world: World, opts: Options, root: Rng): PlanRes
   let requested = 0;
   const failedBand = new Set<string>();
   for (const q of reqs) {
+    if (!q.explicit && (q.pop >= mainPop || q.pop > remainingAutoPopulation)) continue;
     requested++;
     const rq = root.fork('settlement:' + q.key);
     const ext = extentRadius(q.pop);
     let chosen: { i: number; p: Vec2; relax: number } | null = null;
     if (q.position) {
-      const prefs = getCulture(q.culture).sitePrefs ?? {};
+      const prefs = prefsFor(q);
       const p = resolvePosition(terrain, S, q.position, {
         inset: 0.03 * S + 0.8 * ext + 40, maxMove: 400,
         slopeMax: 0.3 + 0.25 * (prefs.mountainFace ?? 0) + 0.08 * (prefs.woodland ?? 0),
@@ -395,7 +407,7 @@ export function planSettlements(world: World, opts: Options, root: Rng): PlanRes
       const bandKey = (q.pop < 15 ? 0 : q.pop < 100 ? 1 : q.pop < 1000 ? 2 : q.pop < 20000 ? 3 : 4) + '|' + q.culture + '|' + (q.siteType ?? '');
       // automatic mode: once a class finds no room, the rest of that class is skipped
       if (!q.explicit && failedBand.has(bandKey)) continue;
-      const list = sortedFor(q.pop, q.culture);
+      const list = sortedFor(q.pop, q.culture, prefsFor(q));
       const bm = blockedFor(q.pop);
       const steps = q.explicit ? [1, 0.8, 0.62, 0.48] : [AUTO_SPREAD];
       // automatic mode: small settlements only on good land, and none in the main town's own outskirts
@@ -438,8 +450,9 @@ export function planSettlements(world: World, opts: Options, root: Rng): PlanRes
     const cls = classOfPop(q.pop);
     placed.push({
       key: q.key, index: placed.length, cls, population: q.pop, culture: q.culture, center, archetype, radius: ext,
-      extent: [], region: [], fixed: !!q.position, detail: cls === 'farmstead' ? 'farmstead' : 'eager',
+      extent: [], region: [], fixed: !!q.position, options: q.options, detail: cls === 'farmstead' ? 'farmstead' : 'eager',
     });
+    if (!q.explicit) remainingAutoPopulation -= q.pop;
     for (let b = 0; b < 5; b++) if (blocked[b]) block(b, placed[placed.length - 1]);
     addBucket(placed[placed.length - 1]);
   }

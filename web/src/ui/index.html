@@ -9,7 +9,7 @@
   * { box-sizing: border-box; }
   html, body { margin:0; height:100%; background:var(--bg); color:var(--ink); font:14px/1.4 Georgia, 'Times New Roman', serif; overflow:hidden; }
   #app { display:flex; height:100%; position:relative; }
-  #panel { width:300px; flex:none; background:var(--panel); border-right:1px solid var(--line); padding:14px 14px 10px; overflow:auto; box-shadow:2px 0 12px rgba(0,0,0,.35); z-index:5; display:flex; flex-direction:column; gap:8px; }
+  #panel { width:360px; flex:none; background:var(--panel); border-right:1px solid var(--line); padding:14px 14px 10px; overflow:auto; box-shadow:2px 0 12px rgba(0,0,0,.35); z-index:5; display:flex; flex-direction:column; gap:8px; }
   #panel h1 { margin:0; font-size:24px; letter-spacing:.04em; }
   #panel .sub { color:var(--ink2); font-size:12px; margin:0 0 4px; }
   label { display:block; font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:var(--ink2); margin:10px 0 3px; }
@@ -27,7 +27,20 @@
   .check { display:flex; align-items:center; gap:8px; margin-top:9px; font-size:13px; }
   .btns { display:flex; gap:6px; margin-top:4px; }
   .btns { flex-wrap:wrap; }
+  #panel [hidden] { display:none; }
   .btns button { flex:1 1 auto; padding-left:6px; padding-right:6px; font-size:13px; }
+  .workflow-step { border:1px solid var(--line); border-radius:10px; padding:12px; background:var(--field); }
+  .workflow-step h2 { font:600 18px/1.3 Georgia,serif; margin:0 0 5px; }
+  .step-number { display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; margin-right:7px; border-radius:50%; background:var(--accent); color:white; font:12px sans-serif; }
+  .workflow-step > .hint { margin:0 0 12px; }
+  .generate { width:100%; padding:10px; margin-top:12px; }
+  #draftState { min-height:1.4em; }
+  .settlement-choice { width:100%; text-align:left; display:flex; justify-content:space-between; white-space:normal; margin-bottom:6px; padding:9px; }
+  .settlement-choice[aria-pressed=true] { background:var(--accent); color:var(--field); }
+  .settlement-choice small { display:block; font-size:11px; opacity:.8; }
+  #settlementEditor { border-top:1px solid var(--line); margin-top:12px; padding-top:8px; }
+  #settlementEditor h3 { margin:2px 0 8px; font-size:15px; }
+  #settlementEditor details { margin-top:10px; }
   /* collapsible sections (native <details>) */
   details.sec { border:1px solid var(--line); border-radius:6px; background:rgba(255,250,240,.45); }
   details.sec > summary { cursor:pointer; padding:7px 10px; font-size:12px; letter-spacing:.1em; text-transform:uppercase; color:var(--accent); font-weight:bold; list-style:none; user-select:none; }
@@ -77,7 +90,7 @@
   #loadbar > i { display:block; height:100%; width:0; background:var(--accent); box-shadow:0 0 6px var(--accent); transition:width .35s ease-out; }
   #menuBtn { display:none; position:absolute; left:10px; top:10px; z-index:6; padding:5px 10px; font-size:18px; line-height:1; }
   @media (max-width: 800px) {
-    #panel { position:absolute; left:0; top:0; bottom:0; width:min(86vw, 330px); transform:translateX(-102%); transition:transform .2s; }
+    #panel { position:absolute; left:0; top:0; bottom:0; width:min(90vw, 360px); transform:translateX(-102%); transition:transform .2s; }
     #app.open #panel { transform:none; }
     #menuBtn { display:block; }
     #panel { padding-top:52px; }
@@ -102,32 +115,46 @@
       <div id="shareState" class="hint"></div>
     </div>
 
-    <details class="sec" open id="sec-terrain"><summary>Terrain</summary><div class="body">
+    <section class="workflow-step" id="sec-terrain" aria-labelledby="environmentHeading">
+      <h2 id="environmentHeading"><span class="step-number">1</span>Environment</h2>
+      <p class="hint">Create the landscape first, then populate it.</p>
+      <div id="extentControls"><label for="mapSize">Map extent (m)</label><input id="mapSize" type="number" min="600" max="40000" step="100"></div>
+      <label for="biome">Climate &amp; biome</label><select id="biome"></select>
       <label for="relief">Relief</label><select id="relief"></select>
-      <label for="biome">Biome</label><select id="biome"></select>
-      <label for="coast">Coast</label><select id="coast"></select>
-      <label for="river">River</label><select id="river"></select>
-      <label>Heightmap</label>
-      <button id="hmImport" class="secondary" style="width:100%">Import heightmap (PNG/JPG)</button>
-      <input id="hmFile" type="file" accept="image/png,image/jpeg,image/*" hidden>
-      <div class="row" style="align-items:center;justify-content:space-between;margin-top:6px"><span id="hmInfo" class="hint" style="margin:0"></span><button id="hmClear" class="secondary small" title="Back to generated terrain" hidden>Remove</button></div>
-      <div id="hmParams" hidden>
-        <label for="hmScale">Vertical scale (m, white pixel)</label><input id="hmScale" type="number" min="1" max="9000" step="10">
-        <label for="hmSea">Sea level (m)</label><input id="hmSea" type="number" min="-1000" max="9000" step="5">
+      <div class="row"><div style="flex:1"><label for="coast">Coast</label><select id="coast"></select></div><div style="flex:1"><label for="river">Rivers</label><select id="river"></select></div></div>
+      <label for="seaLevel">Coastal water level</label><input id="seaLevel" type="range" min="-1" max="1" step="0.05" value="0">
+      <details class="sec"><summary>Import terrain</summary><div class="body">
+        <button id="hmImport" class="secondary" style="width:100%">Import heightmap (PNG/JPG)</button>
+        <input id="hmFile" type="file" accept="image/png,image/jpeg,image/*" hidden>
+        <div class="row" style="align-items:center;justify-content:space-between;margin-top:6px"><span id="hmInfo" class="hint" style="margin:0"></span><button id="hmClear" class="secondary small" hidden>Remove</button></div>
+        <div id="hmParams" hidden><label for="hmScale">Vertical scale (m, white pixel)</label><input id="hmScale" type="number" min="1" max="9000" step="any"><label for="hmSea">Sea level (m)</label><input id="hmSea" type="number" min="-1000" max="9000" step="any"></div>
+      </div></details>
+      <button id="generateEnvironment" class="generate" type="button">Generate environment</button>
+    </section>
+
+    <section class="workflow-step" id="sec-settlement" aria-labelledby="settlementsHeading">
+      <h2 id="settlementsHeading"><span class="step-number">2</span>Settlements</h2>
+      <p class="hint">Build an automatic region or configure each settlement yourself.</p>
+      <label for="settlMode">Composition</label><select id="settlMode"><option value="automatic">Automatic region</option><option value="list">Individual settlements</option></select>
+      <div id="settlementChoices"></div>
+      <div class="btns" id="compositionActions"><button id="settlAdd" type="button" class="secondary">+ Add settlement</button><button id="settlRemove" type="button" class="secondary">Remove selected</button></div>
+      <div id="settlementEditor">
+        <h3 id="settlementEditorHeading">Main settlement</h3>
+        <div class="row"><div style="flex:1"><label for="size">Type</label><select id="size"></select></div><div style="flex:1"><label for="population">Population</label><input id="population" type="number" min="0" max="5000000" step="10"></div></div>
+        <label for="culture">Culture &amp; town plan</label><select id="culture"></select>
+        <label for="language">Place-name language</label><select id="language"></select>
+        <label for="siteType">Site</label><select id="siteType"></select>
+        <div id="positionControls"></div>
+        <details class="sec" id="sec-plan"><summary>Layout &amp; landmarks</summary><div class="body">
+          <label for="roads">Regional road exits</label><select id="roads"></select>
+          <div id="planExtra"></div><div id="cultureOverrides"></div>
+        </div></details>
       </div>
-    </div></details>
-
-    <details class="sec" open id="sec-settlement"><summary>Settlement</summary><div class="body">
-      <label for="size">Size</label><select id="size"></select>
-      <label for="population">Population (0 = automatic)</label><input id="population" type="number" min="0" max="5000000" step="10">
-      <label for="roads">Regional roads</label><select id="roads"></select>
-    </div></details>
-
-    <details class="sec" id="sec-plan"><summary>Plan</summary><div class="body">
-      <label for="culture">Town plan</label><select id="culture"></select>
-      <label for="language">Place-name language</label><select id="language"></select>
-      <div id="planExtra" class="slot" data-slot="plan-extra">Phases, cultural blend and plan parameters will appear here.</div>
-    </div></details>
+      <div id="settlWarn" class="hint"></div>
+      <button id="generateSettlements" class="generate" type="button">Generate settlements</button>
+    </section>
+    <div id="draftState" class="hint" role="status" aria-live="polite"></div>
+    <div id="generationIdentity" class="hint"></div>
 
     <details class="sec" open id="sec-map"><summary>Map</summary><div class="body">
       <label for="style">Style</label><select id="style"></select>

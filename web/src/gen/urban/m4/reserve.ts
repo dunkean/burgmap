@@ -29,6 +29,8 @@ export interface M4State {
   culture: string;
   /** Width of the lists of a double enceinte (0 = none): outside lots keep clear of the outer wall. */
   listsW?: number;
+  /** Physical thickness of the emitted town curtain (zero for a living or primitive boundary). */
+  wallThickness?: number;
   /** Stone quay edges planned by the port. */
   quays?: Polyline[];
 }

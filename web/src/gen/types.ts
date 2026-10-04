@@ -1,6 +1,6 @@
 import type { Vec2, Polygon, Polyline } from './core/geom';
 import type { Grid } from './core/grid';
-import type { Options } from './options';
+import type { Options, SettlementOverrides } from './options';
 import type { NamesLayer } from './names/types';
 
 export type { Vec2, Polygon, Polyline, Grid, Options, NamesLayer };
@@ -126,6 +126,8 @@ export interface LandUseLayer {
   reserve: Polygon[];
   /** Permission generated with these areas; late settlement detail must not invent uncovered render patches. */
   naturalGround?: PolyH[];
+  /** Opaque landscape under ordinary blocks and informal hut lots, with paving and water excluded. */
+  landscapeGround?: PolyH[];
 }
 
 /** Polygon with holes (all rings positively oriented). */
@@ -278,6 +280,8 @@ export interface Settlement {
   cls: SettlementClass;
   population: number;
   culture: string;
+  /** Explicit controls retained for eager, lazy and macro-quarter generation. */
+  options?: SettlementOverrides;
   center: Vec2;
   archetype: SiteArchetype;
   /** Projected radius of the built extent (m) and its outline (disc clipped to the region). */
@@ -297,6 +301,8 @@ export interface Settlement {
 
 export interface World {
   seed: string;
+  /** Deterministic identity of the generation inputs in an opt-in workflow. */
+  uid?: string;
   options: Options;
   mapSize: number;
   terrain: TerrainLayer;

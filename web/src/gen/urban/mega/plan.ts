@@ -41,6 +41,7 @@ import { swahiliBazaarQuarter, hasSwahiliBazaar } from '../swahili';
 import { DEFAULT_M4 } from '../m4/index';
 import { primitiveBoundaryLines } from '../primitive_features';
 import { planMoat, naturalBank, moatReserve } from '../moat';
+import { macroPortFrontage } from './ports';
 
 const TAU = Math.PI * 2;
 const TMP = -999;
@@ -1125,16 +1126,13 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
   {
     const onNaturalBank = moat.length ? naturalBank(ctx.water) : null;
     const nW = Math.max(1, Math.round(nR / 2));
+    const coastalPorts = new Set<number>();
     for (const q of quarters) {
       if (q.kind !== 'quarter' || (q.district !== 'town' && q.district !== 'old-town' && q.district !== 'suburb')) continue;
-      const wetEdge = q.pts.map((a, i) => {
-        const b = q.pts[(i + 1) % q.pts.length];
-        return q.lab[i] === LAB_WATER && (!onNaturalBank || onNaturalBank({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }));
-      });
-      let wetL = 0;
-      for (let i = 0; i < q.pts.length; i++) if (wetEdge[i]) wetL += dist(q.pts[i], q.pts[(i + 1) % q.pts.length]);
-      if (wetL < 140) continue;
-      if (q.phase > nR) {
+      const { wetEdge, length: wetL, served, coastal } = macroPortFrontage(ctx, q, mstreets, onNaturalBank);
+      if (wetL < 140 || !served) continue;
+      const allowed = opts.port !== 'no' && (getCulture(q.culture).m4?.port ?? DEFAULT_M4.port);
+      if (q.phase > nR && !(coastal && allowed)) {
         if (q.phase === nR + 1 && wetL > 220 && q.culture !== 'swahili-stone-town') {
           // tanners, dyers and mills on the water outside the walls
           q.district = 'craft';
@@ -1143,14 +1141,17 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
         }
         continue;
       }
+      if (!allowed) continue;
       // (the harbour quarters: the old town's waterfront, then fewer and fewer outward)
-      if (q.phase > 1 && lm.chance(q.phase > nR - nW + 1 ? 0.7 : 0.45)) continue;
-      q.district = 'port';
-      if (q.culture === 'swahili-stone-town') q.wants.push({ kind: 'swahili-merchant-house', place: 'edge', area: [900, 3500] });
+      if (q.phase > 1 && q.phase <= nR) {
+        const skip = lm.chance(q.phase > nR - nW + 1 ? 0.7 : 0.45);
+        if (skip && !coastal) continue;
+      }
       // runs of water edges → quay streets
       const n = q.pts.length;
       const s0 = wetEdge.findIndex((wet, i) => wet && !wetEdge[(i - 1 + n) % n]);
       if (s0 < 0) continue; // all water edges: an island quarter, no quay
+      let hasQuay = false;
       for (let k = 0; k < n; k++) {
         const i = (s0 + k) % n;
         if (!wetEdge[i] || wetEdge[(i - 1 + n) % n]) continue;
@@ -1164,12 +1165,18 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
         for (const e of idxs) q.lab[e] = id;
         quays.push(run);
         lines.push({ kind: 'quay-edge', path: run, width: 1.1 });
+        hasQuay = true;
       }
+      if (!hasQuay) continue;
+      q.district = 'port';
+      if (coastal) coastalPorts.add(q.id);
+      if (q.culture === 'swahili-stone-town') q.wants.push({ kind: 'swahili-merchant-house', place: 'edge', area: [900, 3500] });
     }
     const ports = quarters.filter((q) => q.district === 'port');
     if (ports.length) {
-      const pq = byScore(ports, (q) => -dist(innerPoint(q.pts), c));
-      if (pq) sites.push({ id: 'harbour', kind: 'river-port', role: 'port', lot: pq.pts, anchor: innerPoint(pq.pts), culture: pq.culture });
+      const coastal = ports.filter((q) => coastalPorts.has(q.id));
+      const pq = byScore(coastal.length ? coastal : ports, (q) => -dist(innerPoint(q.pts), c));
+      if (pq) sites.push({ id: 'harbour', kind: coastalPorts.has(pq.id) ? 'harbour' : 'river-port', role: 'port', lot: pq.pts, anchor: innerPoint(pq.pts), culture: pq.culture });
     }
   }
   for (let i = 1; i < nuclei.length; i++) {

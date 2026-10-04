@@ -6,6 +6,7 @@
 import type { World, LandKind, Polygon, Polyline, Vec2, PolyH } from '../gen/types';
 import { contourSet } from './contours';
 import { countrysideFringe, fringeStreetWidth } from './countryside';
+import { currentLandscapeGround } from '../gen/landuse/landscapeGround';
 import { renderView } from '../gen/settlements/merge';
 import { seaWithIslands } from './util';
 import { farmPlots, farmRidges, treePolys } from './farms';
@@ -259,10 +260,12 @@ export function buildScene(world0: World, tileSize = TILE_SIZE): Scene {
   const ur = world.urban;
   if (ur) {
     const addH = (name: string, l: PolyH[]): void => addPoly(name, l.map((p) => p.outer), l.map((p) => (p.holes.length ? p.holes : undefined)));
-    const fringe = countrysideFringe(world0);
+    const fringe = world0.landuse?.landscapeGround === undefined ? countrysideFringe(world0) : { bands: [], ground: [], streets: [] };
     fringe.bands.forEach((pieces, i) => addH('u-country-fringe-' + i, pieces));
     addH('u-country-fringe', fringe.ground);
-    addH('u-natural-ground', (world0.landuse?.naturalGround ?? []).map((p) => ({ outer: orientPos(p.outer),
+    addH('u-natural-ground', (world0.landuse?.landscapeGround === undefined ? world0.landuse?.naturalGround ?? [] : []).map((p) => ({ outer: orientPos(p.outer),
+      holes: p.holes.map((h) => orientPos(h).slice().reverse()) })));
+    addH('u-landscape-ground', currentLandscapeGround(world0).map((p) => ({ outer: orientPos(p.outer),
       holes: p.holes.map((h) => orientPos(h).slice().reverse()) })));
     const fringeStreets = new Map<number, Polyline[]>();
     for (const st of fringe.streets) {
@@ -307,7 +310,6 @@ export function buildScene(world0: World, tileSize = TILE_SIZE): Scene {
     addPoly('u-terraces', ur.landmarks.filter((l) => l.kind === 'terrace-field').map((l) => l.poly));
     addPoly('u-chinampa-canals', ur.landmarks.filter((l) => l.kind === 'chinampa-canal' || l.kind === 'baray' || l.kind === 'pond').map((l) => l.poly));
     addPoly('u-chinampas', ur.landmarks.filter((l) => l.kind === 'chinampa').map((l) => l.poly));
-    addPoly('block-edges', ur.blocks);
     addH('u-backland', ur.backLand);
     addH('u-masses', ur.masses);
     {

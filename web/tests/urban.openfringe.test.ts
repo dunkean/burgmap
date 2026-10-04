@@ -12,6 +12,7 @@ import { ribbon } from '../src/gen/geo/offset';
 import { generate } from '../src/gen/pipeline';
 import { makeOptions } from '../src/gen/options';
 import { urbanNaturalGround } from '../src/gen/landuse/urbanGround';
+import { urbanLandscapeGround, landscapeCoverGround } from '../src/gen/landuse/landscapeGround';
 import { checkWorld } from './urbanCheck';
 import '../src/gen/urban/cultures';
 
@@ -149,7 +150,7 @@ describe('open settlement fringe', () => {
   });
 
   it('preserves partitions, access and containment on the reported open-town shape', () => {
-    const w = generate(makeOptions({ seed: 'p4uefz', size: 'town', culture: 'european-organic', walls: 'none', settlements: 'none' }));
+    const w = generate(makeOptions({ seed: 'p4uefz', size: 'town', culture: 'european-organic', walls: 'none', settlements: 'none', suburbs: 'some' }));
     expect(Number(w.stats['urban.openFringe.quarters'])).toBeGreaterThan(0);
     // Check the actual transition rather than a counter for randomly emptied mature plots.
     const u = w.urban!;
@@ -180,12 +181,19 @@ describe('open settlement fringe', () => {
     expect(report.noFrontage).toBe(0);
     expect(report.bldgOutside).toBeLessThanOrEqual(0.05);
     expect(report.orphanMain).toBe(0);
-    const forbiddenNatural = differenceS(w.urban!.footprintH, urbanNaturalGround(w));
+    const permittedNatural = [...urbanNaturalGround(w), ...landscapeCoverGround(w, urbanLandscapeGround(w))];
+    const forbiddenNatural = differenceS(w.urban!.footprintH, permittedNatural);
     // The occupation mask permits natural cover, while agriculture and occupied urban land stay reserved.
     const naturalKinds = new Set(['forest', 'meadow', 'pasture', 'commons', 'marsh']);
     const landOverlap = w.landuse!.areas.reduce((sum, a) => sum + mpArea(intersectionS([{ outer: a.poly, holes: a.holes ?? [] }],
       naturalKinds.has(a.kind) ? forbiddenNatural : w.urban!.footprintH)), 0);
     expect(landOverlap).toBeLessThanOrEqual(0.05);
+    const naturalAreas = w.landuse!.areas.filter((a) => naturalKinds.has(a.kind)).map((a) => ({ outer: a.poly, holes: a.holes ?? [] }));
+    const roofOverlap = u.buildings.reduce((sum, building) => sum + mpArea(intersectionS(building.poly, naturalAreas)), 0);
+    const pavedOverlap = u.parcels.filter((p) => p.use !== 'plot' && p.use !== 'hut-lot')
+      .reduce((sum, parcel) => sum + mpArea(intersectionS(parcel.poly, naturalAreas)), 0);
+    expect(roofOverlap, 'new landscape cover never covers occupied roofs').toBeLessThanOrEqual(0.05);
+    expect(pavedOverlap, 'real public paving retains its material').toBeLessThanOrEqual(0.05);
     expect(w.stats['landuse.ms.lu.vector']).toEqual(expect.any(Number));
     expect(Number(w.stats['landuse.lu.clipDropped'] ?? 0)).toBe(0);
   });

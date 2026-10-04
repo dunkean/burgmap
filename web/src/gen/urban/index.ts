@@ -72,6 +72,8 @@ import { outerEnclosure, absorbedVillages, joinVillages, reserveVillages, quarte
 import type { ReservedLot } from './primary';
 import { unionS } from '../geo/bool';
 import { servedFootprint } from './footprint';
+import { finishEdgeRoofs } from './edgeRoofs';
+import { repairResidentialDensity } from './densityRepair';
 
 export interface UrbanResult { layer: UrbanLayer; stats: Record<string, number | string>; debug: UrbanDebug }
 export interface UrbanDebug { quarters: { poly: Polygon; phase: number; lab: number[] }[] }
@@ -171,7 +173,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   }
   // the culture's settlement classes: below its minimum it is raised to it, above its maximum capped (1.5 ×)
   if (culture.scale) pop = Math.round(Math.max(scaleMinPop(culture.scale.min), Math.min(pop, scaleMaxPop(culture.scale.max) * 1.5)));
-  let roads = (world.roads ?? []).filter((r) => r.kind !== 'track').map((r) => ({ path: r.path, major: r.kind === 'major' }));
+  let roads = (world.roads ?? []).filter((r) => r.kind !== 'track').map((r) => ({ path: r.path, major: r.kind === 'major', width: r.width }));
   const reaching = roads.filter((r) => dist(r.path[r.path.length - 1], world.site!.center) < 10).length;
   let archetype = chooseArchetype(pop, reaching, rng.fork('arch'));
   const settlement = archetype === 'hamlet' ? culture.hamlet : archetype === 'town' ? null : culture.village;
@@ -260,6 +262,9 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
 
   let eplan: EnclosurePlan | null = null;
   let faub: { region: MultiPoly } = { region: [] };
+  const varyFringeGrowth = (opts.suburbs ?? 'auto') === 'auto';
+  // A preliminary fringe can inform an outer enclosure. Final districts must use the roads redirected to gates.
+  let replanFringe: (() => { region: MultiPoly }) | null = null;
   let marketArea = 0, extraRadials = false;
   let faubZone: Zone = 'faubourg';
   let nucleusSpec: NucleusSpec | null = null;
@@ -286,7 +291,8 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     };
     eplan = planServedPhases(ctx, pop, walled, mainAngle, rng.fork('phases'), roads, { nPh: 1, zones: ['village'], faubShare: 0.3, specs: settlement && settlement.form !== 'auto' ? [spec] : undefined, organicOutline: enc.wall === 'hedge' || enc.wall === 'none' });
     siteCastleOn(eplan);
-    faub = planFaubourgs(ctx, eplan.enclosure, roads, ((pop * 0.3) / params.density.village) * 1e4, 0, rng.fork('faubourg'));
+    replanFringe = () => flags.suburbs === 'none' ? { region: [] } : planFaubourgs(ctx, eplan!.enclosure, roads, ((pop * 0.3) / params.density.village) * 1e4, 0, rng.fork('faubourg'), 'village', 1, varyFringeGrowth);
+    faub = replanFringe();
     const nu = { ...plan.nucleus, ...(settlement?.nucleus ?? {}) };
     marketArea = nu.kind === 'market' ? 500 + pop * 0.8 : 0;
     if (settlement && settlement.form !== 'auto') nucleusSpec = nu;
@@ -308,23 +314,25 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     // suburbs (M4): none, the faubourg ribbons, or thick suburbs (an outer wall for a city, absorbed villages)
     const faubArea = (faubPop / plan.faubourg.density.faubourg) * 1e4 + short;
     const sub = flags.suburbs;
-    faub = sub === 'none' ? { region: [] } : planFaubourgs(ctx, eplan.enclosure, roads, faubArea * (sub === 'many' ? 2.4 : 1), walled ? 22 + (listsW ? listsW + 8 : 0) : 0, rng.fork('faubourg'), 'faubourg', (sub === 'many' ? 1.6 : 1) * Math.max(0.7, 1 + 0.35 * sprF));
-    if (sub === 'many' && faub.region.length) {
-      // suburbs spread between the roads: a belt of 150–220 m round the walls (beyond the glacis) joins the ribbons;
-      // its quarters, bounded by the radial roads, are split by their own secondary streets and lanes
-      const gl = walled ? 22 + (listsW ? listsW + 8 : 0) : 6;
-      let belt = differenceS(dilate(eplan.enclosure, gl + rng.fork('belt').range(150, 220)), dilate(eplan.enclosure, gl));
-      if (ctx.water.length) belt = differenceS(belt, ctx.water);
-      belt = belt.filter((ph) => areaOf(ph.outer) > 5000);
-      faub = { region: unionS(faub.region, belt).filter((ph) => areaOf(ph.outer) > 1500) };
-    }
+    replanFringe = () => {
+      let district: { region: MultiPoly } = sub === 'none' ? { region: [] } : planFaubourgs(ctx, eplan!.enclosure, roads, faubArea * (sub === 'many' ? 2.4 : 1), walled ? 22 + (listsW ? listsW + 8 : 0) : 0, rng.fork('faubourg'), 'faubourg', (sub === 'many' ? 1.6 : 1) * Math.max(0.7, 1 + 0.35 * sprF), varyFringeGrowth);
+      if (sub === 'many' && district.region.length) {
+        // A broad suburban belt joins the road ribbons beyond the defensive works.
+        const gl = walled ? 22 + (listsW ? listsW + 8 : 0) : 0;
+        let belt = differenceS(dilate(eplan!.enclosure, gl + rng.fork('belt').range(150, 220)), dilate(eplan!.enclosure, gl));
+        if (ctx.water.length) belt = differenceS(belt, ctx.water);
+        belt = belt.filter((ph) => areaOf(ph.outer) > 5000);
+        district = { region: unionS(district.region, belt).filter((ph) => areaOf(ph.outer) > 1500) };
+      }
+      return district;
+    };
+    faub = replanFringe();
     if (sub === 'many') {
       if (walled && pop >= 9000 && outerEnclosure(ctx, eplan, faub.region, pop)) {
         outerPhase = true;
-        faub = planFaubourgs(ctx, eplan.enclosure, roads, faubArea * 0.6, 22 + (listsW ? listsW + 8 : 0), rng.fork('faubourg2'), 'faubourg', 1.2);
+        replanFringe = () => planFaubourgs(ctx, eplan!.enclosure, roads, faubArea * 0.6, 22 + (listsW ? listsW + 8 : 0), rng.fork('faubourg2'), 'faubourg', 1.2, varyFringeGrowth);
+        faub = replanFringe();
       }
-      villages = absorbedVillages(ctx, eplan.enclosure, faub.region, roads, pop >= 40000 ? 3 : 2, rng.fork('villages'));
-      faub = { region: joinVillages(faub.region, villages, eplan.enclosure, ctx) };
     }
     marketArea = plan.nucleus.area === 'market' ? MARKET_AREA(pop) : 0;
     extraRadials = plan.phases.some((p) => p.morph.extraRadials && p.morph.streetOp !== 'grid');
@@ -359,11 +367,16 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
       if (ends.length) {
         const newPaths = approachGates(roads.map((r) => r.path), hull, ends, ctx.center, 30, ctx.isWater);
         roads = roads.map((r, i) => ({ ...r, path: newPaths[i] }));
+        if (replanFringe) faub = replanFringe();
         // the regional road layer follows (roads converge on the gates)
         const wr = (world.roads ?? []).filter((r) => r.kind !== 'track');
         wr.forEach((r, i) => { r.path = newPaths[i]; });
       }
     }
+  }
+  if (archetype === 'town' && flags.suburbs === 'many') {
+    villages = absorbedVillages(ctx, eplan.enclosure, faub.region, roads, pop >= 40000 ? 3 : 2, rng.fork('villages'));
+    faub = { region: joinVillages(faub.region, villages, eplan.enclosure, ctx, walled ? 22 + (listsW ? listsW + 8 : 0) : 0) };
   }
   const coreM = phaseMorphs[0];
   const prim = buildPrimary(ctx, {
@@ -380,7 +393,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     gatesOnly: !!coreM.gatesOnly,
     preLots: castlesAll.map((c) => c.lot),
     reserve: (api) => {
-      const st: M4State = { ctx, rng: rng.fork('m4lots'), pop, P: coreM, lotData, sites, culture: culture.id, listsW };
+      const st: M4State = { ctx, rng: rng.fork('m4lots'), pop, P: coreM, lotData, sites, culture: culture.id, listsW, wallThickness: wallKind === 'hedge' || primitivePalisade ? 0 : wallKind === 'palisade' ? 1.6 : pop > 12000 ? 3.2 : 2.6 };
       const out: ReservedLot[] = [];
       for (let k = 0; k < castlesAll.length; k++) {
         const l = reserveCastle(st, api, castlesAll[k], k ? 'castle:' + k : 'castle');
@@ -495,7 +508,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   }
   // Small extensions grow from connected street ends after the core's cuts are frozen.
   const fringeQuarters = new Set<number>();
-  if (!eplan.walled && archetype === 'town' && flags.suburbs !== 'none') {
+  if (!eplan.walled && archetype === 'town' && flags.suburbs !== 'none' && faub.region.length) {
     const protect: MultiPoly = [
       ...prim.quarters.map((q) => ({ outer: q.lp.pts, holes: [] })),
       ...castlesAll.map((c) => ({ outer: c.lot, holes: [] })),
@@ -503,7 +516,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
       ...(world.bridges ?? []).flatMap((b) => streetStrips([b.a, b.b], b.width + 2)),
       ...streets.list.filter((s) => s.ribbon).flatMap((s) => streetStrips(s.path, s.widths)),
     ];
-    const fringe = addOpenFringe(ctx, prim, streets, nPh + 1, faubMorph, culture.id, rng.fork('openFringe'), protect);
+    const fringe = addOpenFringe(ctx, prim, streets, nPh + 1, faubMorph, culture.id, rng.fork('openFringe'), protect, varyFringeGrowth);
     for (const q of fringe) {
       const qi = prim.quarters.length;
       fringeQuarters.add(qi);
@@ -1063,6 +1076,42 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
         trees.push({ x: p.x, y: p.y, r });
       }
     }
+  }
+
+  // Finish edge roofs after seeded programmes and ornaments are complete. Grow the owner at all partition
+  // levels on safe open ground; physical barriers retain an intact contained rectangle instead.
+  const edgePartition = {
+    ctx, quarters: prim.quarters, blocks: carved, parcels, buildings, streetSpace, footprint: prim.footprint,
+    gardens: plotGardens, streets, phases: eplan.phases,
+    protectedLand: [
+      ...ctx.water, ...waterPieces, ...defensiveReserve,
+      ...streets.list.filter((s) => s.ribbon).flatMap((s) => streetStrips(s.path, s.widths)),
+      ...(world.roads ?? []).flatMap((r) => streetStrips(r.path, r.width)),
+      ...prim.walls.flatMap((w) => streetStrips(w.ring.concat([w.ring[0]]), 5.6)),
+      ...prim.walls.flatMap((w) => { const out = listsW ? offsetCurtain(w, listsW) : null; return out ? streetStrips(out.ring.concat([out.ring[0]]), 5.6) : []; }),
+      ...lines.filter((l) => /wall|fence|palisade|rampart|barbican|hedge/.test(l.kind)).flatMap((l) => streetStrips(l.closed && l.path.length ? l.path.concat([l.path[0]]) : l.path, l.width ?? 1)),
+    ],
+    allowGrowth: true,
+    eligible: (pi: number) => parcels[pi].use === 'plot' && ['streetFrontRow', 'detached', 'machiya', 'giebelhaus', 'yardHouse', 'shopRow'].includes(blockMorph[parcels[pi].block].buildingOp),
+  };
+  const edgeRoofs = finishEdgeRoofs(edgePartition);
+  // Dedicated programmes can change the remaining mature residential inputs. Restore the whole-block floor
+  // inside existing plots after roof styling, preserving every planning frame and the seeded dwelling counts.
+  const densityRepair = repairResidentialDensity({ ...edgePartition, morphology: (bi: number) => blockMorph[bi] });
+  if (densityRepair.enlarged) {
+    stats['densityRepair.enlarged'] = densityRepair.enlarged;
+    stats['densityRepair.addedArea'] = densityRepair.addedArea;
+  }
+  const densityShortfall = densityRepair.groups.reduce((sum, group) => sum + group.shortfall, 0);
+  if (densityShortfall > 1e-6) stats['densityRepair.shortfall'] = densityShortfall;
+  if (edgeRoofs.constrained) stats['edgeRoofs.constrained'] = edgeRoofs.constrained;
+  if (edgeRoofs.grown) { prim.footprint = edgePartition.footprint; eplan.enclosure = eplan.phases.at(-1)!.region; }
+  if (edgeRoofs.grown || edgeRoofs.fitted || densityRepair.changedBlocks.size) {
+    stats['edgeRoofs.grown'] = edgeRoofs.grown; stats['edgeRoofs.fitted'] = edgeRoofs.fitted;
+    perBlock.forEach((list) => { list.length = 0; });
+    for (const b of buildings) if (b.parcel !== undefined) perBlock[parcels[b.parcel].block].push(b.poly);
+    masses.length = 0;
+    perBlock.forEach((list) => { if (list.length) masses.push(...unionMany(list, 24, true)); });
   }
 
   const keptQ = prim.quarters.map((_, qi) => qi).filter((qi) => urbanized.has(qi));

@@ -1,4 +1,4 @@
-import { Options, SIZE_PRESETS, DEFAULT_ROADS, fromQuery, toQuery, wantsCustomHeight, DEFAULTS, withCulture } from '../gen/options';
+import { Options, SIZE_PRESETS, DEFAULT_ROADS, fromQuery, toQuery, wantsCustomHeight, DEFAULTS, withCulture, makeOptions, generationUid, SITE_ARCHETYPES } from '../gen/options';
 import { generate } from '../gen/pipeline';
 import { renderSvg } from '../render/svg';
 // CANVAS-VIEWER (begin imports)
@@ -32,6 +32,7 @@ import { canWorkerExport, legacyGenerationResponse } from './generationMessages'
 import { exportPng } from './pngExport';
 import { exportSnapshot, type ExportSnapshot } from './exportSnapshot';
 import { initSettlementsUI, showSettlementWarnings } from './settlementsPanel';
+import { initPlanEditor } from './planEditor';
 import { screenToWorld } from '../render/view';
 import { Pin, ViewState, fullQuery, uiStateFromQuery, bugReport } from './share';
 import { createPins } from './pins';
@@ -47,12 +48,14 @@ function parseOptions(q: string): Options {
 }
 const mapStyle = (): MapStyle => opts.style as MapStyle;
 
-let opts: Options = parseOptions(location.search);
+let opts: Options = location.search ? parseOptions(location.search) : makeOptions({ workflow: 'environment', population: 20000, size: 'city', mapSize: 10000 });
+let draft: Options = structuredClone(opts);
 /** The imported image of this session (kept out of the URL; the link only carries a `hm=custom` marker). */
 let importedMem: ImportedHeight | null = null;
 /** Set when the page was opened from a link that used a custom heightmap we do not have. */
 let missingCustom = wantsCustomHeight(location.search);
 let heightId = 0;
+let heightDraftId = 0;
 /** UI-only state of the link (pins, view): never part of the options, so never of the generation. */
 const initUi = uiStateFromQuery(location.search);
 /** A view from the link, applied once the first map content has arrived (the map size is known then). */
@@ -77,7 +80,7 @@ const languageEl = $<HTMLSelectElement>('language');
 const styleEl = $<HTMLSelectElement>('style');
 const seedEl = $<HTMLInputElement>('seed');
 
-fillSelect(sizeEl, Object.entries(SIZE_PRESETS).map(([k, v]) => [k, `${v.label} (${v.mapSize} m)`]), opts.size);
+fillSelect(sizeEl, Object.entries(SIZE_PRESETS).map(([k, v]) => [k, v.label]), opts.size);
 fillSelect(reliefEl, [['flat', 'Flat'], ['hills', 'Rolling hills'], ['valley', 'Valley'], ['mountains', 'Mountains']], opts.relief);
 fillSelect(biomeEl, BIOME_LABELS, biomeName(opts.biome));
 fillSelect(coastEl, [['none', 'None'], ['random', 'Random side'], ['N', 'North'], ['E', 'East'], ['S', 'South'], ['W', 'West']], opts.coast);
@@ -95,12 +98,16 @@ const seedControl = {
 };
 registry.add(seedControl);
 // map extent (preset or custom), population slider and the settlement system (M3c)
-const settlUI = initSettlementsUI(registry, () => opts);
+const settlUI = initSettlementsUI(registry, () => draft, changeEditor);
 registry.add(selectControl(reliefEl, 'relief', (v) => v as Options['relief']));
 registry.add({ ...selectControl(biomeEl, 'biome', (v) => biomeName(v)), write: (o) => { biomeEl.value = biomeName(o.biome); } });
 registry.add(selectControl(coastEl, 'coast', (v) => v as Options['coast']));
 registry.add(selectControl(riverEl, 'river', (v) => v as Options['river']));
+registry.add({ ...numberControl($<HTMLInputElement>('seaLevel'), 'seaLevel', 0), live: false });
 registry.add(selectControl(roadsEl, 'roads', (v) => Number(v)));
+const siteEl = $<HTMLSelectElement>('siteType');
+fillSelect(siteEl, [['auto', 'Automatic'], ...SITE_ARCHETYPES.map((site): [string, string] => [site, site])], opts.siteType ?? 'auto');
+registry.add({ ...selectControl(siteEl, 'siteType', (v) => v as Options['siteType']), write: (o) => { siteEl.value = o.siteType ?? 'auto'; } });
 registry.add(numberControl($<HTMLInputElement>('population'), 'population', 0));
 // (a culture switch drops the previous culture's plan override / mix: see withCulture)
 registry.add({ ...selectControl(cultureEl, 'culture', (v) => v as Options['culture']), read: (o) => withCulture(o, cultureEl.value as Options['culture']) });
@@ -152,7 +159,8 @@ registry.add(checkControl($<HTMLInputElement>('legend'), 'legend', true));
   const sc = numberControl(inp, 'sprawl', 1);
   registry.add({ ...sc, live: false, write: (o) => { sc.write(o); show(); } });
 }
-registry.writeAll(opts);
+initPlanEditor(registry);
+registry.writeAll(settlUI.editorOptions(draft));
 // ---------- Plan section: population-driven growth or the culture's scale cap
 {
   const note = document.createElement('div');
@@ -186,25 +194,25 @@ hmFile.addEventListener('change', async () => {
     statusEl.textContent = 'Reading heightmap...';
     importedMem = await readHeightmap(f);
     missingCustom = false;
-    heightId++;
-    opts = { ...registry.readAll(opts), importedHeight: importedMem };
-    commit('push');
+    heightDraftId++;
+    draft = { ...settlUI.capture(registry.readAll(settlUI.editorOptions(draft)), draft), importedHeight: importedMem };
+    updateHeightmapUI(); markDraft();
   } catch (e) {
     statusEl.textContent = 'Could not read the image: ' + (e as Error).message;
   }
   hmFile.value = '';
 });
 hmClear.addEventListener('click', () => {
-  importedMem = null; heightId++;
-  opts = { ...registry.readAll(opts), importedHeight: undefined };
-  commit('push');
+  importedMem = null; heightDraftId++;
+  draft = { ...settlUI.capture(registry.readAll(settlUI.editorOptions(draft)), draft), importedHeight: undefined };
+  updateHeightmapUI(); markDraft();
 });
 function updateHeightmapUI(): void {
-  const custom = !!opts.importedHeight;
+  const custom = !!draft.importedHeight;
   hmParams.hidden = !custom;
   hmClear.hidden = !custom;
   reliefEl.disabled = custom; coastEl.disabled = custom;
-  hmInfo.textContent = custom ? `${opts.importedHeight!.name ?? 'image'} (${opts.importedHeight!.w} x ${opts.importedHeight!.h} px)` : '';
+  hmInfo.textContent = custom ? `${draft.importedHeight!.name ?? 'image'} (${draft.importedHeight!.w} x ${draft.importedHeight!.h} px)` : '';
   $('shareState').innerHTML = custom
     ? '<span class="chip" id="customChip">custom heightmap (not included in the link)</span>'
     : missingCustom ? '<span class="chip warn" id="customChip">this link used a custom heightmap: import it again to reproduce the map</span>' : '';
@@ -482,41 +490,72 @@ function schedule(): void {
 // ---------- state: URL, history, regeneration ----------
 /** Bring everything in line with `opts`: panel, URL (push / replace / none) and the map (regenerate or just redraw). */
 function commit(mode: 'push' | 'replace' | 'none', displayOnly = false): void {
-  registry.writeAll(opts);
-  roadsEl.options[0].textContent = `Auto (${DEFAULT_ROADS[opts.size]})`;
+  if (!displayOnly) {
+    draft = structuredClone(opts);
+    settlUI.load(draft);
+    registry.writeAll(settlUI.editorOptions(draft));
+  }
+  roadsEl.options[0].textContent = `Auto (${DEFAULT_ROADS[settlUI.editorOptions(draft).size]})`;
   updateHeightmapUI();
   if (mode !== 'none') {
     const q = '?' + curQuery();
     if (q !== location.search) (mode === 'push' ? history.pushState : history.replaceState).call(history, null, '', q);
   }
   if (!displayOnly && genKey() !== lastGenKey) schedule();
-  else if (displayOnly && (currentWorld || backend)) rerender(true); // worker mode has no currentWorld: the backend still needs the display options
+  else if (displayOnly && (currentWorld || backend)) rerender(true);
+  $('draftState').textContent = '';
+  $('generationIdentity').textContent = opts.workflow ? `Generation ${generationUid(opts)}` : '';
 }
 
-registry.onChange((c, kind) => {
-  opts = registry.readAll(opts);
-  const display = !!c.display;
-  roadsEl.options[0].textContent = `Auto (${DEFAULT_ROADS[opts.size]})`;
-  if (kind === 'input') {
-    // typing: regenerate (debounced) without touching history
-    if (!display && genKey() !== lastGenKey) schedule();
+function markDraft(): void {
+  $('draftState').textContent = 'Settings ready. Press Generate environment or Generate settlements to apply them.';
+}
+function changeEditor(change: (o: Options) => Options): void {
+  draft = settlUI.capture(registry.readAll(settlUI.editorOptions(draft)), draft);
+  draft = change(draft);
+  registry.writeAll(settlUI.editorOptions(draft));
+  roadsEl.options[0].textContent = `Auto (${DEFAULT_ROADS[settlUI.editorOptions(draft).size]})`;
+  markDraft();
+}
+registry.onChange((control) => {
+  draft = settlUI.capture(registry.readAll(settlUI.editorOptions(draft)), draft);
+  if (control.display) {
+    opts = { ...opts, style: draft.style, contours: draft.contours, landuse: draft.landuse, labels: draft.labels, legend: draft.legend };
+    const q = '?' + curQuery();
+    if (q !== location.search) history.pushState(null, '', q);
+    if (currentWorld || backend) rerender(true);
+  } else markDraft();
+});
+function applyGeneration(environment: boolean): void {
+  if (!registry.controls.every((control) => Array.from(control.el.matches('input') ? [control.el] : control.el.querySelectorAll('input')).every((input) => !(input instanceof HTMLInputElement) || input.checkValidity()))) {
+    $('draftState').textContent = 'Check the highlighted values before generating.';
+    for (const input of Array.from(document.querySelectorAll<HTMLInputElement>('#panel input'))) if (!input.checkValidity()) { input.reportValidity(); break; }
     return;
   }
-  commit('push', display);
-});
+  const x = $<HTMLInputElement>('centerX'), y = $<HTMLInputElement>('centerY');
+  if (!!x.value !== !!y.value) { $('draftState').textContent = 'Enter both position coordinates, or clear both for automatic placement.'; return; }
+  draft = settlUI.capture(registry.readAll(settlUI.editorOptions(draft)), draft);
+  heightId = heightDraftId;
+  opts = environment ? { ...draft, workflow: 'environment', settlementMode: settlUI.mode } : settlUI.composition(draft);
+  settlUI.cancelPick();
+  commit('push');
+}
+$('generateEnvironment').addEventListener('click', () => applyGeneration(true));
+$('generateSettlements').addEventListener('click', () => applyGeneration(false));
 
 window.addEventListener('popstate', () => {
   const parsed = parseOptions(location.search);
   missingCustom = wantsCustomHeight(location.search) && !importedMem;
   opts = { ...parsed, importedHeight: wantsCustomHeight(location.search) ? importedMem ?? undefined : undefined };
-  registry.writeAll(opts);
+  heightId = opts.importedHeight ? heightDraftId : 0;
   commit('none');
 });
 
 function randomSeed(): string { return Math.random().toString(36).slice(2, 8); }
 function reroll(): void {
-  opts = { ...opts, seed: randomSeed() };
-  commit('push');
+  draft = settlUI.capture(registry.readAll(settlUI.editorOptions(draft)), draft);
+  draft = { ...draft, seed: randomSeed() };
+  seedEl.value = draft.seed; markDraft();
 }
 $('dice').addEventListener('click', reroll);
 window.addEventListener('keydown', (e) => {
@@ -740,6 +779,7 @@ map.addEventListener('pointerdown', () => $('app').classList.remove('open'));
   /** The World (main-thread mode only: in offscreen mode it lives in the workers; open the page with ?render=main to inspect it). */
   world: () => currentWorld,
   options: () => opts,
+  draft: () => draft,
   mode: () => (backend ? 'offscreen' : 'main'),
   rendering: () => ({ gen: reqId, displayedGen: backend ? handoff.displayedGen : mainPresentedGen, finalVer: finalFrame.finalVer, frameVer: finalFrame.presentedVer, ready: backend ? finalFrame.ready && renderFailedGen !== reqId : mainPresentedGen === reqId && !pendingMain && !busyEl.classList.contains('on') }),
   /** Labels placed in the last frame (kind, text, size). */
@@ -852,6 +892,7 @@ exportPngBtn.addEventListener('click', () => {
 });
 
 history.replaceState(null, '', '?' + curQuery());
+$('generationIdentity').textContent = opts.workflow ? `Generation ${generationUid(opts)}` : '';
 updateHeightmapUI();
 // Probe the offscreen pipeline first (a few ms), then start the first run on whichever path works.
 const backendReady: Promise<OffscreenBackend | null> = forceMain ? Promise.resolve(null) : OffscreenBackend.create(backendEvents, window.devicePixelRatio || 1);

@@ -1,11 +1,12 @@
 import { Rng } from './core/rng';
-import { Options, mapSizeOf, effectiveSize, MAP_SIZE_MAX } from './options';
+import { Options, mapSizeOf, effectiveSize, MAP_SIZE_MAX, optionsForMainSettlement, generationUid } from './options';
 import type { World, Settlement } from './types';
 import { terrainForExtent } from './terrain/hydrology';
 import { chooseSite } from './site/site';
 import { getCulture, populationCulture } from './urban/culture';
 import { routeRoads } from './roads/regional';
 import { generateRural } from './landuse/rural';
+import { generateNaturalCover } from './landuse/natural';
 import { generateUrban } from './urban';
 import { generateNames, settlementNames } from './names';
 import { planSettlements } from './settlements/planner';
@@ -34,6 +35,7 @@ export function mainPopulation(o: Options, root: Rng): number {
 /** Explicit extents, imported rasters and automatic-population links keep their scale. */
 export function generationMapSize(o: Options, root = new Rng('burgmap:' + o.seed)): number {
   const preset = mapSizeOf(o);
+  if (o.workflow === 'environment') return preset;
   if (o.mapSize !== undefined || o.importedHeight || o.population <= 0) return preset;
   const pop = mainPopulation(o, root);
   if (populationCulture(o.culture, pop).camp || pop <= (o.eagerPop ?? EAGER_MAIN_POP)) return preset;
@@ -47,10 +49,12 @@ export interface GenerateOptions {
 
 /** `onStage` (optional) is told which stage is about to run, for progress display. */
 export function generate(options: Options, onStage?: (stage: string, partial?: World) => void, gopts: GenerateOptions = {}): World {
+  const requestedOptions = options;
+  const mainInput = optionsForMainSettlement(options);
   const t0 = performance.now();
   onStage?.('terrain');
   const root = new Rng('burgmap:' + options.seed);
-  const mapSize = generationMapSize(options, root);
+  const mapSize = generationMapSize(mainInput, root);
   const { terrain, timings } = terrainForExtent(options, mapSize, root);
   const stats: Record<string, number | string> = {};
   const r = (v: number) => Math.round(v);
@@ -65,16 +69,29 @@ export function generate(options: Options, onStage?: (stage: string, partial?: W
 
   const worldOptions = mapSize !== mapSizeOf(options) ? { ...options, mapSize } : options;
   const world: World = { seed: options.seed, options: worldOptions, mapSize, terrain, stats };
+  if (options.workflow) world.uid = generationUid(requestedOptions);
+  if (options.workflow === 'environment') {
+    onStage?.('natural cover', world);
+    const tn = performance.now();
+    world.landuse = generateNaturalCover(terrain, options.biome, root);
+    stats['ms.natural'] = r(performance.now() - tn);
+    stats['ms.total'] = r(performance.now() - t0);
+    return world;
+  }
   // the main settlement is generated with its effective size class (custom maps: from the population)
-  const size = effectiveSize(worldOptions);
+  const mainConfigured = optionsForMainSettlement(worldOptions);
+  const mainSpec = worldOptions.workflow === 'list' && worldOptions.settlements &&
+    typeof worldOptions.settlements === 'object' && 'list' in worldOptions.settlements
+    ? worldOptions.settlements.list[0] : undefined;
+  const size = mainSpec?.options?.size ?? effectiveSize(mainConfigured);
   const warnings: string[] = [];
-  let mainOpts: Options = size !== worldOptions.size ? { ...worldOptions, size } : worldOptions;
+  let mainOpts: Options = size !== mainConfigured.size ? { ...mainConfigured, size } : mainConfigured;
   const eagerPop = options.eagerPop ?? EAGER_MAIN_POP;
   const mainPop = mainPopulation(mainOpts, root);
-  const megaPop = populationCulture(options.culture, mainPop).camp ? 0 : mainPop;
+  const megaPop = populationCulture(mainOpts.culture, mainPop).camp ? 0 : mainPop;
   const mega = megaPop > eagerPop;
   if (!mega && mainOpts.population > MAIN_POP_CAP) {
-    warnings.push(`main settlement: ${options.population} inhabitants requested, plan generated for ${MAIN_POP_CAP} (megacity detail is not available)`);
+    warnings.push(`main settlement: ${mainOpts.population} inhabitants requested, plan generated for ${MAIN_POP_CAP} (megacity detail is not available)`);
     mainOpts = { ...mainOpts, population: MAIN_POP_CAP };
   }
   /** The World as the main-settlement stages see it (same object when the options are unchanged). */
@@ -83,7 +100,7 @@ export function generate(options: Options, onStage?: (stage: string, partial?: W
   const t1 = performance.now();
   onStage?.('site & roads', world);
   // the culture's site preferences apply unless the options set their own
-  const cprefs = getCulture(options.culture).sitePrefs;
+  const cprefs = getCulture(mainOpts.culture).sitePrefs;
   let siteOpts = mainOpts.sitePrefs || !cprefs ? mainOpts : { ...mainOpts, sitePrefs: cprefs };
   // a megacity needs its built-up radius free around the site (kept off the map edge as far as the map allows)
   if (mega) {
@@ -133,7 +150,7 @@ export function generate(options: Options, onStage?: (stage: string, partial?: W
   // ---- settlement system (M3c): planner, road network, secondary plans
   onStage?.('settlements', world);
   const mainRoads = world.roads.length;
-  const plan = planSettlements(world, worldOptions, root);
+  const plan = planSettlements(world, worldOptions, root, mainOpts);
   warnings.push(...plan.warnings);
   const settlements: Settlement[] = plan.settlements;
   world.settlements = settlements;
@@ -195,7 +212,7 @@ export function generate(options: Options, onStage?: (stage: string, partial?: W
 
   onStage?.('names');
   {
-    world.names = generateNames(world, root);
+    world.names = generateNames(mainView(), root);
     settlementNames(world, root);
   }
   stats['ms.names'] = r(performance.now() - t4);

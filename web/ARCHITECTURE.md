@@ -71,6 +71,29 @@ Rural classification combines the selected biome with water distance, height abo
 - `core/rng.ts`: `Rng` = sfc32 seeded from a string/number hash. `rng.fork(label)` returns an independent child stream (hash of parent seed + label). Every stage gets `root.fork('<stage>')`, and sub-features fork further (`fork('river')`, `fork('block:12')`), so toggling one option does not reshuffle unrelated stages.
 - Never use `Math.random()` in `src/gen`. Same seed + options ⇒ byte-identical SVG (tested).
 
+## Generation workflow and general theme
+
+Optional `Options.workflow` selects environment-only, automatic or main-inclusive
+list generation (URL `mode=e|a|l`). Legacy `settl=` remains the secondary-only
+format; `set2=` carries ordered instances with sparse `SettlementOverrides`.
+`compose=` remembers the selected composition while editing an environment.
+
+`World.options` is the general theme. Resolve the main instance with
+`optionsForMainSettlement`; secondary, eager and lazy views use
+`optionsForSettlement`. An instance's custom culture must not alter siblings
+or silently retain another culture's mixture. Per-instance positions remain
+independent of inherited properties. Regional road connections follow the
+shared network rather than promising an exact degree for every settlement.
+
+Environment generation returns after terrain and `landuse/natural.ts`: natural
+cover uses the shared vectorizer without human cultivation, site, urban, roads
+or settlement-name stages. `generationUid` fingerprints normalized effective
+generation options, independent of style, camera, pins and dormant composition.
+Imported pixels have a separate fingerprint and are not embedded in URLs.
+
+The UI keeps draft and applied options separate. Only explicit generation buttons
+apply draft generation controls; links and exports describe the displayed map.
+
 ## Pipeline (each stage = pure function `(world, opts, rng) → adds its layer`)
 
 1. **terrain** — heightfield from fBm/ridged simplex noise shaped by the `relief` option (`flat | hills | valley | mountains`); optional sea (`coast: none | N | E | S | W | random`), shaped so land rises from the coast; optional imported heightmap. Hydrology: priority-flood depression filling (Barnes 2014) → D8/D∞ flow directions → flow accumulation. Rivers = cells above an accumulation threshold, plus `river: none | stream | river | major` forcing an inflow at a map edge so a main river crosses the map (carve its valley). Output: `terrain.height` (grid, meters), `terrain.slope`, `terrain.water` (grid mask: sea/lake/river), river centerlines as smoothed polylines with width per vertex (widening downstream), lakes and coastline as polygons.
@@ -148,9 +171,47 @@ interface World {
 - **Catalogue** (`catalogue.ts`, `plans.ts`): cathedral close (parvis, cruciform cathedral 80–140 m oriented east, cloister, bishop's palace, canons' houses, close wall), palace (forecourt, logis and wings, garden), monasteries (inside near the wall / outside by the gates; church, cloister, garden, orchard, precinct wall), madrasa (medina), hospital (level 2, by a gate), market hall / town hall with belfry on the grand-place (`market.ts`).
 - **Port** (`port.ts`): shore run → RDP straight segments → stone edge shifted per segment to the water side of its shore points; apron (place), quay street, ribs, harbour strip (quarter), piers / moles with chain towers, shipyard (dry yard + slipways), rope walk; fish market and customs house on the apron; `UrbanLayer.quays` holds the stone edges.
 - **Activities** (`activities.ts`, `inns.ts`): watermills (weir, race, mill astride it), windmills on knolls, tanneries downstream, gallows / lazar house / cemetery by the roads (tracks to the road), arena (Lucca-style oval of houses), gate inns from merged plots and smithies.
-- **Suburbs** (`suburbs.ts`): `suburbs: none|some|many`; many = thicker, longer ribbons, an outer polygonal enclosure for walled cities (the old line fossilizes), absorbed villages with a green and suburb parishes (`place: 'suburb'`); medina mellah (ward wall), warehouse row, craft quarter.
+- **Suburbs** (`suburbs.ts`): `suburbs: auto|none|some|many`; Auto deterministically develops no, some or several actual road approaches. Connected extensions meet the parent ground; many = thicker, longer ribbons, an outer polygonal enclosure for walled cities (the old line fossilizes), absorbed villages with a green and suburb parishes (`place: 'suburb'`); medina mellah (ward wall), warehouse row, craft quarter.
 - **Shanty towns** (`shanty.ts`): land-value field (glacis, floodplain, slope, roadside, nuisance; culture flavour) → regions; own partition: relaxed Voronoi hut cells, pruned footpath tree, huts 15–40 m², 50–70 % coverage; block kind `shanty`.
 - **Output**: `UrbanLayer.sites` (id, kind, role, lot, entrance, anchor, `name` hook filled by `names/`), `quays`, wall `role`. Tests: `tests/urban.m4.test.ts` + `tests/m4Check.ts`. Previews: `scripts/m4_previews.ts` (→ `out/m4_*.png`, `out/m4_contact.png`), `scripts/m4_shot.ts --site <kind>`.
+
+## Urban ground and completed roofs
+
+`landuse/landscapeGround.ts` supplies opaque ground from actual terrain and
+natural-cover permissions. SVG and Canvas omit artificial outer settlement
+outlines while retaining real walls, fences and lot boundaries. Macro
+stand-ins and detailed quarters share the same ground contract.
+
+`urban/edgeRoofs.ts` completes ordinary exposed roofs only after proving
+owner, peer, physical-land and access clearance. Its local perpendicular
+frame does not change the shared polygon OBB implementation. Parcels too
+small for a whole 4.5 m roof require separate land reassignment; the
+finisher does not delete dwellings to hide them.
+
+`urban/densityRepair.ts` restores mature residential coverage by bounded
+enlargement of existing ordinary roofs inside their own usable gardens.
+It preserves planning partitions, building metadata and access, caps each
+roof against its original area, and measures all added protected-land contact
+from its original polygon across every proposal. Sparse cultural, young-edge,
+faubourg and village programmes remain unchanged.
+
+Where ordinary fitting fails, eligible neighbours in the same block and zone
+can exchange unoccupied garden land. The transfer conserves their original
+union, both real frontage arcs, donor roofs and prior block access. Its local
+checked union preserves short inherited boundary vertices; failed physical
+or garden proofs leave both owners untouched.
+
+Natural cover beside regional roads is cut by vector strips at the real
+half-width plus 6 m, rather than by the broad cultivation exclusion cells.
+Fields and farm placement retain their coarse safety exclusion.
+
+Automatic regional planning limits companion population to the main
+settlement population; each companion is smaller than the main one.
+Explicit counts and instance lists retain their requested programme. On
+coarse terrain, an empty smoothed tiny phase may recover a small connected
+dry region before the ordinary slope, water and access checks. Empty eager
+settlements do not reserve or clear a false footprint; planned macro
+quarters remain eligible for deferred detail.
 
 ## Settlement system (M3c)
 

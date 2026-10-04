@@ -480,7 +480,7 @@ export function settlementNames(world: World, root: Rng): void {
   let idn = names.entries.length;
   for (const s of world.settlements) {
     if (s.main) { s.name = names.town; continue; }
-    const family = familyFor(s.culture, world.options.language, world.seed);
+    const family = familyFor(s.culture, s.options?.language ?? world.options.language, world.seed);
     const V = VOCAB[family];
     const tier: 0 | 1 | 2 = s.population >= 1000 ? 0 : s.population >= 150 ? 1 : 2;
     const r = root.fork('names').fork('settlement:' + s.key);

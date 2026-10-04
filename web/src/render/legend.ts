@@ -33,6 +33,7 @@ export function fmtPop(n: number): string {
 const round2 = (n: number): number => (n >= 1000 ? Math.round(n / 100) * 100 : n >= 100 ? Math.round(n / 10) * 10 : n);
 
 export function townTitle(world: World): { title: string; sub: string } {
+  if (world.options.workflow === 'environment') return { title: 'Landscape', sub: `${fmtPop(world.mapSize)} m · ${world.options.biome ?? 'temperate'}` };
   const fam: NameFamily = world.names?.family ?? 'english';
   const pop = world.urban?.population;
   const cls = SETTLEMENT_CLASS(fam, pop ?? 0);

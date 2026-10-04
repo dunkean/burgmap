@@ -27,7 +27,8 @@ export function streetStrips(path: Polyline, widths: number | number[]): MultiPo
 }
 
 /** Small served extensions beyond the original frame. Core quarters and landmarks are never reclaimed. */
-export function addOpenFringe(ctx: UrbanCtx, primary: Primary, streets: Streets, phase: number, morph: MorphologyParams, culture: string, rng: Rng, protect: MultiPoly = []): Quarter[] {
+export function addOpenFringe(ctx: UrbanCtx, primary: Primary, streets: Streets, phase: number, morph: MorphologyParams, culture: string, rng: Rng, protect: MultiPoly = [], varyGrowth = true): Quarter[] {
+  if (varyGrowth && rng.fork('growth').chance(0.18)) return [];
   const planned = primary.footprint;
   const protectedIndex = new GridIndex<number>(30);
   protect.forEach((ph, i) => protectedIndex.insertPts(ph.outer, i));
@@ -57,6 +58,7 @@ export function addOpenFringe(ctx: UrbanCtx, primary: Primary, streets: Streets,
     const { root, dx, dy } = candidate;
     if (roots.some((p) => Math.hypot(p.x - root.x, p.y - root.y) < 55)) continue;
     const local = rng.fork(`street:${candidate.id}:${candidate.end}`);
+    if (varyGrowth && !local.fork('growth').chance(0.85)) continue;
     const width = Math.max(3, Math.min(4.5, morph.widthByRank[3] * morph.widthScale));
     const wanted = local.range(45, 95);
     const curve = morph.streetOp === 'grid' ? 0 : local.fork('curve').range(-8, 8);

@@ -79,7 +79,7 @@ export function outerEnclosure(ctx: UrbanCtx, ep: EnclosurePlan, faub: MultiPoly
   return true;
 }
 
-export interface Village { c: Vec2; core: Polygon; road: Polyline }
+export interface Village { c: Vec2; core: Polygon; road: Polyline; roadWidth?: number }
 
 /**
  * Villages on the roads just beyond the suburbs (the rural stage's hamlets the town absorbed): an irregular core
@@ -89,7 +89,7 @@ export interface Village { c: Vec2; core: Polygon; road: Polyline }
 export function absorbedVillages(ctx: UrbanCtx, enclosure: MultiPoly, faub: MultiPoly, roads: RoadIn[], n: number, rng: Rng): Village[] {
   const out: Village[] = [];
   const inside = (p: Vec2) => inMP(enclosure, p);
-  const cands: { pl: Polyline; s: number }[] = [];
+  const cands: { pl: Polyline; s: number; width: number }[] = [];
   for (const rd of roads) {
     const pl = rd.path; // map edge → centre
     let entry = -1;
@@ -101,7 +101,7 @@ export function absorbedVillages(ctx: UrbanCtx, enclosure: MultiPoly, faub: Mult
     const cum = [0];
     for (let i = 1; i < outward.length; i++) cum.push(cum[i - 1] + dist(outward[i - 1], outward[i]));
     for (let i = 0; i < outward.length; i++) if (inMP(faub, outward[i])) sEnd = cum[i];
-    cands.push({ pl: outward, s: sEnd + rng.range(70, 150) });
+    cands.push({ pl: outward, s: sEnd + rng.range(70, 150), width: rd.width ?? (rd.major ? 7 : 5) });
   }
   cands.sort((a, b) => a.s - b.s);
   for (const cd of cands) {
@@ -127,13 +127,13 @@ export function absorbedVillages(ctx: UrbanCtx, enclosure: MultiPoly, faub: Mult
     core = big[0].outer;
     // the ribbon that joins it to the suburb
     const sub = cd.pl.filter((_, i) => i === 0 || dist(cd.pl[i], c) < cd.s + 5);
-    out.push({ c, core, road: sub });
+    out.push({ c, core, road: sub, roadWidth: cd.width });
   }
   return out;
 }
 
 /** Joins the village cores to the faubourg region (a 30 m road ribbon between them). */
-export function joinVillages(faub: MultiPoly, villages: Village[], enclosure: MultiPoly, ctx: UrbanCtx): MultiPoly {
+export function joinVillages(faub: MultiPoly, villages: Village[], enclosure: MultiPoly, ctx: UrbanCtx, glacis = 20): MultiPoly {
   if (!villages.length) return faub;
   const parts: MultiPoly = [];
   for (const v of villages) {
@@ -142,9 +142,18 @@ export function joinVillages(faub: MultiPoly, villages: Village[], enclosure: Mu
     const rb = ribbon(v.road.slice(0, near.i + 1), 60);
     if (rb.length >= 3) parts.push({ outer: rb, holes: [] });
   }
-  let m = unionS(faub, parts);
-  m = differenceS(m, dilate(enclosure, 20));
+  const blocked = dilate(enclosure, glacis);
+  let m = differenceS(parts, blocked);
   if (ctx.water.length) m = differenceS(m, ctx.water);
+  // Preserve the faubourgs' existing gate throats. Village approaches use only public-road width in the
+  // defensive belt; their house-bearing strips still remain beyond the actual glacis.
+  const throats = villages.flatMap((v) => {
+    const neck = tryIntersection(ribbon(v.road, Math.max(2, (v.roadWidth ?? 7) - 1)), blocked);
+    if (neck.failed) return [];
+    const dry = tryDifference(neck.pieces, enclosure, ctx.water);
+    return dry.failed ? [] : dry.pieces;
+  });
+  m = unionS(faub, m, throats);
   return m.filter((ph) => area(ph.outer) > 1500);
 }
 

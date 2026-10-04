@@ -11,6 +11,7 @@
 import type { Vec2, Polygon, Polyline } from '../../core/geom';
 import { dist } from '../../core/geom';
 import { Rng } from '../../core/rng';
+import { optionsForMainSettlement, optionsForSettlement } from '../../options';
 import type { World, UrbanLayer, UrbanBuilding, UrbanParcel, UrbanSite, UrbanLine, UrbanTree, UrbanWall, PolyH, UrbanStreet } from '../../types';
 import type { MorphologyParams } from '../morphology';
 import { makeCtx, type UrbanCtx } from '../context';
@@ -22,6 +23,8 @@ import { cutPlots, type Plot } from '../plots';
 import { cutCourtyards } from '../courtyards';
 import { buildOn, type ArchBldg } from '../bops';
 import { chamferPersianHouse } from '../persianhouse';
+import { finishEdgeRoofs } from '../edgeRoofs';
+import { streetStrips } from '../openfringe';
 import { blockReach, carvePassage, makeStreetAt, splitLong, frontRangeDepth, shapeOkObb } from '../access';
 import { buildCompound, pickBlock, type ClaimBlock } from '../compounds';
 import { wallFeatures } from '../walls';
@@ -122,7 +125,12 @@ export function megaQuarterDetail(world: World, key: number): UrbanLayer | null 
   const mq = M?.quarters[id];
   if (!M || !mq || !host) return null;
   // (a secondary settlement's context is centred on its own plan)
-  const rt = runtime(si === 0 ? world : { ...world, site: { ...world.site!, center: M.center } }, M);
+  const secondary = si > 0 ? world.settlements?.[si] : undefined;
+  const hostOptions = si === 0 ? optionsForMainSettlement(world.options) : secondary && world.options.workflow === 'list'
+    ? optionsForSettlement(world.options, { population: secondary.population, culture: secondary.culture,
+      siteType: secondary.archetype, position: secondary.center, options: secondary.options })
+    : world.options;
+  const rt = runtime(si === 0 ? { ...world, options: hostOptions } : { ...world, options: hostOptions, site: { ...world.site!, center: M.center } }, M);
   const ctx = rt.ctx;
   const rng = rt.base.fork('quarter:' + id);
   const P = rt.morphs[mq.morph];
@@ -364,11 +372,6 @@ export function megaQuarterDetail(world: World, key: number): UrbanLayer | null 
     const b = buildings[i];
     if (b.parcel !== undefined && !polyInside(parcels[b.parcel].poly, b.poly)) buildings.splice(i, 1);
   }
-  const perBlock: Polygon[][] = carved.map(() => []);
-  for (const b of buildings) if (b.parcel !== undefined) perBlock[parcels[b.parcel].block].push(b.poly);
-  const masses: PolyH[] = [];
-  perBlock.forEach((list) => { if (list.length) for (const ph of unionMany(list, 24, true)) masses.push({ outer: ph.outer, holes: ph.holes }); });
-
   // ---- plan lines: walled compound lots (yashiki, siheyuan, kancha...), ward walls
   const hints = (host.renderHints ?? {}) as { compoundWalls?: boolean; wardWalls?: boolean };
   if (hints.compoundWalls) {
@@ -401,6 +404,24 @@ export function megaQuarterDetail(world: World, key: number): UrbanLayer | null 
     const wf = wallFeatures(w.ring, w.gates, rng.fork('xwall:' + wi), ctx.isWater, (p) => ctx.isWater(p), 40);
     return { path: w.ring, closed: true, towers: wf.towers, gates: w.gates.map((g) => g.p), thickness: 3.2, gateInfo: w.gates, pieces: wf.pieces, gateTowers: wf.gateTowers, towerScale: wf.towerScale.map((x) => x * 1.15), curtains: wf.curtains, towerShape: host.renderHints?.towerShape ?? 'round', role: w.role === 'castle' ? 'castle' : 'quarter' };
   });
+  // Macro frames stay immutable. Finish only after the actual fences, ward walls and lot curtains exist,
+  // so moving a rectangle inside its lot cannot occupy their reserved ground.
+  finishEdgeRoofs({
+    ctx, quarters: [q], blocks: carved, quarterOf: () => 0, parcels, buildings, streetSpace: [cr.streetSpace],
+    footprint: [{ outer: q.lp.pts, holes: [] }], gardens: plotGardens, streets: local,
+    protectedLand: [
+      ...ctx.water, ...waterPieces,
+      ...local.list.filter((s) => s.ribbon).flatMap((s) => streetStrips(s.path, s.widths)),
+      ...[...(host.walls ?? []), ...walls].flatMap((w) => streetStrips(w.closed && w.path.length ? w.path.concat([w.path[0]]) : w.path, w.thickness)),
+      ...lines.filter((l) => /wall|fence|palisade|rampart|barbican|hedge/.test(l.kind)).flatMap((l) => streetStrips(l.closed && l.path.length ? l.path.concat([l.path[0]]) : l.path, l.width ?? 1)),
+    ],
+    allowGrowth: false,
+    eligible: (pi) => parcels[pi].use === 'plot' && ['streetFrontRow', 'detached', 'machiya', 'giebelhaus', 'yardHouse', 'shopRow'].includes(P.buildingOp),
+  });
+  const perBlock: Polygon[][] = carved.map(() => []);
+  for (const b of buildings) if (b.parcel !== undefined) perBlock[parcels[b.parcel].block].push(b.poly);
+  const masses: PolyH[] = [];
+  perBlock.forEach((list) => { if (list.length) for (const ph of unionMany(list, 24, true)) masses.push({ outer: ph.outer, holes: ph.holes }); });
   const streets: UrbanStreet[] = local.list.slice(nMacro).filter((s) => s.ribbon).map((s) => ({
     path: s.path, width: s.widths.reduce((a, b) => a + b, 0) / s.widths.length, widths: s.widths,
     kind: s.rank <= 1 ? 'main' : s.rank <= 2 ? 'street' : 'alley', rank: s.rank, role: s.role, phase: s.phase,

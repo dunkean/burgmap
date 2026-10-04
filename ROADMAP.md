@@ -6,6 +6,35 @@ Current review gate: the user's latest 2026-10-04 instruction calls for grouped 
 
 ## User bugs, in priority order
 
+Validated in the reviewed integration checkpoint (2026-10-04): attached optional
+road fringes, opaque ground, organic shanty fabric, bounded regional population
+and tiny mountain settlements. Large-map reproduction: 14 instances, with
+13 companions totalling 4,997 inhabitants for a 5,000-person main settlement.
+At the same mountain centre, populations 40/50/60/80 produce 8/12/28/38
+accessible residential footprints. Final focused source validation passes:
+30 roof +22 port +11 M4 tests, and 11 density-repair +2 historical/density
+tests. Native main/offscreen and offline checks pass; the root CSS amendment
+also passes measured visibility, draft/applied identity and offline checks.
+The local 40-path source-only tree is `923a5cad`; the published checkpoint
+remains `54072c1`. No optimisation or full-suite rerun was performed.
+
+The first user report remains open: artificial settlement outlines are
+removed and several whole roofs are restored, but the four actual reference
+maps still have 21 exposed/wall cuts (8 open-town, 8 standing-wall, 5 served
+port cases). Tiny-owner bounds describe current parcels, not global
+impossibility of safe reassignment. The actual683 remedy retains all homes,
+frontage, access and the raw two-owner union; the town-density repair keeps
+70% coverage and cumulative road contact below the original1e-6 threshold.
+
+- [ ] New manual feedback (2026-10-04): remove artificial town/hamlet/extension outlines; preserve coherent unwalled roof shapes at exposed boundaries.
+- [x] Join roadside extensions to the settlement; allow deterministic cases with no extension or only some roads developed.
+- [x] Integrate opaque urban ground with actual surrounding terrain and natural cover across all presets, including Wizard City.
+- [x] Restore plausible served coastal ports where usable shoreline exists.
+- [x] Improve shanty ground and irregular fabric while retaining physical hut sizes, density and access.
+- [x] Environment / Settlements generation workflow, general theme, per-instance properties and automatic/manual placement, reproducible applied-state URL and UID.
+- [x] Bound automatic regional settlement population on large maps without changing explicit lists/counts.
+- [x] Preserve tiny settlements on coarse mountain terrain and natural vegetation beside physical roads.
+
 - [x] Overlapping phase districts and faubourgs (`0b8b5b9`, seeded regression and visual inspection).
 - [x] Biomes: selectable climates, water-dependent cultivation, vegetation, consistent SVG/Canvas rendering, share links (`1508eb4`; six inspected previews, browser control/link, typecheck/build, targeted suites).
 - [x] Chinese moats: optional, terrain-aware, dry gates and double-wall crossings; separate defensive reserves, SVG/Canvas water holes (`6f78c19`; Astra + Opus 5.5 reviews before 39 passing tests, typecheck/build, inspected PNG and browser On/Off/link checks).
@@ -61,4 +90,5 @@ Bug fixes take priority. The user requested a preliminary performance study, wit
 - [ ] Evaluate WebGL and Rust/WASM only if measured rendering/export budgets still require them; the handoff records them as optional.
 - [ ] Further aesthetic harmonisation of the preset families after the completed geometry/programme audit.
 - [x] Update architecture, README, handoff and polish status; typecheck, build, relevant suites and native browser checks pass. Existing offline/PNG paths are validated; `AGENTS.md` and the user's two repro scripts are preserved.
-- [ ] Final full-suite rerun and release publication after the user has tested the local version. Optimisation and further performance passes are also deferred by the user's latest instruction.
+- [x] Publish the current manual checkpoint at the user's request (2026-10-04): `main` `54072c1`, `gh-pages` `de0d038`, original handoff tag retained. The live HTML matches the clean build exactly, and the published native Chrome village smoke passes without errors.
+- [ ] Final full-suite rerun after the user's manual testing. Optimisation and further performance passes also remain deferred.

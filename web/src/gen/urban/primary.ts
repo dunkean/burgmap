@@ -11,11 +11,11 @@ import type { PhasePlan } from './phases';
 import type { Zone, MorphologyParams } from './morphology';
 import { MultiPoly, unionS as union, intersectionS as intersection, differenceS as difference, differenceSafeS, tryIntersection, mpArea } from '../geo/bool';
 import { dryPieces, waterNear } from './waterland';
-import { area, pointInRing, distToRing, convexHull, orientPos, cleanRing, segSegT } from '../geo/poly';
+import { area, pointInRing, distToRing, convexHull, orientPos, cleanRing, segSegT, SNAP } from '../geo/poly';
 import { ribbon } from '../geo/offset';
 import { LPoly, insidePieces } from '../geo/split';
 import { GridIndex } from '../geo/spatial';
-import { Streets, LAB_OPEN, LAB_WALL, LAB_WATER, jitterWidths } from './streets';
+import { Streets, LAB_OPEN, LAB_WALL, LAB_WATER, jitterWidths, type StreetRec } from './streets';
 import { wiggle, crank, axisLines, spiralArm, outsetConvex, resampleAt } from './streetops';
 import { disk } from '../geo/offset';
 import { openHoles } from './plots';
@@ -43,11 +43,45 @@ export interface ReserveApi {
   enclosure: MultiPoly; footprint: MultiPoly; phases: PhasePlan[];
   /** Points where the radials cross the enclosure (future gates). */
   gates: Vec2[];
+  /** Authoritative curtain contacts, with the same directions and widths as the final wall openings. */
+  gateWalls?: WallLine[];
   /** Extra cuts of the partition registered by the callback (streets without a lot: town bridges). */
   cuts: Polyline[];
 }
 
 export interface WallLine { ring: Polygon; gates: { p: Vec2; dir: Vec2; width: number; street: number }[] }
+
+/** The same physical radial contacts supply landmark access and the final wall openings. */
+export function radialWallGates(st: StreetRec, ring: Polygon): WallLine['gates'] {
+  const gates: WallLine['gates'] = [];
+  const add = (p: Vec2, i: number) => {
+    if (gates.some((g) => dist(g.p, p) < 12)) return;
+    const a = st.path[i - 1], b = st.path[i], length = dist(a, b);
+    if (length < 1e-9) return;
+    gates.push({ p, dir: { x: (b.x - a.x) / length, y: (b.y - a.y) / length }, width: st.widths[i], street: st.id });
+  };
+  for (let i = 1; i < st.path.length; i++) for (let k = 0; k < ring.length; k++) {
+    const a = st.path[i - 1], b = st.path[i];
+    const hit = segSegT(a, b, ring[k], ring[(k + 1) % ring.length]);
+    if (hit) add({ x: a.x + (b.x - a.x) * hit.t, y: a.y + (b.y - a.y) * hit.t }, i);
+  }
+  // insidePieces snaps its terminal cut to the one-centimetre grid. Recover that contact only within
+  // the maximum displacement of that rounding, along the actual terminal street segment.
+  const snapReach = Math.SQRT2 / (2 * SNAP);
+  for (const end of [0, st.path.length - 1]) {
+    if (st.path.length < 2) break;
+    const e = st.path[end], n = st.path[end === 0 ? 1 : end - 1], length = dist(n, e);
+    if (length < 1e-9 || distToRing(ring, e) > snapReach || !pointInRing(ring, n) || distToRing(ring, n) <= snapReach) continue;
+    const beyond = { x: e.x + (e.x - n.x) * (2 / SNAP) / length, y: e.y + (e.y - n.y) * (2 / SNAP) / length };
+    for (let k = 0; k < ring.length; k++) {
+      const hit = segSegT(n, beyond, ring[k], ring[(k + 1) % ring.length]);
+      if (!hit) continue;
+      const p = { x: n.x + (beyond.x - n.x) * hit.t, y: n.y + (beyond.y - n.y) * hit.t };
+      if (dist(e, p) <= snapReach) add(p, end === 0 ? 1 : end);
+    }
+  }
+  return gates;
+}
 
 export interface Primary {
   quarters: Quarter[];
@@ -613,52 +647,34 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
     }
     if (hit) streets.connected.add(st.id);
   }
+  // Resolve each curtain's physical openings once, before landmarks can request an approach through them.
+  // Reservation and the final walls use the same globally deduplicated radial and axis contacts.
+  const curtainWalls: WallLine[] = enc.map((comp) => {
+    const ring = comp.outer, gates: WallLine['gates'] = [];
+    for (const id of radials) {
+      const st = streets.list[id];
+      for (const g of radialWallGates(st, ring)) if (!gates.some((existing) => dist(existing.p, g.p) < 12)) gates.push(g);
+    }
+    // axis ends on the wall are gates (the lines end exactly on it)
+    for (const e of axisEnds) if (distToRing(ring, e) < 1 && !gates.some((g) => dist(g.p, e) < 12)) {
+      const length = dist(ctx.center, e) || 1;
+      gates.push({ p: e, dir: { x: (e.x - ctx.center.x) / length, y: (e.y - ctx.center.y) / length }, width: inp.axis!.width, street: -1 });
+    }
+    return { ring, gates };
+  });
   // ---- landmark lots (M4): reserved as exact pieces before the quarters; their connectors cut the partition
   const lots: ReservedLot[] = [];
   const extraCuts: Polyline[] = [];
   if (inp.reserve) {
-    const gatePts: Vec2[] = [];
-    for (const id of radials) {
-      const st = streets.list[id];
-      for (const comp of enc) for (let i = 1; i < st.path.length; i++) for (let k = 0; k < comp.outer.length; k++) {
-        const r = segSegT(st.path[i - 1], st.path[i], comp.outer[k], comp.outer[(k + 1) % comp.outer.length]);
-        if (r) gatePts.push({ x: st.path[i - 1].x + (st.path[i].x - st.path[i - 1].x) * r.t, y: st.path[i - 1].y + (st.path[i].y - st.path[i - 1].y) * r.t });
-      }
-    }
-    for (const l of inp.reserve({ streets, market, marketStreet, radialLines, enclosure: enc, footprint, phases: inp.phases, gates: gatePts, cuts: extraCuts })) {
+    const gatePts = curtainWalls.flatMap((wall) => wall.gates.map((gate) => gate.p));
+    for (const l of inp.reserve({ streets, market, marketStreet, radialLines, enclosure: enc, footprint, phases: inp.phases, gates: gatePts, gateWalls: curtainWalls, cuts: extraCuts })) {
       const dry = waterLot(l) ? [{ outer: l.poly, holes: [] }] : dryPieces(l.poly, ctx.water);
       const safe = unchangedRing(dry, l.poly) ? l.poly : servedLotPiece(l, dry);
       if (safe && safe.length >= 3 && area(safe) > 20) { updateLotRing(l, safe); lots.push(l); }
     }
   }
   // ---- walls and gates
-  const walls: WallLine[] = [];
-  if (inp.walled) {
-    for (const comp of enc) {
-      const ring = comp.outer;
-      const gates: WallLine['gates'] = [];
-      for (const id of radials) {
-        const st = streets.list[id];
-        for (let i = 1; i < st.path.length; i++) {
-          const a = st.path[i - 1], b = st.path[i];
-          for (let k = 0; k < ring.length; k++) {
-            const r = segSegT(a, b, ring[k], ring[(k + 1) % ring.length]);
-            if (!r) continue;
-            const p = { x: a.x + (b.x - a.x) * r.t, y: a.y + (b.y - a.y) * r.t };
-            if (gates.some((g) => dist(g.p, p) < 12)) continue;
-            const l = dist(a, b) || 1;
-            gates.push({ p, dir: { x: (b.x - a.x) / l, y: (b.y - a.y) / l }, width: st.widths[i], street: id });
-          }
-        }
-      }
-      // axis ends on the wall are gates (the lines end exactly on it)
-      for (const e of axisEnds) if (distToRing(ring, e) < 1 && !gates.some((g) => dist(g.p, e) < 12)) {
-        const l = dist(ctx.center, e) || 1;
-        gates.push({ p: e, dir: { x: (e.x - ctx.center.x) / l, y: (e.y - ctx.center.y) / l }, width: inp.axis!.width, street: -1 });
-      }
-      walls.push({ ring, gates });
-    }
-  }
+  const walls = inp.walled ? curtainWalls : [];
   const moatWalls = inp.moatWallOffset ? walls.flatMap((w) => { const out = offsetCurtain(w, inp.moatWallOffset!); return out ? [out] : []; }) : walls;
   const moat = planMoat(ctx, moatWalls, [...streets.list, ...inp.roads.map((r) => ({ path: r.path, widths: r.path.map(() => r.major ? 10 : 6) }))], lots.map((l) => l.poly), inp.moat, inp.customaryMoat);
   // ---- quarters: phase bands minus the market, cut by the radials

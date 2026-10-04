@@ -570,7 +570,6 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
       }
       if (polyL('footprint')) {
         fillPolys('footprint', pal.ink, 0.07 * lod.densityAlpha);
-        strokePolys('footprint', pal.inkSoft, lw(1, 1), 0.55 * lod.densityAlpha, [px(7), px(5)]);
       }
     }
     if (!lod.blocks) {
@@ -696,7 +695,7 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
         }
       }
 
-      const natural = polyL('u-natural-ground');
+      const natural = polyL('u-landscape-ground') ?? polyL('u-natural-ground');
       if (natural && natural.index.query(rect).length) {
         const clip = cached(natural.name + '|clip', () => polyPath(P, natural, natural.polys.map((_, id) => id), 0));
         if (clip) {
@@ -722,6 +721,11 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
           strokeLines(roads, pal.roadEdge, (l) => regionalRoadSurface(l.kind === 'major' ? 'major' : 'minor', sc, l.width).casing);
           strokeLines(roads, pal.roadFill, (l) => regionalRoadSurface(l.kind === 'major' ? 'major' : 'minor', sc, l.width).fill);
           strokeLines(tracks, ruralInk(pal), () => lw(1.6, 0.9), pal.rural.track, [px(lod.band >= 2 ? 7 : 5), px(lod.band >= 2 ? 4 : 3)], 'butt');
+          // Restore native paths only where this opaque replay covered their earlier earth/causeway strokes.
+          if (open && natural.name === 'u-landscape-ground') {
+            strokeLines(uStreets.filter((l) => !(l.width >= 6.5 && Number(l.kind.slice(1, 2)) <= 1)), earth, (l) => Math.max(1.2, l.width * 0.92, 0.8 / sc), 0.8);
+            strokeLines(uStreets.filter((l) => l.width >= 6.5 && Number(l.kind.slice(1, 2)) <= 1), U.street, (l) => Math.max(1.2, l.width * 0.92, 0.8 / sc));
+          }
           ctx.restore();
         }
       }
@@ -911,7 +915,6 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
       }
       strokeLines(thin, open ? earth : U.street, (l) => minPx(l) / sc, open ? 0.8 : 1);
       ctx.restore();
-      if (!stilts && !open) strokePolys('block-edges', U.blockEdge, lw(U.blockEdgeW, 0.3));
       if (polyL('landmarks') && near) strokePolys('landmarks', U.landmark, lw(0.6, 0.6), 0.5, [px(5), px(3)]);
       // zoomed out: the landmark sites (wells, crosses, markets, compounds' named buildings) as a solid outline of at
       // least ~1.8 px, so the small ones stay visible on the full map
