@@ -798,7 +798,7 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
 
   // ---- cells: the graph's faces, minus the water
   pruneDangling(g);
-  restoreMacroBoundary(g, rings[rings.length - 1], mstreets);
+  restoreMacroBoundary(g, rings[rings.length - 1], mstreets, true);
   if (nucleusSubject.poly !== marketCandidate) coalesceMegaNucleusEdges(g, marketId);
   const faces = labelledFaces(g);
   const outerWall = standing.size ? rings[Math.max(...standing) - 1] : null;

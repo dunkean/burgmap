@@ -5,6 +5,7 @@ import { makeOptions, mapSizeOf, CULTURES } from '../src/gen/options';
 import type { Polygon, Vec2 } from '../src/gen/core/geom';
 import type { MacroQuarter, MacroStreet } from '../src/gen/urban/mega/types';
 import { restoreMacroBoundary } from '../src/gen/urban/mega/boundary';
+import { megaQuarterDetail } from '../src/gen/urban/mega/detail';
 import { StreetGraph } from '../src/gen/geo/graph';
 import { standIn, STAND_IN_BUDGET, fabricBudget, type FabricBudget } from '../src/gen/urban/mega/standin';
 import { renderView } from '../src/gen/settlements/merge';
@@ -201,7 +202,49 @@ describe('absorbed village places in cities', () => {
 });
 
 describe('population-aware megacity extent', () => {
-  it.each([[0, 'boundary'], [0.37, 'boundary'], [0.37, 'wall-lane']] as const)('restores recursively rounded outer supports before shared face extraction (rotation %s, owner %s)', (angle, role) => {
+  it.each([0.006, -0.02])('keeps an admissible graph byte-identical (signed exterior shift %s m)', (shift) => {
+    const outer = rect(0, 0, 100, 100);
+    const path = [outer[0], outer[1], { x: 100, y: 50 }, outer[2], outer[3], outer[0]];
+    const streets: MacroStreet[] = [{ path, widths: path.map(() => 0), rank: 0, role: 'boundary', phase: 1 }];
+    const g = new StreetGraph({ thinSegs: true });
+    g.insertPolyline(streets[0].path, { width: 0, rank: 0, phase: 1, kind: 'boundary', street: 0 }, { snapR: 1.5, mergeDist: 0 });
+    // Model a shared rounded support without changing any adjacency. A larger inward offset is also safe.
+    const shifted = new Map<string, Vec2>();
+    const move = (p: Vec2): Vec2 => {
+      if (p.x !== 100) return p;
+      const key = `${p.x},${p.y}`;
+      let q = shifted.get(key);
+      if (!q) { q = { x: p.x + shift, y: p.y }; shifted.set(key, q); }
+      return q;
+    };
+    for (const e of g.edges) e.pts = e.pts.map(move);
+    for (const n of g.nodes) n.p = move(n.p);
+    const middle = g.edges.flatMap((e) => e.pts).find((p) => p.y === 50)!;
+    expect(middle).toBeDefined();
+    expect(pointInRing(outer, middle)).toBe(shift < 0);
+    expect(distToRing(outer, middle)).toBeCloseTo(Math.abs(shift), 9);
+    const before = JSON.stringify({ nodes: g.nodes, edges: g.edges, streets });
+    const paths = g.edges.map((e) => e.pts), points = g.nodes.map((n) => n.p);
+    restoreMacroBoundary(g, outer, streets, true);
+    expect(JSON.stringify({ nodes: g.nodes, edges: g.edges, streets })).toBe(before);
+    g.edges.forEach((e, i) => expect(e.pts).toBe(paths[i]));
+    g.nodes.forEach((n, i) => expect(n.p).toBe(points[i]));
+  });
+
+  it('preserves the actual approved q13 plan and detail when its boundary is within the rounding budget', () => {
+    const w = generate(makeOptions({ seed: '1', size: 'city', population: 60000, mapSize: 7000, eagerPop: 1000,
+      river: 'none', relief: 'flat', coast: 'none', settlements: 'none', suburbs: 'many', culture: 'european-organic', style: 'atlas' }));
+    const m = w.urban!.macro!;
+    expect(m.center).toEqual(Q13_NUCLEUS);
+    expect(m.quarters).toHaveLength(Q13_QUARTER_COUNT);
+    expect(m.quarters[13]).toEqual(Q13);
+    const u = megaQuarterDetail(w, 13)!;
+    expect(u).not.toBeNull();
+    expect({ blocks: u.blocks.length, buildings: u.buildings.length, parcels: u.parcels.length })
+      .toEqual({ blocks: 112, buildings: 1443, parcels: 1037 });
+  }, 900000);
+
+  it.each([[0, 'boundary', false], [0.37, 'boundary', false], [0.37, 'wall-lane', false], [0, 'boundary', true]] as const)('restores recursively rounded outer supports before shared face extraction (rotation %s, owner %s, preserveValid %s)', (angle, role, preserveValid) => {
     // Actual ancestry of the 5M / 20km q1777 failure: each new horizontal crossing splits an already rounded edge.
     const transform = (p: Vec2): Vec2 => angle === 0 ? { ...p } : ({
       x: 1200 + p.x * Math.cos(angle) - p.y * Math.sin(angle),
@@ -224,7 +267,7 @@ describe('population-aware megacity extent', () => {
       expect(failing).toBeDefined();
       expect(distToRing(outer, failing.p)).toBeGreaterThan(Math.SQRT2 * (0.5 / SNAP + 0.5 / BOOL_GRID) + 1e-8);
     }
-    restoreMacroBoundary(g, outer, streets);
+    restoreMacroBoundary(g, outer, streets, preserveValid);
     expect(topology()).toEqual(oldTopology);
     expect(JSON.stringify(streets)).toBe(oldStreets);
     for (const edge of g.edges.filter((e) => e.alive)) {

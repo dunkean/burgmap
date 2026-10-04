@@ -1,6 +1,7 @@
 import type { Polygon, Vec2 } from '../../core/geom';
 import type { StreetGraph } from '../../geo/graph';
-import { distToSeg, snapPt } from '../../geo/poly';
+import { distToRing, distToSeg, pointInRing, SNAP, snapPt } from '../../geo/poly';
+import { BOOL_GRID } from '../../geo/bool';
 import type { MacroStreet } from './types';
 
 const key = (p: Vec2): string => p.x + ',' + p.y;
@@ -15,9 +16,11 @@ const project = (p: Vec2, a: Vec2, b: Vec2): Vec2 => {
  * intersection can move its parent edge; recursively splitting that edge accumulates the rounding error.
  * Only ring segments originally on the outer boundary are eligible, within the graph's 5 cm crossing radius.
  * Correct every occurrence of a shared coordinate together, keeping edge ids, incidence and street labels.
+ * With preserveValid, leave an admissible graph byte-identical: tiny boundary changes can alter later cuts.
+ * One real exterior overflow beyond the existing graph + Boolean rounding budget restores all supports.
  * Terminal operation: the graph's spatial indices are not rebuilt; do not insert/query it afterwards.
  */
-export function restoreMacroBoundary(graph: StreetGraph, outer: Polygon, streets: readonly MacroStreet[]): void {
+export function restoreMacroBoundary(graph: StreetGraph, outer: Polygon, streets: readonly MacroStreet[], preserveValid = false): void {
   const sources = new Map<number, { a: Vec2; b: Vec2; outer: boolean }[]>();
   const corners = new Map(outer.map((p) => [key(snapPt(p)), p]));
   streets.forEach((street, id) => {
@@ -31,6 +34,12 @@ export function restoreMacroBoundary(graph: StreetGraph, outer: Polygon, streets
     if (segments.some((s) => s.outer)) sources.set(id, segments);
   });
   const corrected = new Map<string, Vec2>();
+  const budget = Math.SQRT2 * (0.5 / SNAP + 0.5 / BOOL_GRID) + 1e-8;
+  let overflow = !preserveValid;
+  const remember = (p: Vec2, q: Vec2): void => {
+    corrected.set(key(p), q);
+    if (!overflow && distToRing(outer, p) > budget && !pointInRing(outer, p)) overflow = true;
+  };
   for (const edge of graph.edges) {
     if (!edge.alive) continue;
     const segments = sources.get(edge.street);
@@ -40,7 +49,7 @@ export function restoreMacroBoundary(graph: StreetGraph, outer: Polygon, streets
       if (corrected.has(k)) continue;
       const corner = corners.get(k);
       if (corner && segments.some((s) => s.outer && distToSeg(corner, s.a, s.b) < 1e-7)) {
-        corrected.set(k, { ...corner });
+        remember(p, { ...corner });
         continue;
       }
       // Include non-boundary source segments in the nearest test: a nearby inner ring is not an outer edge.
@@ -50,10 +59,10 @@ export function restoreMacroBoundary(graph: StreetGraph, outer: Polygon, streets
         if (d < distance) { distance = d; nearest = segment; }
       }
       if (!nearest?.outer) continue;
-      corrected.set(k, project(p, nearest.a, nearest.b));
+      remember(p, project(p, nearest.a, nearest.b));
     }
   }
-  if (!corrected.size) return;
+  if (!corrected.size || !overflow) return;
   for (const node of graph.nodes) node.p = corrected.get(key(node.p)) ?? node.p;
   for (const edge of graph.edges) if (edge.alive) edge.pts = edge.pts.map((p) => corrected.get(key(p)) ?? p);
 }
