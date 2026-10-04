@@ -27,3 +27,26 @@ The interactive path already retains vector geometry in a rendering worker, uses
 Rust/WASM may benefit compute-heavy geometry or a renderer that changes batching and caching. Calling the same Canvas APIs from Rust offers no established speedup: WASM accesses JavaScript objects through interoperability bindings ([Rust/WASM reference](https://rustwasm.github.io/docs/book/reference/js-ffi.html)). Development PNG export already uses [resvg, implemented in Rust](https://github.com/linebender/resvg).
 
 After bugs: profile boolean cuts/plot construction, repeated scene/index work, cold texture creation and bitmap rasterization separately on the real browser. Preserve vector World/SVG data. Consider targeted WASM kernels or a GPU renderer only after those measurements establish a bottleneck and a useful gain.
+
+## Ground-fix profiling supplement
+
+The bug-fix agent measured the countryside fringe at `7831250` on a quiet machine,
+using saved p4/city, town, 40 km regional and macro Worlds. These older snapshots
+isolate fringe preparation and do not measure the new generation-time interior
+permission mask or total current generation. The original general study above
+remains the root agent's separate preliminary study.
+
+| Saved case | Previous scene | Scene with fringe, cold | Warm scene | Cold fringe helper |
+| --- | ---: | ---: | ---: | ---: |
+| p4 open city | 240 ms | 1,772 ms | 148 ms | 1,705 ms |
+| town | 104 ms | 720 ms | 77 ms | 588 ms |
+| 40 km region | 1,687 ms | 2,667 ms | 1,557 ms | 1,013 ms |
+| macro plan | 588 ms | 1,186 ms | 529 ms | 636 ms |
+
+Coalesced water windows, conservative spatial filtering, bounded cosmetic
+simplification and balanced four-input unions cut the worst helper from about
+13.8 s to 1.7 s. Normalized masks retain their protections; final ground boundaries
+differ by at most 3.2 mm from the prior 24-input grouping on these cases. Stress
+tests no longer exhaust the heap. The p4 first scene still adds roughly 1.53 s;
+this is a measured remaining optimisation target, not a subsecond result. Warm
+measurements include cache reuse and must not be presented as cold costs.
