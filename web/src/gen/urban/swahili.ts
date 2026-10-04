@@ -1,5 +1,6 @@
 /** Coral-stone coast architecture. All plans use the existing exact lot and courtyard engine. */
 import type { Polygon, Vec2 } from '../core/geom';
+import { polygonCentroid } from '../core/geom';
 import type { UrbanBuilding, UrbanLine, UrbanParcel } from '../types';
 import { area, obb, orientPos, pointInRing } from '../geo/poly';
 import { registerBuilders, type CompoundCtx, type CompoundOut } from './compounds';
@@ -10,6 +11,28 @@ import { MORPHOLOGIES, deepMerge } from './morphology';
 import type { Plot } from './plots';
 
 const empty = (lot: Polygon, kind: string): CompoundOut => ({ parcels: [{ poly: lot, use: 'compound:' + kind }], buildings: [], lines: [], water: [], landmarks: [] });
+
+/** A mosque or open market carrying a sector morphology does not provide its shop programme. */
+export function hasSwahiliBazaar(quarters: { kind: string; served: boolean; morph?: string }[]): boolean {
+  return quarters.some((q) => q.kind === 'quarter' && q.served && q.morph === 'swahili-bazaar');
+}
+
+/** A coast can consume an angular sector completely; retain its programme on a real served core quarter. */
+export function swahiliBazaarQuarter(quarters: { id: number; poly: Polygon; eligible: boolean; marketFront: boolean }[], center: Vec2, share: number): number | undefined {
+  const P = MORPHOLOGIES['swahili-bazaar'];
+  const candidates = quarters.filter((q) => q.eligible && area(q.poly) >= P.minBlock && 2 * obb(q.poly).hv >= P.minWidth);
+  const total = candidates.reduce((sum, q) => sum + area(q.poly), 0);
+  if (!total || !(share > 0)) return undefined;
+  const target = total * share, radius = Math.sqrt(total / Math.PI);
+  let best: number | undefined, score = Infinity;
+  for (const q of candidates) {
+    const p = polygonCentroid(q.poly);
+    // Compare relative programme sizes so a tiny remnant does not win merely by being closest to the mosque.
+    const value = Math.hypot(p.x - center.x, p.y - center.y) / Math.max(1, radius) + Math.abs(Math.log(area(q.poly) / target)) - (q.marketFront ? 1 : 0);
+    if (value < score) { score = value; best = q.id; }
+  }
+  return best;
+}
 
 /** A compact flat-roofed prayer hall and open forecourt, rather than a domed North-African hypostyle plan. */
 function mosque(lot: Polygon, cx: CompoundCtx, friday = false): CompoundOut {

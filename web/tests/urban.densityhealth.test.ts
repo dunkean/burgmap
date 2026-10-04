@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { generate } from '../src/gen/pipeline';
 import { makeOptions } from '../src/gen/options';
 import { Rng } from '../src/gen/core/rng';
+import { buildCompound } from '../src/gen/urban/compounds';
+import { registerM4 } from '../src/gen/urban/m4';
+import { FROZEN_SHANTY_CELLS } from './fixtures/shanty-cells';
 import { area, isSimple, obb } from '../src/gen/geo/poly';
 import { polyInside } from '../src/gen/geo/split';
 import { burgageHouse } from '../src/gen/urban/houses';
@@ -10,14 +13,10 @@ import type { Plot } from '../src/gen/urban/plots';
 import { coverage } from './coverage';
 import { unreachableBuildings } from './accessCheck';
 
-// All 53 narrow hut parcels observed in the approved 87fb4af city seeds, before the final styling guard.
+// Approved d887575 quantities: regional roads alter cells in seeds 1 and 6, not the dwelling producer.
 const HUT_CASES = [
-  { seed: '1', count: 332, parcels: [58, 59, 72, 77, 87, 89, 106, 142, 256, 287, 363] },
-  { seed: '2', count: 176, parcels: [53, 122, 124, 134, 158, 173] },
-  { seed: '3', count: 95, parcels: [54, 94, 109] },
-  { seed: '4', count: 286, parcels: [88, 95, 112, 130, 183, 237, 253, 292, 354, 377] },
-  { seed: '5', count: 651, parcels: [234, 372, 404, 424, 437, 440, 457, 575, 610] },
-  { seed: '6', count: 603, parcels: [53, 90, 94, 102, 112, 173, 367, 378, 445, 533, 673, 697, 703, 712] },
+  { seed: '1', count: 267 }, { seed: '2', count: 176 }, { seed: '3', count: 95 },
+  { seed: '4', count: 286 }, { seed: '5', count: 651 }, { seed: '6', count: 638 },
 ];
 
 const FADE = 0.9, FADE_CHANCE = 0.5 * Math.pow(FADE, 1.4);
@@ -44,11 +43,31 @@ function edgePlot(zone: Plot['zone']): Plot {
 }
 
 describe('density producer contracts survive late styling and edge fading', () => {
+  it('preserves all 53 formerly narrow huts on their exact original cells regardless of later regional-road changes', () => {
+    registerM4();
+    expect(FROZEN_SHANTY_CELLS.reduce((n, f) => n + f.cells.length, 0)).toBe(53);
+    for (const fixture of FROZEN_SHANTY_CELLS) {
+      const out = buildCompound('m4-shanty', fixture.poly, { rng: new Rng(fixture.rngKey), angle: 0, pop: 10000, center: fixture.center });
+      for (const cell of fixture.cells) {
+        expect(out.parcels[cell.index].poly, `seed ${fixture.seed} original block ${fixture.block} cell ${cell.index}`).toEqual(cell.poly);
+        const huts = out.buildings.filter((b) => b.kind === 'hut' && b.parcel === cell.index);
+        expect(huts, 'styling preserves the original dwelling').toHaveLength(1);
+        const h = huts[0], o = obb(h.poly);
+        expect({ poly: h.poly, arch: h.arch }, 'approved producer footprint and architecture on the historical centre').toEqual(cell.hut);
+        expect(isSimple(h.poly)).toBe(true);
+        expect(polyInside(cell.poly, h.poly)).toBe(true);
+        expect(2 * o.hv).toBeGreaterThanOrEqual(4.5 - 1e-6);
+        expect(o.hu / o.hv).toBeLessThanOrEqual(3 + 1e-6);
+        expect(area(h.poly)).toBeGreaterThanOrEqual(15 - 1e-6);
+        expect(area(h.poly)).toBeLessThanOrEqual(40.5);
+      }
+    }
+  });
+
   for (const fixture of HUT_CASES) it(`city seed ${fixture.seed} retains its huts with usable final footprints`, () => {
     const u = generate(makeOptions({ size: 'city', seed: fixture.seed })).urban!;
     const huts = u.buildings.filter((b) => b.kind === 'hut');
     expect(huts, 'fix styling without deleting dwellings').toHaveLength(fixture.count);
-    for (const parcel of fixture.parcels) expect(huts.filter((h) => h.parcel === parcel), `formerly narrow hut on parcel ${parcel}`).toHaveLength(1);
     for (const h of huts) {
       expect(h.parcel).toBeDefined();
       const pc = u.parcels[h.parcel!], o = obb(h.poly);

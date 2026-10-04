@@ -3,7 +3,9 @@ import { createHash } from 'node:crypto';
 import { generate, generationMapSize } from '../src/gen/pipeline';
 import { makeOptions, mapSizeOf, CULTURES } from '../src/gen/options';
 import type { Polygon, Vec2 } from '../src/gen/core/geom';
-import type { MacroQuarter } from '../src/gen/urban/mega/types';
+import type { MacroQuarter, MacroStreet } from '../src/gen/urban/mega/types';
+import { restoreMacroBoundary } from '../src/gen/urban/mega/boundary';
+import { StreetGraph } from '../src/gen/geo/graph';
 import { standIn, STAND_IN_BUDGET, fabricBudget, type FabricBudget } from '../src/gen/urban/mega/standin';
 import { renderView } from '../src/gen/settlements/merge';
 import { containMegaRings } from '../src/gen/urban/mega/extent';
@@ -199,6 +201,51 @@ describe('absorbed village places in cities', () => {
 });
 
 describe('population-aware megacity extent', () => {
+  it.each([[0, 'boundary'], [0.37, 'boundary'], [0.37, 'wall-lane']] as const)('restores recursively rounded outer supports before shared face extraction (rotation %s, owner %s)', (angle, role) => {
+    // Actual ancestry of the 5M / 20km q1777 failure: each new horizontal crossing splits an already rounded edge.
+    const transform = (p: Vec2): Vec2 => angle === 0 ? { ...p } : ({
+      x: 1200 + p.x * Math.cos(angle) - p.y * Math.sin(angle),
+      y: -2300 + p.x * Math.sin(angle) + p.y * Math.cos(angle),
+    });
+    const a = { x: 19841.406972042154, y: 749.9482289795124 }, b = { x: 19850, y: 18631.244105671583 };
+    const outer = [a, b, { x: b.x - 1000, y: b.y }, { x: a.x - 1000, y: a.y }].map(transform);
+    const streets: MacroStreet[] = [{ path: [...outer, outer[0]], widths: outer.map(() => 0).concat(0), rank: 0, role, phase: 1 }];
+    const g = new StreetGraph({ thinSegs: true });
+    g.insertPolyline(streets[0].path, { width: 0, rank: 0, phase: 1, kind: role, street: 0 }, { snapR: 1.5, mergeDist: 0 });
+    for (const [x, y] of [[19846.88, 12129.16], [19843.75, 5613.6], [19842.42, 2840.97], [19843.32, 4712.89]]) {
+      const path = [{ x: x - 1000, y }, { x, y }].map(transform), id = streets.length;
+      streets.push({ path, widths: [7, 7], rank: 2, role: 'street', phase: 1 });
+      g.insertPolyline(path, { width: 7, rank: 2, phase: 1, kind: 'street', street: id }, { snapR: 1.5, mergeDist: 0 });
+    }
+    const topology = () => g.edges.map((e) => [e.id, e.a, e.b, e.street, e.alive]);
+    const oldTopology = topology(), oldStreets = JSON.stringify(streets);
+    if (angle === 0) {
+      const failing = g.nodes.find((n) => n.p.x === 19842.42 && n.p.y === 2840.97)!;
+      expect(failing).toBeDefined();
+      expect(distToRing(outer, failing.p)).toBeGreaterThan(Math.SQRT2 * (0.5 / SNAP + 0.5 / BOOL_GRID) + 1e-8);
+    }
+    restoreMacroBoundary(g, outer, streets);
+    expect(topology()).toEqual(oldTopology);
+    expect(JSON.stringify(streets)).toBe(oldStreets);
+    for (const edge of g.edges.filter((e) => e.alive)) {
+      expect(edge.pts[0]).toBe(g.nodes[edge.a].p);
+      expect(edge.pts.at(-1)).toBe(g.nodes[edge.b].p);
+    }
+    const faces = g.faces();
+    expect(faces).toHaveLength(5);
+    expect(Math.abs(faces.reduce((sum, f) => sum + area(f.ring), 0) - area(outer))).toBeLessThan(1e-5);
+    let sharedPairs = 0;
+    for (let i = 0; i < faces.length; i++) {
+      expect(isSimple(faces[i].ring)).toBe(true);
+      expect(mpArea(difference(faces[i].ring, outer))).toBeLessThan(1e-5);
+      for (const p of faces[i].ring) if (!pointInRing(outer, p)) expect(distToRing(outer, p)).toBeLessThan(1e-7);
+      for (let j = 0; j < i; j++) {
+        expect(mpArea(intersection(faces[i].ring, faces[j].ring))).toBeLessThan(1e-5);
+        if (faces[i].ring.filter((p) => faces[j].ring.includes(p)).length >= 2) sharedPairs++;
+      }
+    }
+    expect(sharedPairs).toBe(4);
+  });
   it('preserves automatic-population links in every size and culture, and the scale of imported heightmaps', () => {
     for (const size of ['hamlet', 'village', 'town', 'city', 'capital'] as const) for (const culture of CULTURES) for (const seed of ['1', '4', '7']) {
       const o = makeOptions({ seed, size, culture, population: 0 });
@@ -256,6 +303,12 @@ describe('population-aware megacity extent', () => {
     const outer = m.rings.at(-1)!;
     const boundaryTolerance = Math.SQRT2 * (0.5 / SNAP + 0.5 / BOOL_GRID) + 1e-8;
     for (const q of m.quarters) {
+      for (const p of q.pts) {
+        expect(p.x, `quarter ${q.id} map margin x`).toBeGreaterThanOrEqual(150 - 1e-7);
+        expect(p.y, `quarter ${q.id} map margin y`).toBeGreaterThanOrEqual(150 - 1e-7);
+        expect(p.x, `quarter ${q.id} map margin x`).toBeLessThanOrEqual(19850 + 1e-7);
+        expect(p.y, `quarter ${q.id} map margin y`).toBeLessThanOrEqual(19850 + 1e-7);
+      }
       for (const p of q.pts) if (!pointInRing(outer, p)) expect(distToRing(outer, p), `quarter ${q.id} boundary distance`).toBeLessThanOrEqual(boundaryTolerance);
       expect(mpArea(difference(q.pts, outer)), `quarter ${q.id} exterior sliver area`).toBeLessThanOrEqual(perimeter(q.pts) * boundaryTolerance);
     }

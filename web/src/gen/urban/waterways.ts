@@ -4,7 +4,7 @@ import { dist } from '../core/geom';
 import { MinHeap } from '../core/pq';
 import type { Streets, StreetRec } from './streets';
 
-interface Edge { a: number; b: number; street: StreetRec; width: number; cost: number; connector?: boolean }
+interface Edge { a: number; b: number; street: StreetRec; width: number; cost: number; connector?: boolean; overlapStart?: Vec2 }
 interface Segment { street: StreetRec; i: number; a: Vec2; b: Vec2; cuts: { t: number; node: number }[] }
 export interface WaterwayNetwork { canals: StreetRec[]; connectors: { path: Polyline; width: number; street: number; outlet?: boolean }[] }
 
@@ -68,7 +68,13 @@ export function connectedWaterways(streets: Streets, candidates: StreetRec[], is
     for (let d = 1; d <= 12; d++) {
       const q = { x: p.x + (p.x - back.x) * d / length, y: p.y + (p.y - back.y) * d / length };
       if (!isWater(q)) continue;
-      if (canOutlet([p, q], 2.2)) outlets.push({ a: node(p), b: node(q), street: c, width: 2.2, cost: d * 0.08, connector: true });
+      if (canOutlet([p, q], 2.2)) {
+        // Different-width flat caps can separate after centimetre node and millimetre
+        // polygon snapping. Overlap two centimetres inside the existing public canal.
+        const overlap = Math.min(0.02, length / 2);
+        const overlapStart = { x: p.x + (back.x - p.x) * overlap / length, y: p.y + (back.y - p.y) * overlap / length };
+        outlets.push({ a: node(p), b: node(q), street: c, width: 2.2, cost: d * 0.08, connector: true, overlapStart });
+      }
       break;
     }
   }
@@ -111,7 +117,8 @@ export function connectedWaterways(streets: Streets, candidates: StreetRec[], is
   const connectors: WaterwayNetwork['connectors'] = [];
   for (const id of [...selected].sort((a, b) => a - b)) {
     const e = edges[id];
-    if (e.connector) connectors.push({ path: [points[e.a], points[e.b]], width: e.width, street: e.street.id, outlet: id >= joins.length && id < joins.length + outlets.length });
+    if (e.connector) connectors.push({ path: [...(e.overlapStart ? [e.overlapStart] : []), points[e.a], points[e.b]], width: e.width,
+      street: e.street.id, outlet: id >= joins.length && id < joins.length + outlets.length });
   }
   return { canals, connectors };
 }

@@ -10,7 +10,10 @@ import { makeOptions, fromQuery, toQuery, CULTURE_LABELS } from '../src/gen/opti
 import { getCulture, resolvePlan, type NucleusKind } from '../src/gen/urban/culture';
 import { MORPHOLOGIES } from '../src/gen/urban/morphology';
 import { buildOn } from '../src/gen/urban/bops';
-import { registerSwahili, swahiliDoorLines } from '../src/gen/urban/swahili';
+import { registerSwahili, swahiliDoorLines, swahiliBazaarQuarter, hasSwahiliBazaar } from '../src/gen/urban/swahili';
+import { centredMegaNucleus, megaNucleusFace, coalesceMegaNucleusEdges } from '../src/gen/urban/mega/nucleus';
+import { StreetGraph } from '../src/gen/geo/graph';
+import { LAB_WATER } from '../src/gen/urban/streets';
 import { buildCompound } from '../src/gen/urban/compounds';
 import { registerPrimitiveFeatures, primitiveBoundaryLines, primitiveGardenLines, halflingGardenTrees } from '../src/gen/urban/primitive_features';
 import { resolveMorph } from '../src/gen/urban/morphology';
@@ -91,6 +94,77 @@ describe('Ottoman usable house projection', () => {
 });
 
 describe('native programmes survive urban growth', () => {
+  it('centres the real native precinct when a one-sided road fan excludes its meeting point', () => {
+    // Exact approved d887575 barbarian seed 2 candidate: the actual centre lies 19.756 m outside it.
+    const candidate = [{ x: 2621.0297201273543, y: 2851.0876836847765 }, { x: 2622.1823519700984, y: 2693.13827919138 }, { x: 2744.377781486283, y: 2870.0546671853135 }];
+    const center = { x: 2699.710564399421, y: 2770.6222865412446 };
+    const core = rect(1000, 1000).map((p) => ({ x: p.x + center.x - 500, y: p.y + center.y - 500 }));
+    const water = rect(40, 200).map((p) => ({ x: p.x + Math.floor(center.x) - 90, y: p.y + Math.floor(center.y) - 100 }));
+    expect(pointInRing(candidate, center)).toBe(false);
+    const subject = centredMegaNucleus(candidate, center, [{ outer: core, holes: [] }], [{ outer: water, holes: [] }], 9000, resolvePlan('barbarian', 60000).nucleus, 0);
+    expect(subject.available).toBe(true);
+    expect(pointInRing(subject.poly, center)).toBe(true);
+    expect(polyInside(core, subject.poly)).toBe(true);
+    expect(mpArea(intersectionS(subject.poly, water))).toBeLessThanOrEqual(0.01);
+    expect(area(subject.poly)).toBeGreaterThan(3600);
+    expect(isSimple(subject.poly)).toBe(true);
+    const healthy = rect(80, 80), c = { x: 40, y: 40 };
+    expect(centredMegaNucleus(healthy, c, [{ outer: healthy, holes: [] }], [], 6400, resolvePlan('barbarian', 60000).nucleus, 0).poly).toBe(healthy);
+  });
+
+  it('retains only the actual dry reserved face after a bank adds water labels', () => {
+    const subject = rect(100, 100), center = { x: 50, y: 50 };
+    const dry = { pts: rect(100, 80), lab: [0, 0, LAB_WATER, 0] };
+    const outside = { pts: rect(300, 300), lab: [0, LAB_WATER, 0, 0] };
+    const second = { pts: rect(20, 10).map((p) => ({ x: p.x, y: p.y + 90 })), lab: [0, 0, LAB_WATER, 0] };
+    expect(megaNucleusFace([outside, second, dry], subject, 0, center)).toBe(dry);
+    expect(megaNucleusFace([outside], subject, 0, center)).toBeUndefined();
+    expect(megaNucleusFace([dry], subject, 0, center, false)).toBeUndefined();
+    // A radial crossing an unrelated centre face is not a reserved subject.
+    expect(megaNucleusFace([{ pts: rect(40, 40), lab: [0, 4, 5, 8] }], subject, 0, center)).toBeUndefined();
+  });
+
+  it('retains the actual reserved face when a near-corner radial duplicates 1.629 m of its ring', () => {
+    // Approved v2 barbarian seed2: actual repaired subject and the offending regional-road raccord.
+    const subject = [{ x: 2650.44, y: 2723.42 }, { x: 2732.7, y: 2710.89 }, { x: 2748.98, y: 2817.83 }, { x: 2666.72, y: 2830.35 }];
+    const center = { x: 2699.710564399421, y: 2770.6222865412446 };
+    const junction = { x: 2652.051682303847, y: 2723.174505479368 };
+    const end = { x: 2529.660372169925, y: 2601.8064185257435 };
+    const boundary = [end, { x: 2900, y: end.y }, { x: 2900, y: 3000 }, { x: end.x, y: 3000 }];
+    const paths = [[...subject, subject[0]], [...boundary, boundary[0]], [junction, end]], beforePaths = structuredClone(paths);
+    const g = new StreetGraph({ thinSegs: true });
+    g.insertPolyline(paths[0], { width: 12, rank: 0, phase: 1, kind: 'ring', street: 0 }, { snapR: 1.5, mergeDist: 0 });
+    g.insertPolyline(paths[1], { width: 0, rank: 0, phase: 2, kind: 'boundary', street: 2 }, { snapR: 1.5, mergeDist: 0 });
+    g.insertPolyline(paths[2], { width: 10.4, rank: 0, phase: 1, kind: 'radial', street: 5 }, { snapR: 1.5, mergeDist: 6, mergeAngleDeg: 12 });
+    const duplicate = g.edges.find((e) => e.alive && e.street === 5 && g.edges.some((m) => m.alive && m.street === 0 && m.a === e.b && m.b === e.a && JSON.stringify(m.pts) === JSON.stringify(e.pts.slice().reverse())));
+    expect(duplicate).toBeDefined();
+    const beforeEdges = structuredClone(g.edges), beforeNodes = structuredClone(g.nodes);
+    expect(g.faces().filter((f) => pointInRing(f.ring, center) && polyInside(subject, f.ring))).toHaveLength(0);
+    expect(coalesceMegaNucleusEdges(g, 0)).toBe(1);
+    expect(g.edges).toEqual(beforeEdges.map((e) => ({ ...e, alive: e.id === duplicate!.id ? false : e.alive })));
+    expect(g.nodes).toEqual(beforeNodes.map((n) => ({ ...n, edges: n.edges.filter((id) => id !== duplicate!.id) })));
+    expect(paths).toEqual(beforePaths);
+    const reserved = g.faces().filter((f) => pointInRing(f.ring, center) && polyInside(subject, f.ring));
+    expect(reserved).toHaveLength(1);
+    expect(isSimple(reserved[0].ring)).toBe(true);
+    const perimeter = subject.reduce((sum, p, i) => sum + Math.hypot(p.x - subject[(i + 1) % subject.length].x, p.y - subject[(i + 1) % subject.length].y), 0);
+    expect(Math.abs(area(reserved[0].ring) - area(subject))).toBeLessThanOrEqual(perimeter * Math.SQRT2 * 0.005);
+    expect(coalesceMegaNucleusEdges(g, 0), 'terminal cleanup is idempotent').toBe(0);
+  });
+
+  it('keeps distinct curves and distinct node aliases even when their endpoints have the same coordinates', () => {
+    const a = { x: 0, y: 0 }, b = { x: 10, y: 0 }, g = new StreetGraph();
+    g.nodes = [{ id: 0, p: a, edges: [0, 1] }, { id: 1, p: b, edges: [0, 1] }, { id: 2, p: a, edges: [2] }, { id: 3, p: b, edges: [2] }];
+    g.edges = [
+      { id: 0, a: 0, b: 1, pts: [a, b], width: 12, rank: 0, phase: 1, kind: 'ring', street: 0, alive: true },
+      { id: 1, a: 0, b: 1, pts: [a, { x: 5, y: 1 }, b], width: 10, rank: 0, phase: 1, kind: 'radial', street: 1, alive: true },
+      { id: 2, a: 2, b: 3, pts: [a, b], width: 10, rank: 0, phase: 1, kind: 'radial', street: 2, alive: true },
+    ];
+    const edges = structuredClone(g.edges), nodes = structuredClone(g.nodes);
+    expect(coalesceMegaNucleusEdges(g, 0)).toBe(0);
+    expect(g.edges).toEqual(edges); expect(g.nodes).toEqual(nodes);
+  });
+
   for (const kind of ['cattle-kraal', 'chieftain-hall', 'kiva-plaza']) it(kind + ' reserves a useful civic core with contained architecture and open circulation', () => {
     registerPrimitiveFeatures();
     const lot = rect(60, 50), out = buildCompound(kind, lot, { angle: 0, pop: 10000, rng: new Rng('native-core'), center: { x: 30, y: 25 } });
@@ -147,7 +221,7 @@ describe('native programmes survive urban growth', () => {
     const currentHashes = new Set(homes.map((b) => createHash('sha256').update(JSON.stringify([
       u.parcels[b.parcel!].poly, b.poly, b.arch, b.roof, b.material, b.storeys, b.orientation,
     ])).digest('hex')));
-    expect(IROQUOIAN_VALID_HOUSE_HASHES[seed].filter((hash) => !currentHashes.has(hash)), 'every previously valid clan dwelling stays byte-identical').toEqual([]);
+    expect(IROQUOIAN_VALID_HOUSE_HASHES[seed].filter((hash) => !currentHashes.has(hash)), 'every dwelling on the approved road foundation stays byte-identical').toEqual([]);
     for (const b of homes) { expect(2 * obb(b.poly).hu).toBeGreaterThan(11.5); expect(2 * obb(b.poly).hv).toBeGreaterThanOrEqual(4.45); }
   }, 600000);
 
@@ -353,6 +427,35 @@ describe('Swahili stone town', () => {
     expect(u.blockInfo.some((b) => ['great-mosque', 'm4-cathedral-close', 'parish-church', 'church'].includes(b.compound ?? '')) || u.buildings.some((b) => b.arch === 'parish-church')).toBe(false);
   }, 600000);
 
+  it('assigns a starved bazaar to a genuine served core quarter rather than a bank sliver or distant suburb', () => {
+    const market = { kind: 'market', served: true, morph: 'swahili-bazaar' };
+    const residential = { kind: 'quarter', served: true, morph: 'swahili-stone' };
+    expect(hasSwahiliBazaar([market, residential])).toBe(false);
+    expect(hasSwahiliBazaar([market, { ...residential, served: false, morph: 'swahili-bazaar' }])).toBe(false);
+    expect(hasSwahiliBazaar([market, { ...residential, morph: 'swahili-bazaar' }])).toBe(true);
+    const p = (x: number, y: number, w: number, h: number) => rect(w, h).map((v) => ({ x: v.x + x, y: v.y + y }));
+    const candidates = [
+      { id: 0, poly: p(0, 0, 100, 100), eligible: false, marketFront: true },
+      { id: 1, poly: p(0, 0, 100, 1), eligible: true, marketFront: true },
+      { id: 2, poly: p(20, 20, 80, 80), eligible: true, marketFront: true },
+      { id: 3, poly: p(400, 400, 100, 100), eligible: true, marketFront: false },
+      { id: 4, poly: p(0, 0, 20, 20), eligible: true, marketFront: true },
+    ];
+    expect(swahiliBazaarQuarter(candidates, { x: 0, y: 0 }, 0.18)).toBe(2);
+    expect(swahiliBazaarQuarter(candidates.slice(0, 2), { x: 0, y: 0 }, 0.18)).toBeUndefined();
+  });
+
+  it('keeps the main Swahili programme on the actual water-clipped macro nucleus', () => {
+    const w = generate(makeOptions({ seed: '1', size: 'town', population: 6000, mapSize: 5000, eagerPop: 1000, culture: 'swahili-stone-town', river: 'none', relief: 'flat', coast: 'none', settlements: 'none' }));
+    const M = w.urban!.macro!, nucleus = M.quarters.filter((q) => q.kind === 'market' && q.nucleus === 0);
+    expect(nucleus).toHaveLength(1);
+    const u = megaQuarterDetail(w, nucleus[0].id)!;
+    expect(u.buildings.some((b) => b.arch === 'swahili-juma-mosque')).toBe(true);
+    expect(u.sites?.some((s) => s.kind === 'swahili-juma-mosque' && s.role === 'worship')).toBe(true);
+    expectFabric(u, w.urban!.streets);
+    expect(u.buildings.some((b) => b.arch === 'parish-church')).toBe(false);
+  }, 600000);
+
   it('keeps inland water-free towns dry without inventing a quay', () => {
     const w = generate(makeOptions({ seed: '2', size: 'town', population: 2400, culture: 'swahili-stone-town', coast: 'none', river: 'none', relief: 'flat', settlements: 'none' }));
     expectInvariants(w); expectFabric(w.urban!);
@@ -380,12 +483,13 @@ describe('Swahili stone town', () => {
   }, 600000);
 });
 
-// e9a5df2 approved baseline, exact matching options. Hashes omit timing/stats and include all urban geometry.
+// Approved d887575 regional-road foundation, exact options. Replaying 9078428 on these inputs reproduces every field.
+// Timing/stats are omitted; all streets, plots, architecture and cultural boundary lines remain protected.
 const UNCHANGED = {
-  hanseatic: 'a31745e3591d1a27b24388decff09d6e774f3c3f60ea929a042cad9cdaa03e35',
-  korean: '77d5671142d1249afe7fc50dbac3bdf21e88c7271b48bc6386eb936f060c1a7e',
+  hanseatic: 'cf84971168067cffc92f493244d1e9870094f8eeb5bc71752ca80bb1cdb5c66e',
+  korean: 'da9cb53530a86c4670e980f7ac091a4926293102f8e0e4c16d66dfb18df40552',
   'stilt-town': 'd89df30e3ef33ea6016788f0f8174ff44eb8d35b5efdcb099cd285d30835cbee',
-  'celtic-oppidum': '63cb3eed43ea2ea133a269d34f92e3d55ac42e135ba7c2cce87c9c43f07d5081',
+  'celtic-oppidum': '5f9d960d0411c8e427b544cec53c49b6383e98c587389d10471b32a5197687b0',
   'barbarian-norse': '86baec92e1970e274fb3105e1175a744cc8343902e1b5d02c9543405249bb12f',
 };
 for (const [culture, hash] of Object.entries(UNCHANGED)) it(culture + ' retains the approved streets, plots and architecture', () => {

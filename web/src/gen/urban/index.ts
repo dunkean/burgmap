@@ -28,6 +28,7 @@ import { polygonCentroid } from '../core/geom';
 import { cutPlots, Plot } from './plots';
 import { cutCourtyards } from './courtyards';
 import { buildOn, type ArchBldg } from './bops';
+import { chamferPersianHouse } from './persianhouse';
 import { blockReach, carvePassage, makeStreetAt, splitLong, frontRangeDepth, shapeOkObb } from './access';
 import { GridIndex } from '../geo/spatial';
 import { wallFeatures } from './walls';
@@ -49,7 +50,7 @@ import { registerByzantine, stairLanes } from './byzantine';
 import { registerVenice, lagoonWaterways, reserveArsenal } from './venice';
 import { registerPersian, bazaarRoofs, qanats } from './persian';
 import { registerOttoman } from './ottoman';
-import { registerSwahili, swahiliDoorLines } from './swahili';
+import { registerSwahili, swahiliDoorLines, swahiliBazaarQuarter, hasSwahiliBazaar } from './swahili';
 import { registerPrimitiveFeatures, primitiveBoundaryLines, primitiveGardenLines, halflingGardenTrees } from './primitive_features';
 import { registerSahel } from './sahel';
 import { registerHanse } from './hanse';
@@ -453,6 +454,14 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
       for (const s of ph.sectors) { if (a >= acc && a < acc + s.share) { q.morph = s.morph; q.culture = s.culture; break; } acc += s.share; }
     }
   });
+
+  if (culture.id === 'swahili-stone-town' && archetype === 'town' && !hasSwahiliBazaar(prim.quarters.map((q) => ({ kind: q.kind, morph: q.morph?.id, served: q.lp.lab.some((l) => l >= 0 && streets.connected.has(l)) })))) {
+    const sector = plan.phases[0].sectors.find((s) => s.morph.id === 'swahili-bazaar');
+    if (sector) {
+      const index = swahiliBazaarQuarter(prim.quarters.map((q, id) => ({ id, poly: q.lp.pts, eligible: q.kind === 'quarter' && q.phase === 1 && q.culture === culture.id && q.lp.lab.some((l) => l >= 0 && streets.connected.has(l)), marketFront: prim.marketStreet >= 0 && q.lp.lab.includes(prim.marketStreet) })), ctx.center, sector.share);
+      if (index !== undefined) prim.quarters[index].morph = sector.morph;
+    }
+  }
 
   // ---- level 2: blocks
   const nucleus = prim.market ? polygonCentroid(prim.market) : ctx.center;
@@ -907,7 +916,12 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     stats['access.dropped'] = dropped;
   }
   plots.forEach((pl, pi) => {
-    for (const b of plotBld[pi]) buildings.push({ poly: b.poly, kind: b.kind, parcel: parcelIndexOfPlot[pi], arch: b.arch, roof: b.roof, storeys: b.storeys, material: b.material, courtyards: b.courtyards, orientation: b.orientation });
+    for (const b of plotBld[pi]) {
+      // Passage cuts can create new acute patio corners. Finish only after all access cuts and filters;
+      // subsequent containment checks and mass unions consume these footprints without cutting them again.
+      const poly = b.kind === 'house' && b.arch === 'persian-courtyard-house' ? chamferPersianHouse(b.poly) : b.poly;
+      buildings.push({ poly, kind: b.kind, parcel: parcelIndexOfPlot[pi], arch: b.arch, roof: b.roof, storeys: b.storeys, material: b.material, courtyards: b.courtyards, orientation: b.orientation });
+    }
   });
   // final guard of the partition (level 4 ⊂ level 3): a footprint must lie inside its parcel
   for (let i = buildings.length - 1; i >= 0; i--) {

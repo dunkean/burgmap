@@ -21,6 +21,7 @@ import { culDeSacTree } from '../culdesac';
 import { cutPlots, type Plot } from '../plots';
 import { cutCourtyards } from '../courtyards';
 import { buildOn, type ArchBldg } from '../bops';
+import { chamferPersianHouse } from '../persianhouse';
 import { blockReach, carvePassage, makeStreetAt, splitLong, frontRangeDepth, shapeOkObb } from '../access';
 import { buildCompound, pickBlock, type ClaimBlock } from '../compounds';
 import { wallFeatures } from '../walls';
@@ -353,7 +354,11 @@ export function megaQuarterDetail(world: World, key: number): UrbanLayer | null 
     }
   }
   plots.forEach((_pl, pi) => {
-    for (const b of plotBld[pi]) buildings.push({ poly: b.poly, kind: b.kind, parcel: parcelIndexOfPlot[pi], arch: b.arch, roof: b.roof, storeys: b.storeys, material: b.material, courtyards: b.courtyards, orientation: b.orientation });
+    for (const b of plotBld[pi]) {
+      // Match the eager path: bevel final roofs after access, before read-only containment/mass assembly.
+      const poly = b.kind === 'house' && b.arch === 'persian-courtyard-house' ? chamferPersianHouse(b.poly) : b.poly;
+      buildings.push({ poly, kind: b.kind, parcel: parcelIndexOfPlot[pi], arch: b.arch, roof: b.roof, storeys: b.storeys, material: b.material, courtyards: b.courtyards, orientation: b.orientation });
+    }
   });
   for (let i = buildings.length - 1; i >= 0; i--) {
     const b = buildings[i];

@@ -28,8 +28,12 @@ describe('share state (pins, view)', () => {
     expect(fullQuery(o, [], null)).toBe(toQuery(o));
     const a = generate(withUi), b = generate(o);
     expect(JSON.stringify(a.urban)).toBe(JSON.stringify(b.urban));
-    const det = (st: Record<string, unknown>): string => JSON.stringify(Object.entries(st).filter(([k]) => !/(^|\.)ms(\.|$)/.test(k)));
+    // The vertex count of the slowest measured block follows wall-clock timing too.
+    const det = (st: Record<string, unknown>): string => JSON.stringify(Object.entries(st)
+      .filter(([k]) => !/(^|\.)ms(\.|$)/.test(k) && k !== 'urban.slowestBlockVerts'));
     expect(det(a.stats)).toBe(det(b.stats));
+    const worldData = (w: unknown): string => JSON.stringify(w, (key, value) => key === 'stats' ? undefined : value);
+    expect(worldData(a)).toBe(worldData(b));
   });
 });
 

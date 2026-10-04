@@ -26,6 +26,7 @@ import { Streets, LAB_OPEN, LAB_WALL, LAB_WATER } from '../streets';
 import { insetPiece } from '../blocks';
 import { wallFeatures } from '../walls';
 import { StreetGraph } from '../../geo/graph';
+import { restoreMacroBoundary } from './boundary';
 import { GridIndex } from '../../geo/spatial';
 import { area, pointInRing, inscribed, obb, orientPos, segSegT, bboxOf, distToSeg, convexHull } from '../../geo/poly';
 import { splitByChord, rayHit, locate, type LPoly } from '../../geo/split';
@@ -35,6 +36,8 @@ import { ribbon } from '../../geo/offset';
 import type { MacroPlan, MacroQuarter, MacroStreet, MacroNucleus, MacroDistrict, MacroWant } from './types';
 import { fitRings, segKey } from './rings';
 import { containMegaRings, requiredMegaExtent } from './extent';
+import { centredMegaNucleus, megaNucleusFace, coalesceMegaNucleusEdges } from './nucleus';
+import { swahiliBazaarQuarter, hasSwahiliBazaar } from '../swahili';
 import { DEFAULT_M4 } from '../m4/index';
 import { primitiveBoundaryLines } from '../primitive_features';
 import { planMoat, naturalBank, moatReserve } from '../moat';
@@ -516,7 +519,10 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
   // the market at the meeting of the main roads
   const toCenter = roadsIn.filter((r) => dist(r.path[r.path.length - 1], c) < 10).sort((a, b) => (a.kind === b.kind ? b.path.length - a.path.length : a.kind === 'major' ? -1 : 1));
   const marketA = pop > 500000 ? 14000 : 9000;
-  const market = makeMarket(c, toCenter.map((r) => r.path), marketA, rng.fork('market'), mainAngle);
+  const marketCandidate = makeMarket(c, toCenter.map((r) => r.path), marketA, rng.fork('market'), mainAngle);
+  const nucleusAngle = plan.nucleus.orientation === 'cardinal' ? 0 : plan.nucleus.orientation === 'terrain' ? terrainAngle : plan.nucleus.orientation === 'water' ? waterAngle : mainAngle;
+  const nucleusSubject = centredMegaNucleus(marketCandidate, c, [{ outer: rings[0], holes: [] }], ctx.water, marketA, plan.nucleus, nucleusAngle);
+  const market = nucleusSubject.poly;
   const marketId = addStreet(closed(market), 12, 0, 'ring', 1);
   insert(closed(market), marketId);
   // ring lines: the standing walls first (a stretch shared with an older line is wall), then the boulevards on the
@@ -792,6 +798,8 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
 
   // ---- cells: the graph's faces, minus the water
   pruneDangling(g);
+  restoreMacroBoundary(g, rings[rings.length - 1], mstreets);
+  if (nucleusSubject.poly !== marketCandidate) coalesceMegaNucleusEdges(g, marketId);
   const faces = labelledFaces(g);
   const outerWall = standing.size ? rings[Math.max(...standing) - 1] : null;
   const moatWalls = outerWall ? [{ ring: outerWall, gates: [] }] : [];
@@ -838,7 +846,8 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
   const noise = new Noise2D(rng.fork('arterialNoise'));
   const split = rng.fork('split');
   const quarterArea = (k: number) => QUARTER_AREA[zoneOf(k)] * Math.max(0.7, Math.min(1.6, Math.sqrt(sprawl)));
-  const isMarketFace = (lp: LPoly) => lp.lab.every((l) => l === labelOf[marketId]) && pointInRing(lp.pts, c);
+  const reservedNucleus = megaNucleusFace(cells, market, labelOf[marketId], c, nucleusSubject.available);
+  const isMarketFace = (lp: LPoly) => lp === reservedNucleus;
   const greenFace = (lp: LPoly): number => {
     for (let i = 1; i < nuclei.length; i++) if (pointInRing(lp.pts, nuclei[i].p) && lp.lab.every((l) => nucStreets.includes(l))) return i;
     return -1;
@@ -975,6 +984,19 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
     if (f.tag === 'palace') palaceQ = quarters[quarters.length - 1];
   }
   morphIdx(plan.faubourg);
+
+  if (culture.id === 'swahili-stone-town' && !hasSwahiliBazaar(quarters.map((q) => ({ kind: q.kind, morph: morphs[q.morph].id, served: q.lab.some((l) => l >= 0 && mstreets[l].widths[0] > 0) })))) {
+    const sector = plan.phases[0].sectors.find((s) => s.morph.id === 'swahili-bazaar');
+    if (sector) {
+      const index = swahiliBazaarQuarter(quarters.map((q) => ({ id: q.id, poly: q.pts, eligible: q.kind === 'quarter' && q.phase === 1 && q.culture === culture.id && q.lab.some((l) => l >= 0 && mstreets[l].widths[0] > 0), marketFront: q.lab.includes(labelOf[marketId]) })), c, sector.share);
+      if (index !== undefined) {
+        const q = quarters[index];
+        q.morph = morphIdx(sector.morph);
+        q.density = Math.round(sector.morph.density[q.zone] * dS);
+        q.pop = Math.round((q.density * q.area) / 1e4);
+      }
+    }
+  }
 
   // ---- city-rank landmarks: the cathedral close by the market, the palace city, parish churches and abbeys;
   // the port districts along the water (quays), craftsmen's quarters by the water outside the walls
@@ -1313,7 +1335,7 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
   }));
   const macro: MacroPlan = {
     version: 1, seedKey: rng.seedKey, eagerPop, population: pop, center: c, mainAngle, terrainAngle, waterAngle, cityR: ringR[nR], ctxRadius,
-    nucleusCompound: plan.nucleus.kind !== 'none' ? plan.nucleus.builder ?? (Object.prototype.hasOwnProperty.call(NUCLEUS_COMPOUND, plan.nucleus.kind) ? NUCLEUS_COMPOUND[plan.nucleus.kind] : undefined) : undefined,
+    nucleusCompound: nucleusSubject.available && reservedNucleus && plan.nucleus.kind !== 'none' ? plan.nucleus.builder ?? (Object.prototype.hasOwnProperty.call(NUCLEUS_COMPOUND, plan.nucleus.kind) ? NUCLEUS_COMPOUND[plan.nucleus.kind] : undefined) : undefined,
     streets: mstreets, quarters, nuclei, morphs, wallRings: [...[...standing].sort((a, b) => a - b).map((k) => rings[k - 1]), ...nuclei.filter((nu) => nu.walled && nu.ring).map((nu) => nu.ring!)], rings,
   };
   const targetLand = areas[nR];
@@ -1323,6 +1345,7 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
   const required = requiredMegaExtent(estR);
   macro.extent = { required, targetLand, availableLand, plannedPopulation, constrained, scale: bounded.scale };
   const warnings = constrained ? [`megacity: ${pop} inhabitants requested on ${world.mapSize} m; bounded plan estimates ${plannedPopulation} inhabitants, approximately ${required} m of map extent needed (terrain may require more)`] : [];
+  if (plan.nucleus.kind !== 'none' && !reservedNucleus) warnings.push('megacity: no served dry face can hold the requested nucleus programme');
   const marketQ = quarters.find((q) => q.kind === 'market' && q.nucleus === 0);
   const layer: UrbanLayer = {
     footprint: footprintH.map((p) => p.outer), footprintH,

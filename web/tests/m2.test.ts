@@ -5,6 +5,11 @@ import { makeOptions, DEFAULT_ROADS, Options } from '../src/gen/options';
 import { Rng } from '../src/gen/core/rng';
 import { dist, distToPolyline, bbox, polygonContains, Vec2 } from '../src/gen/core/geom';
 import type { World } from '../src/gen/types';
+import { makeCtx } from '../src/gen/urban/context';
+import { resolveMorph } from '../src/gen/urban/morphology';
+import { waterContains } from '../src/gen/urban/waterland';
+import { distToRing, distToSeg } from '../src/gen/geo/poly';
+import type { KindedBridge } from '../src/gen/urban/streambridges';
 
 const cases: Partial<Options>[] = [
   { seed: '1', size: 'village', relief: 'hills', coast: 'S', river: 'river' },
@@ -81,6 +86,7 @@ describe('regional roads', () => {
   });
 
   it('never runs through water except on bridges', () => {
+    let urbanBanks = 0;
     for (const w of worlds) {
       for (const r of w.roads!) {
         for (let i = 1; i < r.path.length; i++) {
@@ -104,9 +110,27 @@ describe('regional roads', () => {
           }
         }
       }
-      for (const br of w.bridges!) {
-        expect(waterAt(w, br.a)).toBe(0);
-        expect(waterAt(w, br.b)).toBe(0);
+      for (const br of w.bridges! as KindedBridge[]) {
+        if (!br.kind) {
+          expect(waterAt(w, br.a)).toBe(0);
+          expect(waterAt(w, br.b)).toBe(0);
+          continue;
+        }
+        // Urban decks join the exact partition banks. A 5m raster cell can still mark dry bank ground wet
+        // (seed11 below); extending the deck to the cell edge would detach it from its connecting streets.
+        const water = makeCtx(w, resolveMorph(undefined), w.mapSize).water;
+        const length = dist(br.a, br.b);
+        expect(length).toBeGreaterThan(0);
+        const dx = (br.b.x - br.a.x) / length, dy = (br.b.y - br.a.y) / length;
+        const streets = w.urban!.streets;
+        const own = streets.findIndex((s) => s.path.length === 2 && dist(s.path[0], br.a) < 1e-6 && dist(s.path[1], br.b) < 1e-6);
+        expect(own).toBeGreaterThanOrEqual(0);
+        for (const [p, sign] of [[br.a, -1], [br.b, 1]] as const) {
+          urbanBanks++;
+          if (waterContains(water, p)) expect(Math.min(...water.flatMap((ph) => [ph.outer, ...ph.holes]).map((ring) => distToRing(ring, p)))).toBeLessThan(1e-6);
+          expect(waterContains(water, { x: p.x + sign * dx * 0.05, y: p.y + sign * dy * 0.05 })).toBe(false);
+          expect(streets.some((s, i) => i !== own && s.path.some((q, j) => j > 0 && distToSeg(p, s.path[j - 1], q) < 0.05))).toBe(true);
+        }
       }
       // a real main river (not a brook) is bridged only a few times, all near the crossing
       const mr = w.terrain.rivers.find((rv) => rv.main);
@@ -114,6 +138,7 @@ describe('regional roads', () => {
       const mainBridges = w.bridges!.filter((br) => w.terrain.rivers.some((rv) => rv.main && distToPolyline({ x: (br.a.x + br.b.x) / 2, y: (br.a.y + br.b.y) / 2 }, rv.path) < 40));
       expect(mainBridges.length).toBeLessThanOrEqual(4);
     }
+    expect(urbanBanks).toBeGreaterThan(0); // the existing seed11 case must retain its connected plank crossing
   });
 });
 

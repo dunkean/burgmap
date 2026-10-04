@@ -51,6 +51,30 @@ describe('connected lagoon waterways', () => {
     expect(connectedWaterways(narrow, narrow.list, () => true).canals).toHaveLength(0);
   });
 
+  it('overlaps the real oblique p4uefz outlet cap inside its canal after polygon quantization', () => {
+    const streets = new Streets(), p = { x: 2058.9568194430854, y: 2814.486820746317 };
+    const back = { x: 2071.782487931913, y: 2807.496586511331 };
+    const length = Math.hypot(back.x - p.x, back.y - p.y);
+    const towardWater = { x: (p.x - back.x) / length, y: (p.y - back.y) / length };
+    const normal = { x: -towardWater.y, y: towardWater.x };
+    const at = (d: number, t: number) => ({ x: p.x + towardWater.x * d + normal.x * t, y: p.y + towardWater.y * d + normal.y * t });
+    streets.add([p, back], 6.936332931539654, 2, 'street', 0);
+    const isWater = (q: { x: number; y: number }) => (q.x - p.x) * towardWater.x + (q.y - p.y) * towardWater.y > 2.5;
+    const result = connectedWaterways(streets, streets.list, isWater);
+    expect(result.canals).toHaveLength(1);
+    expect(result.connectors).toHaveLength(1);
+    expect(result.connectors[0].outlet).toBe(true);
+    const channel = ribbon([p, back], 4.536332931539654), outlet = ribbon(result.connectors[0].path, 2.2);
+    expect(mpArea(intersectionS(channel, outlet))).toBeGreaterThan(0.01);
+    const network = unionMany([channel, outlet], 24, true);
+    expect(network).toHaveLength(1);
+    const water = [at(2.5, -20), at(20, -20), at(20, 20), at(2.5, 20)];
+    expect(mpArea(intersectionS(network, water))).toBeGreaterThan(0.1);
+    // The added dry overlap stays inside the existing street, never an occupied lot.
+    const dryOverlap = ribbon(result.connectors[0].path.slice(0, 2), 2.2);
+    expect(mpArea(differenceS(dryOverlap, ribbon(streets.list[0].path, streets.list[0].widths)))).toBeLessThan(0.001);
+  });
+
   it('bridges a narrow calle midway along a new channel without adding bridges at plain bends', () => {
     const { streets, isWater } = fixture();
     streets.add([{ x: 20, y: 70 }, { x: 60, y: 70 }], 2.6, 3, 'lane', 0);
