@@ -9,8 +9,7 @@ import { GridIndex } from '../../geo/spatial';
 import { splitHoles, goodShape, sharedLen, cutByCells } from './kit';
 
 export function shoreTerrain(ctx: UrbanCtx) {
-  // makeCtx clips water 20 m beyond this window. Stay inside the reliable coverage;
-  // its artificial water edges are then farther away than the 12 m shallow band.
+  // Keep bank growth inside the planning window even though the water context now covers the whole map.
   const covered = (p: Vec2) => p.x >= Math.max(3, ctx.win.x0) && p.y >= Math.max(3, ctx.win.y0) &&
     p.x <= Math.min(ctx.mapSize - 3, ctx.win.x1) && p.y <= Math.min(ctx.mapSize - 3, ctx.win.y1);
   const wet = ctx.water.map((ph) => ({ ph, box: bboxOf(ph.outer) }));

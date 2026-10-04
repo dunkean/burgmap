@@ -16,7 +16,7 @@ import { dist, polygonArea } from '../core/geom';
 import type { Rng } from '../core/rng';
 import type { MorphologyParams, Zone } from './morphology';
 import type { Streets } from './streets';
-import { MultiPoly, PolyH, intersectionS, differenceS, difference, unionS, mpArea } from '../geo/bool';
+import { MultiPoly, PolyH, intersectionS, differenceS, difference, unionS, tryIntersection, mpArea } from '../geo/bool';
 import { area, interiorAngle, pointInRing, distToSeg, inscribed, cleanRing, orientPos, bboxOf, snapPt, isSimple, convexWidth, obb, convexHull } from '../geo/poly';
 import { clipPlot } from './buildings';
 import { truncateAcute } from './blocks';
@@ -88,8 +88,10 @@ function polyCenter(p: Polygon): Vec2 {
 }
 
 /** Splits a polygon with holes by lines through its holes until every piece is hole-free. */
-export function openHoles(ph: PolyH, depth = 0): MultiPoly {
-  if (!ph.holes.length || depth > 4) return [{ outer: ph.outer, holes: [] }];
+export function openHoles(ph: PolyH, depth = 0, exact = false): MultiPoly {
+  if (!ph.holes.length) return [{ outer: ph.outer, holes: [] }];
+  // An unresolved hole is excluded land, never a licence to fill the parent's outer ring.
+  if (depth > 4) return [];
   const h = ph.holes[0];
   const c = polyCenter(h);
   const bb = bboxOf(ph.outer);
@@ -97,7 +99,10 @@ export function openHoles(ph: PolyH, depth = 0): MultiPoly {
   const left = [{ x: c.x - W, y: bb.y0 - W }, { x: c.x, y: bb.y0 - W }, { x: c.x, y: bb.y1 + W }, { x: c.x - W, y: bb.y1 + W }];
   const right = [{ x: c.x, y: bb.y0 - W }, { x: c.x + W, y: bb.y0 - W }, { x: c.x + W, y: bb.y1 + W }, { x: c.x, y: bb.y1 + W }];
   const out: MultiPoly = [];
-  for (const half of [left, right]) for (const q of intersectionS([ph], half)) out.push(...openHoles(q, depth + 1));
+  for (const half of [left, right]) {
+    const pieces = exact ? tryIntersection([ph], half).pieces : intersectionS([ph], half);
+    for (const q of pieces) out.push(...openHoles(q, depth + 1, exact));
+  }
   return out;
 }
 

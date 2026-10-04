@@ -14,6 +14,7 @@ import { ribbon } from '../../geo/offset';
 import { polyInside, isConvex, clipHalfPlaneConvex, segCrossesRing } from '../../geo/split';
 import { GridIndex } from '../../geo/spatial';
 import { truncateAcute } from '../blocks';
+import { dryPieces } from '../waterland';
 
 export type BlockKind = UrbanBlockInfo['kind'];
 export interface CampBlock { poly: Polygon; kind: BlockKind; compound?: string; quarter: number }
@@ -80,7 +81,8 @@ export function annulus(c: Vec2, r0: number, r1: number, n = 96): PolyH {
  * is opened by the line through its centroid), so no piece keeps a hole, however many there are.
  */
 export function splitHoles(ph: PolyH, depth = 0): Polygon[] {
-  if (!ph.holes.length || depth > 3) return [ph.outer];
+  if (!ph.holes.length) return [ph.outer];
+  if (depth > 3) return [];
   const bb = bboxOf(ph.outer);
   // (a hole left after the first pass is cut a little off its centroid line)
   const xs = [...new Set(ph.holes.map((h) => Math.round((polygonCentroid(h).x + depth * 0.37) * 1000) / 1000))].sort((a, b) => a - b);
@@ -132,7 +134,7 @@ export function carveBlocks(quarter: Polygon, cuts: MultiPoly, water: MultiPoly)
   // (the cuts unioned first, in batches: polygon-clipping is far more robust on one clean operand than on many
   // overlapping ribbons, and a failure would fall back to a coarse 5 cm grid)
   if (cuts.length) m = differenceS(m, cuts.length > 1 ? unionMany(cuts.map((ph) => [ph] as MultiPoly), 16, true) : cuts);
-  if (water.length) m = differenceS(m, ...water.map((ph) => [ph] as MultiPoly));
+  if (water.length) m = dryPieces(m, water);
   // (spikes left where path ribbons meet or graze the outline are cut off at 1.5 m width)
   const out = pieces(m, 40).map((p) => (goodShape(p, 2.5) ? p : orientPos(truncateAcute(p, (14 * Math.PI) / 180, 1.5)))).filter((p) => p.length >= 3 && goodShape(p, 2.5));
   // (a boolean that fell back to its coarse grid may leave a block a few cm out of its quarter: clipped back)

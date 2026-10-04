@@ -27,6 +27,7 @@ import { emptyOut, fits, placeRect, type Out } from './kit';
 import { inscribed, obb } from '../../geo/poly';
 import { frameAt } from './lots';
 import type { UrbanBuilding } from '../../types';
+import { waterContains } from '../waterland';
 
 
 export interface PortIn {
@@ -165,8 +166,7 @@ export function reservePort(s: M4State, api: ReserveApi, pin: PortIn): ReservedL
   const target = pin.harbor ?? pin.nucleus;
   // ---- shore runs near the town, on navigable water, away from the other lots
   let best: { run: Polyline; d: number } | null = null;
-  for (const ph of ctx.water) {
-    const ring = ph.outer;
+  for (const ph of ctx.water) for (const ring of [ph.outer, ...ph.holes]) {
     const m = ring.length;
     if (m < 4) continue;
     const ok = ring.map((p, i) => {
@@ -176,7 +176,7 @@ export function reservePort(s: M4State, api: ReserveApi, pin: PortIn): ReservedL
       const a = ring[(i - 1 + m) % m], b = ring[(i + 1) % m];
       const ux = b.x - a.x, uy = b.y - a.y, l = Math.hypot(ux, uy) || 1;
       let q = { x: p.x - (uy / l) * 6, y: p.y + (ux / l) * 6 };
-      if (!pointInRing(ring, q)) q = { x: p.x + (uy / l) * 6, y: p.y - (ux / l) * 6 };
+      if (!waterContains(ctx.water, q)) q = { x: p.x + (uy / l) * 6, y: p.y - (ux / l) * 6 };
       const c = code(q);
       if (c === 1) return true;
       if (c === 3) return riverW(q) >= 8;

@@ -8,6 +8,7 @@ import { Options, SIZE_PRESETS, RiverOpt } from '../options';
 import type { TerrainLayer, River } from '../types';
 import { generateHeightfield, HeightPlan, OPPOSITE, SIDE_VEC, Side } from './heightfield';
 import { marchingSquares } from './contour';
+import { carveEstuary } from './estuary';
 import { resolveDepressions } from './erosion';
 import { scaleFor, areaOfWidth, assembleChannels, assignHydraulics, RawChan } from './rivernet';
 
@@ -284,43 +285,6 @@ function carveRiver(height: Grid, pl: Polyline, widths: number[], seaLevel: numb
   return { bed };
 }
 
-/** Drown the lower course of the main river: a funnel-shaped estuary below sea level that widens to the mouth. */
-function carveEstuary(height: Grid, pl: Polyline, widths: number[], lest: number): void {
-  const { w, h, cell } = height;
-  const H = height.data;
-  const n = pl.length;
-  // arc length measured back from the mouth (last vertex)
-  const sFrom = new Array<number>(n).fill(0);
-  for (let i = n - 2; i >= 0; i--) sFrom[i] = sFrom[i + 1] + dist(pl[i], pl[i + 1]);
-  const start = sFrom.findIndex((s) => s <= lest);
-  if (start < 0) return;
-  const rAt = (i: number) => {
-    const t = Math.min(1, sFrom[i] / lest);
-    return (widths[i] / 2) * (1 + 6 * Math.pow(1 - t, 1.5)) + 2;
-  };
-  for (let i = Math.max(0, start - 1); i < n - 1; i++) {
-    const a = pl[i], b = pl[i + 1];
-    const rm = Math.max(rAt(i), rAt(i + 1)) * 1.9;
-    const x0 = Math.max(0, Math.floor((Math.min(a.x, b.x) - rm) / cell)), x1 = Math.min(w - 1, Math.floor((Math.max(a.x, b.x) + rm) / cell));
-    const y0 = Math.max(0, Math.floor((Math.min(a.y, b.y) - rm) / cell)), y1 = Math.min(h - 1, Math.floor((Math.max(a.y, b.y) + rm) / cell));
-    const dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy || 1;
-    for (let yy = y0; yy <= y1; yy++) for (let xx = x0; xx <= x1; xx++) {
-      const px = (xx + 0.5) * cell, py = (yy + 0.5) * cell;
-      const t = Math.max(0, Math.min(1, ((px - a.x) * dx + (py - a.y) * dy) / l2));
-      const d = Math.hypot(px - a.x - t * dx, py - a.y - t * dy);
-      const r = rAt(i) * (1 - t) + rAt(i + 1) * t;
-      if (d > r * 1.9) continue;
-      const s = sFrom[i] * (1 - t) + sFrom[i + 1] * t;
-      const f = smooth((lest - s) / (0.6 * lest));
-      const tgt = -0.7 + 3.2 * (1 - f);
-      const mix = smooth((d - r) / (0.9 * r));
-      const v = tgt * (1 - mix) + H[yy * w + xx] * mix;
-      const idx = yy * w + xx;
-      if (v < H[idx]) H[idx] = v;
-    }
-  }
-}
-
 interface LakeSite { idx: number }
 
 /** Picks concave valley-floor spots on medium drainage lines and carves a bowl with a lowest rim (the outlet). */
@@ -569,7 +533,7 @@ export function terrainForExtent(opts: Options, mapSize: number, root?: Rng): { 
           // provisional widths (final widths recomputed from accumulation below)
       const provisional = poly.map((_, i) => cls.wSrc + (cls.wMouth - cls.wSrc) * Math.pow(i / Math.max(1, poly.length - 1), 0.7));
       carveRiver(height, poly, provisional, seaLevel, plan.relief === 'mountains' ? 0.5 : 0.24, plan.amp, flood.filled, ek);
-          if (hasSea) carveEstuary(height, poly, provisional, 700 * Math.sqrt(ek));
+          if (hasSea) carveEstuary(height, poly, provisional, 700 * Math.sqrt(ek), seaLevel, rrng.fork('estuary'));
       mainPoly = poly;
       const pi = Math.min(N - 1, Math.max(0, Math.floor(poly[Math.min(2, poly.length - 1)].y / cell) * n + Math.floor(poly[Math.min(2, poly.length - 1)].x / cell)));
       inject = [{ idx: pi, amount: cls.inject * N }];
@@ -757,23 +721,24 @@ export function terrainForExtent(opts: Options, mapSize: number, root?: Rng): { 
   const seaField = new Float32Array(N);
   for (let i = 0; i < N; i++) seaField[i] = sea2[i] ? Math.max(0.05, seaLevel - height.data[i]) : -Math.max(0.05, height.data[i] - seaLevel);
   const seaLoops = regionPolygons(seaField, n, n, cell, cell * cell * 6);
-  // loops of opposite orientation to the biggest one are islands (holes in the sea)
-  let coastline: Polygon[] = seaLoops;
+  // Marching-square chaining does not prescribe winding. Nesting, rather than its arbitrary orientation,
+  // distinguishes the sea's outer loops from genuinely dry islands.
+  const coastline: Polygon[] = [];
   const islands: Polygon[] = [];
-  if (seaLoops.length > 1) {
-    let big = seaLoops[0];
-    for (const p of seaLoops) if (Math.abs(polygonArea(p)) > Math.abs(polygonArea(big))) big = p;
-    const sg = Math.sign(polygonArea(big));
-    coastline = seaLoops.filter((p) => Math.sign(polygonArea(p)) === sg);
-    for (const p of seaLoops) if (Math.sign(polygonArea(p)) !== sg) islands.push(p);
+  const seaAreas = seaLoops.map((p) => Math.abs(polygonArea(p)));
+  for (let i = 0; i < seaLoops.length; i++) {
+    let depth = 0;
+    for (let j = 0; j < seaLoops.length; j++) if (seaAreas[j] > seaAreas[i] && polygonContains(seaLoops[j], seaLoops[i][0])) depth++;
+    (depth % 2 ? islands : coastline).push(seaLoops[i]);
   }
   let lakes = regionPolygons(lakeField, n, n, cell, cell * cell * 6);
   lakes = lakes.filter((p) => Math.abs(polygonArea(p)) >= 2500);
 
   // ---- clip river ribbons at the shoreline (sea and lakes): cut where a river enters water, keep the mouth point
-  const waterPolys = coastline.concat(lakes);
   for (let k = rivers.length - 1; k >= 0; k--) {
-    const clipped = clipRiverAtWater(rivers[k], waterPolys);
+    // A lake on an island is still water; apply sea holes only to the sea, then clip the remaining river at lakes.
+    const seaClipped = clipRiverAtWater(rivers[k], coastline, islands);
+    const clipped = seaClipped && clipRiverAtWater(seaClipped, lakes);
     if (!clipped) rivers.splice(k, 1); else rivers[k] = clipped;
   }
 
@@ -781,10 +746,11 @@ export function terrainForExtent(opts: Options, mapSize: number, root?: Rng): { 
   for (const rv of rivers) {
     if (rv.mouth !== 'sea' && rv.mouth !== 'lake') continue;
     const polys = rv.mouth === 'sea' ? coastline : lakes;
+    const holes = rv.mouth === 'sea' ? islands : [];
     const last = rv.path[rv.path.length - 1];
-    if (polys.some((pg) => polygonContains(pg, last))) continue;
+    if (polys.some((pg) => polygonContains(pg, last)) && !holes.some((pg) => polygonContains(pg, last))) continue;
     let bd = 45, bp: Vec2 | null = null;
-    for (const pg of polys) for (let i = 0; i < pg.length; i++) {
+    for (const pg of polys.concat(holes)) for (let i = 0; i < pg.length; i++) {
       const nn = nearestOnPath([pg[i], pg[(i + 1) % pg.length]], last);
       if (nn.d < bd) { bd = nn.d; bp = nn.pt; }
     }
@@ -876,8 +842,8 @@ function nearestOnPath(pl: Polyline, p: Vec2): { pt: Vec2; d: number } {
  * Cut a river polyline where it runs into sea/lake polygons: an initial stretch inside water (a lake outlet
  * that starts in its lake) is trimmed to the shore, and the course ends at the first entry into water (the mouth).
  */
-export function clipRiverAtWater(r: River, polys: Polygon[]): River | null {
-  const inside = (p: Vec2): boolean => { for (const pg of polys) if (polygonContains(pg, p)) return true; return false; };
+export function clipRiverAtWater(r: River, polys: Polygon[], holes: Polygon[] = []): River | null {
+  const inside = (p: Vec2): boolean => polys.some((pg) => polygonContains(pg, p)) && !holes.some((pg) => polygonContains(pg, p));
   const pts = r.path;
   const n = pts.length;
   if (n < 2 || !polys.length) return r;
