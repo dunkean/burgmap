@@ -34,10 +34,15 @@ Bug fixes take priority. The user requested a preliminary performance study, wit
 - [ ] Absorbed village greens: plausible village places rather than accidental triangles.
 - [ ] Stand-in fabric: useful intermediate detail before exact quarters arrive.
 - [ ] Five-million population: contain the full settlement on the map, with explicit extent handling when needed.
-- [ ] Fast/slow test projects and commands; run the entire suite before completion. Projects are implemented: `npm run test:fast` and `npm run test:slow`, while `npm test` runs both. Discovery covers all 59 current suites exactly once (58 fast, one exhaustive city matrix); 11 command-smoke tests and typecheck passed. The full run remains pending integration of the rendering fixes.
+- [ ] Fast/slow test projects and commands; run the entire suite before completion. Projects are implemented: `npm run test:fast` and `npm run test:slow`, while `npm test` runs both. The approved-source full run on 2026-10-04 completed all 63 files: 892 tests passed, 18 failed and four were skipped. The failures are the hydro/terrain and native-culture regressions described below; rerun the integrated suite after their remedies and the remaining feature blocks pass.
 - [x] Density-suite health (`52d71df`): final shanty shapes retain the 4.5 m width/aspect contract, with all 2,143 dwellings kept and all 53 formerly narrow huts corrected. Mature quarters retain their configured coverage instead of cumulative open-edge skips and coverage taper; actual faubourgs, setbacks and access remain. Grouped Astra + actual Opus 5.5 + Sonnet 5.5 reviews preceded validation; 73/73 tests, typecheck/build and inspected matched PNGs passed. Town seed 3 middle coverage is 74.19%, p4uefz 73.05%; all twelve density cases pass unchanged thresholds. Faubourg geometry and the walled control are byte-identical. Full-suite validation remains pending.
 - [ ] Ten-kilometre generation: reach the six-second target, retaining established output for pure optimisations.
 - [ ] Check capital loading and Medina/Persian town budgets on a quiet machine.
+
+### Full-suite regression audit
+
+- [x] Shoreline river identity and coastal roads (`e41b5dc`): drowned tributaries retain their real sea mouth instead of a vanished river host; lake mouths retain valid basin identity and external inflow. Road smoothing checks every crossed grid cell, preserves the untrimmed route, validates real junction connectors and refuses sea/lake shortcuts while retaining legitimate bridge/ford anchors. Grouped Astra + actual Opus 5.5 + actual Sonnet 5.5 reviews preceded 109 passing tests, typecheck/build and matched native SVG previews. The mountain reproduction keeps four roads and its two real bridges. Height, shore and channel-path hashes match the approved source on five cases. The shoreline-distance test now measures the actual edge with its original numeric tolerance.
+- [ ] Native cultural signatures: fifteen failing culture cases now pass in the reviewed culture worktree, but the new longhouse fitting check exposes excessive Iroquoian housing loss on town seeds 1/2. Preserve both the minimum dimensions and the existing served housing; do not relax their assertions. Culture integration and final full-suite validation remain pending.
 
 ## Culture and rendering quality
 
