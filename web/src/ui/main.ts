@@ -17,6 +17,7 @@ import { STYLE_LIST, isMapStyle, MapStyle } from '../render/styles';
 import type { Scene } from '../render/scene';
 import { buildScene } from '../render/scene';
 import { QuarterQueue } from './megaQueue';
+import { createQuarterExecutor } from './quarterPool';
 import { saveFile } from './download';
 import { worldToJson } from './exportWorld';
 import type { ImportedHeight } from '../gen/terrain/import';
@@ -25,7 +26,11 @@ import { scaleMaxPop } from '../gen/urban/culture';
 import { POP_RANGE } from '../gen/urban/phases';
 import { perf, rec, now as pnow } from './perf';
 import { OffscreenBackend, BackendEvents } from './backend';
-import type { DisplayOpts, GDone, SettlementMeta } from './protocol';
+import type { DisplayOpts, GDone, GResponse, SettlementMeta } from './protocol';
+import { FrameHandoff } from './frameHandoff';
+import { canWorkerExport, legacyGenerationResponse } from './generationMessages';
+import { exportPng } from './pngExport';
+import { exportSnapshot, type ExportSnapshot } from './exportSnapshot';
 import { initSettlementsUI, showSettlementWarnings } from './settlementsPanel';
 import { screenToWorld } from '../render/view';
 import { Pin, ViewState, fullQuery, uiStateFromQuery, bugReport } from './share';
@@ -226,18 +231,19 @@ let sceneCache: { world: World; contours: boolean; scene: Scene } | null = null;
 /** Offscreen mode: tiny summary of the world (center, name anchors) and the labels of the last frame, for the debug hooks. */
 let meta: GDone['meta'] | null = null;
 let lastLabels: { kind: string; text: string; size: number }[] = [];
-let doneFor = 0, finalFor = 0;
+const handoff = new FrameHandoff();
+const finalFrame = handoff.final;
+let mainPresentedGen = 0;
+let presentedWorld: World | null = null;
+let renderFailedGen = 0;
+let workerTextMeasure = false;
+let pendingDone: GDone | null = null;
+let pendingMain: { id: number; stats: Record<string, number | string>; ms: number } | null = null;
+let exportId = 0;
+const legacyExports = new Map<number, { resolve(blob: Blob): void; reject(error: Error): void }>();
 
 const display = (): DisplayOpts => ({ style: mapStyle(), contours: opts.contours, landuse: opts.landuse, labels: opts.labels, legend: opts.legend });
 const measureCtx = document.createElement('canvas').getContext('2d');
-const svgMeasure = (t: string, s: number, st: Parameters<typeof fontString>[0]): number => {
-  if (!measureCtx) return t.length * s * 0.5;
-  measureCtx.font = fontString(st, s, FONT_STACKS[opts.style]);
-  return measureCtx.measureText(t).width;
-};
-const currentSvg = (width?: number): string => (currentWorld
-  ? renderSvg(currentWorld, { width, style: mapStyle(), contours: opts.contours, landuse: opts.landuse, labels: opts.labels !== false, legend: !!opts.legend, measure: svgMeasure })
-  : '');
 
 /** (Re)build the renderer from the current world and the display options. */
 function rerender(keepView = true): void {
@@ -261,14 +267,19 @@ function rerender(keepView = true): void {
 function show(world: World, stats: Record<string, number | string>, ms: number): void {
   rec('genWorker', ms); rec('roundTrip', pnow() - genStart); rec('transfer', pnow() - genStart - ms);
   const tShow = pnow();
+  const previous = { world: currentWorld, scene: sceneCache };
   currentWorld = world;
-  rerender(true);
+  pendingMain = { id: reqId, stats, ms };
+  try { rerender(true); }
+  catch (error) {
+    currentWorld = previous.world; sceneCache = previous.scene; pendingMain = null;
+    backendEvents.onRenderError?.(reqId, String((error as Error)?.message ?? error));
+    return;
+  }
   rec('showSync', pnow() - tShow);
   perf.extra.stats = stats;
-  requestAnimationFrame(() => requestAnimationFrame(() => { rec('startToFrame', pnow() - genStart); perf.extra.doneAt = pnow(); }));
 // CANVAS-VIEWER (end show)
-  setBusy(false);
-  showStats(stats, ms);
+  setBusy(true, 'drawing');
 }
 
 function showStats(stats: Record<string, number | string>, ms: number): void {
@@ -289,7 +300,7 @@ const loadEl = $('loadbar');
 const loadFill = loadEl.firstElementChild as HTMLElement;
 const STAGE_FRAC: Record<string, [number, number]> = {
   starting: [0.01, 0.03], terrain: [0.03, 0.09], 'site & roads': [0.09, 0.2], town: [0.2, 0.6], settlements: [0.6, 0.68], villages: [0.68, 0.84],
-  'fields & woods': [0.85, 0.94], names: [0.94, 0.97],
+  'fields & woods': [0.85, 0.94], names: [0.94, 0.97], drawing: [0.97, 0.99],
 };
 let loadPos = 0, loadCeil = 0, loadTick: number | undefined, loadHide: number | undefined;
 function setLoad(on: boolean, stage = ''): void {
@@ -314,7 +325,7 @@ function setLoad(on: boolean, stage = ''): void {
 function setBusy(on: boolean, stage = ''): void {
   setLoad(on, stage);
   busyEl.classList.toggle('on', on);
-  progressEl.classList.toggle('on', on);
+  progressEl.classList.toggle('on', on || exporting);
   if (on) { busyEl.textContent = stage ? `generating: ${stage}...` : 'generating...'; genTimeEl.textContent = stage ? `Generating: ${stage}...` : 'Generating...'; }
 }
 
@@ -327,29 +338,43 @@ function applyPendingView(): void {
 
 // ---- offscreen mode events
 let firstContentGen = 0, firstFrameGen = 0, awaitVer = 0;
+function finishOffscreen(): void {
+  if (!finalFrame.ready || !pendingDone || pendingDone.id !== reqId || renderFailedGen === reqId) return;
+  const d = pendingDone; pendingDone = null;
+  meta = handoff.displayedMeta ?? d.meta;
+  showStats(d.stats, d.ms); setBusy(false);
+  rec('startToFrame', pnow() - genStart); perf.extra.doneAt = pnow();
+}
 const backendEvents: BackendEvents = {
-  onStage(id, stage) { if (id === reqId) setBusy(true, stage); },
+  onStage(id, stage) { if (id === reqId && renderFailedGen !== id) setBusy(true, stage); },
   onDone(d) {
     if (d.id !== reqId) return;
-    meta = d.meta; doneFor = d.id; detailAsked.clear();
+    pendingDone = d; finalFrame.generated(d.id); detailAsked.clear();
     rec('genWorker', d.ms); perf.extra.stats = d.stats;
-    showStats(d.stats, d.ms);
-    if (finalFor === d.id) setBusy(false);
+    if (renderFailedGen === d.id) { setBusy(false); return; }
+    if (!finalFrame.ready) setBusy(true, 'drawing');
+    finishOffscreen();
   },
   onError(id, error) {
     if (id !== reqId) return;
     setBusy(false); genTimeEl.textContent = 'Generation failed'; statusEl.textContent = 'Error: ' + error.split('\n')[0]; console.error(error);
   },
+  onRenderError(id, error) {
+    if (id !== reqId) return;
+    renderFailedGen = id;
+    setBusy(false); genTimeEl.textContent = 'Rendering failed'; statusEl.textContent = 'Error: ' + error.split('\n')[0];
+  },
   onContent(c) {
-    // new snapshot (terrain, then roads, then the town...) or a style change: redraw, keeping the view unless the map size changed
+    if (!handoff.acceptsContent(c.gen)) return;
+    // Final world or a display/detail rebuild: redraw, keeping the view unless the map size changed.
     viewer.contentChanged(c.mapSize, true, c.marker);
-    applyPendingView();
+    if (c.gen === reqId) applyPendingView();
     map.style.background = c.paper;
-    awaitVer = c.ver;
+    handoff.content(c.gen, c.ver, c.final, c.meta);
     if (c.gen !== reqId) return;
+    awaitVer = c.ver;
     if (firstContentGen !== c.gen) { firstContentGen = c.gen; rec('firstContent', pnow() - genStart); }
     rec(c.final ? 'sceneFinal' : 'scenePartial', c.sceneMs);
-    if (c.final) { finalFor = c.gen; if (doneFor === c.gen) setBusy(false); }
   },
   onDetail(d) {
     if (d.id !== reqId) return;
@@ -362,18 +387,22 @@ const backendEvents: BackendEvents = {
   },
   onQuarters(d) {
     if (d.id !== reqId) return;
-    megaProgress(d.done, d.queued, d.total);
+    megaProgress(d.done, d.queued, d.total, d.failed);
     rec('quarterSlice', d.ms);
   },
   onFrame(f) {
-    maybeDetail(f.view);
-    lastLabels = f.labels; if (f.bitmap) perf.extra.lastFrameView = f.view;
-    viewer.present(f);
-    if (awaitVer && f.ver >= awaitVer && f.bitmap) {
+    const presented = viewer.present(f, handoff.acceptsFrame(f.gen, f.ver));
+    if (!presented) return;
+    lastLabels = f.labels; perf.extra.lastFrameView = f.view;
+    handoff.presented(f.gen, f.ver);
+    meta = handoff.displayedMeta;
+    if (f.gen === reqId) renderFailedGen = 0;
+    if (f.gen === reqId && awaitVer && f.ver >= awaitVer && f.bitmap) {
       awaitVer = 0;
       if (firstFrameGen !== reqId) { firstFrameGen = reqId; rec('firstFrame', pnow() - genStart); }
-      if (finalFor === reqId && doneFor === reqId) { rec('startToFrame', pnow() - genStart); perf.extra.doneAt = pnow(); }
     }
+    finishOffscreen();
+    maybeDetail(f.view);
   },
   onFatal(msg) {
     setBusy(false); genTimeEl.textContent = 'Renderer stopped'; statusEl.textContent = 'A worker failed (' + msg + '): reload the page, or add ?render=main to the address.';
@@ -381,19 +410,32 @@ const backendEvents: BackendEvents = {
 };
 
 function spawnWorker(): void {
+  workerTextMeasure = false;
   try { worker = new GenWorker(); } catch { worker = null; legacyWorkerRefused = true; return; }
-  worker.onmessage = (e: MessageEvent<WorkerResponse>) => {
-    const r = e.data;
+  worker.onmessage = (e: MessageEvent<WorkerResponse | GResponse>) => {
+    const r = legacyGenerationResponse(e.data, {
+      exported(m) {
+        const p = legacyExports.get(m.id); legacyExports.delete(m.id);
+        if (m.blob) p?.resolve(m.blob); else p?.reject(new Error(m.error ?? 'export failed'));
+      },
+      quarters(m) { if (m.id === reqId) megaProgress(m.done, m.queued, m.total, m.failed); },
+      capabilities(ok) { workerTextMeasure = ok; },
+    });
+    if (!r) return;
     if (r.id !== reqId) return;
     if (r.stage) { setBusy(true, r.stage); return; }
     if (r.detail) { applyDetail(r.detail.index, r.detail.urban, r.detail.bridges); return; }
-    if (r.quarters) { applyQuarters(r.quarters.layers, r.quarters.drop); megaProgress(r.quarters.done, r.quarters.queued, r.quarters.total); return; }
+    if (r.quarters) { applyQuarters(r.quarters.layers, r.quarters.drop); megaProgress(r.quarters.done, r.quarters.queued, r.quarters.total, r.quarters.failed); return; }
     workerBusy = false;
     if (r.error) { setBusy(false); genTimeEl.textContent = 'Generation failed'; statusEl.textContent = 'Error: ' + r.error.split('\n')[0]; console.error(r.error); return; }
     show(r.world!, r.stats!, r.ms!);
   };
   // e.g. blob workers are refused on file:// - fall back to generating on the main thread
-  worker.onerror = () => { console.info('Generation worker unavailable (file:// ?), generating on the main thread'); worker = null; legacyWorkerRefused = true; workerBusy = false; run(); };
+  worker.onerror = () => {
+    for (const p of legacyExports.values()) p.reject(new Error('generation worker unavailable'));
+    legacyExports.clear();
+    console.info('Generation worker unavailable (file:// ?), generating on the main thread'); worker?.terminate(); worker = null; legacyWorkerRefused = true; workerBusy = false; run();
+  };
 }
 
 function genKey(): string {
@@ -403,6 +445,9 @@ function genKey(): string {
 function run(): void {
   if (!backendSettled) return; // the first run starts when the backend probe has answered
   const id = ++reqId;
+  handoff.begin(id); pendingDone = null; pendingMain = null; awaitVer = 0; renderFailedGen = 0;
+  for (const p of legacyExports.values()) p.reject(new Error('superseded'));
+  legacyExports.clear();
   detailAsked.clear();
   megaLocal?.stop(); megaLocal = null; megaRect = null;
   lastGenKey = genKey();
@@ -524,7 +569,21 @@ const hudEl = $('hud');
 const viewer = createViewer({
   container: map, canvas: canvasEl, minimap: $<HTMLCanvasElement>('minimap'),
   onView: (v, w, h) => { pinsUI.update(v, w, h); renderCoords(); if (viewReady) syncUrl(); },
-  onFrame: (ms, band, scale) => { maybeDetail(viewer.getView()); perf.frames.push(ms); if (perf.frames.length > 5000) perf.frames.shift(); hudEl.textContent = `${['far', 'mid', 'near'][band]} - ${scale.toFixed(3)} px/m - ${ms.toFixed(1)} ms`; },
+  onError: (error) => {
+    if (pendingMain?.id === reqId) backendEvents.onRenderError?.(reqId, String(error.message));
+    else console.error('canvas draw:', error);
+  },
+  onFrame: (ms, band, scale) => {
+    if (!backend && pendingMain?.id === reqId) {
+      const d = pendingMain; pendingMain = null;
+      renderFailedGen = 0;
+      mainPresentedGen = d.id;
+      showStats(d.stats, d.ms); setBusy(false);
+      rec('startToFrame', pnow() - genStart); perf.extra.doneAt = pnow();
+    }
+    if (!backend) presentedWorld = currentWorld;
+    maybeDetail(viewer.getView()); perf.frames.push(ms); if (perf.frames.length > 5000) perf.frames.shift(); hudEl.textContent = `${['far', 'mid', 'near'][band]} - ${scale.toFixed(3)} px/m - ${ms.toFixed(1)} ms`;
+  },
 });
 $('fit').addEventListener('click', () => viewer.fit());
 
@@ -590,6 +649,7 @@ function applyDetail(index: number, urban: NonNullable<World['urban']>, bridges:
 /** Detail level: settlements generated lazily are built when the view comes close enough (in a worker). */
 const DETAIL_SCALE = 0.12;
 function maybeDetail(v: { cx: number; cy: number; scale: number }): void {
+  if (busyEl.classList.contains('on') || renderFailedGen === reqId || (backend ? handoff.displayedGen !== reqId : mainPresentedGen !== reqId)) return;
   maybeQuarters(v);
   if (v.scale < DETAIL_SCALE) return;
   const r = map.getBoundingClientRect();
@@ -614,12 +674,13 @@ let megaRedraw: number | undefined;
 /** Settlements above this population are planned as megacities (macro plan + lazy quarters). */
 const megaPop = (): number => opts.eagerPop ?? EAGER_MAIN_POP;
 const isMega = (): boolean => (backend ? !!meta?.mega || settlementList().some((s) => s.index > 0 && s.population > megaPop()) : !!currentWorld?.urban?.macro || !!currentWorld?.settlements?.some((s) => s.urban?.macro));
-function megaProgress(done: number, queued: number, total: number): void {
+function megaProgress(done: number, queued: number, total: number, failed = 0): void {
   statusEl.textContent = queued > 0 ? `Detailing quarters: ${done} ready, ${queued} queued (of ${total})` : `${done} of ${total} quarters detailed (zoom in elsewhere for more)`;
+  if (failed) statusEl.textContent += `; ${failed} unavailable`;
 }
 /** Main-thread / legacy mode: detailed quarters merged into the World, redrawn at most every 400 ms. */
 function applyQuarters(layers: Record<number, NonNullable<World['urban']>>, drop: number[]): void {
-  if (!currentWorld) return;
+  if (!currentWorld || (!Object.keys(layers).length && !drop.length)) return;
   const det = { ...(currentWorld.megaDetail ?? {}), ...layers };
   for (const id of drop) delete det[id];
   currentWorld = { ...currentWorld, megaDetail: det };
@@ -637,7 +698,7 @@ function maybeQuarters(v: { cx: number; cy: number; scale: number }): void {
   if (backend) backend.quarters(reqId, rect);
   else if (worker) worker.postMessage({ type: 'quarters', id: reqId, rect });
   else if (currentWorld) {
-    megaLocal ??= new QuarterQueue(currentWorld, (layers, drop, st) => { applyQuarters(layers, drop); megaProgress(st.done, st.queued, st.total); });
+    megaLocal ??= new QuarterQueue(currentWorld, (layers, drop, st) => { applyQuarters(layers, drop); megaProgress(st.done, st.queued, st.total, st.failed); }, 420, 150, createQuarterExecutor(currentWorld));
     megaLocal.request(rect);
   }
 }
@@ -680,6 +741,7 @@ map.addEventListener('pointerdown', () => $('app').classList.remove('open'));
   world: () => currentWorld,
   options: () => opts,
   mode: () => (backend ? 'offscreen' : 'main'),
+  rendering: () => ({ gen: reqId, displayedGen: backend ? handoff.displayedGen : mainPresentedGen, finalVer: finalFrame.finalVer, frameVer: finalFrame.presentedVer, ready: backend ? finalFrame.ready && renderFailedGen !== reqId : mainPresentedGen === reqId && !pendingMain && !busyEl.classList.contains('on') }),
   /** Labels placed in the last frame (kind, text, size). */
   labels: () => (backend ? lastLabels : (currentRenderer?.lastPlaced() ?? []).map((p) => ({ kind: p.label.kind, text: p.label.text, size: p.size }))),
   /** Center of the settlement (site center / urban footprint centroid). */
@@ -693,7 +755,6 @@ map.addEventListener('pointerdown', () => $('app').classList.remove('open'));
 // CANVAS-VIEWER (end viewer)
 
 // ---------- export ----------
-const fname = () => `burgmap-${opts.seed}-${opts.size}`;
 /** Save through the Artifact viewer's downloads capability when present, else a plain download. */
 async function exportFile(name: string, data: Blob | string, mime: string): Promise<void> {
   try {
@@ -703,34 +764,59 @@ async function exportFile(name: string, data: Blob | string, mime: string): Prom
     statusEl.textContent = 'Export failed: ' + (e as Error).message;
   }
 }
-/** SVG / JSON of the current world as a Blob: built in the generation worker (offscreen mode) so the page never blocks, or here. */
-async function buildExport(kind: 'svg' | 'json', full = false, width?: number): Promise<Blob> {
+function captureExport(): ExportSnapshot {
+  if (busyEl.classList.contains('on') || genKey() !== lastGenKey) throw new Error('the map is still being generated');
+  if (renderFailedGen === reqId || (backend && !finalFrame.ready)) throw new Error('the requested map has not been presented');
+  return exportSnapshot(opts, backend ? null : presentedWorld, reqId, backend ? handoff.displayedGen : mainPresentedGen);
+}
+/** SVG / JSON in the retained generation worker, including the main-render fallback when its worker is available. */
+async function buildExport(snapshot: ExportSnapshot, kind: 'svg' | 'json', full = false, width?: number): Promise<Blob> {
   const t = pnow();
   let blob: Blob;
-  if (backend) blob = await backend.export(kind, display(), full, width);
+  if (backend) blob = await backend.export(snapshot.gen, kind, snapshot.display, full, width);
+  else if (worker && canWorkerExport(kind, workerTextMeasure)) {
+    blob = await new Promise<Blob>((resolve, reject) => {
+      const id = ++exportId;
+      legacyExports.set(id, { resolve, reject });
+      try { worker!.postMessage({ type: 'export', id, gen: snapshot.gen, kind, display: snapshot.display, full, width }); }
+      catch (error) { legacyExports.delete(id); reject(error); }
+    });
+  }
   else {
-    if (!currentWorld) throw new Error('nothing to export yet');
-    if (full && currentWorld.urban?.macro) {
+    let world = snapshot.world;
+    if (!world) throw new Error('nothing to export yet');
+    if (full && world.urban?.macro) {
       // megacity: every quarter's detail first (tile by tile; slow)
-      const q = megaLocal ?? new QuarterQueue(currentWorld, () => {});
-      currentWorld = { ...currentWorld, megaDetail: q.all() };
+      const q = megaLocal ?? new QuarterQueue(world, () => {});
+      world = { ...world, megaDetail: q.all() };
     }
     await new Promise((r) => setTimeout(r, 30)); // let the progress message paint before the synchronous build
+    const d = snapshot.display;
+    const measure = (text: string, size: number, style: Parameters<typeof fontString>[0]): number => {
+      if (!measureCtx) return text.length * size * 0.5;
+      measureCtx.font = fontString(style, size, FONT_STACKS[d.style]);
+      return measureCtx.measureText(text).width;
+    };
     blob = kind === 'svg'
-      ? new Blob([currentSvg(width)], { type: 'image/svg+xml' })
-      : new Blob([worldToJson(currentWorld)], { type: 'application/json' });
+      ? new Blob([renderSvg(world, { width, style: d.style, contours: d.contours, landuse: d.landuse, labels: d.labels !== false, legend: !!d.legend, measure })], { type: 'image/svg+xml' })
+      : new Blob([worldToJson(world)], { type: 'application/json' });
   }
   rec(kind === 'svg' ? 'exportSvg' : 'exportJson', pnow() - t);
   perf.extra.svgBytes = blob.size;
   return blob;
 }
 /** Run an export job with visible progress (button label, progress bar, status line) and report failures. */
-async function withProgress(btn: HTMLButtonElement, label: string, job: () => Promise<void>): Promise<void> {
+let exporting = false;
+async function withProgress(btn: HTMLButtonElement, label: string, job: (snapshot: ExportSnapshot, progress: (label: string) => void) => Promise<void>): Promise<void> {
+  if (exporting) return;
   const text = btn.textContent;
-  btn.disabled = true; btn.textContent = label;
+  const buttons = [exportSvgBtn, exportPngBtn, exportJsonBtn, exportFullBtn];
+  const disabled = buttons.map((b) => b.disabled);
+  exporting = true; buttons.forEach((b) => { b.disabled = true; }); btn.textContent = label;
   progressEl.classList.add('on'); statusEl.textContent = label.replace(/\.\.\.$/, '') + ' in the background...';
-  try { await job(); } catch (e) { statusEl.textContent = 'Export failed: ' + (e as Error).message; } finally {
-    btn.disabled = false; btn.textContent = text;
+  const progress = (message: string): void => { btn.textContent = message; if (!busyEl.classList.contains('on')) statusEl.textContent = message; };
+  try { await job(captureExport(), progress); } catch (e) { statusEl.textContent = 'Export failed: ' + (e as Error).message; } finally {
+    exporting = false; buttons.forEach((b, i) => { b.disabled = disabled[i]; }); btn.textContent = text;
     if (!busyEl.classList.contains('on')) progressEl.classList.remove('on');
   }
 }
@@ -739,50 +825,29 @@ const exportPngBtn = $<HTMLButtonElement>('exportPng');
 const exportJsonBtn = $<HTMLButtonElement>('exportJson');
 const exportFullBtn = $<HTMLButtonElement>('exportSvgFull');
 exportFullBtn.addEventListener('click', () => {
-  void withProgress(exportFullBtn, 'Detailing all quarters...', async () => {
-    await exportFile(fname() + '-full.svg', await buildExport('svg', true), 'image/svg+xml');
+  void withProgress(exportFullBtn, 'Detailing all quarters...', async (snapshot) => {
+    await exportFile(snapshot.name + '-full.svg', await buildExport(snapshot, 'svg', true), 'image/svg+xml');
   });
 });
 exportSvgBtn.addEventListener('click', () => {
-  void withProgress(exportSvgBtn, 'Building SVG...', async () => {
-    await exportFile(fname() + '.svg', await buildExport('svg'), 'image/svg+xml');
+  void withProgress(exportSvgBtn, 'Building SVG...', async (snapshot) => {
+    await exportFile(snapshot.name + '.svg', await buildExport(snapshot, 'svg'), 'image/svg+xml');
   });
 });
 exportJsonBtn.addEventListener('click', () => {
-  void withProgress(exportJsonBtn, 'Building JSON...', async () => {
-    await exportFile(fname() + '.json', await buildExport('json'), 'application/json');
+  void withProgress(exportJsonBtn, 'Building JSON...', async (snapshot) => {
+    await exportFile(snapshot.name + '.json', await buildExport(snapshot, 'json'), 'application/json');
   });
 });
 exportPngBtn.addEventListener('click', () => {
-  void withProgress(exportPngBtn, 'Rendering PNG...', async () => {
+  void withProgress(exportPngBtn, 'Building SVG...', async (snapshot, progress) => {
     const tP = pnow();
-    const svgBlob = await buildExport('svg', false, 3000);
+    const svgBlob = await buildExport(snapshot, 'svg', false, 3000);
     rec('pngSvg', pnow() - tP);
-    // rasterize through an <img> (the browser decodes the SVG off the UI path as far as it can)
-    const png = await new Promise<Blob | null>((resolve) => {
-      const load = (src: string, revoke?: () => void): void => {
-        const img = new Image();
-        img.onload = () => {
-          const S = 3000;
-          const c = document.createElement('canvas');
-          c.width = S; c.height = S;
-          c.getContext('2d')!.drawImage(img, 0, 0, S, S);
-          revoke?.();
-          c.toBlob((b) => resolve(b), 'image/png');
-        };
-        img.onerror = () => {
-          revoke?.();
-          // some hosts refuse blob: images: retry once with a data: URL
-          if (src.startsWith('blob:')) void svgBlob.text().then((svg) => load('data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg)));
-          else resolve(null);
-        };
-        img.src = src;
-      };
-      const url = URL.createObjectURL(svgBlob);
-      load(url, () => URL.revokeObjectURL(url));
-    });
+    const png = await exportPng(svgBlob, 3000, (phase) => progress(phase === 'decode' ? 'Decoding SVG...' : phase === 'raster' ? 'Drawing SVG...' : phase === 'snapshot' ? 'Preparing PNG pixels...' : 'Encoding PNG...'));
     rec('exportPng', pnow() - tP);
-    if (png) await exportFile(fname() + '.png', png, 'image/png'); else statusEl.textContent = 'PNG export failed';
+    progress('Saving PNG...');
+    await exportFile(snapshot.name + '.png', png, 'image/png');
   });
 });
 

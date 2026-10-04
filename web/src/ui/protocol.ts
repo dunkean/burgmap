@@ -17,7 +17,7 @@ export interface DisplayOpts { style: MapStyle; contours?: boolean; landuse?: bo
 
 // ---- M -> G ----
 export interface GRun { type: 'run'; id: number; options: Options; /** snapshot channel to the render worker */ port: MessagePort }
-export interface GExport { type: 'export'; id: number; kind: 'svg' | 'json'; display: DisplayOpts; /** Actual SVG raster export width in pixels; omitted for intrinsic SVG. */ width?: number; /** megacity: generate the detail of every quarter first (slow) */ full?: boolean }
+export interface GExport { type: 'export'; id: number; gen: number; kind: 'svg' | 'json'; display: DisplayOpts; /** Actual SVG raster export width in pixels; omitted for intrinsic SVG. */ width?: number; /** megacity: generate the detail of every quarter first (slow) */ full?: boolean }
 /** Lazy detail (M3c): generate the plan of secondary settlement `index` of run `id`. */
 export interface GDetail { type: 'detail'; id: number; index: number }
 /**
@@ -38,11 +38,12 @@ export interface GDone {
   meta: { center: Vec2; anchors: Record<string, Vec2[]>; mapSize: number; settlements?: SettlementMeta[]; /** megacity: lazily detailed quarters */ mega?: { quarters: number; cityR: number } };
 }
 /** Megacity: progress of the quarter detail queue. */
-export interface GQuartersDone { type: 'quartersDone'; id: number; done: number; queued: number; total: number; ms: number }
+export interface GQuartersDone { type: 'quartersDone'; id: number; done: number; queued: number; total: number; ms: number; failed?: number }
 export interface GDetailDone { type: 'detailDone'; id: number; index: number; ms: number; error?: string }
 export interface GError { type: 'error'; id: number; error: string }
 export interface GExported { type: 'exported'; id: number; kind: 'svg' | 'json'; blob?: Blob; error?: string; ms: number }
-export type GResponse = GStage | GDone | GError | GExported | GDetailDone | GQuartersDone;
+export interface GCapabilities { type: 'capabilities'; textMeasure: boolean }
+export type GResponse = GStage | GDone | GError | GExported | GDetailDone | GQuartersDone | GCapabilities;
 
 // ---- G -> R (snapshot port) ----
 export interface WorldMsg { type: 'world'; gen: number; world: World; final: boolean; stage: string }
@@ -63,11 +64,11 @@ export type RRequest = RInit | RAttach | RDisplay | RView | RPng;
 // ---- R -> M ----
 export interface RReady { type: 'ready'; ok: boolean; reason?: string }
 /** The drawn content changed (new snapshot / style): the viewer should re-request a frame (and fit if the map size changed). */
-export interface RContent { type: 'content'; gen: number; ver: number; mapSize: number; final: boolean; sceneMs: number; marker: string; paper: string }
+export interface RContent { type: 'content'; gen: number; ver: number; mapSize: number; final: boolean; sceneMs: number; marker: string; paper: string; meta: GDone['meta'] }
 export interface RFrame {
-  type: 'frame'; seq: number; ver: number; view: View; w: number; h: number; dpr: number;
+  type: 'frame'; gen: number; seq: number; ver: number; view: View; w: number; h: number; dpr: number;
   bitmap?: ImageBitmap; mini?: ImageBitmap;
   ms: number; band: number; scale: number;
   labels: { kind: string; text: string; size: number }[];
 }
-export type RResponse = RReady | RContent | RFrame | { type: 'error'; error: string };
+export type RResponse = RReady | RContent | RFrame | { type: 'error'; gen: number; error: string };

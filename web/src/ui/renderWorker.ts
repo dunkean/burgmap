@@ -11,6 +11,7 @@ import { buildScene, Scene } from '../render/scene';
 import { biomePalette } from '../render/biomes';
 import type { World } from '../gen/types';
 import type { RRequest, RResponse, RView, DisplayOpts, WorldMsg, RAttach, PortMsg, SettlementMsg, QuarterMsg } from './protocol';
+import { worldMeta } from './worldMeta';
 
 const ctx = self as unknown as Worker;
 const post = (r: RResponse, transfer: Transferable[] = []): void => ctx.postMessage(r, transfer);
@@ -19,8 +20,11 @@ let canvas: OffscreenCanvas | null = null;
 let miniCanvas: OffscreenCanvas | null = null;
 let display: DisplayOpts = { style: 'parchment' };
 let gen = -1;
+/** The renderer can still hold the preceding run while the new generation is in progress. */
+let worldGen = -1;
 let port: MessagePort | null = null;
 let world: World | null = null;
+let metaCache: { world: World; meta: ReturnType<typeof worldMeta> } | null = null;
 let final = false;
 let sceneCache: { world: World; contours: boolean; scene: Scene } | null = null;
 let renderer: CanvasRenderer | null = null;
@@ -49,10 +53,10 @@ function rebuild(): number {
   if (!sceneCache || sceneCache.world !== world || sceneCache.contours !== !!display.contours) {
     sceneCache = { world, contours: !!display.contours, scene: buildScene(w) };
   }
-  renderer?.dispose();
   // `dpr` stays a live getter: the page's devicePixelRatio can change between frames
-  renderer = createCanvasRenderer(canvas as unknown as CanvasLike, w, display.style, { scene: sceneCache.scene, get dpr(): number { return curDpr; } });
-  renderer.setOverlays({ cartouche: final }); // the title block needs the names: skip it on partial snapshots
+  const next = createCanvasRenderer(canvas as unknown as CanvasLike, w, display.style, { scene: sceneCache.scene, get dpr(): number { return curDpr; } });
+  next.setOverlays({ cartouche: final });
+  renderer?.dispose(); renderer = next;
   miniDirty = true; ver++;
   return performance.now() - t0;
 }
@@ -60,19 +64,24 @@ function rebuild(): number {
 function announce(sceneMs: number): void {
   if (!world) return;
   const pal = biomePalette(display.style, world.options.biome);
-  post({ type: 'content', gen, ver, mapSize: world.mapSize, final, sceneMs, marker: pal.marker, paper: pal.paper });
+  if (!metaCache || metaCache.world !== world) metaCache = { world, meta: worldMeta(world) };
+  post({ type: 'content', gen: worldGen, ver, mapSize: world.mapSize, final, sceneMs, marker: pal.marker, paper: pal.paper, meta: metaCache.meta });
 }
 
 function onWorld(m: WorldMsg): void {
-  if (m.gen !== gen) return;
-  world = m.world; final = m.final;
+  if (m.gen !== gen || !m.final) return;
+  const previous = { world, worldGen, final, sceneCache };
+  world = m.world; worldGen = m.gen; final = true;
   sceneCache = null;
-  announce(rebuild());
+  let sceneMs: number;
+  try { sceneMs = rebuild(); }
+  catch (error) { ({ world, worldGen, final, sceneCache } = previous); throw error; }
+  announce(sceneMs);
 }
 
 /** A lazily generated settlement plan (M3c): merged into the World, the scene is rebuilt. */
 function onSettlement(m: SettlementMsg): void {
-  if (m.gen !== gen || !world) return;
+  if (m.gen !== gen || m.gen !== worldGen || !world) return;
   const list = world.settlements ? world.settlements.slice() : [];
   if (!list[m.index]) return;
   list[m.index] = { ...list[m.index], urban: m.urban };
@@ -88,7 +97,7 @@ function onSettlement(m: SettlementMsg): void {
 let megaTimer: ReturnType<typeof setTimeout> | null = null;
 let megaLast = 0;
 function onQuarters(m: QuarterMsg): void {
-  if (m.gen !== gen || !world) return;
+  if (m.gen !== gen || m.gen !== worldGen || !world) return;
   const det = { ...(world.megaDetail ?? {}), ...m.layers };
   for (const id of m.drop) delete det[id];
   world = { ...world, megaDetail: det };
@@ -103,17 +112,18 @@ function onQuarters(m: QuarterMsg): void {
 
 function onAttach(m: RAttach): void {
   port?.close();
+  if (megaTimer) { clearTimeout(megaTimer); megaTimer = null; }
   gen = m.gen; port = m.port;
   port.onmessage = (e: MessageEvent<PortMsg>): void => {
-    try { if (e.data.type === 'settlement') onSettlement(e.data); else if (e.data.type === 'quarters') onQuarters(e.data); else onWorld(e.data as WorldMsg); } catch (err) { post({ type: 'error', error: String((err as Error)?.stack ?? err) }); }
+    try { if (e.data.type === 'settlement') onSettlement(e.data); else if (e.data.type === 'quarters') onQuarters(e.data); else onWorld(e.data as WorldMsg); } catch (err) { post({ type: 'error', gen: e.data.gen, error: String((err as Error)?.stack ?? err) }); }
   };
-  // the previous world stays on screen until the first snapshot of the new one arrives
+  // Stage snapshots do not replace the preceding map. Only the final scene can produce its replacement bitmap.
 }
 
 function onView(v: RView): void {
   lastView = v;
   curDpr = v.dpr;
-  if (!renderer || !canvas) { post({ type: 'frame', seq: v.seq, ver, view: v.view, w: v.w, h: v.h, dpr: v.dpr, ms: 0, band: 0, scale: v.view.scale, labels: [] }); return; }
+  if (!renderer || !canvas) { post({ type: 'frame', gen: worldGen, seq: v.seq, ver, view: v.view, w: v.w, h: v.h, dpr: v.dpr, ms: 0, band: 0, scale: v.view.scale, labels: [] }); return; }
   const pw = Math.max(1, Math.round(v.w * v.dpr)), ph = Math.max(1, Math.round(v.h * v.dpr));
   if (canvas.width !== pw || canvas.height !== ph) { canvas.width = pw; canvas.height = ph; }
   const st = renderer.draw(v.view);
@@ -128,7 +138,7 @@ function onView(v: RView): void {
     miniDirty = false; miniSize = v.mini;
   }
   const labels = renderer.lastPlaced().map((p) => ({ kind: p.label.kind, text: p.label.text, size: p.size }));
-  post({ type: 'frame', seq: v.seq, ver, view: v.view, w: v.w, h: v.h, dpr: v.dpr, bitmap, mini, ms: st.ms, band: st.band, scale: st.scale, labels }, out);
+  post({ type: 'frame', gen: worldGen, seq: v.seq, ver, view: v.view, w: v.w, h: v.h, dpr: v.dpr, bitmap, mini, ms: st.ms, band: st.band, scale: st.scale, labels }, out);
 }
 
 ctx.onmessage = (e: MessageEvent<RRequest>): void => {
@@ -149,12 +159,12 @@ ctx.onmessage = (e: MessageEvent<RRequest>): void => {
         break;
       }
       case 'view': onView(m); break;
-      case 'dispose': port?.close(); renderer?.dispose(); world = null; renderer = null; break;
+      case 'dispose': port?.close(); renderer?.dispose(); world = null; metaCache = null; renderer = null; break;
     }
   } catch (err) {
-    post({ type: 'error', error: String((err as Error)?.stack ?? err) });
+    post({ type: 'error', gen: worldGen, error: String((err as Error)?.stack ?? err) });
     // never leave the page waiting for a frame
-    if (m.type === 'view') post({ type: 'frame', seq: m.seq, ver, view: m.view, w: m.w, h: m.h, dpr: m.dpr, ms: 0, band: 0, scale: m.view.scale, labels: [] });
+    if (m.type === 'view') post({ type: 'frame', gen: worldGen, seq: m.seq, ver, view: m.view, w: m.w, h: m.h, dpr: m.dpr, ms: 0, band: 0, scale: m.view.scale, labels: [] });
   }
 };
 void lastView;

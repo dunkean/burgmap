@@ -11,12 +11,49 @@ import type { UrbanCtx } from '../context';
 import type { EnclosurePlan, RoadIn } from '../phases';
 import { dilate } from '../phases';
 import { fortifyRegion } from '../fortify';
-import { MultiPoly, unionS, intersectionS, differenceS, mpArea } from '../../geo/bool';
-import { area, pointInRing, orientPos, cleanRing } from '../../geo/poly';
+import { MultiPoly, unionS, intersectionS, differenceS, mpArea, tryIntersection, tryDifference } from '../../geo/bool';
+import { area, pointInRing, orientPos, cleanRing, obb, isSimple } from '../../geo/poly';
 import { ribbon, sweepLeft } from '../../geo/offset';
 import type { ReserveApi, ReservedLot } from '../primary';
 import { inMP, plAt, plLen, nearestOnPl, clearOfStreets, polysNear, TAU } from './lots';
 import { phaseAt, type M4State } from './reserve';
+
+/** A roadside place uses a length of road, not the number/density of its sampled vertices. */
+export function villageGreen(core: Polygon, road: Polyline, center: Vec2, depth: number, side: number): Polygon | null {
+  if (road.length < 2) return null;
+  const nn = nearestOnPl(road, center);
+  let s = dist(road[nn.i - 1], nn.q);
+  for (let i = 1; i < nn.i; i++) s += dist(road[i - 1], road[i]);
+  const start = Math.max(0, s - 32), end = Math.min(plLen(road), s + 32);
+  if (end - start < 40) return null;
+  const sub = [plAt(road, start).p];
+  let acc = 0;
+  for (let i = 1; i < road.length; i++) {
+    acc += dist(road[i - 1], road[i]);
+    if (acc > start + 1e-6 && acc < end - 1e-6) sub.push(road[i]);
+  }
+  sub.push(plAt(road, end).p);
+  const path = side > 0 ? sub : sub.slice().reverse();
+  const swept = sweepLeft(path, path.map(() => depth));
+  const clipped = tryIntersection(swept, core);
+  if (clipped.failed) return null;
+  const pieces = clipped.pieces.filter((p) => !p.holes.length).sort((a, b) => area(b.outer) - area(a.outer));
+  for (const p of pieces) {
+    const ring = orientPos(cleanRing(p.outer, 0.01, 0.01, Infinity, false));
+    const o = obb(ring);
+    // Reject clipped tips: an absorbed village needs a usable place rather than a leftover triangle.
+    if (ring.length < 4 || !isSimple(ring) || area(ring) < 700 || 2 * o.hv < 18 || o.hu / o.hv > 3) continue;
+    // The selected component must retain its road edge after containment clipping.
+    const frontage = ring.reduce((sum, a, i) => {
+      const b = ring[(i + 1) % ring.length];
+      const m = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      return sum + (nearestOnPl(path, a).d < 0.01 && nearestOnPl(path, b).d < 0.01 && nearestOnPl(path, m).d < 0.01 ? dist(a, b) : 0);
+    }, 0);
+    const outside = tryDifference(ring, core);
+    if (frontage >= 20 && !outside.failed && mpArea(outside.pieces) < 1e-6) return ring;
+  }
+  return null;
+}
 
 /** Wraps the walled town and its nearest suburbs in a later polygonal enclosure; the old line fossilizes. */
 export function outerEnclosure(ctx: UrbanCtx, ep: EnclosurePlan, faub: MultiPoly, pop: number): boolean {
@@ -112,7 +149,7 @@ export function joinVillages(faub: MultiPoly, villages: Village[], enclosure: Mu
 }
 
 /** The village cores as quarters of their own (zone village) and a green on the road at their centre. */
-export function reserveVillages(s: M4State, api: ReserveApi, villages: Village[], avoid: Polygon[]): ReservedLot[] {
+export function reserveVillages(s: M4State, api: ReserveApi, villages: Village[], avoid: Polygon[], cityPlaces = false): ReservedLot[] {
   const out: ReservedLot[] = [];
   villages.forEach((v, k) => {
     const core = v.core;
@@ -126,18 +163,31 @@ export function reserveVillages(s: M4State, api: ReserveApi, villages: Village[]
     }
     const lots: ReservedLot[] = [];
     if (best) {
-      const nn = nearestOnPl(best.pl, v.c);
-      const sub: Vec2[] = [];
-      for (let i = 0; i < best.pl.length; i++) if (dist(best.pl[i], nn.q) < 38) sub.push(best.pl[i]);
-      if (sub.length >= 3 && plLen(sub) > 40) {
+      if (cityPlaces) {
         const depth = s.rng.fork('green:' + k).range(26, 36);
         for (const side of [1, -1]) {
-          const sw = side > 0 ? sweepLeft(sub, sub.map(() => depth)) : sweepLeft(sub.slice().reverse(), sub.map(() => depth));
-          if (sw.length < 3 || !pointInRing(core, polygonCentroid(sw)) || !clearOfStreets(sw, api.streets, 3, new Set([best.id]))) continue;
-          if (avoid.some((a) => polysNear(sw, a, 4))) continue;
+          const sw = villageGreen(core, best.pl, v.c, depth, side);
+          if (!sw || !clearOfStreets(sw, api.streets, 3, new Set([best.id])) || avoid.some((a) => polysNear(sw, a, 4))) continue;
+          // A place must survive the later natural-water clipping as a whole usable component.
+          if (s.ctx.water.length && mpArea(intersectionS(sw, s.ctx.water)) > 0.01) continue;
           const ph = phaseAt(api, polygonCentroid(sw));
-          lots.push({ id: 'green:' + k, kind: 'm4-green', poly: orientPos(sw), phase: ph.phase, zone: 'village', cuts: [], piece: 'place' });
+          lots.push({ id: 'green:' + k, kind: 'm4-green', poly: sw, phase: ph.phase, zone: 'village', cuts: [], piece: 'place' });
           break;
+        }
+      } else {
+        const nn = nearestOnPl(best.pl, v.c);
+        const sub: Vec2[] = [];
+        for (let i = 0; i < best.pl.length; i++) if (dist(best.pl[i], nn.q) < 38) sub.push(best.pl[i]);
+        if (sub.length >= 3 && plLen(sub) > 40) {
+          const depth = s.rng.fork('green:' + k).range(26, 36);
+          for (const side of [1, -1]) {
+            const sw = side > 0 ? sweepLeft(sub, sub.map(() => depth)) : sweepLeft(sub.slice().reverse(), sub.map(() => depth));
+            if (sw.length < 3 || !pointInRing(core, polygonCentroid(sw)) || !clearOfStreets(sw, api.streets, 3, new Set([best.id]))) continue;
+            if (avoid.some((a) => polysNear(sw, a, 4))) continue;
+            const ph = phaseAt(api, polygonCentroid(sw));
+            lots.push({ id: 'green:' + k, kind: 'm4-green', poly: orientPos(sw), phase: ph.phase, zone: 'village', cuts: [], piece: 'place' });
+            break;
+          }
         }
       }
     }

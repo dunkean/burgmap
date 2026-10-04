@@ -38,6 +38,7 @@ export interface LineLayer {
 export interface DensityMap { w: number; h: number; cell: number; /** built-up fraction 0..1 */ cov: Float32Array; max: number }
 export interface TextureArea { kind: LandKind; poly: Polygon; holes?: Polygon[] }
 export interface TextureLayer { kind: LandKind; areas: TextureArea[]; index: TileIndex }
+export interface FurrowArea { poly: Polygon; holes?: Polygon[]; strips: Polygon[]; angle: number }
 
 export interface Scene {
   mapSize: number;
@@ -45,6 +46,7 @@ export interface Scene {
   poly: Map<string, PolyLayer>;
   lines: LineLayer[];
   textures: TextureLayer[];
+  furrows?: { areas: FurrowArea[]; index: TileIndex };
   density: DensityMap | null;
   /** Number of source geometries indexed (for stats). */
   counts: Record<string, number>;
@@ -194,6 +196,7 @@ export function buildScene(world0: World, tileSize = TILE_SIZE): Scene {
 
   // land use
   const textures: TextureLayer[] = [];
+  const furrowAreas: FurrowArea[] = [];
   const lu = world.landuse;
   if (lu) {
     const tones: Polygon[][] = [[], [], [], []];
@@ -207,6 +210,7 @@ export function buildScene(world0: World, tileSize = TILE_SIZE): Scene {
       if (a.kind === 'field') {
         if (!(a as { enclosed?: boolean }).enclosed) { open.push(a.poly); open_h.push(a.holes); }
         if (a.strips && a.stripAngle !== undefined) {
+          if (a.strips.length && Number.isFinite(a.stripAngle)) furrowAreas.push({ poly: a.poly, holes: a.holes, strips: a.strips, angle: a.stripAngle });
           a.strips.forEach((s, i) => tones[(i * 5 + fi * 3 + (i >> 2)) & 3].push(s));
           fi++;
         }
@@ -386,7 +390,8 @@ export function buildScene(world0: World, tileSize = TILE_SIZE): Scene {
 
   const density = buildDensity(world);
   const t1 = typeof performance !== 'undefined' ? performance.now() : Date.now();
-  return { mapSize: S, tileSize, poly, lines, textures, density, counts, buildMs: t1 - t0 };
+  const furrows = furrowAreas.length ? { areas: furrowAreas, index: new TileIndex(S, tileSize, boxesOf(furrowAreas.map((a) => a.poly)), 'overlap') } : undefined;
+  return { mapSize: S, tileSize, poly, lines, textures, furrows, density, counts, buildMs: t1 - t0 };
 }
 
 /** Deterministic integer hash -> [0,1). Independent of view/tile so marks never flicker. */

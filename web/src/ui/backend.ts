@@ -14,6 +14,7 @@ export interface BackendEvents {
   onStage(id: number, stage: string): void;
   onDone(d: GDone): void;
   onError(id: number, error: string): void;
+  onRenderError?(id: number, error: string): void;
   onContent(c: RContent): void;
   onFrame(f: RFrame): void;
   /** A worker died after startup. */
@@ -28,6 +29,7 @@ export class OffscreenBackend {
   private gen: Worker | null = null;
   private busy = false;
   private exportId = 0;
+  private currentRun = 0;
   private pending = new Map<number, { resolve(b: Blob): void; reject(e: Error): void }>();
 
   private constructor(private render: Worker, private ev: BackendEvents) {
@@ -35,7 +37,7 @@ export class OffscreenBackend {
       const r = e.data;
       if (r.type === 'content') ev.onContent(r);
       else if (r.type === 'frame') ev.onFrame(r);
-      else if (r.type === 'error') console.error('render worker:', r.error);
+      else if (r.type === 'error') { console.error('render worker:', r.error); ev.onRenderError?.(r.gen, r.error); }
     };
     render.onerror = (e): void => { ev.onFatal(e.message || 'render worker error'); };
   }
@@ -82,7 +84,12 @@ export class OffscreenBackend {
         }
       }
     };
-    g.onerror = (e): void => { this.busy = false; this.gen = null; this.ev.onFatal(e.message || 'generation worker error'); };
+    g.onerror = (e): void => {
+      this.busy = false; this.gen = null;
+      for (const p of this.pending.values()) p.reject(new Error('generation worker unavailable'));
+      this.pending.clear(); g.terminate();
+      this.ev.onFatal(e.message || 'generation worker error');
+    };
     return g;
   }
 
@@ -90,6 +97,7 @@ export class OffscreenBackend {
 
   /** Generate `options` as run `id`; a running generation is superseded (its worker is restarted, as generation cannot be interrupted). */
   run(id: number, options: Options): void {
+    this.currentRun = id;
     if (this.gen && this.busy) { this.gen.terminate(); this.gen = null; }
     this.gen ??= this.spawnGen();
     for (const [, p] of this.pending) p.reject(new Error('superseded'));
@@ -117,12 +125,13 @@ export class OffscreenBackend {
   request(r: FrameRequest): void { this.render.postMessage({ type: 'view', ...r }); }
 
   /** Build the SVG / JSON of the current world in the generation worker. */
-  export(kind: 'svg' | 'json', display: DisplayOpts, full = false, width?: number): Promise<Blob> {
+  export(gen: number, kind: 'svg' | 'json', display: DisplayOpts, full = false, width?: number): Promise<Blob> {
     return new Promise((resolve, reject) => {
-      if (!this.gen || this.busy) { reject(new Error('the map is still being generated')); return; }
+      if (!this.gen || this.busy || gen !== this.currentRun) { reject(new Error('the requested map is unavailable')); return; }
       const id = ++this.exportId;
       this.pending.set(id, { resolve, reject });
-      this.gen.postMessage({ type: 'export', id, kind, display, full, width });
+      try { this.gen.postMessage({ type: 'export', id, gen, kind, display, full, width }); }
+      catch (error) { this.pending.delete(id); reject(error); }
     });
   }
 }

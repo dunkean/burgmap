@@ -110,7 +110,7 @@ export interface Options {
   /** Imported heightmap: sea level in meters (pixels below become sea; default 0 = no sea). */
   importSea?: number;
   // ---- settlement system (M3c, REGION_SETTLEMENTS.md), additive
-  /** Custom map extent in meters (600 – 40 000); undefined = the size preset's extent. */
+  /** Custom map extent in meters (600 – 40 000); undefined = the preset, expanded by the pipeline for megacities. */
   mapSize?: number;
   /** Secondary settlements: automatic, none, counts per class, or an explicit list. Default 'auto'. */
   settlements?: SettlementsOpt;

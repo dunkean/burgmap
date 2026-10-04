@@ -386,7 +386,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
       for (const c of castlesAll) ci.avoid.push(c.lot);
       if (flags.port && archetype === 'town') tm('port', () => { for (const l of reservePort(st, api, { avoid: ci.avoid.slice(), nucleus: ci.nucleus, harbor: world.site!.harbor, roads: nonTrack, bridges: world.bridges ?? [] })) push(l); });
       quays.push(...(st.quays ?? []));
-      if (villages.length) for (const l of reserveVillages(st, api, villages, ci.avoid)) push(l);
+      if (villages.length) for (const l of reserveVillages(st, api, villages, ci.avoid, world.options.size === 'city' || world.options.size === 'capital')) push(l);
       // town bridges every 250–500 m of river course, joined to the streets on both banks
       if (archetype === 'town') tm('bridges', () => {
         const br = reserveBridges(st, api, ci.avoid.slice(), world.bridges ?? []);

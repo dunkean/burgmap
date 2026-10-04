@@ -4,7 +4,8 @@
  * keys, so the options (and therefore the world) are exactly the same with or without them.
  * Also builds the bug-report snippet (link, options, pins, view and the `preview:png` command to reproduce it).
  */
-import { Options, toQuery, mapSizeOf } from '../gen/options';
+import { Options, toQuery } from '../gen/options';
+import { generationMapSize } from '../gen/pipeline';
 
 export interface Pin { x: number; y: number; note: string }
 export interface ViewState { cx: number; cy: number; scale: number }
@@ -74,7 +75,7 @@ export function cropAround(x: number, y: number, w: number, mapSize: number): st
 }
 
 export function bugReport(o: Options, pins: Pin[], view: ViewState, linkBase: string, viewW: number): string {
-  const ms = mapSizeOf(o);
+  const ms = generationMapSize(o);
   const link = linkBase + '?' + fullQuery(o, pins, view);
   const q = new URLSearchParams(toQuery(o));
   const key = ['seed', 'size', 'culture', 'style', ...[...q.keys()].filter((k) => !['seed', 'size', 'culture', 'style', 'hm', 'hscale', 'hsea'].includes(k))]

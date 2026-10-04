@@ -8,6 +8,7 @@ import { COUNT_CLASSES, SITE_ARCHETYPES, mapSizeOf, MAP_SIZE_MIN, MAP_SIZE_MAX, 
 import { CULTURE_LIST } from '../gen/urban/cultures';
 import type { ControlRegistry } from './controls';
 import { SETTLEMENT_KINDS, withSettlementKind } from './settlementKinds';
+import { generationMapSize } from '../gen/pipeline';
 
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, attrs: Record<string, string> = {}, text?: string): HTMLElementTagNameMap[K] => {
   const e = document.createElement(tag);
@@ -53,6 +54,8 @@ export function initSettlementsUI(registry: ControlRegistry, getOpts: () => Opti
   const msEl = el('input', { id: 'mapSize', type: 'number', min: String(MAP_SIZE_MIN), max: String(MAP_SIZE_MAX), step: '100' });
   msRow.appendChild(msEl);
   sizeWrap.appendChild(msRow);
+  const automaticExtent = el('div', { class: 'info' });
+  sizeWrap.appendChild(automaticExtent);
   registry.add({
     el: sizeWrap, live: false,
     read: (o) => {
@@ -66,7 +69,10 @@ export function initSettlementsUI(registry: ControlRegistry, getOpts: () => Opti
       const isCustom = o.mapSize !== undefined;
       sizeEl.value = isCustom ? 'custom' : o.size;
       msRow.hidden = !isCustom;
-      if (document.activeElement !== msEl) msEl.value = String(mapSizeOf(o));
+      const extent = generationMapSize(o);
+      if (document.activeElement !== msEl) msEl.value = String(extent);
+      automaticExtent.textContent = !isCustom && extent !== mapSizeOf(o) ? `Automatic extent: ${extent.toLocaleString('en')} m. Choose Custom to set a limit.` : '';
+      automaticExtent.hidden = !automaticExtent.textContent;
     },
   });
 
@@ -283,7 +289,7 @@ export function initSettlementsUI(registry: ControlRegistry, getOpts: () => Opti
   return {
     get picking() { return picking; },
     place(p) {
-      const extent = mapSizeOf(getOpts());
+      const extent = generationMapSize(getOpts());
       if (!Number.isFinite(p.x) || !Number.isFinite(p.y) || p.x < 0 || p.y < 0 || p.x > extent || p.y > extent) return;
       if (picking === 'main') {
         centerX.value = String(Math.round(p.x)); centerY.value = String(Math.round(p.y));

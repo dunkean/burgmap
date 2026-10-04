@@ -1,5 +1,5 @@
 import { Rng } from './core/rng';
-import { Options, mapSizeOf, effectiveSize } from './options';
+import { Options, mapSizeOf, effectiveSize, MAP_SIZE_MAX } from './options';
 import type { World, Settlement } from './types';
 import { terrainForExtent } from './terrain/hydrology';
 import { chooseSite } from './site/site';
@@ -15,6 +15,7 @@ import { choosePopulation } from './urban/phases';
 import { scaleMinPop, scaleMaxPop } from './urban/culture';
 import { generateMega, megaRadius } from './urban/mega/plan';
 import { EAGER_MAIN_POP } from './urban/mega/types';
+import { requiredMegaExtent } from './urban/mega/extent';
 
 /** Above this total population, secondary settlements are generated lazily (on demand, URBAN_MORPHOLOGY §3d). */
 export const EAGER_POP = 50000;
@@ -30,6 +31,15 @@ export function mainPopulation(o: Options, root: Rng): number {
   return pop;
 }
 
+/** Explicit extents, imported rasters and automatic-population links keep their scale. */
+export function generationMapSize(o: Options, root = new Rng('burgmap:' + o.seed)): number {
+  const preset = mapSizeOf(o);
+  if (o.mapSize !== undefined || o.importedHeight || o.population <= 0) return preset;
+  const pop = mainPopulation(o, root);
+  if (populationCulture(o.culture, pop).camp || pop <= (o.eagerPop ?? EAGER_MAIN_POP)) return preset;
+  return Math.min(MAP_SIZE_MAX, Math.max(preset, requiredMegaExtent(megaRadius(pop, o))));
+}
+
 export interface GenerateOptions {
   /** Force every secondary settlement lazy (true) or eager (false); default: by total population. */
   lazy?: boolean;
@@ -40,7 +50,7 @@ export function generate(options: Options, onStage?: (stage: string, partial?: W
   const t0 = performance.now();
   onStage?.('terrain');
   const root = new Rng('burgmap:' + options.seed);
-  const mapSize = mapSizeOf(options);
+  const mapSize = generationMapSize(options, root);
   const { terrain, timings } = terrainForExtent(options, mapSize, root);
   const stats: Record<string, number | string> = {};
   const r = (v: number) => Math.round(v);
@@ -53,11 +63,12 @@ export function generate(options: Options, onStage?: (stage: string, partial?: W
   stats['rivers'] = terrain.rivers.length;
   stats['lakes'] = terrain.lakes.length;
 
-  const world: World = { seed: options.seed, options, mapSize, terrain, stats };
+  const worldOptions = mapSize !== mapSizeOf(options) ? { ...options, mapSize } : options;
+  const world: World = { seed: options.seed, options: worldOptions, mapSize, terrain, stats };
   // the main settlement is generated with its effective size class (custom maps: from the population)
-  const size = effectiveSize(options);
+  const size = effectiveSize(worldOptions);
   const warnings: string[] = [];
-  let mainOpts: Options = size !== options.size ? { ...options, size } : options;
+  let mainOpts: Options = size !== worldOptions.size ? { ...worldOptions, size } : worldOptions;
   const eagerPop = options.eagerPop ?? EAGER_MAIN_POP;
   const mainPop = mainPopulation(mainOpts, root);
   const megaPop = populationCulture(options.culture, mainPop).camp ? 0 : mainPop;
@@ -67,7 +78,7 @@ export function generate(options: Options, onStage?: (stage: string, partial?: W
     mainOpts = { ...mainOpts, population: MAIN_POP_CAP };
   }
   /** The World as the main-settlement stages see it (same object when the options are unchanged). */
-  const mainView = (): World => (mainOpts === options ? world : { ...world, options: mainOpts });
+  const mainView = (): World => (mainOpts === worldOptions ? world : { ...world, options: mainOpts });
 
   const t1 = performance.now();
   onStage?.('site & roads', world);
@@ -76,7 +87,7 @@ export function generate(options: Options, onStage?: (stage: string, partial?: W
   let siteOpts = mainOpts.sitePrefs || !cprefs ? mainOpts : { ...mainOpts, sitePrefs: cprefs };
   // a megacity needs its built-up radius free around the site (kept off the map edge as far as the map allows)
   if (mega) {
-    const clearance = megaRadius(megaPop, mainOpts) + 400;
+    const clearance = 1.3 * megaRadius(megaPop, mainOpts) + 600;
     siteOpts = { ...siteOpts, sitePrefs: { ...(siteOpts.sitePrefs ?? {}), margin: clearance / mapSize, centerInset: clearance } };
   }
   world.site = chooseSite(terrain, siteOpts, mapSize, root);
@@ -104,6 +115,7 @@ export function generate(options: Options, onStage?: (stage: string, partial?: W
     const mv = mainView();
     if (mega) {
       const mr = generateMega(mv, root, megaPop, eagerPop);
+      warnings.push(...mr.warnings);
       world.urban = mr.layer;
       if (mr.bridges.length) world.bridges = [...(world.bridges ?? []), ...mr.bridges];
       for (const [k, v] of Object.entries(mr.stats)) stats[k.startsWith('ms.') ? k : 'urban.' + k] = v;
@@ -121,7 +133,7 @@ export function generate(options: Options, onStage?: (stage: string, partial?: W
   // ---- settlement system (M3c): planner, road network, secondary plans
   onStage?.('settlements', world);
   const mainRoads = world.roads.length;
-  const plan = planSettlements(world, options, root);
+  const plan = planSettlements(world, worldOptions, root);
   warnings.push(...plan.warnings);
   const settlements: Settlement[] = plan.settlements;
   world.settlements = settlements;

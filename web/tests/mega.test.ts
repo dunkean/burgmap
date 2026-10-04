@@ -8,6 +8,9 @@ import { makeOptions, toQuery, fromQuery } from '../src/gen/options';
 import type { World, Polygon } from '../src/gen/types';
 import { megaQuarterDetail, megaKey } from '../src/gen/urban/mega/detail';
 import { QuarterQueue } from '../src/ui/megaQueue';
+import { worldForQuarters } from '../src/ui/quarterPoolCore';
+import { generateMega } from '../src/gen/urban/mega/plan';
+import { Rng } from '../src/gen/core/rng';
 import { mpArea, intersectionS, differenceS } from '../src/gen/geo/bool';
 import { area } from '../src/gen/geo/poly';
 import { renderView } from '../src/gen/settlements/merge';
@@ -60,6 +63,23 @@ describe('megacity near the threshold (60 000 inhabitants)', () => {
     expect(j(w1.urban!.walls)).toBe(j(w2.urban!.walls));
   });
 
+  it('keeps reduced-worker quarter output identical across structurally different culture families', () => {
+    for (const culture of ['chinese', 'inca', 'aztec', 'russian-kremlin', 'byzantine-greek', 'venetian-lagoon', 'persian', 'ottoman', 'sahel', 'hanseatic', 'korean', 'dwarven', 'medina']) {
+      const full = { ...w1, options: makeOptions({ ...opts, culture }) };
+      full.urban = generateMega(full, new Rng('burgmap:' + opts.seed), opts.population, EAGER_MAIN_POP).layer;
+      const snapshot = structuredClone(worldForQuarters(full));
+      const qs = full.urban!.macro!.quarters.filter((q) => q.kind === 'quarter' && q.zone === 'core').slice(0, 2);
+      expect(qs.length, culture).toBe(2);
+      let buildings = 0;
+      for (const q of qs) {
+        const expected = megaQuarterDetail(full, q.id)!;
+        expect(j(megaQuarterDetail(snapshot, q.id)), `${culture}/quarter:${q.id}`).toBe(j(expected));
+        buildings += expected.buildings.length;
+      }
+      expect(buildings, culture).toBeGreaterThan(0);
+    }
+  }, T);
+
   it('a lazy quarter equals the same quarter generated eagerly (all quarters, another World)', () => {
     const all = new QuarterQueue(w2, () => {}).all();
     expect(Object.keys(all).length).toBe(w2.urban!.macro!.quarters.length);
@@ -69,6 +89,11 @@ describe('megacity near the threshold (60 000 inhabitants)', () => {
   it('does not depend on the generation order', () => {
     const w3 = structuredClone(w1);
     for (const id of ids.slice().reverse()) expect(j(megaQuarterDetail(w3, id))).toBe(lazy.get(id));
+  }, T);
+
+  it('produces the same exact quarters from the reduced worker snapshot', () => {
+    const snapshot = structuredClone(worldForQuarters(w1));
+    for (const id of ids.slice(0, 3)) expect(j(megaQuarterDetail(snapshot, id))).toBe(lazy.get(id));
   }, T);
 
   it('quarters tile the built-up land without overlaps or gaps', () => {
@@ -170,7 +195,12 @@ describe('a big secondary settlement is planned as a megacity', () => {
     expect(M.quarters.length).toBeGreaterThan(10);
     const ks = M.quarters.slice(0, 4).map((q) => megaKey(si, q.id));
     const det: Record<number, NonNullable<World['urban']>> = {};
-    for (const k of ks) { det[k] = megaQuarterDetail(w, k)!; expect(j(det[k])).toBe(j(megaQuarterDetail(w2, k))); }
+    const snapshot = structuredClone(worldForQuarters(w));
+    for (const k of ks) {
+      det[k] = megaQuarterDetail(w, k)!;
+      expect(j(det[k])).toBe(j(megaQuarterDetail(w2, k)));
+      expect(j(det[k])).toBe(j(megaQuarterDetail(snapshot, k)));
+    }
     expect(Object.values(det).some((d) => d.buildings.length > 0)).toBe(true);
     // the render view shows them with the main settlement
     const v = renderView({ ...w, megaDetail: det }).urban!;
