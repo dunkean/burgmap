@@ -38,7 +38,7 @@ export interface GDone {
   meta: { center: Vec2; anchors: Record<string, Vec2[]>; mapSize: number; settlements?: SettlementMeta[]; /** megacity: lazily detailed quarters */ mega?: { quarters: number; cityR: number } };
 }
 /** Megacity: progress of the quarter detail queue. */
-export interface GQuartersDone { type: 'quartersDone'; id: number; done: number; queued: number; total: number; ms: number }
+export interface GQuartersDone { type: 'quartersDone'; id: number; done: number; queued: number; total: number; ms: number; failed?: number }
 export interface GDetailDone { type: 'detailDone'; id: number; index: number; ms: number; error?: string }
 export interface GError { type: 'error'; id: number; error: string }
 export interface GExported { type: 'exported'; id: number; kind: 'svg' | 'json'; blob?: Blob; error?: string; ms: number }

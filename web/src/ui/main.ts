@@ -17,6 +17,7 @@ import { STYLE_LIST, isMapStyle, MapStyle } from '../render/styles';
 import type { Scene } from '../render/scene';
 import { buildScene } from '../render/scene';
 import { QuarterQueue } from './megaQueue';
+import { createQuarterExecutor } from './quarterPool';
 import { saveFile } from './download';
 import { worldToJson } from './exportWorld';
 import type { ImportedHeight } from '../gen/terrain/import';
@@ -362,7 +363,7 @@ const backendEvents: BackendEvents = {
   },
   onQuarters(d) {
     if (d.id !== reqId) return;
-    megaProgress(d.done, d.queued, d.total);
+    megaProgress(d.done, d.queued, d.total, d.failed);
     rec('quarterSlice', d.ms);
   },
   onFrame(f) {
@@ -387,7 +388,7 @@ function spawnWorker(): void {
     if (r.id !== reqId) return;
     if (r.stage) { setBusy(true, r.stage); return; }
     if (r.detail) { applyDetail(r.detail.index, r.detail.urban, r.detail.bridges); return; }
-    if (r.quarters) { applyQuarters(r.quarters.layers, r.quarters.drop); megaProgress(r.quarters.done, r.quarters.queued, r.quarters.total); return; }
+    if (r.quarters) { applyQuarters(r.quarters.layers, r.quarters.drop); megaProgress(r.quarters.done, r.quarters.queued, r.quarters.total, r.quarters.failed); return; }
     workerBusy = false;
     if (r.error) { setBusy(false); genTimeEl.textContent = 'Generation failed'; statusEl.textContent = 'Error: ' + r.error.split('\n')[0]; console.error(r.error); return; }
     show(r.world!, r.stats!, r.ms!);
@@ -614,12 +615,13 @@ let megaRedraw: number | undefined;
 /** Settlements above this population are planned as megacities (macro plan + lazy quarters). */
 const megaPop = (): number => opts.eagerPop ?? EAGER_MAIN_POP;
 const isMega = (): boolean => (backend ? !!meta?.mega || settlementList().some((s) => s.index > 0 && s.population > megaPop()) : !!currentWorld?.urban?.macro || !!currentWorld?.settlements?.some((s) => s.urban?.macro));
-function megaProgress(done: number, queued: number, total: number): void {
+function megaProgress(done: number, queued: number, total: number, failed = 0): void {
   statusEl.textContent = queued > 0 ? `Detailing quarters: ${done} ready, ${queued} queued (of ${total})` : `${done} of ${total} quarters detailed (zoom in elsewhere for more)`;
+  if (failed) statusEl.textContent += `; ${failed} unavailable`;
 }
 /** Main-thread / legacy mode: detailed quarters merged into the World, redrawn at most every 400 ms. */
 function applyQuarters(layers: Record<number, NonNullable<World['urban']>>, drop: number[]): void {
-  if (!currentWorld) return;
+  if (!currentWorld || (!Object.keys(layers).length && !drop.length)) return;
   const det = { ...(currentWorld.megaDetail ?? {}), ...layers };
   for (const id of drop) delete det[id];
   currentWorld = { ...currentWorld, megaDetail: det };
@@ -637,7 +639,7 @@ function maybeQuarters(v: { cx: number; cy: number; scale: number }): void {
   if (backend) backend.quarters(reqId, rect);
   else if (worker) worker.postMessage({ type: 'quarters', id: reqId, rect });
   else if (currentWorld) {
-    megaLocal ??= new QuarterQueue(currentWorld, (layers, drop, st) => { applyQuarters(layers, drop); megaProgress(st.done, st.queued, st.total); });
+    megaLocal ??= new QuarterQueue(currentWorld, (layers, drop, st) => { applyQuarters(layers, drop); megaProgress(st.done, st.queued, st.total, st.failed); }, 420, 150, createQuarterExecutor(currentWorld));
     megaLocal.request(rect);
   }
 }

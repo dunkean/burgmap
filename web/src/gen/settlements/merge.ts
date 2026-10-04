@@ -4,7 +4,7 @@
  * The main settlement's scalar fields (archetype, population, culture, phases) are kept.
  */
 import type { World, UrbanLayer, Settlement, UrbanBlockInfo, UrbanParcel, Polygon } from '../types';
-import { standIn } from '../urban/mega/standin';
+import { standIn, fabricBudget, type FabricBudget } from '../urban/mega/standin';
 import { MEGA_KEY } from '../urban/mega/types';
 
 export function mergeUrban(layers: UrbanLayer[]): UrbanLayer | undefined {
@@ -91,16 +91,17 @@ export function placeholderUrban(s: Settlement, water?: { data: Uint8Array; n: n
  * Megacity (URBAN_MORPHOLOGY §3d): the macro layer with a stand-in block for every quarter whose detail is not
  * generated yet, followed by the detailed quarters (by id). The result has no `macro` (merging it again is a no-op).
  */
-export function megaView(u: UrbanLayer, details?: Record<number, UrbanLayer>): UrbanLayer {
+export function megaView(u: UrbanLayer, details?: Record<number, UrbanLayer>, budget?: FabricBudget): UrbanLayer {
   const M = u.macro;
   if (!M) return u;
+  budget ??= fabricBudget(M.quarters.length);
   const blocks: Polygon[] = [], blockInfo: UrbanBlockInfo[] = [], parcels: UrbanParcel[] = [], masses: UrbanLayer['masses'] = [];
   for (const q of M.quarters) {
     if (details?.[q.id] || q.inset.length < 3) continue;
     const green = q.kind === 'place' || q.district === 'gardens';
     if (q.kind === 'quarter') {
       // stand-in fabric: block-sized pieces with their built mass
-      const si = standIn(q, M.nuclei[q.nucleus]?.p ?? M.center);
+      const si = standIn(q, M.nuclei[q.nucleus]?.p ?? M.center, budget);
       for (const b of si.blocks) { blocks.push(b); blockInfo.push({ quarter: q.id, phase: q.phase, zone: q.zone, kind: 'block', culture: q.culture }); }
       masses.push(...si.masses);
       continue;
@@ -129,9 +130,11 @@ export function renderView(world: World): World {
     for (const k of Object.keys(det)) { const key = Number(k); if (Math.floor(key / MEGA_KEY) === si) out[key - si * MEGA_KEY] = det[key]; }
     return out;
   };
-  const main = world.urban?.macro ? megaView(world.urban, sub(0)) : world.urban;
+  const macroCount = (world.urban?.macro?.quarters.length ?? 0) + (world.settlements ?? []).reduce((n, s) => n + (!s.main ? s.urban?.macro?.quarters.length ?? 0 : 0), 0);
+  const budget = fabricBudget(macroCount);
+  const main = world.urban?.macro ? megaView(world.urban, sub(0), budget) : world.urban;
   const wg = { data: world.terrain.water, n: world.terrain.height.w, cell: world.terrain.height.cell };
-  const extra = (world.settlements ?? []).filter((s) => !s.main && (s.urban || s.detail === 'lazy')).map((s) => (s.urban?.macro ? megaView(s.urban, sub(s.index)) : s.urban ?? placeholderUrban(s, wg)));
+  const extra = (world.settlements ?? []).filter((s) => !s.main && (s.urban || s.detail === 'lazy')).map((s) => (s.urban?.macro ? megaView(s.urban, sub(s.index), budget) : s.urban ?? placeholderUrban(s, wg)));
   if (!extra.length || !main) return main === world.urban ? world : { ...world, urban: main };
   return { ...world, urban: mergeUrban([main, ...extra]) };
 }

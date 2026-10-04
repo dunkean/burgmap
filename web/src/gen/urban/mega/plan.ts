@@ -34,6 +34,7 @@ import { openHoles } from '../plots';
 import { ribbon } from '../../geo/offset';
 import type { MacroPlan, MacroQuarter, MacroStreet, MacroNucleus, MacroDistrict, MacroWant } from './types';
 import { fitRings, segKey } from './rings';
+import { containMegaRings, requiredMegaExtent } from './extent';
 import { DEFAULT_M4 } from '../m4/index';
 import { planMoat, naturalBank, moatReserve } from '../moat';
 
@@ -86,6 +87,7 @@ export interface MegaResult {
   layer: UrbanLayer;
   stats: Record<string, number | string>;
   bridges: { a: Vec2; b: Vec2; width: number }[];
+  warnings: string[];
 }
 
 interface Ray { dx: number; dy: number; ds: number; G: Float32Array; L: Float64Array; rmax: number }
@@ -487,7 +489,8 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
     return best;
   };
   const fit = fitRings(c, radii, merged, tolK, fixedP, snapHigh);
-  const rings: Polygon[] = fit.polys.map((p, i) => fixedP[i] ?? orientPos(p));
+  const bounded = containMegaRings(fit.polys.map((p, i) => fixedP[i] ?? orientPos(p)), c, world.mapSize);
+  const rings = bounded.rings;
   const outer = rings[nR];
   const ringR = rings.map((r) => Math.sqrt(area(r) / Math.PI));
   lap('rings');
@@ -1307,6 +1310,13 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
     nucleusCompound: plan.nucleus.kind !== 'none' ? NUCLEUS_COMPOUND[plan.nucleus.kind] : undefined,
     streets: mstreets, quarters, nuclei, morphs, wallRings: [...[...standing].sort((a, b) => a - b).map((k) => rings[k - 1]), ...nuclei.filter((nu) => nu.walled && nu.ring).map((nu) => nu.ring!)], rings,
   };
+  const targetLand = areas[nR];
+  const availableLand = rays.reduce((a, r) => a + r.L[r.L.length - 1], 0);
+  const plannedPopulation = Math.round(quarters.reduce((a, q) => a + q.pop, 0));
+  const constrained = availableLand < targetLand || plannedPopulation < pop * 0.95;
+  const required = requiredMegaExtent(estR);
+  macro.extent = { required, targetLand, availableLand, plannedPopulation, constrained, scale: bounded.scale };
+  const warnings = constrained ? [`megacity: ${pop} inhabitants requested on ${world.mapSize} m; bounded plan estimates ${plannedPopulation} inhabitants, approximately ${required} m of map extent needed (terrain may require more)`] : [];
   const marketQ = quarters.find((q) => q.kind === 'market' && q.nucleus === 0);
   const layer: UrbanLayer = {
     footprint: footprintH.map((p) => p.outer), footprintH,
@@ -1327,7 +1337,11 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
   };
   for (const [k, v] of Object.entries(tm)) stats['ms.mega.' + k] = v;
   stats['ms.urban'] = Math.round(performance.now() - T0);
-  return { layer, stats, bridges };
+  stats['pop.planned'] = plannedPopulation;
+  stats['extent.required'] = required;
+  stats['extent.constrained'] = constrained ? 1 : 0;
+  stats['extent.scale'] = bounded.scale;
+  return { layer, stats, bridges, warnings };
 }
 
 /**

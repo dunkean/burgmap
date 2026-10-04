@@ -14,6 +14,7 @@ import { FONT_STACKS, fontString } from '../render/labelStyles';
 import { worldToJson } from './exportWorld';
 import type { GRequest, GResponse, GExport, GRun, WorldMsg, GDetail, SettlementMsg, SettlementMeta, GQuarters, QuarterMsg } from './protocol';
 import { QuarterQueue } from './megaQueue';
+import { createQuarterExecutor } from './quarterPool';
 
 export interface WorkerRequest { id: number; options: Options }
 export interface WorkerResponse {
@@ -21,7 +22,7 @@ export interface WorkerResponse {
   /** legacy mode, lazy detail (M3c): the plan of one secondary settlement */
   detail?: { index: number; urban: NonNullable<World['urban']>; bridges: NonNullable<World['bridges']> };
   /** legacy mode, megacity: detailed quarters and quarters evicted from the cache */
-  quarters?: { layers: Record<number, NonNullable<World['urban']>>; drop: number[]; done: number; queued: number; total: number };
+  quarters?: { layers: Record<number, NonNullable<World['urban']>>; drop: number[]; done: number; queued: number; total: number; failed?: number };
 }
 
 const ctx = self as unknown as Worker;
@@ -95,10 +96,10 @@ function quarterQueue(id: number): QuarterQueue | null {
     const port = lastPort;
     quarters = new QuarterQueue(lastWorld, (layers, drop, st) => {
       if (port) {
-        port.postMessage({ type: 'quarters', gen: id, layers, drop } satisfies QuarterMsg);
-        ctx.postMessage({ type: 'quartersDone', id, done: st.done, queued: st.queued, total: st.total, ms: st.ms } satisfies GResponse);
-      } else ctx.postMessage({ id, quarters: { layers, drop, done: st.done, queued: st.queued, total: st.total } } satisfies WorkerResponse);
-    });
+        if (Object.keys(layers).length || drop.length) port.postMessage({ type: 'quarters', gen: id, layers, drop } satisfies QuarterMsg);
+        ctx.postMessage({ type: 'quartersDone', id, done: st.done, queued: st.queued, total: st.total, ms: st.ms, failed: st.failed } satisfies GResponse);
+      } else ctx.postMessage({ id, quarters: { layers, drop, done: st.done, queued: st.queued, total: st.total, failed: st.failed } } satisfies WorkerResponse);
+    }, 420, 150, createQuarterExecutor(lastWorld));
   }
   return quarters;
 }
@@ -148,6 +149,7 @@ function doDetail(m: GDetail): void {
     if (!res) return;
     s.urban = res.urban;
     if (res.bridges.length) lastWorld.bridges = [...(lastWorld.bridges ?? []), ...res.bridges];
+    if (res.urban.macro) quarters?.setWorld(lastWorld);
     if (lastPort) {
       lastPort.postMessage({ type: 'settlement', gen: m.id, index: m.index, urban: res.urban, bridges: res.bridges } satisfies SettlementMsg);
       ctx.postMessage({ type: 'detailDone', id: m.id, index: m.index, ms: Math.round(performance.now() - t0) } satisfies GResponse);

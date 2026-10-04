@@ -73,6 +73,8 @@ export interface MacroPlan {
   seedKey: string;
   eagerPop: number;
   population: number;
+  /** Geometric capacity, not a promise that the requested population fits a constrained map. */
+  extent?: { required: number; targetLand: number; availableLand: number; plannedPopulation: number; constrained: boolean; scale: number };
   center: Vec2;
   mainAngle: number;
   terrainAngle: number;
