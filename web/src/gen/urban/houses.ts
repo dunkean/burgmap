@@ -24,8 +24,8 @@ import type { Rng } from '../core/rng';
 import type { MorphologyParams } from './morphology';
 import type { Plot } from './plots';
 import { clipPlot, courtyardRing, rectify, shapeOf, MIN_BW, MAX_ASPECT, type Bldg, type HalfPlane, type CourtHint } from './buildings';
-import { area, cleanRing, interiorAngle } from '../geo/poly';
-import { isConvex } from '../geo/split';
+import { area, cleanRing, interiorAngle, orientPos } from '../geo/poly';
+import { isConvex, polyInside } from '../geo/split';
 import { stitchUnion } from '../geo/stitch';
 import { unionS } from '../geo/bool';
 import { disk } from '../geo/offset';
@@ -238,9 +238,22 @@ export function burgageHouse(pl: Plot, cov: number, P: MorphologyParams, rng: Rn
     const c1 = s.n.x * s.p.x + s.n.y * s.p.y, c2 = n.x * (fa.x + n.x * d0) + n.y * (fa.y + n.y * d0);
     const p = { x: (c1 * n.y - s.n.y * c2) / den, y: (s.n.x * c2 - c1 * n.x) / den };
     const r = Math.min(rng.range(1.5, 2), 0.35 * (W - ww));
-    const oct = clipPlot(disk(p, r, 8), band(sb, D), true);
-    if (oct.length !== 1) return;
-    for (let j = 0; j < houses.length; j++) { const u2 = joinFoot(houses[j], oct[0]); if (u2) { houses[j] = u2; return; } }
+    // The side frame can survive a later parcel merge while the actual lot tapers or has a notch.
+    // Partition the turret from the lot too: clipping only its depth band can extend a house across a party wall.
+    const octagon = orientPos(disk(p, r, 8));
+    const old = clipPlot(octagon, band(sb, D), true);
+    if (old.length === 1 && polyInside(poly, old[0])) {
+      for (let j = 0; j < houses.length; j++) { const u2 = joinFoot(houses[j], old[0]); if (u2) { houses[j] = u2; return; } }
+      return;
+    }
+    const hps = band(sb, D);
+    for (let i = 0; i < octagon.length; i++) {
+      const a = octagon[i], b = octagon[(i + 1) % octagon.length];
+      hps.push({ p: a, n: { x: -(b.y - a.y), y: b.x - a.x } });
+    }
+    for (const oct of clipPlot(poly, hps, convex)) {
+      for (let j = 0; j < houses.length; j++) { const u2 = joinFoot(houses[j], oct); if (u2) { houses[j] = u2; return; } }
+    }
   };
 
   if (rest >= 4.5 && cov >= 0.84) {
@@ -265,23 +278,28 @@ export function burgageHouse(pl: Plot, cov: number, P: MorphologyParams, rng: Rn
     // (courts pair up across the party wall: each plot gives ≥ 2.4 m)
     const cw = Lsum > 0 ? clamp(U / Lsum, 2.4, W - 3.6) : 0;
     const both = wl > 0.7 && W >= 12 && rng.chance(0.6);
+    // An attached room range may be 3.6 m wide; standalone buildings and carved gateway ranges need MIN_BW.
+    // Keep the rich-house draw, but use one full-width wing when dividing it would leave two thin arms.
+    const pair = both && (W - cw) / 2 >= 3.6 - 1e-9;
     let first = true;
     for (const s of segs) {
       if (!s.court) { push(cut(band(s.d0, s.d1)), s.d1 > D ? 'back' : 'rear'); continue; }
-      if (W - cw < 3.6 || cw < 2.4) {
+      // The clamped court leaves exactly 3.6 m for its wings; floating subtraction must not turn that equality
+      // into a cross-plot court with no wing or stair turret.
+      if (W - cw < 3.6 - 1e-9 || cw < 2.4) {
         // narrow plot: a court across the whole width, short (one light court)
         const Lc = clamp(U / Math.max(1, W), 3, s.d1 - s.d0);
         if (s.d1 - s.d0 - Lc >= MIN_BW) push(cut(band(s.d0 + Lc, s.d1)), 'rear');
         else if (s.d1 - s.d0 - Lc > 0.5) { /* the rest of the segment joins the court */ }
         continue;
       }
-      if (both) {
+      if (pair) {
         const w1 = (W - cw) / 2;
         wingAt(s.d0, s.d1, k, w1, first); wingAt(s.d0, s.d1, c, w1, first);
       } else {
         wingAt(s.d0, s.d1, k, W - cw, first);
       }
-      if (first) turret(both ? (W - cw) / 2 : W - cw, k);
+      if (first) turret(pair ? (W - cw) / 2 : W - cw, k);
       first = false;
     }
     for (const h of houses) out.unshift({ poly: h, kind: 'house' });

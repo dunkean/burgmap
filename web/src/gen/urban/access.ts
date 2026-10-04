@@ -5,7 +5,8 @@
  * Reachability is computed on a raster of the block (0.5 m cells): free = inside the block and outside every
  * footprint; a cell is passable when its four neighbours are free (or outside the block on the street side), so a
  * passage narrower than ~1.5 m does not count; passable cells next to the street edge are the seeds of a flood fill.
- * A building is reachable when it touches the street edge or a reached passable cell.
+ * A building is reachable when it touches the street edge or the free contact cells around a reached passable
+ * centre. Those contact cells restore the doorway apron removed by the clearance check at a terminal facade.
  *
  * Plots whose rear buildings are cut off get a passage along one side line, shared with the neighbouring plot of
  * the same frontage run (each gives half its width, like the allées and closes of medieval towns), cut through the
@@ -13,12 +14,13 @@
  */
 import type { Vec2, Polygon } from '../core/geom';
 import { dist } from '../core/geom';
-import { bboxOf, pointInRing, area, distToSeg, distToRing, obb as obbOf } from '../geo/poly';
+import { bboxOf, pointInRing, area, distToSeg, distToRing, obb as obbOf, cleanRing } from '../geo/poly';
 import { GridIndex } from '../geo/spatial';
 import { rasterizePolys } from '../geo/raster';
 import type { Plot } from './plots';
 import { clipPlot, shapeOf, MIN_BW, MAX_ASPECT, type HalfPlane } from './buildings';
-import { isConvex } from '../geo/split';
+import { isConvex, polyInside } from '../geo/split';
+import { stitchUnion } from '../geo/stitch';
 
 export const ACCESS_CELL = 0.5;
 export const ACC_STATS = { calls: 0, cells: 0, ms: 0, msRaster: 0, msStreet: 0 };
@@ -100,7 +102,7 @@ function blockStatic(block: Polygon, streetAt0: StreetAt | ((p: Vec2) => boolean
     if (!streetCell[i]) continue;
     const x = i % w, y = (i / w) | 0;
     for (let yy = Math.max(0, y - R); yy <= Math.min(h - 1, y + R); yy++) for (let xx = Math.max(0, x - R); xx <= Math.min(w - 1, x + R); xx++) near[yy * w + xx] = 1;
-    if (x >= 1 && x < w - 1 && y >= 1 && y < h - 1) streetSeeds.push(i);
+    streetSeeds.push(i);
   }
   ACC_STATS.msStreet += performance.now() - tS;
   LAST_BLOCK = { block, streetAt: streetAt0, cell, x0, y0, w, h, inB, streetCell, near, streetSeeds };
@@ -159,6 +161,16 @@ export function blockReach(block: Polygon, blds: Polygon[], streetAt0: StreetAt 
     return x >= 1 && x < w - 1 && y >= 1 && y < h - 1 && free(j) && okN(j - 1) && okN(j + 1) && okN(j - w) && okN(j + w);
   };
   const settle = (i: number) => { const k = bid[i]; if (k && !ok[k - 1]) { ok[k - 1] = true; left--; } };
+  const settleFromFree = (i: number) => {
+    if (!free(i)) return;
+    const x = i % w, y = (i / w) | 0;
+    // Terminal contact must share an edge with the free apron. A diagonal across two occupied
+    // cardinal neighbours is only a closed corner, not an entrance.
+    if (x > 0) settle(i - 1);
+    if (x < w - 1) settle(i + 1);
+    if (y > 0) settle(i - w);
+    if (y < h - 1) settle(i + w);
+  };
   if (++pool.ep === 0xffffffff) { pool.seen.fill(0); pool.ep = 1; }
   const ep = pool.ep, seen = pool.seen, queue = pool.queue;
   let qh = 0, qt = 0;
@@ -175,9 +187,23 @@ export function blockReach(block: Polygon, blds: Polygon[], streetAt0: StreetAt 
     if (r && u) settle(j - w + 1);
     if (l && d) settle(j + w - 1);
     if (r && d) settle(j + w + 1);
+    // The passable centre is one cell away from a terminal facade: its free neighbour is the doorway apron.
+    // Restore that free contact cell after the clearance erosion, without flooding narrow or blocked cells.
+    if (left > 0) {
+      if (l) settleFromFree(j - 1);
+      if (r) settleFromFree(j + 1);
+      if (u) settleFromFree(j - w);
+      if (d) settleFromFree(j + w);
+    }
   };
   for (const i of streetSeeds) {
-    visit(i - 1); visit(i + 1); visit(i - w); visit(i + w);
+    // Top/left boundary cells occupy row/column zero of the padded raster too.
+    // Their in-block neighbours are valid flood seeds; bound each neighbour instead of skipping that street side.
+    const x = i % w, y = (i / w) | 0;
+    if (x > 0) visit(i - 1);
+    if (x < w - 1) visit(i + 1);
+    if (y > 0) visit(i - w);
+    if (y < h - 1) visit(i + w);
     if (left === 0) break;
   }
   while (qh < qt && left > 0) {
@@ -204,8 +230,9 @@ function sideHP(pl: Plot, which: 'A' | 'B'): HalfPlane {
 }
 
 /**
- * Cuts a passage of width `w` along one side line of the plot through its buildings (from the street to the back):
- * every footprint keeps only its part beyond the passage; pieces that are no longer proper footprints are dropped.
+ * Cuts a passage of width `w` along one side line, from the street to depth `dMax` (the whole plot by default).
+ * For a finite gateway, proper front and rear ranges stay joined when their union is a valid footprint;
+ * otherwise valid ranges remain separate. Pieces that are no longer proper footprints are dropped.
  */
 export function carvePassage<T extends { poly: Polygon; kind: string }>(pl: Plot, blds: T[], which: 'A' | 'B', w: number, dMax = Infinity): T[] {
   const h = sideHP(pl, which);
@@ -218,11 +245,31 @@ export function carvePassage<T extends { poly: Polygon; kind: string }>(pl: Plot
     if (b.poly.every((q) => (q.x - keep.p.x) * keep.n.x + (q.y - keep.p.y) * keep.n.y >= -1e-6)) { out.push(b); continue; }
     const conv = isConvex(b.poly, 1e-3);
     if (dMax < Infinity && b.poly.some((q) => (q.x - fa.x) * n.x + (q.y - fa.y) * n.y > dMax + 0.01)) {
-      // a gateway through the front range only: the part beyond dMax keeps its full width
+      // Keep the gateway cut while joining useful front/back ranges into one continuous house.
+      // The old transverse cut also rejected front ranges whose aspect becomes valid as part of the whole L.
       const cut: HalfPlane = { p: { x: fa.x + n.x * dMax, y: fa.y + n.y * dMax }, n };
+      const frontCut: HalfPlane = { p: cut.p, n: { x: -n.x, y: -n.y } };
+      const frontKeep = clipPlot(b.poly, [frontCut, keep], conv);
       const back = clipPlot(b.poly, [cut], conv);
-      const front = clipPlot(b.poly, [{ p: cut.p, n: { x: -n.x, y: -n.y } }, keep], conv);
-      for (const r of [...back, ...front]) if (ok(r)) out.push({ ...b, poly: r });
+      // A concave clip can contain a retraced zero-area boundary at dMax. Clean it before stitching,
+      // accepting the cleanup only when it conserves area and stays inside the original footprint.
+      const rawRooms = [...frontKeep, ...back];
+      const cleaned = rawRooms.map((r) => cleanRing(r, 0.005, 0.5, 0.002, false));
+      const cleanOK = cleaned.every((r, i) => r.length >= 3 && Math.abs(area(r) - area(rawRooms[i])) <= 1e-6 && polyInside(b.poly, r));
+      const frontRoom = cleanOK ? cleaned.slice(0, frontKeep.length) : frontKeep;
+      const backRoom = cleanOK ? cleaned.slice(frontKeep.length) : back;
+      // Both ranges must be useful rooms: neither a wide rear nor a wide front can hide a thin arm.
+      if (frontRoom.length === 1 && backRoom.length === 1 && shapeOf(frontRoom[0]).w >= MIN_BW && shapeOf(backRoom[0]).w >= MIN_BW) {
+        const joined = stitchUnion(frontRoom[0], backRoom[0]);
+        const expected = area(frontRoom[0]) + area(backRoom[0]);
+        if (joined && ok(joined) && Math.abs(area(joined) - expected) <= 1e-6 && polyInside(b.poly, joined)) {
+          out.push({ ...b, poly: joined });
+          continue;
+        }
+      }
+      // The exact old partition remains available when the merged L is too long or cannot be stitched.
+      // No difference fallback can return an unchanged building with its gateway still blocked.
+      for (const r of [...backRoom, ...frontRoom]) if (ok(r)) out.push({ ...b, poly: r });
       continue;
     }
     for (const r of clipPlot(b.poly, [keep], conv)) if (ok(r)) out.push({ ...b, poly: r });
