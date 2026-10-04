@@ -88,3 +88,52 @@ Generation remains the largest measured cost on these cases. A renderer-only
 Rust port cannot remove terrain, urban partition or rural-generation time;
 targeted geometry optimizations should be assessed with output hashes before
 choosing a new language or graphics backend.
+
+## Integrated generation and rendering profile
+
+The root agent repeated the study on source `d887575`, with other generation and
+test jobs paused. Node `generate()` took **12.00 s** for `p4uefz`, city, 10 km,
+twelve settlements: terrain 2.15 s, main urban 4.78 s, secondary detail 0.70 s,
+and rural land use 2.47 s. Its non-statistical World hash exactly matches the
+earlier `cf02820` case. This is an output-preservation check, not evidence of a
+speed improvement.
+
+A warmed V8 CPU sampling run took 10.57 s and retained that hash. Sampling was
+restricted to generation, at a 1 ms interval. Polygon clipping accounts for
+13.8% of sampled self time and geometry helpers for 11.9%; specific hot frames
+include priority flood (6.2%), access (3.9%), noise (3.9%) and grid blur (3.4%).
+Self time omits callees and must not be added to inclusive stage timings. The
+sample suggests useful targets; it does not establish the gain of a rewrite.
+
+The separate Chromium 153 native OffscreenCanvas pass used 1100 × 900 pixels,
+DPR 1, terrain included, with no other generation/tests running. Frame timings
+include bitmap transfer and exclude page presentation and preview PNG encoding.
+
+| Case | Generate | Cold scene | First fit frame + bitmap | Warm median across sampled zooms |
+| --- | ---: | ---: | ---: | ---: |
+| `p4uefz`, city, 10 km, auto settlements | 10.21 s | 1.02 s | 802 ms | 88–134 ms |
+| `3`, implicit map, 5 M, no secondaries | 16.61 s | 4.08 s | 952 ms | 31–314 ms |
+
+The 5 M case realizes a 34 km map, 4,801 macro quarters, 9,480 stand-in blocks
+and 19,894 masses. Exact houses are not generated in this initial view. Its
+macro stage takes 1.32 s, but rural land use takes **11.13 s**. Whole-map scene
+preparation and countryside detail deserve attention before extending the town
+engine's performance work.
+
+At fit zoom this case builds 46,904 paths against an 8,000-entry path cache;
+6,904 remain afterward. Repeated cache eviction is a plausible cause of the
+314 ms warm fit frame, requiring a controlled follow-up. Close views take
+31–57 ms. Test far-view batching, LOD and cache working sets before simply
+raising memory limits. Profile scene reconstruction as exact quarters arrive.
+
+The current architecture already keeps vector objects offscreen. A faster
+raster backend could improve first frames or exports, but cannot remove the
+10–17 s spent generating these Worlds. Start with measured geometry kernels,
+rural generation and scene/cache work; consider Rust/WASM or GPU rendering
+only after a focused prototype demonstrates a useful gain. The six-second
+10 km target remains future work under the user's preliminary-study scope.
+
+Ignored evidence: `web/out/integration-performance/` contains the generation
+benchmark, CPU profile and summary, native frame measurements and inspected
+PNG views. Functional browser/export checks run separately under test load;
+their timings are not substituted for these quiet profiling samples.

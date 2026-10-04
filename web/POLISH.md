@@ -11,19 +11,19 @@ Status: [ ] open · [~] in progress · [x] done
 - [x] Seams where two quarters touch without a street. (Built-over old wall lines keep a lane; at unwalled edges, quarter boundaries and lot backs, a strip of back land under ~7 m per side is given to the lots, which meet back to back.)
 - [x] Castle count option; walls none / single / double.
 
-## Cultures: next polish agent
+## Cultures
 - [x] Residual review (cultures agent 2): Japanese merchant fabric = continuous machiya rows (machiwari blocks, deep fill, rows also along the roads out of town, kura and ura-nagaya behind); Roman core dark polygon (an unsplittable lot along the river was one building: now courtyard houses along its street front, garden behind); medina patios 14–24 % of the lot; dwarven: mountain-face site preference and terraces cut along the local contours (`contourFollow`).
 - [x] Japanese (jōkamachi): the overall plan is nice, but some quarters are piles of rectangles. Merchant blocks need machiya rows along the street with gardens and storehouses (kura) behind. Samurai lots: walled yashiki with a garden.
 - [x] Dwarven: towns are empty. Fill the terraces with halls, workshops, forges, dwellings cut into the slope, and real density. Use a mountain flank when available.
 - [x] Medina: hard to read. Houses must show inner courtyards (patio holes) systematically, blank outer walls, and entrances from derbs. Souk lanes need small shop cells. Coverage stays high, but the courtyards must be visible.
 - [x] Chinese: the interior of the walled city is too empty.
-- [ ] General: cultures are uneven in quality. Each preset must reach the European preset's level.
+- [x] General completion quality pass: audited the preset families and corrected native civic programmes, Ottoman jetties, Khmer temples and Iroquoian housing. Existing Hanseatic, Korean, stilt, Celtic and Norse builders retain strict output guards; the final focused culture audit and native views pass. Further aesthetic harmonisation toward the European preset's quality remains an optional art-direction task in ROADMAP.md; this pass does not claim that every family was rewritten.
 
-## New cultures (next culture agent)
+## Implemented cultures
 
-Each culture gets a `scale` range: the settlement classes it can produce. [x] `scale: { min, max }` on the ladder hamlet … megacity (culture.ts); village-only cultures become one large village up to 1.5 × their cap, beyond that a cluster of villages linked by tracks (camps/index.ts); the plan selector notes the cap.
+Each culture gets a `scale` range: the settlement classes it can produce. [x] `scale: { min, max }` on the ladder hamlet … megacity (`culture.ts`). Native camps retain their village recipes at small populations; above culture-specific thresholds they grow one connected town with native houses, civic sites and appropriate boundaries (`primitive_features.ts`). The plan selector reports scale and capacity limits.
 
-- **Village/hamlet-only cultures.** Above their maximum population they degrade to a large village or a confederation of villages, or the UI caps the population with a note.
+- **Native village cultures.** Small settlements use the camp builders below; their urban growth retains native architecture instead of producing generic masonry or disconnected camp clusters.
   - [x] **Barbarian / Germanic–Celtic–Norse village** (`barbarian`, `barbarian-celtic`, `barbarian-norse`; camps/yards.ts):
     - longhouses and byre-houses in a palisaded or ditched enclosure, with a chieftain's hall at the center;
     - sunken huts (Grubenhäuser), granaries on posts, cattle pens;
@@ -43,7 +43,7 @@ Each culture gets a `scale` range: the settlement classes it can produce. [x] `s
     - a great central plaza (haukaypata), ushnu platform, temple (Coricancha-like), fortress on the hill (Sacsayhuamán-like zigzag walls);
     - agricultural terraces on the slopes around;
     - canalized streams through the town.
-  - [~] Remaining historical presets from URBAN_MORPHOLOGY §3b, by priority: Aztec, Maya, Khmer, Byzantine, Russian kremlin, Venetian, Persian, Ottoman, Sahel, Hanseatic, Norse ring fort, Celtic oppidum, Korean.
+  - [x] Historical presets from URBAN_MORPHOLOGY §3b: Aztec, Maya, Khmer, Byzantine, Russian kremlin, Venetian, Persian, Ottoman, Sahel, Hanseatic, Norse ring fort, Celtic oppidum, Korean.
     - [x] `aztec` (aztec.ts): cardinal grid with canals down every second lane, walled ceremonial precinct (twin-stair Templo Mayor, round temple, lesser pyramids, ballcourt, tzompantli, calmecac), calpulli ward temples, tecpan, tianguis, chinampas on wetland and shallow water.
     - [x] `maya` (camps/yards.ts): dispersed houselots on platforms among fields, sacbeob from the core, plaza groups (twin temple pyramids, stelae, palace acropolis, ballcourts); grows to a city.
     - [x] `norse-ringfort` (camps/ringfort.ts): Trelleborg circle, rampart and ditch, four gates, axial streets, longhouse squares.
@@ -57,8 +57,8 @@ Each culture gets a `scale` range: the settlement classes it can produce. [x] `s
     - [x] `sahel` (sahel.ts, `sahelCompound` operator): the buttressed great mud mosque on the market, small mosques, the chief's palace, a dense mud core and walled compounds with granaries outside it, sand lanes widening into open spaces.
     - [x] `hanseatic` (hanse.ts, `giebelhaus` operator, `water` lattice orientation): rib streets down to the water, brick hall church and town hall on the market, gabled merchant houses with Flügel and Hinterhaus, Gänge with their Buden, warehouses on the quay.
     - [x] `korean` (korea.ts, `hanok` operator, level-1 landmark lots): pungsu site, cardinal main streets, hanok round the madang, the palace precinct north of the centre (throne hall, pond pavilion), Jongmyo, hyanggyo, a temple.
-    - [ ] Swahili stone town: not shipped (reuse medina + quay).
-  - [~] Remaining fantasy presets from §3c: halfling, orcish, gnomish, stilt-town, wizard city, necropolis.
+    - [x] `swahili-stone-town` (`swahili.ts`, native compound builders): coral-stone courtyard houses, carved doors and verandas, served bazaar shops, Juma and local mosques, merchant mansions, a fort and waterfront quays. Eager/lazy programmes, fresh nested workers, full-detail exports and the two 6,000-person native regressions pass (2026-10-04; final source `5c104595`).
+  - [x] Fantasy presets from §3c: halfling, orcish, gnomish, stilt-town, wizard city, necropolis.
     - [x] `orcish` (camps/ring.ts): stake-palisade rings, huts packed anyhow, arena, warlord's hall on its mound, totems.
     - [x] `necropolis` (cultures_cities.ts, tomb operator, fantasy.ts): walled cardinal grid of tomb lots (mausolea, tholoi, obelisks over the graves), processional avenue to the great stepped mausoleum, charnel houses.
     - [x] `halfling` (camps/yards.ts): hedged gardens along winding lanes, smials dug into the banks, vegetable beds and fruit trees, the inn by the party field and its party tree.
@@ -92,7 +92,7 @@ Each culture gets a `scale` range: the settlement classes it can produce. [x] `s
 - [x] Too many brooks rising inside the map (max 1–2 springs now).
 
 ## UI
-- [~] Loading bar at the top during generation; the current map stays visible.
+- [x] Loading bar at the top during generation; the current map stays visible. Versioned content/frame handoff retains old and intermediate maps with matching metadata; native reroll, pan, style, minimap and captured-export checks passed (`0770277`, integrated `d887575`).
 - [x] Farmstead variety: 23 cultural types, cottage/manor sizes, slope/wet-ground adaptation and track-facing layout (`landuse/farms.ts`). Audit 2026-10-04: 552 layout combinations and generated placement/culture tests pass; the 46-farm SVG/PNG catalog was inspected.
 - [x] UI debug tooling: cursor/click coordinates, pins with notes and links carrying pins/view (`ui/pins.ts`, `ui/share.ts`). Audit 2026-10-04: real offscreen UI add/edit/focus/delete, Unicode link/view reload and copied bug report with crops pass without regeneration or console errors.
 - [x] Minor-stream bridges: connected lane footbridges and street arches (`urban/streambridges.ts`, shared `render/townbridges.ts`). Audit 2026-10-04: geometry/access/water checks pass across 24 towns; actual seed 1 valley plank bridges were inspected in SVG and Canvas. Fords remain deliberately subtle.

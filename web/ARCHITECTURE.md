@@ -21,6 +21,8 @@ The Python code in `../town_generator/` is a prototype/reference only (algorithm
 npm run dev        # vite dev server
 npm run build      # single-file build → dist/index.html
 npm test           # vitest
+npm run test:fast  # development suites, excluding the exhaustive city matrix
+npm run test:slow  # exhaustive city/culture/mix matrix
 npm run preview:png -- --seed 42 --size town [--opt k=v ...] --out out/x.png   # Node: generate + render SVG + rasterize
 npm run typecheck
 ```
@@ -160,8 +162,61 @@ Spec: `REGION_SETTLEMENTS.md`. Options `mapSize` (600 m–40 km, URL `map=`), `p
 ## Megacity scaling (URBAN_MORPHOLOGY §3d)
 
 Main settlements above `eagerPop` (option, URL `eager=`, default `EAGER_MAIN_POP` = 40 000) take the megacity path; at or below it the eager town stage runs exactly as before (whole-world hashes unchanged). The capital preset (40–60 k) is therefore lazy: its eager plan took 14–18 s in the urban stage.
-- **Macro plan, eager** (`urban/mega/plan.ts`, < 1 s at 1 M, ~2.5 s at 5 M): growth rings = cost isolines of the land each phase needs (2–5 rings by population, shares growing ×1.9, densities × 1–1.5 with size, low-frequency lobes; planned cultures use their figure), the old lines as boulevards and the last one or two standing as walls; radials = the regional roads (the main ones to the market) plus new ones out of every ring where the arc between two radials exceeds ~0.6–1.5 km; nuclei = fused market towns (own wall or boulevard, market, spokes) and absorbed villages (green + spokes). All lines go into one `StreetGraph`; its faces minus the water are split by chords along the radial/tangential field of the nearest nucleus (secondary arterials) into quarters of 4–15 ha. Each `MacroQuarter` has its polygon and edge labels (street ids / wall / water / open), phase, zone, age, morphology, culture, density, district (old town, town, suburb, village, satellite, port, palace, cathedral, craft, gardens) and the landmarks it should claim (cathedral close by the market, parish churches, abbeys). City-rank lots: the palace city (a quarter-sized lot), parks; port quarters turn their water edges into quays; bridges where arterials cross a river. The site keeps the city's radius off the map edge (`SitePrefs.margin`).
+- **Macro plan, eager** (`urban/mega/plan.ts`): growth rings = cost isolines of the land each phase needs (2–5 rings by population, shares growing ×1.9, densities × 1–1.5 with size, low-frequency lobes; planned cultures use their figure), the old lines as boulevards and the last one or two standing as walls; radials = the regional roads (the main ones to the market) plus new ones out of every ring where the arc between two radials exceeds ~0.6–1.5 km; nuclei = fused market towns (own wall or boulevard, market, spokes) and absorbed villages (green + spokes). All lines go into one `StreetGraph`; its faces minus the water are split by chords along the radial/tangential field of the nearest nucleus (secondary arterials) into quarters of 4–15 ha. Each `MacroQuarter` has its polygon and edge labels (street ids / wall / water / open), phase, zone, age, morphology, culture, density, district (old town, town, suburb, village, satellite, port, palace, cathedral, craft, gardens) and the landmarks it should claim (cathedral close by the market, parish churches, abbeys). City-rank lots: the palace city (a quarter-sized lot), parks; port quarters turn their water edges into quays; bridges where arterials cross a river. The site keeps the city's radius off the map edge (`SitePrefs.margin`). Current timings are recorded in `../PERFORMANCE_STUDY.md`.
 - **Quarter detail, lazy** (`urban/mega/detail.ts`, 100–250 ms): the level 2–4 engine (splitQuarter, closes / derbs, carveBlocks, compounds, cutPlots / cutCourtyards, buildOn, access, masses) on one quarter with the arterials around it (same ids as the macro labels) and its own stream. It never sees another quarter's streets, so it is independent of the generation order and equals the quarter of a "generate all" run.
-- **Worker / UI**: `QuarterQueue` (`ui/megaQueue.ts`) in the generation worker: `quarters` requests carry the view rectangle (scale ≥ 0.1 px/m), quarters nearest its centre first, ~150 ms slices, LRU of 420 quarters; batches go to the render worker (`QuarterMsg`), merged into `World.megaDetail` and redrawn at most every 400 ms. `renderView` → `megaView` merges the detailed quarters and draws the others as stand-in fabric (`mega/standin.ts`); far zoom uses the macro density raster (`UrbanLayer.densityGrid`). Export "SVG, all quarters (slow)" details every quarter first.
+- **Worker / UI**: `QuarterQueue` (`ui/megaQueue.ts`) lives in the generation worker. View requests prioritize central quarters, cap the visible request and LRU at 420, and prefetch at most 140. `quarterPool.ts` runs at most two nested quarter workers with an immutable reduced World snapshot (`quarterPoolCore.ts`): terrain, water, site/cost fields and macro plans remain; names, land use, hydrological analysis grids and eager detail are omitted. Per-quarter failures retry once in slices on the original World; transport failure switches the pool to sliced generation. Rerolls discard stale replies and terminate workers. Batches arrive within roughly 150 ms and rebuild the displayed scene at most every 400 ms. Secondary-plan identity controls snapshot refresh; ordinary detail batches do not reclone it.
+- **Stand-ins and exports**: `renderView` → `megaView` merges exact quarters and uses `mega/standin.ts` elsewhere. Stand-in caches include nucleus and budget identity, with a shared 12,000-block/32,000-mass budget and local 64-block/512-mass caps. Frontage, usable courts and reserved open places survive coarse detail. Full SVG/export requests generate every quarter through a separate export cache; they deliberately exceed the interactive 420-quarter limit.
+- **Extent**: `mega/extent.ts` expands only implicit map presets for explicit populations. Custom maps, automatic-region extents and imported heightmaps remain authoritative. All growth rings share one containment scale and retain a 150 m map margin. The realized extent is stored in options for reproducible URL/export reloads; capacity shortfalls carry planned-population/land/extent warnings.
 - Tools: `scripts/mega_view.ts` (macro plan by district / density, `--detail N`), `tests/mega.test.ts` (threshold, lazy = eager quarter, order independence, tiling, render merge; `BURGMAP_PERF=1` for the 1 M / 5 M timings).
 
+`mega/boundary.ts` restores the original outer supports after recursive graph
+splits and before face extraction. Production uses `preserveValid`: an already
+admissible graph stays byte-identical; a real exterior overflow beyond the
+existing graph/Boolean rounding budget triggers complete restoration. It moves
+shared coordinates together, keeps incidence and labels, and is terminal:
+do not query the graph's spatial indices afterward. `mega/nucleus.ts` repairs
+only road fans that exclude the real centre
+and selects one verified dry reserved face, including legitimate water-bank
+labels; unavailable native programmes produce an explicit warning.
+
+## Native cultural programmes
+
+`NucleusSpec.builder` names a registered compound builder independently of its
+generic nucleus kind. Eager, macro and lazy detail paths use the same builder;
+an explicit kind override clears an inherited builder. Every worker runtime
+registers the required operators and compounds, including reduced-snapshot
+quarter workers. Unknown builders fall back to an open parcel, and registry
+lookups reject inherited object properties. Worlds remain structured-clonable.
+
+`swahili.ts` supplies coral-stone courtyard houses, bazaars, Juma/local mosques,
+merchant mansions, a fort and waterfront programmes. `primitive_features.ts`
+retains cattle kraals, chief halls, kivas, native banks and garden boundaries
+after village-to-town growth. House fittings preserve physical minimum sizes,
+served passages and previously valid buildings.
+
+Swahili angular commerce falls back to a real served core quarter only when no
+buildable bazaar quarter exists; a mosque or place with that morphology does not
+provide shops. `persianhouse.ts` removes tiny acute roof tips locally, accepting
+only a simple contained footprint with preserved physical dimensions and an
+analytically bounded area loss. Failed geometry proofs preserve the old house.
+
+## Displayed frames and PNG export
+
+`ui/frameHandoff.ts` distinguishes the requested generation from the displayed
+bitmap. A map stays visible and interactive during generation; accepted frames
+carry their own options, name, centre and content version. Ready means the final
+version was actually displayed. A render-worker error restores the prior scene.
+Typed replies are dispatched before legacy SVG/progress replies.
+
+Canvas field furrows share SVG phase, spacing and hole/strip clipping. Tiny
+fields and views with more than 350 eligible fields omit texture while retaining
+field geometry and tones. Furrow paths have a separate bounded LRU.
+
+PNG export captures the displayed World/options/name before yielding. The page
+decodes native SVG and draws it to a full-size HTML canvas; `createImageBitmap`
+of that canvas is sent to a fresh worker for PNG encoding. This retains native
+SVG text pixels exactly. The page raster phases still cost time: fallback export
+can pause it for roughly half a second on measured 3,000-pixel cases. Progress
+reports build/decode/draw/snapshot/encode/save. Bitmaps, canvas dimensions and the
+encoding worker are released on completion/error. Worker/measurement refusal and
+`file://` retain generation, display and export fallback paths.

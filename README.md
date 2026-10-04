@@ -23,12 +23,16 @@ Procedural generator of pre-modern settlements in their landscape. From a seed (
   - Faubourgs grow along the roads.
   - Each town has parish churches and places.
 - **Planning cultures**, recognisable from the plan alone:
-  - European organic, bastide, Roman core;
-  - Medina, Chinese walled city, Japanese castle town, Indian temple town;
-  - Elven, dwarven.
-  
+  - 38 presets: European, Mediterranean, Asian, American, African and fantasy;
+  - Swahili stone towns with coral-stone courtyard houses, bazaars, mosques and waterfront quays;
+  - native village architecture retained as settlements grow into towns.
+
   Cultures can be mixed by growth phase, by sector or by continuous blend.
-- **Output**: several map styles, labels, legend, and SVG / PNG / JSON export.
+- **Scale and placement**: 10 to 5 million inhabitants, regional settlements,
+  chosen centres and lazily detailed large-city quarters. Implicit maps expand
+  for large populations; explicit map limits retain capacity warnings.
+- **Output**: nine map styles, labels, legend, bug pins and SVG / PNG / JSON
+  export. Interactive Canvas uses offscreen rendering and bounded detail caches.
 
 ## Development
 
@@ -44,9 +48,12 @@ npm run build      # single self-contained dist/index.html (works from file://)
 npm run preview:png -- --seed 42 --size town --out out/x.png
 ```
 
-The full suite includes the long city matrix; allow roughly 20 minutes. Both
+The full suite includes the long city matrix; allow roughly 40 minutes. Both
 projects use the same assertions and run at most two worker processes. A focused
 suite can still run with `npm test -- tests/urban.determinism.test.ts`.
+
+Current fixes and measured performance: [ROADMAP.md](ROADMAP.md) and
+[PERFORMANCE_STUDY.md](PERFORMANCE_STUDY.md).
 
 Design documents:
 - `web/ARCHITECTURE.md`
