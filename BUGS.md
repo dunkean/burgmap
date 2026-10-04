@@ -18,4 +18,3 @@ Agents: fix the open reports; parallel work is allowed. Remove a report after it
 - De très nimbreux town plan construire les quartiers sur l'eau sans en tenir compte. Il faut corriger
 - lignes de contours et interne des champs scale avec la taille de l'image. Sur de très grande map ca devient hideux.
 - le tracé des maisons en zone très denses, y a des overlaps, des coupures, voire des incohérence.
-- il faut pouvoir aussi placer des villages, hameau, fermes, etc.
