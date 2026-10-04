@@ -797,12 +797,17 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   let openGardens = 0;
   plots.forEach((pl, pi) => {
     const pr = rng.fork('pl:' + pi);
-    const cov = Math.max(0, Math.min(1, (blockInfill[pl.block] + pr.range(-0.03, 0.03)) * (1 - 0.4 * (pl.fade ?? 0))));
+    const mature = pl.zone === 'core' || pl.zone === 'middle';
+    // Preserve the phase's configured burgage programme in mature quarters. The edge still changes setbacks;
+    // lowering the infill as well can turn an established middle quarter into young house-and-garden fabric.
+    const cov = Math.max(0, Math.min(1, (blockInfill[pl.block] + pr.range(-0.03, 0.03)) * (mature ? 1 : 1 - 0.4 * (pl.fade ?? 0))));
     let first = smithies.has(pl);
     const fm = { x: (pl.front[0].x + pl.front[1].x) / 2, y: (pl.front[0].y + pl.front[1].y) / 2 };
     const onQuay = quays.length > 0 && !!streets.nearest(fm, 10, (st) => st.role === 'quay');
     const craft = craftAt && dist(fm, craftAt) < 170;
-    const gap = plotMorph[pi].faubFade !== false && !onQuay && !first && !craft ? edgeFade(fm, false) : 0;
+    // Mature phases already express gardens through their configured burgage programme.
+    // Whole-plot gaps belong to younger fabric, rather than independently emptying core/middle plots.
+    const gap = !mature && plotMorph[pi].faubFade !== false && !onQuay && !first && !craft ? edgeFade(fm, false) : 0;
     if (gap > 0 && pr.fork('openGap').chance(0.5 * gap)) {
       plotGardens.push(pl.poly);
       openGardens++;

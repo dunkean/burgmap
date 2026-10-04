@@ -150,7 +150,26 @@ describe('open settlement fringe', () => {
   it('preserves partitions, access and containment on the reported open-town shape', () => {
     const w = generate(makeOptions({ seed: 'p4uefz', size: 'town', culture: 'european-organic', walls: 'none', settlements: 'none' }));
     expect(Number(w.stats['urban.openFringe.quarters'])).toBeGreaterThan(0);
-    expect(Number(w.stats['urban.openEdge.gardens'])).toBeGreaterThan(0);
+    // Check the actual transition rather than a counter for randomly emptied mature plots.
+    const u = w.urban!;
+    const fringeBlocks = new Set(u.blockInfo.flatMap((info, i) => info.kind === 'block' && info.zone === 'faubourg' ? [i] : []));
+    const matureBlocks = new Set(u.blockInfo.flatMap((info, i) => info.kind === 'block' && ['core', 'middle'].includes(info.zone) ? [i] : []));
+    const builtIn = (blocks: Set<number>) => u.buildings.reduce((sum, b) => sum + (b.parcel !== undefined && blocks.has(u.parcels[b.parcel].block) ? area(b.poly) : 0), 0);
+    const areaOf = (blocks: Set<number>) => [...blocks].reduce((sum, i) => sum + area(u.blocks[i]), 0);
+    const middleBlocks = new Set(u.blockInfo.flatMap((info, i) => info.kind === 'block' && info.zone === 'middle' ? [i] : []));
+    expect(builtIn(middleBlocks) / areaOf(middleBlocks), 'open mature middle keeps its historical coverage target').toBeGreaterThanOrEqual(0.7);
+    expect(builtIn(middleBlocks) / areaOf(middleBlocks)).toBeLessThanOrEqual(0.85);
+    const fringePlots = u.parcels.map((p, i) => ({ p, i })).filter(({ p }) => p.use === 'plot' && fringeBlocks.has(p.block));
+    const gardenPlots = fringePlots.filter(({ i }) => !u.buildings.some((b) => b.parcel === i));
+    expect(fringeBlocks.size).toBeGreaterThan(0);
+    expect(builtIn(fringeBlocks), 'served outlying dwellings remain').toBeGreaterThan(0);
+    expect(builtIn(fringeBlocks) / areaOf(fringeBlocks), 'real outlying fabric is less dense than the mature town').toBeLessThan(builtIn(matureBlocks) / areaOf(matureBlocks));
+    expect(gardenPlots.length, 'whole-plot gardens remain outside the mature phases').toBeGreaterThan(0);
+    const fullGardenPlots = gardenPlots.filter(({ p }) => {
+      const garden = u.backLand.reduce((sum, g) => sum + mpArea(intersectionS(g, p.poly)), 0);
+      return garden >= 0.99 * area(p.poly);
+    });
+    expect(fullGardenPlots.length, 'whole-plot gaps have real garden geometry').toBeGreaterThan(0);
     const report = checkWorld(w);
     expect(report.blockOutside).toBeLessThanOrEqual(0.05);
     expect(report.blockAreaErr).toBeLessThanOrEqual(0.005);

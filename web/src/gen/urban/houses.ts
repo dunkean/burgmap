@@ -105,7 +105,9 @@ export function burgageHouse(pl: Plot, cov: number, P: MorphologyParams, rng: Rn
 
   // ---- the street line: mostly continuous, small jogs on some plots, set back outside the core
   const fade = pl.fade ?? 0;
-  if (fade > 0 && rng.chance(0.5 * Math.pow(fade, 1.4))) { garden(0); return out; }
+  // Core/middle keep their street-front dwelling and configured programme; the edge still changes setbacks.
+  // Preserve the existing draw before the zone guard so previously built plots keep their RNG sequence.
+  if (fade > 0 && rng.chance(0.5 * Math.pow(fade, 1.4)) && !dense) { garden(0); return out; }
   const [sb0, sb1] = P.setback[zone];
   let sb = dense && rng.chance(zone === 'core' ? 0.14 : 0.24) ? rng.range(0.4, 1.1) : rng.range(sb0, sb1);
   if (fade > 0) sb += rng.range(0, 3.5) * fade;

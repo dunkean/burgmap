@@ -466,7 +466,12 @@ function realHut(hut: Polygon, cell: Polygon, r: Rng): { poly: Polygon; arch: st
   const o = obb(hut);
   const u = o.u, v = o.v;
   const c = inscribed(hut, [], 0.3).c;
-  const ok = (p: Polygon | null): p is Polygon => !!p && p.length >= 3 && isSimple(p) && polyInside(cell, p) && p.every((q) => distToRing(cell, q) >= 0.25) && area(p) >= 15.2 && area(p) <= 40 && area(p) >= A * 0.7;
+  const ok = (p: Polygon | null): p is Polygon => {
+    if (!p || p.length < 3 || !isSimple(p) || !polyInside(cell, p) || !p.every((q) => distToRing(cell, q) >= 0.25)) return false;
+    const a = area(p), sh = shapeOf(p);
+    // Styling must preserve the dwelling's fitting contract; otherwise retain the already valid original hut.
+    return a >= 15.2 && a <= 40 && a >= A * 0.7 && sh.w >= 4.5 && sh.asp <= 3;
+  };
   const box = (q: Vec2, L: number, W: number): Polygon => orientPos([-1, 1].flatMap((su) => (su < 0 ? [-1, 1] : [1, -1]).map((sv) => ({ x: q.x + u.x * su * L / 2 + v.x * sv * W / 2, y: q.y + u.y * su * L / 2 + v.y * sv * W / 2 }))));
   const t = r.float();
   if (t < 0.16) {
