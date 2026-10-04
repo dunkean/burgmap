@@ -22,6 +22,7 @@ import type { UrbanStreet } from '../../types';
 import { area, orientPos, pointInRing, inscribed, bboxOf } from '../../geo/poly';
 import { clipHalfPlaneConvex } from '../../geo/split';
 import { intersectionS, mpArea } from '../../geo/bool';
+import { wetArea } from '../waterland';
 import type { CampCtx } from './index';
 import { CampOut, emptyCamp, street, rect, fitIn, hut, at, openRing } from './kit';
 import { roundedRect } from './farms';
@@ -149,7 +150,7 @@ export function mayaCity(cc: CampCtx, c: Vec2, pop: number, rng: Rng): CampOut {
   const plazaPolys: Polygon[] = [];
   for (const pz of plazas) {
     const poly = box(pz.cu, pz.cv, pz.w - 4, pz.h - 4);
-    if (poly.some((q) => ctx.isWater(q)) || plazaPolys.some((o) => mpArea(intersectionS(o, poly)) > 1)) continue;
+    if (poly.some((q) => ctx.isWater(q)) || wetArea(poly, ctx.water) > 0.01 || plazaPolys.some((o) => mpArea(intersectionS(o, poly)) > 1)) continue;
     plazaPolys.push(poly);
     const qi = out.quarters.length;
     out.quarters.push(poly); out.outline.push(poly);
@@ -395,7 +396,7 @@ function houselots(out: Out, cc: CampCtx, c: Vec2, pop: number, tier: number, an
       if (cellP.length < 3) return;
     }
     cellP = orientPos(cellP.map((q) => ({ x: mm(q.x), y: mm(q.y) })));
-    if (area(cellP) < 260 || cellP.some((q) => ctx.isWater(q) || plazas.some((pz) => pointInRing(pz, q)) || resv.some((w) => pointInRing(w, q)))) return;
+    if (area(cellP) < 260 || cellP.some((q) => ctx.isWater(q) || plazas.some((pz) => pointInRing(pz, q)) || resv.some((w) => pointInRing(w, q))) || wetArea(cellP, ctx.water) > 0.01) return;
     // the frontage: the longest edge facing the nearest target
     let tgt = targets[0], td = Infinity;
     for (const t of targets) { const d = dist(t, p); if (d < td) { td = d; tgt = t; } }

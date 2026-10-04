@@ -21,6 +21,7 @@ import { rasterizePolys } from '../geo/raster';
 import { insidePieces } from '../geo/split';
 import { fortifyRegion } from './fortify';
 import { D8 } from '../core/grid';
+import { dryPieces } from './waterland';
 
 export const POP_RANGE: Record<SizeName, [number, number]> = {
   hamlet: [40, 150], village: [320, 900], town: [2200, 5000], city: [11000, 24000], capital: [40000, 60000],
@@ -358,7 +359,7 @@ export function regionForArea(ctx: UrbanCtx, fld: PhaseField, targetArea: number
     regs = isoRegions(sm, n, cell, 0.5, Math.min(2500, targetArea * 0.05), win);
   } else regs = isoRegions(v, n, cell, -thr, Math.min(2500, targetArea * 0.05), win);
   let m: MultiPoly = regs;
-  if (ctx.water.length) m = difference(m, ctx.water);
+  if (ctx.water.length) m = dryPieces(m, ctx.water);
   return keepMain(m, ctx.center, 0.1);
 }
 
@@ -618,7 +619,7 @@ export function planFaubourgs(ctx: UrbanCtx, enclosure: MultiPoly, roads: RoadIn
   if (!pieces.length) return { region: [], paths: [] };
   let region = union(pieces[0], ...pieces.slice(1));
   region = difference(region, blocked);
-  if (ctx.water.length) region = difference(region, ctx.water);
+  if (ctx.water.length) region = dryPieces(region, ctx.water);
   void zone;
   region = dropSlivers(region, 1200, 8);
   return { region, paths };

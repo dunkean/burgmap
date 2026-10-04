@@ -5,7 +5,7 @@ import type { World, PolyH, UrbanWall } from '../gen/types';
 import type { Polygon } from '../gen/core/geom';
 import type { Palette } from './styles';
 import { f1, pathD } from './util';
-import { area } from '../gen/geo/poly';
+import { area, orientPos } from '../gen/geo/poly';
 import { FENCE_STYLE, solidGround } from './scene';
 
 const phD = (p: PolyH): string => pathD(p.outer, true) + p.holes.map((h) => pathD(h, true)).join('');
@@ -355,7 +355,7 @@ export function urbanLayer(world: World, pal: Palette, u: number, debug: boolean
     for (const st of ub.streets) s += `<path d="${pathD(st.path, false)}" stroke="${pal.bridgeInk}" stroke-width="${f1(Math.max(1.6, st.width + 0.2))}"/>`;
     for (const st of ub.streets) s += `<path d="${pathD(st.path, false)}" stroke="${pal.bridgeDeck}" stroke-width="${f1(Math.max(1, st.width - 0.7))}"/>`;
     s += '</g>';
-  } else s += `<path class="u-streets" d="${ub.quarters.map((q) => pathD(q.poly.outer, true)).join('')}" fill="${U.street}" stroke="${U.street}" stroke-width="0.4"/>`;
+  } else s += `<path class="u-streets" d="${ub.quarters.map((q) => pathD(orientPos(q.poly.outer), true) + q.poly.holes.map((h) => pathD(orientPos(h).slice().reverse(), true)).join('')).join('')}" fill-rule="nonzero" fill="${U.street}" stroke="${U.street}" stroke-width="0.4"/>`;
   if (!open) {
   const places = ub.parcels.filter((p) => p.use === 'place' || p.use === 'market' || p.use === 'quay' || p.use === 'pier' || p.use === 'slipway' || p.use === 'timber-yard' || p.use === 'mill-yard' || p.use === 'mill' || p.use === 'tannery-yard' || p.use === 'bridge');
   if (places.length) {

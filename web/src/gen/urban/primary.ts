@@ -9,7 +9,8 @@ import type { Rng } from '../core/rng';
 import type { UrbanCtx } from './context';
 import type { PhasePlan } from './phases';
 import type { Zone, MorphologyParams } from './morphology';
-import { MultiPoly, unionS as union, intersectionS as intersection, differenceS as difference, differenceSafeS, mpArea } from '../geo/bool';
+import { MultiPoly, unionS as union, intersectionS as intersection, differenceS as difference, differenceSafeS, tryIntersection, mpArea } from '../geo/bool';
+import { dryPieces, waterNear } from './waterland';
 import { area, pointInRing, distToRing, convexHull, orientPos, cleanRing, segSegT } from '../geo/poly';
 import { ribbon } from '../geo/offset';
 import { LPoly, insidePieces } from '../geo/split';
@@ -57,6 +58,44 @@ export interface Primary {
   footprint: MultiPoly;
   /** Street id of the ring around the market (-1 if none). */
   marketStreet: number;
+}
+
+/** Explicit public structures over natural water; no residential quarter gains this permission. */
+// Quay aprons explicitly reclaim a narrow shore strip; their warehouse quarters remain constrained to land.
+export const WATER_LOT_KINDS = new Set(['m4-quay', 'm4-pier', 'm4-slipway', 'm4-bridge-houses']);
+const waterLot = (lot: ReservedLot) => lot.piece === 'place' && WATER_LOT_KINDS.has(lot.kind);
+
+function largestSimple(pieces: MultiPoly): Polygon | null {
+  let best: Polygon | null = null;
+  for (const ph of pieces) for (const simple of ph.holes.length ? openHoles(ph) : [ph]) {
+    if (!simple.holes.length && (!best || area(simple.outer) > area(best))) best = simple.outer;
+  }
+  return best;
+}
+
+/** A water cut must keep the piece reached by the existing approach, rather than an isolated larger island. */
+function servedLotPiece(lot: ReservedLot, pieces: MultiPoly): Polygon | null {
+  const simple = pieces.flatMap((ph) => ph.holes.length ? openHoles(ph) : [ph]);
+  const reached = !lot.cuts.length ? simple : simple.filter((ph) => lot.cuts.some((cut) =>
+    cut.some((p) => pointInRing(ph.outer, p) || distToRing(ph.outer, p) < 0.6) || insidePieces(ph.outer, cut).length > 0));
+  return largestSimple(reached);
+}
+
+/** Registries and sites may retain the original ring; keep that identity when its extent changes. */
+function updateLotRing(lot: ReservedLot, poly: Polygon): void {
+  if (poly !== lot.poly) lot.poly.splice(0, lot.poly.length, ...poly);
+}
+const unchangedRing = (pieces: MultiPoly, ring: Polygon) => pieces.length === 1 && pieces[0].outer === ring && !pieces[0].holes.length;
+
+/** The single nucleus lot and its surrounding ring must be simple dry polygons before they enter the graph. */
+export function clipMarketToLand(candidate: Polygon, core: MultiPoly, water: MultiPoly, targetArea: number): Polygon | null {
+  const selected = largestSimple(intersection(candidate, core));
+  if (!selected || area(selected) <= 0.4 * targetArea) return null;
+  // Preserve the established cleanup on dry nuclei, then check it: removing a shallow notch can expose water.
+  const cleaned = cleanRing(selected, 0.5, 2);
+  const dry = dryPieces(cleaned, water);
+  const safe = largestSimple(dry);
+  return safe && safe.length >= 3 && (unchangedRing(dry, cleaned) || area(safe) > 0.4 * targetArea) ? safe : null;
 }
 
 const inMP = (m: MultiPoly, p: Vec2) => m.some((ph) => pointInRing(ph.outer, p) && !ph.holes.some((h) => pointInRing(h, p)));
@@ -312,20 +351,12 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
       }
     }
     const mk = nu.shape === 'hull' ? makeMarket(ctx.center, rawRadials.map((r) => r.pl), A, rng.fork('market'), inp.mainAngle) : shapeAt(nc);
-    const clipped = intersection(mk, core);
-    let best: Polygon | null = null;
-    for (const ph of clipped) if (!best || area(ph.outer) > area(best)) best = ph.outer;
-    if (best && area(best) > 0.4 * A) market = cleanRing(best, 0.5, 2);
-    if (market && market.length < 3) market = null;
+    market = clipMarketToLand(mk, core, ctx.water, A);
   } else if (inp.marketArea > 0) {
     const mk = P.streetOp === 'grid'
       ? orientedRectP(ctx.center, inp.mainAngle, Math.sqrt(inp.marketArea * 1.25), Math.sqrt(inp.marketArea / 1.25))
       : makeMarket(ctx.center, rawRadials.map((r) => r.pl), inp.marketArea, rng.fork('market'), inp.mainAngle);
-    const clipped = intersection(mk, core);
-    let best: Polygon | null = null;
-    for (const ph of clipped) if (!best || area(ph.outer) > area(best)) best = ph.outer;
-    if (best && area(best) > 0.4 * inp.marketArea) market = cleanRing(best, 0.5, 2);
-    if (market && market.length < 3) market = null;
+    market = clipMarketToLand(mk, core, ctx.water, inp.marketArea);
   }
   // ---- register radials (cut at the market)
   const radials: number[] = [];
@@ -595,7 +626,9 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
       }
     }
     for (const l of inp.reserve({ streets, market, marketStreet, radialLines, enclosure: enc, footprint, phases: inp.phases, gates: gatePts, cuts: extraCuts })) {
-      if (l.poly.length >= 3 && area(l.poly) > 20) lots.push(l);
+      const dry = waterLot(l) ? [{ outer: l.poly, holes: [] }] : dryPieces(l.poly, ctx.water);
+      const safe = unchangedRing(dry, l.poly) ? l.poly : servedLotPiece(l, dry);
+      if (safe && safe.length >= 3 && area(safe) > 20) { updateLotRing(l, safe); lots.push(l); }
     }
   }
   // ---- walls and gates
@@ -687,7 +720,7 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
     let pl: MultiPoly = union(places[0], ...places.slice(1));
     if (market) pl = difference(pl, market);
     if (lots.length) pl = difference(pl, ...lots.map((l) => l.poly));
-    if (ctx.water.length) pl = difference(pl, ctx.water);
+    if (ctx.water.length) pl = dryPieces(pl, ctx.water);
     const enclosed = bands.slice();
     for (const b of enclosed) {
       const inter = intersection(b.mp, pl);
@@ -711,9 +744,27 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
     }
     footprint = union(footprint, ...lots.map((l) => l.poly));
   }
-  // Reserve the ditch before blocks and plots, including any faubourg pieces outside the curtain.
-  if (moat.length) {
-    for (const b of bands) b.mp = differenceSafeS(b.mp, moat);
+  // Every source band (including extra lots and faubourgs) stays off natural water and the defensive ditch.
+  if (ctx.water.length || moat.length) {
+    for (const b of bands) {
+      const before = b.mp;
+      if (!b.lot || !waterLot(b.lot)) b.mp = dryPieces(b.mp, ctx.water);
+      // The actual compound subject follows its clipped band. Builders receive these quarter/block polygons,
+      // never a stale pre-clip extent. A fragmented lot is represented by its largest served compound piece.
+      if (b.lot && b.mp !== before) {
+        const safe = servedLotPiece(b.lot, b.mp);
+        if (safe) {
+          // The registry ring is never a replacement for this band's partition. Keep the exact overlap of the
+          // selected served piece with its already-clipped band, preserving every earlier lot exclusion.
+          const kept = tryIntersection(safe, b.mp);
+          b.mp = kept.failed ? [] : kept.pieces;
+          if (b.mp.length) updateLotRing(b.lot, safe);
+        }
+        else b.mp = [];
+      }
+      // Preserve the established snapped ditch partition. Only natural-water clipping rebuilds a lot.
+      if (moat.length) b.mp = differenceSafeS(b.mp, moat);
+    }
   }
   // label sources
   const src = new GridIndex<{ a: Vec2; b: Vec2; lab: number }>(20);
@@ -749,6 +800,11 @@ export function buildPrimary(ctx: UrbanCtx, inp: PrimaryInput, streets: Streets,
     }
     // pieces that still have holes are split through them (exact partition; the cuts are open land)
     if (pieces.some((ph) => ph.holes.length)) pieces = pieces.flatMap((ph) => (ph.holes.length ? openHoles(ph) : [ph]));
+    // Later street/ditch cuts may snap a previously exact bank back toward water. Restore the actual shoreline
+    // before registering any terrestrial quarter; opening new water holes must also preserve that exact bank.
+    if (ctx.water.length && (!b.lot || !waterLot(b.lot))) {
+      pieces = dryPieces(pieces, ctx.water).flatMap((ph) => ph.holes.length ? openHoles(ph, 0, true) : [ph]);
+    }
     for (const ph of pieces) {
       const pts = ph.outer;
       if (area(pts) < (b.lot ? 20 : 150)) continue;
@@ -783,8 +839,7 @@ function nearWaterBoundary(ctx: UrbanCtx, p: Vec2, tol: number): boolean {
   return false;
 }
 function nearWater(ctx: UrbanCtx, p: Vec2, tol: number): boolean {
-  for (const ph of ctx.water) if (pointInRing(ph.outer, p) || distToRing(ph.outer, p) < tol) return true;
-  return false;
+  return waterNear(ctx.water, p, tol);
 }
 
 /** Extra radial: from the market edge outward along direction th, gently wandering, clipped to the enclosure. */

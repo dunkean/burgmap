@@ -14,6 +14,7 @@ import { resolvePlan, getCulture, ResolvedPlan, EnclosureSpec, NucleusSpec, scal
 import { generateCamp } from './camps/index';
 import { planRibbonVillage } from './villages';
 import { makeCtx } from './context';
+import { waterNear } from './waterland';
 import { choosePopulation, chooseArchetype, planServedPhases, planFaubourgs, EnclosurePlan, zonesFor, PhaseInput, dilate } from './phases';
 import { buildPrimary, Quarter } from './primary';
 import { Streets, LAB_OPEN, LAB_WALL } from './streets';
@@ -1048,13 +1049,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   const towerShape = hints.towerShape;
   // within 4 m of the water or in it (wall stretches along the water are left out): the water edges in a grid index
   // (the polygons are long river ribbons; a full scan per 2 m sample of every wall was the slowest part of the walls)
-  const waterSegs = new GridIndex<{ a: Vec2; b: Vec2 }>(25);
-  const waterBB = ctx.water.map((ph) => bboxOf(ph.outer));
-  for (const ph of ctx.water) { const r = ph.outer; for (let i = 0; i < r.length; i++) waterSegs.insertSeg(r[i], r[(i + 1) % r.length], { a: r[i], b: r[(i + 1) % r.length] }); }
-  const nearW = (q: Vec2): boolean => {
-    for (const s of waterSegs.queryPt(q, 4)) if (distToSeg(q, s.a, s.b) < 4) return true;
-    return ctx.water.some((ph, i) => q.x >= waterBB[i].x0 && q.x <= waterBB[i].x1 && q.y >= waterBB[i].y0 && q.y <= waterBB[i].y1 && pointInRing(ph.outer, q));
-  };
+  const nearW = (q: Vec2): boolean => waterNear(ctx.water, q, 4);
   // the outer wall of a double enceinte: the curtain line offset by the lists, gates aligned on the inner gates,
   // a barbican in front of each outer gate
   const outerWalls = (): UrbanWall[] => {

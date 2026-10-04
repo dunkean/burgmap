@@ -20,6 +20,7 @@ import type { Rng } from '../../core/rng';
 import type { UrbanStreet } from '../../types';
 import { orientPos, pointInRing, inscribed, area, bboxOf } from '../../geo/poly';
 import { intersectionS, differenceS } from '../../geo/bool';
+import { wetArea } from '../waterland';
 import type { CampCtx } from './index';
 import { snapRing, CampOut, emptyCamp, street, carveBlocks, pathRibbons, cutExact, FrontIndex, rect, fits, fitIn, openRing, pieces } from './kit';
 import { pyramid } from '../aztec';
@@ -332,7 +333,7 @@ function angkorWat(out: CampOut, cc: CampCtx, c: Vec2, H: number, R: number, r: 
     if (bb.x0 < 15 || bb.y0 < 15 || bb.x1 > ctx.mapSize - 15 || bb.y1 > ctx.mapSize - 15) continue;
     let wet = false;
     for (let x = bb.x0; x <= bb.x1 && !wet; x += 30) for (let y = bb.y0; y <= bb.y1; y += 30) if (ctx.isWater({ x, y })) { wet = true; break; }
-    if (wet || out.landmarks.some((l) => l.kind === 'baray' && intersectionS(l.poly, outer).length)) continue;
+    if (wet || wetArea(outer, ctx.water) > 0.01 || out.landmarks.some((l) => l.kind === 'baray' && intersectionS(l.poly, outer).length)) continue;
     // the island: a quarter of its own (one block, one compound parcel)
     const island = snapRing(sq(ac, S));
     const qi = out.quarters.length;

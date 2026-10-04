@@ -254,7 +254,7 @@ export function buildScene(world0: World, tileSize = TILE_SIZE): Scene {
   if (ur) {
     const addH = (name: string, l: PolyH[]): void => addPoly(name, l.map((p) => p.outer), l.map((p) => (p.holes.length ? p.holes : undefined)));
     addPoly('footprint', ur.footprint);
-    addPoly('u-streets', ur.quarters.map((q) => q.poly.outer));
+    addH('u-streets', ur.quarters.map((q) => ({ outer: orientPos(q.poly.outer), holes: q.poly.holes.map((h) => orientPos(h).slice().reverse()) })));
     const parcelsOf = (use: string[]): Polygon[] => ur.parcels.filter((p) => use.includes(p.use)).map((p) => p.poly);
     const PU = URBAN_PARCEL_USES;
     addPoly('u-places', parcelsOf([...PU.places]));

@@ -20,6 +20,7 @@ import { applySprawl } from '../morphology';
 import { getCulture, resolvePlan, type ResolvedPlan } from '../culture';
 import { makeCtx, type UrbanCtx } from '../context';
 import { shapePolygon } from '../phases';
+import { dryPieces } from '../waterland';
 import { makeMarket } from '../primary';
 import { Streets, LAB_OPEN, LAB_WALL, LAB_WATER } from '../streets';
 import { insetPiece } from '../blocks';
@@ -28,7 +29,7 @@ import { StreetGraph } from '../../geo/graph';
 import { GridIndex } from '../../geo/spatial';
 import { area, pointInRing, inscribed, obb, orientPos, segSegT, bboxOf, distToSeg, convexHull } from '../../geo/poly';
 import { splitByChord, rayHit, locate, type LPoly } from '../../geo/split';
-import { differenceS, mpArea, type MultiPoly } from '../../geo/bool';
+import { mpArea, type MultiPoly } from '../../geo/bool';
 import { openHoles } from '../plots';
 import { ribbon } from '../../geo/offset';
 import type { MacroPlan, MacroQuarter, MacroStreet, MacroNucleus, MacroDistrict, MacroWant } from './types';
@@ -800,7 +801,8 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
     const bb = bboxOf(lp0.pts);
     const wet = water.length && waterBB.some((w) => !(w.x0 > bb.x1 || w.x1 < bb.x0 || w.y0 > bb.y1 || w.y1 < bb.y0));
     if (!wet) { cells.push(lp0); continue; }
-    const res = differenceS(lp0.pts, water);
+    const res = dryPieces(lp0.pts, water);
+    if (res.length === 1 && res[0].outer === lp0.pts && !res[0].holes.length) { cells.push(lp0); continue; }
     const pieces: MultiPoly = [];
     for (const ph of res) pieces.push(...(ph.holes.length ? openHoles(ph) : [ph]));
     for (const ph of pieces) {
@@ -1290,7 +1292,7 @@ export function generateMega(world: World, root: Rng, pop: number, eagerPop: num
   lap('bridges');
 
   // ---- the layer
-  const footprintH: PolyH[] = differenceS(outer, water);
+  const footprintH: PolyH[] = dryPieces(outer, water);
   const layerStreets: UrbanStreet[] = mstreets.filter((s) => s.widths[0] > 0).map((s) => ({
     path: s.path, width: s.widths[0], widths: s.widths, kind: s.rank <= 1 ? 'main' : 'street', rank: s.rank, role: s.role, phase: s.phase,
   }));

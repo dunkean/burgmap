@@ -35,7 +35,7 @@ export interface TerrainLayer {
   seaFraction: number;
   /** Closed sea polygons (may extend a couple of cells beyond the map border; clip when rendering). */
   coastline: Polygon[];
-  /** Islands (land inside the sea): loops of orientation opposite to the main coastline loop. Absent when none. */
+  /** Dry islands inside sea polygons, independent of ring winding. Absent when none. */
   islands?: Polygon[];
   lakes: Polygon[];
   rivers: River[];

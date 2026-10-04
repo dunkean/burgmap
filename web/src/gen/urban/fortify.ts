@@ -13,6 +13,7 @@ import type { UrbanCtx } from './context';
 import { MultiPoly, unionS, differenceS, repairRing } from '../geo/bool';
 import { smoothstep } from '../core/field';
 import { ribbon } from '../geo/offset';
+import { dryPieces } from './waterland';
 
 export interface FitOpts {
   /** Max deviation of the DP fit (m). */
@@ -293,6 +294,6 @@ export function fortifyRegion(ctx: UrbanCtx, R: MultiPoly, prev: MultiPoly): Mul
     parts.push([{ outer: poly ?? ph.outer, holes: ph.holes }]);
   }
   let out: MultiPoly = parts.length ? unionS(parts[0], ...parts.slice(1), prev) : prev;
-  if (ctx.water.length) out = differenceS(out, ctx.water);
+  if (ctx.water.length) out = dryPieces(out, ctx.water);
   return out;
 }

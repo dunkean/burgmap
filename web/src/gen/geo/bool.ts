@@ -33,16 +33,17 @@ export const toGeom = (m: MultiPoly | PolyH | Polygon): Geom => {
 };
 
 /** Converts a polygon-clipping result into cleaned, positively oriented PolyH list (holes negative → stored positive). */
-export function fromGeom(g: Geom, minArea = 0.01, snapped = false): MultiPoly {
+export function fromGeom(g: Geom, minArea = 0.01, snapped = false, preserveEdges = false): MultiPoly {
   const out: MultiPoly = [];
   const me = 0.005;
   for (const pg of g) {
-    const outer = cleanRing(fromRing(pg[0] as Ring), me, 0.5, 0.002, false);
+    const outer = preserveEdges ? fromRing(pg[0] as Ring) : cleanRing(fromRing(pg[0] as Ring), me, 0.5, 0.002, false);
     if (outer.length < 3 || area(outer) < minArea) continue;
     const holes: Polygon[] = [];
     for (let i = 1; i < pg.length; i++) {
-      const h = cleanRing(fromRing(pg[i] as Ring), me, 0.5, 0.002, false);
-      if (h.length >= 3 && area(h) >= minArea) holes.push(orientPos(h));
+      const h = preserveEdges ? fromRing(pg[i] as Ring) : cleanRing(fromRing(pg[i] as Ring), me, 0.5, 0.002, false);
+      // Removing land slivers is conservative; filling even a tiny water hole is not.
+      if (h.length >= 3 && area(h) >= (preserveEdges ? Number.MIN_VALUE : minArea)) holes.push(orientPos(h));
     }
     out.push({ outer: orientPos(outer), holes });
   }
@@ -50,6 +51,8 @@ export function fromGeom(g: Geom, minArea = 0.01, snapped = false): MultiPoly {
 }
 
 type Operand = MultiPoly | PolyH | Polygon;
+/** Floating-point area noise floor (m²), separate from the millimetre coordinate grid. */
+export const BOOL_AREA_EPS = 1e-6;
 
 /** Debug hook: called with the inputs of boolean operations slower than 300 ms. */
 export let SLOW_LOG: ((op: string, snapped: boolean, a: unknown, b: unknown, ms: number) => void) | null = null;
@@ -128,12 +131,13 @@ function trimPolygon(pg: Ring[], sb: Box): Ring[] | null {
   return out;
 }
 
-function run(op: 'union' | 'intersection' | 'difference', a: Operand, rest: Operand[], snapped = false, failClosed = false): MultiPoly {
+function run(op: 'union' | 'intersection' | 'difference', a: Operand, rest: Operand[], snapped = false, failClosed = false, onFailure?: () => void, retryCoarse = true, preserveEdges = false, areaFloor = BOOL_AREA_EPS): MultiPoly {
+  const result = (g: Geom) => fromGeom(g, preserveEdges ? areaFloor : 0.01, snapped, preserveEdges);
   let ga = toGeom(a);
   let gr = rest.map(toGeom).filter((g) => g.length);
   if (snapped) { ga = snapGeom(ga); gr = gr.map(snapGeom); }
   if (!ga.length) return op === 'union' && gr.length ? run('union', rest[0], rest.slice(1), snapped) : [];
-  if (!gr.length) return op === 'intersection' ? [] : fromGeom(ga, 0.01, snapped);
+  if (!gr.length) return op === 'intersection' ? [] : result(ga);
   if (op !== 'union') {
     // polygons of the clip operands whose box misses the subject's box cannot touch the result (each operand keeps
     // its order; an operand left empty is dropped, as the engine would): huge operands such as the town's water
@@ -151,14 +155,23 @@ function run(op: 'union' | 'intersection' | 'difference', a: Operand, rest: Oper
   const f = polygonClipping[op] as (g: Geom, ...r: Geom[]) => Geom;
   const t0 = typeof performance !== 'undefined' ? performance.now() : 0;
   try {
-    const res = fromGeom(f(ga, ...gr), 0.01, snapped);
+    const res = result(f(ga, ...gr));
     if (SLOW_LOG && performance.now() - t0 > 300) SLOW_LOG(op, snapped, ga, gr, performance.now() - t0);
     return res;
   } catch {
     if (SLOW_LOG) SLOW_LOG(op + '-THROW', snapped, ga, gr, performance.now() - t0);
+    if (!retryCoarse && preserveEdges && op === 'intersection') {
+      // Coincident banks far from the origin can make the sweep tree inconsistent. Retry in local coordinates
+      // without snapping or moving one operand relative to another; area remains an exact-frame measurement.
+      const bb = geomBox(ga);
+      const move = (g: Geom, dx: number, dy: number): Geom => g.map((pg) => pg.map((r) => r.map(([x, y]) => [x + dx, y + dy] as [number, number])));
+      try { return result(move(f(move(ga, -bb.x0, -bb.y0), ...gr.map((g) => move(g, -bb.x0, -bb.y0))), bb.x0, bb.y0)); } catch { /* Still unproved: fail closed below. */ }
+    }
+    if (!retryCoarse) { onFailure?.(); return []; }
     // retry on coarser snapping (polygon-clipping can fail on nearly coincident edges)
     const q = (g: Geom): Geom => g.map((pg) => pg.map((r) => r.map(([x, y]) => [Math.round(x * 20) / 20, Math.round(y * 20) / 20] as [number, number])));
     try { return fromGeom(f(q(ga), ...gr.map(q)), 0.01, true); } catch {
+      onFailure?.();
       if (failClosed) return [];
       if (op === 'union') return fromGeom(ga).concat(...gr.map((g) => fromGeom(g)));
       return op === 'difference' ? fromGeom(ga) : [];
@@ -186,6 +199,24 @@ export const intersectionS = (a: Operand, ...rest: Operand[]): MultiPoly => run(
 export const differenceS = (a: Operand, ...rest: Operand[]): MultiPoly => run('difference', a, rest, true);
 /** Added water must disappear if clipping fails, rather than covering protected roads or dry land. */
 export const differenceSafeS = (a: Operand, ...rest: Operand[]): MultiPoly => run('difference', a, rest, true, true);
+
+/** Checked operations distinguish an empty geometric result from an engine failure, without returning unsafe land. */
+export function tryDifference(a: Operand, ...rest: Operand[]): { pieces: MultiPoly; failed: boolean } {
+  let failed = false;
+  const pieces = run('difference', a, rest, false, true, () => { failed = true; }, false, true);
+  return { pieces, failed };
+}
+export function tryDifferenceS(a: Operand, ...rest: Operand[]): { pieces: MultiPoly; failed: boolean } {
+  let failed = false;
+  const pieces = run('difference', a, rest, true, true, () => { failed = true; }, false, true);
+  return { pieces, failed };
+}
+export function tryIntersection(a: Operand, ...rest: Operand[]): { pieces: MultiPoly; failed: boolean } {
+  let failed = false;
+  // Keep raw positive areas here: callers must measure aggregate residue before applying any numerical floor.
+  const pieces = run('intersection', a, rest, false, true, () => { failed = true; }, false, true, Number.MIN_VALUE);
+  return { pieces, failed };
+}
 
 export const mpArea = (m: MultiPoly): number => m.reduce((s, ph) => s + area(ph.outer) - ph.holes.reduce((t, h) => t + area(h), 0), 0);
 

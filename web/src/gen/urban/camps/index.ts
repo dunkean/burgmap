@@ -15,7 +15,8 @@ import type { World, UrbanLayer, UrbanLine, PolyH, Archetype } from '../../types
 import type { Culture } from '../culture';
 import { resolveMorph } from '../morphology';
 import { makeCtx, type UrbanCtx } from '../context';
-import { differenceS, unionS, unionMany, intersectionS, mpArea, MultiPoly } from '../../geo/bool';
+import { difference, unionS, unionMany, intersectionS, mpArea, MultiPoly } from '../../geo/bool';
+import { dryPieces } from '../waterland';
 import { area, pointInRing, bboxOf, distToRing } from '../../geo/poly';
 import { disk, ribbon } from '../../geo/offset';
 import { CampOut, blockInfo, splitHoles } from './kit';
@@ -345,30 +346,73 @@ export function assemble(world: World, parts: CampOut[], culture: Culture, morph
   };
   const regions: PolyH[] = [];
   const direct: PolyH[] = [];
+  const waterBoxes = water.map((ph) => bboxOf(ph.outer));
   for (const part of parts) {
-    const q0 = layer.quarters.length, b0 = layer.blocks.length, p0 = layer.parcels.length;
-    const byQ = new Map<number, Polygon[]>();
-    for (const b of part.blocks) { if (!byQ.has(b.quarter)) byQ.set(b.quarter, []); byQ.get(b.quarter)!.push(b.poly); }
+    const blockQuarter = new Map<number, number>();
+    const byQuarter = new Map<number, number[]>();
+    part.blocks.forEach((b, bi) => {
+      const list = byQuarter.get(b.quarter) ?? [];
+      list.push(bi); byQuarter.set(b.quarter, list);
+    });
     part.quarters.forEach((q, qi) => {
-      const mine = byQ.get(qi) ?? [];
-      // (the street space as the quarter with its blocks as holes, as the street engine gives it: no boolean)
-      layer.quarters.push({ poly: { outer: q, holes: [] }, phase: 1, zone: 'village', streetSpace: [{ outer: q, holes: mine }] });
+      // The layout's blocks already exclude natural water. Keep its quarter as the same dry parent, with
+      // water holes intact; replacing only footprint after assembly left camp grounds painted over rivers.
+      const bb = bboxOf(q);
+      const constrain = !culture.waterBuild && waterBoxes.some((w) => !(w.x0 > bb.x1 || w.x1 < bb.x0 || w.y0 > bb.y1 || w.y1 < bb.y0));
+      const dry = constrain ? dryPieces(q, water) : [{ outer: q, holes: [] }];
+      const changed = dry.length !== 1 || dry[0].outer !== q;
+      for (const ph of dry) {
+        const mine: Polygon[] = [];
+        for (const bi of byQuarter.get(qi) ?? []) {
+          const b = part.blocks[bi];
+          if (blockQuarter.has(bi)) continue;
+          // Whole block containment also refuses the rare layout that checked only its vertices. Never clip
+          // an already parcelled block: that would destroy its frontage and building containment.
+          if (changed && mpArea(difference(b.poly, ph)) > 0.02) continue;
+          blockQuarter.set(bi, layer.quarters.length); mine.push(b.poly);
+        }
+        if (changed && !mine.length && mpArea([ph]) < 1) continue;
+        layer.quarters.push({ poly: ph, phase: 1, zone: 'village', streetSpace: [{ outer: ph.outer, holes: [...ph.holes, ...mine] }] });
+      }
     });
-    part.blocks.forEach((b) => {
+    const blockMap = new Map<number, number>();
+    part.blocks.forEach((b, bi) => {
+      const quarter = blockQuarter.get(bi);
+      if (quarter === undefined) return;
+      blockMap.set(bi, layer.blocks.length);
       layer.blocks.push(b.poly);
-      layer.blockInfo.push(blockInfo(b, q0 + b.quarter, culture.id, morphology));
+      layer.blockInfo.push(blockInfo(b, quarter, culture.id, morphology));
     });
-    for (const p of part.parcels) layer.parcels.push({ poly: p.poly, use: p.use, block: b0 + p.block, zone: 'village' });
-    for (const b of part.buildings) layer.buildings.push({ ...b, parcel: p0 + b.parcel });
-    layer.streets.push(...part.streets);
-    layer.lines!.push(...part.lines);
-    layer.walls!.push(...part.walls);
-    layer.landmarks.push(...part.landmarks);
+    const parcelMap = new Map<number, number>();
+    part.parcels.forEach((p, pi) => {
+      const block = blockMap.get(p.block);
+      if (block === undefined) return;
+      parcelMap.set(pi, layer.parcels.length);
+      layer.parcels.push({ poly: p.poly, use: p.use, block, zone: 'village' });
+    });
+    for (const b of part.buildings) {
+      const parcel = parcelMap.get(b.parcel);
+      if (parcel !== undefined) layer.buildings.push({ ...b, parcel });
+    }
+    const rejected = part.blocks.filter((_, bi) => !blockMap.has(bi)).map((b) => b.poly);
+    const droppedAt = (p: Vec2) => rejected.some((poly) => pointInRing(poly, p));
+    layer.streets.push(...part.streets.filter((st) => !st.path.every(droppedAt)));
+    layer.lines!.push(...part.lines.filter((line) => !line.path.every(droppedAt)));
+    layer.walls!.push(...part.walls.filter((wall) => !wall.path.every(droppedAt)));
+    const drySurface = (poly: Polygon) => !culture.waterBuild && water.length
+      ? dryPieces(poly, water).flatMap((ph) => splitHoles(ph)) : [poly];
+    for (const lm of part.landmarks) if (!droppedAt(polygonCentroid(lm.poly))) {
+      for (const poly of drySurface(lm.poly)) layer.landmarks.push({ ...lm, poly });
+    }
     layer.water!.push(...part.water);
-    layer.sites!.push(...part.sites);
-    layer.squares.push(...part.squares);
-    if (part.trees) layer.trees!.push(...part.trees);
-    if (part.disjoint) { for (const q of part.quarters) direct.push({ outer: q, holes: [] }); for (const o of part.outline) regions.push({ outer: o, holes: [] }); continue; }
+    layer.sites!.push(...part.sites.filter((site) => !droppedAt(site.anchor)));
+    for (const sq of part.squares) if (!droppedAt(polygonCentroid(sq))) layer.squares.push(...drySurface(sq));
+    if (part.trees) layer.trees!.push(...part.trees.filter((tree) => !droppedAt(tree)));
+    if (part.disjoint) {
+      for (const q of part.quarters) direct.push(...(!culture.waterBuild && water.length ? dryPieces(q, water) : [{ outer: q, holes: [] }]));
+      for (const o of part.outline) regions.push({ outer: o, holes: [] });
+      continue;
+    }
     for (const o of part.outline) regions.push({ outer: o, holes: [] });
     for (const q of part.quarters) regions.push({ outer: q, holes: [] });
   }
@@ -383,7 +427,7 @@ export function assemble(world: World, parts: CampOut[], culture: Culture, morph
   for (const list of perBlock.values()) for (const ph of unionMany(list, 24, true)) layer.masses.push({ outer: ph.outer, holes: ph.holes });
   layer.backLand = layer.parcels.filter((p) => p.use === 'garden').map((p) => ({ outer: p.poly, holes: [] }));
   let foot: MultiPoly = regions.length ? unionS(regions) : [];
-  if (water.length) foot = differenceS(foot, water);
+  if (water.length) foot = dryPieces(foot, water);
   foot = foot.filter((ph) => area(ph.outer) > 50);
   foot = [...foot, ...direct];
   layer.footprintH = foot.map((p) => ({ outer: p.outer, holes: p.holes }));
@@ -394,7 +438,7 @@ export function assemble(world: World, parts: CampOut[], culture: Culture, morph
     const grown: MultiPoly = [...foot];
     for (const ph of foot) for (const r of [ph.outer, ...ph.holes]) { const rb = ribbon(r.concat([r[0]]), 16); if (rb.length >= 3) grown.push({ outer: rb, holes: [] }); }
     let g = unionMany(grown.map((x): MultiPoly => [x]), 24, true);
-    if (water.length) g = differenceS(g, water);
+    if (water.length) g = dryPieces(g, water);
     for (const ph of g) for (const p of splitHoles(ph)) if (area(p) > 30) layer.landmarks.push({ kind: 'camp-ground', poly: p });
   }
   void polygonCentroid; void pointInRing; void disk;
