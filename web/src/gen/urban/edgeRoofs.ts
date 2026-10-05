@@ -7,7 +7,7 @@ import type { Streets } from './streets';
 import { LAB_OPEN, LAB_WALL } from './streets';
 import { area, bboxOf, distToSeg, distToRing, isSimple, obb, orientPos, pointInRing } from '../geo/poly';
 import { isConvex, polyInside } from '../geo/split';
-import { union, tryDifference, tryIntersection, mpArea, type MultiPoly } from '../geo/bool';
+import { union, tryDifference, tryIntersection, prepareIntersection, mpArea, type MultiPoly } from '../geo/bool';
 import { openHoles } from './plots';
 import { blockReach, makeStreetAt } from './access';
 import { MIN_BW, MAX_ASPECT } from './buildings';
@@ -15,6 +15,8 @@ import { PolygonIndex } from './polygonIndex';
 import { makeHullRectangleOverlap } from './roofRetention';
 import { makeGardenOpening } from './gardenProof';
 import { makeObstacleSelection } from './obstacleIndex';
+import { convexCenterDomain } from './roofProof';
+import { roofCandidateBatches, type RoofAreaBand, type RoofCandidateSearch } from './roofSearch';
 
 interface Frame { at: (u: number, d: number) => Vec2; us: number[]; ds: number[] }
 function frame(poly: Polygon, front: [Vec2, Vec2]): Frame {
@@ -98,7 +100,7 @@ function* relocatedRoofs(poly: Polygon, plot: Polygon, front: [Vec2, Vec2], size
   }
 }
 
-interface CriticalRoofCandidate { roof: Polygon; owner: Polygon; original: Polygon; move: number }
+interface CriticalRoofCandidate { roof: Polygon; owner: Polygon; original: Polygon; move: number; key: string }
 /** These checks are pure: defer them until the sorted consumer actually needs this proposal. */
 function retainsRoof(candidate: CriticalRoofCandidate): boolean {
   const retained = tryIntersection(candidate.roof, candidate.original);
@@ -113,7 +115,7 @@ function provedRoof(candidate: CriticalRoofCandidate): boolean {
 }
 
 /** Critical placements touch real parcel edges instead of depending on a coarse translation grid. */
-function criticalRoofCandidates(poly: Polygon, plot: Polygon, axis: [Vec2, Vec2], mode: 'regular' | 'supplement' | 'rare' | 'transfer' = 'regular', holes: Polygon[] = []): CriticalRoofCandidate[] {
+function criticalRoofSearch(poly: Polygon, plot: Polygon, axis: [Vec2, Vec2], mode: 'regular' | 'supplement' | 'rare' | 'transfer' = 'regular', holes: Polygon[] = []): RoofCandidateSearch<CriticalRoofCandidate> {
   const f = frame(poly, axis), pf = frame(orientPos(plot), axis);
   const cu = (Math.min(...f.us) + Math.max(...f.us)) / 2, cd = (Math.min(...f.ds) + Math.max(...f.ds)) / 2;
   const oldBounds = bboxOf(poly);
@@ -133,7 +135,6 @@ function criticalRoofCandidates(poly: Polygon, plot: Polygon, axis: [Vec2, Vec2]
   const minimumArea = (rare ? 0.5 : 0.65) * oldArea;
   // A previously clipped, undersized dwelling still needs room for the minimum useful whole roof.
   const maximumArea = rare ? Math.max(1.3 * oldArea, MIN_BW * MIN_BW) : 1.3 * oldArea;
-  const candidates: CriticalRoofCandidate[] = [];
   const ratios = [oldRatio, 1, 1.25, 1.5, 1.75, 2, 0.5, 3, 1 / 3];
   const sizes = mode !== 'regular' ? (() => {
     // Aim just inside the selected strict area floor: world-coordinate shoelace arithmetic can round
@@ -158,109 +159,131 @@ function criticalRoofCandidates(poly: Polygon, plot: Polygon, axis: [Vec2, Vec2]
   })() : [1, 0.8, 0.65].flatMap((fraction) => ratios.map((ratio) => ({
     width: Math.sqrt(oldArea * fraction * ratio), depth: Math.sqrt(oldArea * fraction / ratio),
   })));
-  const rectangles = new Set<string>(), dimensions = new Set<string>();
-  for (const { width, depth } of sizes) {
-    const dimension = `${width}:${depth}`;
-    if (dimensions.has(dimension)) continue;
-    dimensions.add(dimension);
-    if (Math.min(width, depth) < MIN_BW || Math.max(width, depth) / Math.min(width, depth) > MAX_ASPECT
-      || width > ownerWidth + spanMargin || depth > ownerDepth + spanMargin) continue;
-    // polyInside accepts at most one centimetre outside an owner edge. Projection onto
-    // a unit axis cannot increase that distance; retain extra room for frame rounding.
-    // Non-finite bounds stay on the existing exact path.
-    const centerMayFit = (c: { u: number; d: number }): boolean =>
-      !(c.u - width / 2 < ownerU0 - centerMargin || c.u + width / 2 > ownerU1 + centerMargin
-        || c.d - depth / 2 < ownerD0 - centerMargin || c.d + depth / 2 > ownerD1 + centerMargin);
-    const rings = mode === 'transfer' ? [pf, ...holes.map((p) => frame(p, axis))] : [pf];
-    let lines = rings.flatMap((ring) => ring.us.flatMap((u, i) => {
-      const j = (i + 1) % ring.us.length, du = ring.us[j] - u, dd = ring.ds[j] - ring.ds[i], length = Math.hypot(du, dd);
-      if (length < 1e-8) return [];
-      const nu = -dd / length, nd = du / length;
-      const support = Math.abs(nu) * width / 2 + Math.abs(nd) * depth / 2 + 1e-7;
-      return (mode === 'transfer' ? [-1, 1] : [1]).map((sign) => ({ nu, nd, k: nu * u + nd * ring.ds[i] + sign * support }));
-    }));
-    // Same eight-metre movement limit as the ordinary search; its four bounds are also useful critical edges.
-    lines.push({ nu: 1, nd: 0, k: cu - 8 }, { nu: -1, nd: 0, k: -cu - 8 },
-      { nu: 0, nd: 1, k: cd - 8 }, { nu: 0, nd: -1, k: -cd - 8 });
-    // A support line missing the whole relocation square cannot produce a local projection
-    // or intersection. Keep a generous rounding margin for the existing determinant floor.
-    const lineScale = Math.max(1, Math.abs(cu), Math.abs(cd), ...lines.map((line) => Math.abs(line.k)));
-    const lineMargin = 3e-6 + 128 * Number.EPSILON * lineScale / 1e-8;
-    lines = lines.filter((line) => Math.abs(line.k - line.nu * cu - line.nd * cd)
-      <= (Math.abs(line.nu) + Math.abs(line.nd)) * (8 + lineMargin));
-    const centers = [{ u: cu, d: cd }];
-    if (mode === 'transfer') {
-      const center = frame([oldCenter!], axis), u = center.us[0], d = center.ds[0];
-      // A fixed local grid also supplies interior positions in a concave, two-owner garden union.
-      for (const du of [0, -2, 2, -4, 4, -6, 6]) for (const dd of [0, -2, 2, -4, 4, -6, 6]) centers.push({ u: u + du, d: d + dd });
-    }
-    for (const [i, a] of lines.entries()) {
-      const shift = a.k - a.nu * cu - a.nd * cd;
-      centers.push({ u: cu + a.nu * shift, d: cd + a.nd * shift });
-      for (const b of lines.slice(i + 1)) {
-        const det = a.nu * b.nd - a.nd * b.nu;
-        if (Math.abs(det) < 1e-8) continue;
-        centers.push({ u: (a.k * b.nd - a.nd * b.k) / det, d: (a.nu * b.k - a.k * b.nu) / det });
+  // Dimension deduplication and scalar refusal do not depend on any center or proof.
+  // Retain the first original dimension and its order once, rather than rebuilding its keys per band.
+  const dimensions = new Set<string>();
+  const usableSizes = sizes.filter(({ width, depth }) => {
+    const key = `${width}:${depth}`;
+    if (dimensions.has(key)) return false;
+    dimensions.add(key);
+    return !(Math.min(width, depth) < MIN_BW || Math.max(width, depth) / Math.min(width, depth) > MAX_ASPECT
+      || width > ownerWidth + spanMargin || depth > ownerDepth + spanMargin);
+  });
+  // Four constructed vertices, eight world-coordinate products and their accumulated area error.
+  // Include the frame origin and the complete allowed movement/rectangle span. Ambiguous target
+  // areas share one band, so numerical cancellation never changes their original true-area order.
+  const scale = Math.max(coordinateScale, ...axis.flatMap((p) => [Math.abs(p.x), Math.abs(p.y)]))
+    + 20 + Math.sqrt(maximumArea * (MAX_ASPECT + 1 / MAX_ASPECT));
+  const build = (band?: RoofAreaBand): CriticalRoofCandidate[] => {
+    const candidates: CriticalRoofCandidate[] = [];
+    const rectangles = new Set<string>();
+    for (const { width, depth } of usableSizes) {
+      const nominalArea = width * depth;
+      if (band && (nominalArea < band.low || nominalArea > band.high)) continue;
+      const ownerCenter = convexCenterDomain(pf.us, pf.ds, plot, width, depth, cu, cd);
+      if (ownerCenter && !ownerCenter.possible) continue;
+      // polyInside accepts at most one centimetre outside an owner edge. Projection onto
+      // a unit axis cannot increase that distance; retain extra room for frame rounding.
+      // Non-finite bounds stay on the existing exact path.
+      const centerMayFit = (c: { u: number; d: number }): boolean =>
+        !(c.u - width / 2 < ownerU0 - centerMargin || c.u + width / 2 > ownerU1 + centerMargin
+          || c.d - depth / 2 < ownerD0 - centerMargin || c.d + depth / 2 > ownerD1 + centerMargin);
+      const rings = mode === 'transfer' ? [pf, ...holes.map((p) => frame(p, axis))] : [pf];
+      let lines = rings.flatMap((ring) => ring.us.flatMap((u, i) => {
+        const j = (i + 1) % ring.us.length, du = ring.us[j] - u, dd = ring.ds[j] - ring.ds[i], length = Math.hypot(du, dd);
+        if (length < 1e-8) return [];
+        const nu = -dd / length, nd = du / length;
+        const support = Math.abs(nu) * width / 2 + Math.abs(nd) * depth / 2 + 1e-7;
+        return (mode === 'transfer' ? [-1, 1] : [1]).map((sign) => ({ nu, nd, k: nu * u + nd * ring.ds[i] + sign * support }));
+      }));
+      // Same eight-metre movement limit as the ordinary search; its four bounds are also useful critical edges.
+      lines.push({ nu: 1, nd: 0, k: cu - 8 }, { nu: -1, nd: 0, k: -cu - 8 },
+        { nu: 0, nd: 1, k: cd - 8 }, { nu: 0, nd: -1, k: -cd - 8 });
+      // A support line missing the whole relocation square cannot produce a local projection
+      // or intersection. Keep a generous rounding margin for the existing determinant floor.
+      const lineScale = Math.max(1, Math.abs(cu), Math.abs(cd), ...lines.map((line) => Math.abs(line.k)));
+      const lineMargin = 3e-6 + 128 * Number.EPSILON * lineScale / 1e-8;
+      lines = lines.filter((line) => Math.abs(line.k - line.nu * cu - line.nd * cd)
+        <= (Math.abs(line.nu) + Math.abs(line.nd)) * (8 + lineMargin));
+      const centers = [{ u: cu, d: cd }];
+      if (mode === 'transfer') {
+        const center = frame([oldCenter!], axis), u = center.us[0], d = center.ds[0];
+        // A fixed local grid also supplies interior positions in a concave, two-owner garden union.
+        for (const du of [0, -2, 2, -4, 4, -6, 6]) for (const dd of [0, -2, 2, -4, 4, -6, 6]) centers.push({ u: u + du, d: d + dd });
       }
-    }
-    // Preserve the exact earlier-center predicate (including rejected earlier centers), without
-    // allocating/scanning the entire prefix for every line-pair intersection.
-    const previous = new Map<number, { u: number; d: number }[]>();
-    // The bounded window is +/-8,000,003 microcells. A 2^24 stride gives exact unique
-    // integer keys below 2^48; no string allocation is needed for the neighbour probes.
-    const stride = 1 << 24, offset = 1 << 23;
-    const contained = centers.filter((c) => {
-      // A center farther than the allowed window plus the duplicate radius cannot suppress
-      // any admissible center. Keep nearby rejected centers, just as the old full-prefix scan did.
-      if (!(Math.abs(c.u - cu) <= 8 + 3e-6 && Math.abs(c.d - cd) <= 8 + 3e-6)) return false;
-      const within = Math.abs(c.u - cu) <= 8 + 1e-8 && Math.abs(c.d - cd) <= 8 + 1e-8;
-      const x = Math.floor((c.u - cu) / 1e-6), y = Math.floor((c.d - cd) / 1e-6);
-      const possible = within && centerMayFit(c);
-      let duplicate = false;
-      for (let dx = -2; possible && dx <= 2 && !duplicate; dx++) for (let dy = -2; dy <= 2 && !duplicate; dy++) {
-        const neighbours = previous.get((x + dx + offset) * stride + y + dy + offset);
-        if (neighbours) for (const p of neighbours) {
-          if (Math.hypot(p.u - c.u, p.d - c.d) < 1e-6) { duplicate = true; break; }
+      for (const [i, a] of lines.entries()) {
+        const shift = a.k - a.nu * cu - a.nd * cd;
+        centers.push({ u: cu + a.nu * shift, d: cd + a.nd * shift });
+        for (const b of lines.slice(i + 1)) {
+          const det = a.nu * b.nd - a.nd * b.nu;
+          if (Math.abs(det) < 1e-8) continue;
+          centers.push({ u: (a.k * b.nd - a.nd * b.k) / det, d: (a.nu * b.k - a.k * b.nu) / det });
         }
       }
-      const key = (x + offset) * stride + y + offset, bucket = previous.get(key) ?? [];
-      bucket.push(c); previous.set(key, bucket);
-      // Record even impossible preceding centers: their original duplicate predicate
-      // can still suppress a later admissible center. Only mean members are pruned.
-      return possible && !duplicate
-        && polyInside(plot, rectangle(f, c.u - width / 2, c.u + width / 2, c.d - depth / 2, c.d + depth / 2));
-    });
-    if (contained.length) {
-      const center = { u: contained.reduce((sum, p) => sum + p.u, 0) / contained.length,
-        d: contained.reduce((sum, p) => sum + p.d, 0) / contained.length };
-      // Interior placements can preserve access where every boundary-touching placement blocks a yard.
-      centers.push(center, ...contained.map((p) => ({ u: (p.u + center.u) / 2, d: (p.d + center.d) / 2 })));
-    }
-    for (const c of centers) {
-      if (!Number.isFinite(c.u + c.d) || Math.abs(c.u - cu) > 8 + 1e-8 || Math.abs(c.d - cd) > 8 + 1e-8 || !centerMayFit(c)) continue;
-      const r = rectangle(f, c.u - width / 2, c.u + width / 2, c.d - depth / 2, c.d + depth / 2);
-      if (mode === 'transfer') {
-        const newCenter = f.at(c.u, c.d);
-        if (Math.hypot(newCenter.x - oldCenter!.x, newCenter.y - oldCenter!.y) > 8 + 1e-8) continue;
+      // Preserve the exact earlier-center predicate (including rejected earlier centers), without
+      // allocating/scanning the entire prefix for every line-pair intersection.
+      const previous = new Map<number, { u: number; d: number }[]>();
+      // The bounded window is +/-8,000,003 microcells. A 2^24 stride gives exact unique
+      // integer keys below 2^48; no string allocation is needed for the neighbour probes.
+      const stride = 1 << 24, offset = 1 << 23;
+      const contained = centers.filter((c) => {
+        // A center farther than the allowed window plus the duplicate radius cannot suppress
+        // any admissible center. Keep nearby rejected centers, just as the old full-prefix scan did.
+        if (!(Math.abs(c.u - cu) <= 8 + 3e-6 && Math.abs(c.d - cd) <= 8 + 3e-6)) return false;
+        const within = Math.abs(c.u - cu) <= 8 + 1e-8 && Math.abs(c.d - cd) <= 8 + 1e-8;
+        const x = Math.floor((c.u - cu) / 1e-6), y = Math.floor((c.d - cd) / 1e-6);
+        const possible = within && centerMayFit(c) && (!ownerCenter || ownerCenter.allows(c.u, c.d));
+        let duplicate = false;
+        for (let dx = -2; possible && dx <= 2 && !duplicate; dx++) for (let dy = -2; dy <= 2 && !duplicate; dy++) {
+          const neighbours = previous.get((x + dx + offset) * stride + y + dy + offset);
+          if (neighbours) for (const p of neighbours) {
+            if (Math.hypot(p.u - c.u, p.d - c.d) < 1e-6) { duplicate = true; break; }
+          }
+        }
+        const key = (x + offset) * stride + y + offset, bucket = previous.get(key) ?? [];
+        bucket.push(c); previous.set(key, bucket);
+        // Record even impossible preceding centers: their original duplicate predicate
+        // can still suppress a later admissible center. Only mean members are pruned.
+        return possible && !duplicate
+          && polyInside(plot, rectangle(f, c.u - width / 2, c.u + width / 2, c.d - depth / 2, c.d + depth / 2));
+      });
+      if (contained.length) {
+        const center = { u: contained.reduce((sum, p) => sum + p.u, 0) / contained.length,
+          d: contained.reduce((sum, p) => sum + p.d, 0) / contained.length };
+        // Interior placements can preserve access where every boundary-touching placement blocks a yard.
+        centers.push(center, ...contained.map((p) => ({ u: (p.u + center.u) / 2, d: (p.d + center.d) / 2 })));
       }
-      const bounds = bboxOf(r);
-      const overlapWidth = Math.max(0, Math.min(bounds.x1, oldBounds.x1) - Math.max(bounds.x0, oldBounds.x0));
-      const overlapDepth = Math.max(0, Math.min(bounds.y1, oldBounds.y1) - Math.max(bounds.y0, oldBounds.y0));
-      if (overlapWidth * overlapDepth + areaMargin < 0.5 * oldArea
-        || retainedUpper(c.u - width / 2, c.d - depth / 2, c.u + width / 2, c.d + depth / 2) + areaMargin < 0.5 * oldArea
-        || !polyInside(plot, r) || area(r) < minimumArea || area(r) > maximumArea) continue;
-      const key = r.map((p) => `${p.x}:${p.y}`).join(';');
-      if (rectangles.has(key)) continue;
-      rectangles.add(key);
-      candidates.push({ roof: r, owner: plot, original: poly, move: Math.hypot(c.u - cu, c.d - cd) });
+      for (const c of centers) {
+        if (!Number.isFinite(c.u + c.d) || Math.abs(c.u - cu) > 8 + 1e-8 || Math.abs(c.d - cd) > 8 + 1e-8 || !centerMayFit(c)
+          || (ownerCenter && !ownerCenter.allows(c.u, c.d))) continue;
+        const r = rectangle(f, c.u - width / 2, c.u + width / 2, c.d - depth / 2, c.d + depth / 2);
+        if (mode === 'transfer') {
+          const newCenter = f.at(c.u, c.d);
+          if (Math.hypot(newCenter.x - oldCenter!.x, newCenter.y - oldCenter!.y) > 8 + 1e-8) continue;
+        }
+        const bounds = bboxOf(r);
+        const overlapWidth = Math.max(0, Math.min(bounds.x1, oldBounds.x1) - Math.max(bounds.x0, oldBounds.x0));
+        const overlapDepth = Math.max(0, Math.min(bounds.y1, oldBounds.y1) - Math.max(bounds.y0, oldBounds.y0));
+        if (overlapWidth * overlapDepth + areaMargin < 0.5 * oldArea
+          || retainedUpper(c.u - width / 2, c.d - depth / 2, c.u + width / 2, c.d + depth / 2) + areaMargin < 0.5 * oldArea
+          || !polyInside(plot, r) || area(r) < minimumArea || area(r) > maximumArea) continue;
+        const key = r.map((p) => `${p.x}:${p.y}`).join(';');
+        if (rectangles.has(key)) continue;
+        rectangles.add(key);
+        candidates.push({ roof: r, owner: plot, original: poly, move: Math.hypot(c.u - cu, c.d - cd), key });
+      }
     }
-  }
-  candidates.sort((a, b) => area(b.roof) - area(a.roof) || a.move - b.move);
-  return candidates;
+    candidates.sort((a, b) => area(b.roof) - area(a.roof) || a.move - b.move);
+    return candidates;
+  };
+  return { sizes: usableSizes, areaMargin: 4096 * Number.EPSILON * scale * scale, build };
 }
 
 function* criticalRoofs(poly: Polygon, plot: Polygon, axis: [Vec2, Vec2], mode: 'regular' | 'supplement' | 'rare' | 'transfer' = 'regular', holes: Polygon[] = []): Generator<Polygon> {
-  for (const candidate of criticalRoofCandidates(poly, plot, axis, mode, holes)) if (provedRoof(candidate)) yield candidate.roof;
+  const search = criticalRoofSearch(poly, plot, axis, mode, holes);
+  for (const batch of roofCandidateBatches([search], (candidate) => area(candidate.roof))) {
+    for (const candidate of batch) if (provedRoof(candidate)) yield candidate.roof;
+  }
 }
 
 /** Rare constrained corners can need a shorter/deeper rectangle or the roof's own dominant axis. */
@@ -361,8 +384,11 @@ const clear = (subject: Polygon | MultiPoly, obstacles: MultiPoly): boolean => {
 
 /** Move the boolean kernel's ordered outer-box filter before repeated ring conversion. */
 function indexedClearance(obstacles: MultiPoly): (subject: Polygon | MultiPoly) => boolean {
-  const select = makeObstacleSelection(obstacles);
-  return (subject) => clear(subject, select(subject));
+  const intersect = prepareIntersection(obstacles);
+  return (subject) => {
+    const overlap = intersect(subject);
+    return !overlap.failed && mpArea(overlap.pieces) <= 1e-6;
+  };
 }
 
 /** Preserve the actual frontage arc; a curved street's endpoint chord need not lie on its plot ring. */
@@ -483,19 +509,25 @@ export function finishEdgeRoofs(input: EdgeRoofPartition): { grown: number; fitt
   const unresolved: number[] = [];
   const initialRoofs = input.buildings.map((b) => b.poly);
   const protectedNear = makeObstacleSelection(input.protectedLand);
-  const protectedClear = (subject: Polygon | MultiPoly) => clear(subject, protectedNear(subject));
+  const protectedClear = indexedClearance(input.protectedLand);
   const waterClear = indexedClearance(input.ctx.water), openedGardens = makeGardenOpening();
   const roofs = new PolygonIndex(input.buildings.map((b) => b.poly));
   const parcels = new PolygonIndex(input.parcels.map((p) => p.poly));
   const blocks = new PolygonIndex(input.blocks.map((b) => b.poly));
   const quarters = new PolygonIndex(input.quarters.map((q) => q.lp.pts));
   const byBlock = new Map<number, { b: typeof input.buildings[number]; index: number }[]>();
+  const byParcel = new Map<number, { b: typeof input.buildings[number]; index: number }[]>();
   input.buildings.forEach((b, index) => {
     if (b.parcel === undefined) return;
     const bi = input.parcels[b.parcel].block, peers = byBlock.get(bi) ?? [];
     peers.push({ b, index }); byBlock.set(bi, peers);
+    const owned = byParcel.get(b.parcel) ?? [];
+    owned.push({ b, index }); byParcel.set(b.parcel, owned);
   });
   const reachByBlock = new Map<number, boolean[]>();
+  // Other roofs are replaced atomically, never edited during a proposal search. Snapshot each
+  // encountered polygon once; replacement polygons naturally receive a fresh prepared proof.
+  const roofIntersections = new WeakMap<Polygon, ReturnType<typeof prepareIntersection>>();
   const boundaries = input.quarters.map((q) => q.lp.pts.map((a, i) => ({ a, b: q.lp.pts[(i + 1) % q.lp.pts.length], lab: q.lp.lab[i] })));
   const streetAt = makeStreetAt(input.streets.list.filter((s) => s.ribbon).map((s) => ({ path: s.path, widths: s.widths, width: s.widths[0] })), input.parcels.filter((p) => ['place', 'market', 'quay', 'green'].includes(String(p.use))).map((p) => p.poly));
   for (const [index, b] of input.buildings.entries()) {
@@ -522,7 +554,15 @@ export function finishEdgeRoofs(input: EdgeRoofPartition): { grown: number; fitt
       const reached = blockReach(block, peers.map((p) => p.index === index ? poly : p.b.poly), streetAt);
       return reached.every((v, j) => v || (!beforeReach[j] && peers[j].index !== index));
     };
-    const roofClear = (poly: Polygon): boolean => roofs.query(poly, true).every((j) => j === index || clear(poly, [{ outer: input.buildings[j].poly, holes: [] }]));
+    const roofClear = (poly: Polygon): boolean => roofs.query(poly, true).every((j) => {
+      if (j === index) return true;
+      const other = input.buildings[j].poly;
+      let intersect = roofIntersections.get(other);
+      if (!intersect) { intersect = prepareIntersection(other); roofIntersections.set(other, intersect); }
+      // Keep the original per-neighbour residue threshold, rather than summing different roofs.
+      const overlap = intersect(poly);
+      return !overlap.failed && mpArea(overlap.pieces) <= 1e-6;
+    });
     let expanded = false;
     // The existing frontage envelope remains first. A clipped roof's own dominant axis can need
     // less land, so try its true perpendicular frame through the same complete ownership transaction.
@@ -569,9 +609,10 @@ export function finishEdgeRoofs(input: EdgeRoofPartition): { grown: number; fitt
     for (const fittedRoof of fittedRoofs(b.poly, parcel.poly, parcel.front, contacts.map((e) => [e.a, e.b]))) {
       // A lot can include a standing fence or wall reserve. Containment alone does not protect it.
       // Preserve any existing boundary contact while refusing newly occupied protected ground.
+      if (!roofClear(fittedRoof)) continue;
       const added = tryDifference(fittedRoof, b.poly);
       if (added.failed || !protectedClear(added.pieces)) continue;
-      if (!roofClear(fittedRoof) || !accessible(fittedRoof, input.blocks[bi].poly)) continue;
+      if (!accessible(fittedRoof, input.blocks[bi].poly)) continue;
       const gardens = input.gardens.map((p) => meets(fittedRoof, p) ? tryDifference(p, fittedRoof) : { pieces: [{ outer: p, holes: [] }], failed: false });
       const freed = tryDifference(b.poly, fittedRoof);
       if (freed.failed || gardens.some((g) => g.failed)) continue;
@@ -581,7 +622,7 @@ export function finishEdgeRoofs(input: EdgeRoofPartition): { grown: number; fitt
     if (!fittedHere && parcel.use === 'plot' && !peers.some((p) => p.b.courtyards?.length)) {
       // An artificial lot interface can prevent a useful whole dwelling despite free garden immediately
       // next door. Transfer only the new roof's claim, with both owners proved before changing either.
-      const candidates: { proposal: CriticalRoofCandidate; donor: number }[] = [];
+      const searches: RoofCandidateSearch<{ proposal: CriticalRoofCandidate; donor: number }>[] = [];
       const maximumArea = Math.max(1.3 * area(b.poly), MIN_BW * MIN_BW);
       const radius = 8 + Math.sqrt(maximumArea * (MAX_ASPECT + 1 / MAX_ASPECT)) / 2;
       const localWindow: Polygon = [
@@ -613,42 +654,63 @@ export function finishEdgeRoofs(input: EdgeRoofPartition): { grown: number; fitt
           axes.push(axis);
         }
         for (const piece of land) for (const axis of axes) {
-          for (const proposal of criticalRoofCandidates(b.poly, piece.outer, axis, 'transfer', piece.holes)) candidates.push({ proposal, donor: donorIndex });
+          const search = criticalRoofSearch(b.poly, piece.outer, axis, 'transfer', piece.holes);
+          searches.push({ sizes: search.sizes, areaMargin: search.areaMargin,
+            build: (band) => search.build(band).map((proposal) => ({ proposal, donor: donorIndex })) });
         }
       }
       // Preserve built area first across all donors and orientations, then consider the existing rare floor.
       // Stable sorting before pure proof filtering preserves the original accepted-candidate order.
       // Stop proving the remaining donors/axes as soon as the first complete transaction succeeds.
-      candidates.sort((a, z) => area(z.proposal.roof) - area(a.proposal.roof));
-      for (const { proposal, donor: donorIndex } of candidates) {
+      const candidates = function* () {
+        for (const batch of roofCandidateBatches(searches, (candidate) => area(candidate.proposal.roof))) yield* batch;
+      };
+      // These proofs see the same original roof and partition throughout this transaction search.
+      // A rectangle can recur for several axes or garden donors; its global claim is identical.
+      // Both successful and refused proofs stay local and bounded, and disappear at the commit.
+      const claims = new Map<string, MultiPoly | null>();
+      const globalClaim = (proposal: CriticalRoofCandidate): MultiPoly | null => {
+        if (claims.has(proposal.key)) return claims.get(proposal.key)!;
+        const roof = proposal.roof;
+        const prove = (): MultiPoly | null => {
+          // Reject physical collisions before the expensive ownership differences. These checked
+          // predicates are pure; final candidate priority and transaction commits are unchanged.
+          if (!roofClear(roof) || !protectedClear(roof) || !waterClear(roof) || !retainsRoof(proposal)) return null;
+          const claim = tryDifference(roof, parcel.poly);
+          if (claim.failed || mpArea(claim.pieces) <= 1e-6) return null;
+          const insideBlock = tryDifference(roof, input.blocks[bi].poly);
+          if (insideBlock.failed || mpArea(insideBlock.pieces) > 1e-6) return null;
+          const safe = (p: Vec2) => p.x >= Math.max(3, input.ctx.win.x0) && p.y >= Math.max(3, input.ctx.win.y0)
+            && p.x <= Math.min(input.ctx.mapSize - 3, input.ctx.win.x1) && p.y <= Math.min(input.ctx.mapSize - 3, input.ctx.win.y1)
+            && !input.ctx.isWater(p) && input.ctx.slopeAt(p) <= 0.28;
+          if (!roof.every(safe)) return null;
+          const bounds = bboxOf(roof);
+          for (let y = bounds.y0; y <= bounds.y1; y += 2) for (let x = bounds.x0; x <= bounds.x1; x += 2) {
+            if (pointInRing(roof, { x, y }) && !safe({ x, y })) return null;
+          }
+          const blockPeers = blocks.query(roof, true).filter((j) => j !== bi).map((j) => ({ outer: input.blocks[j].poly, holes: [] }));
+          const quarterPeers = quarters.query(roof, true).filter((j) => j !== qi).map((j) => ({ outer: input.quarters[j].lp.pts, holes: [] }));
+          return clear(roof, blockPeers) && clear(roof, quarterPeers) ? claim.pieces : null;
+        };
+        const claim = prove();
+        if (claims.size < 4096) claims.set(proposal.key, claim);
+        return claim;
+      };
+      for (const { proposal, donor: donorIndex } of candidates()) {
         const roof = proposal.roof, donor = input.parcels[donorIndex];
-        if (!retainsRoof(proposal)) continue;
-        const claim = tryDifference(roof, parcel.poly);
-        if (claim.failed || mpArea(claim.pieces) <= 1e-6) continue;
-        const insideDonor = tryDifference(claim.pieces, donor.poly);
+        const claim = globalClaim(proposal);
+        if (!claim || !insideRoofOwner(proposal)) continue;
+        const insideDonor = tryDifference(claim, donor.poly);
         if (insideDonor.failed || mpArea(insideDonor.pieces) > 1e-6) continue;
-        const insideBlock = tryDifference(roof, input.blocks[bi].poly);
-        if (insideBlock.failed || mpArea(insideBlock.pieces) > 1e-6 || !insideRoofOwner(proposal)) continue;
-        const safe = (p: Vec2) => p.x >= Math.max(3, input.ctx.win.x0) && p.y >= Math.max(3, input.ctx.win.y0)
-          && p.x <= Math.min(input.ctx.mapSize - 3, input.ctx.win.x1) && p.y <= Math.min(input.ctx.mapSize - 3, input.ctx.win.y1)
-          && !input.ctx.isWater(p) && input.ctx.slopeAt(p) <= 0.28;
-        let dry = roof.every(safe);
-        const bounds = bboxOf(roof);
-        for (let y = bounds.y0; y <= bounds.y1 && dry; y += 2) for (let x = bounds.x0; x <= bounds.x1; x += 2) {
-          if (pointInRing(roof, { x, y }) && !safe({ x, y })) { dry = false; break; }
-        }
         const parcelPeers = parcels.query(roof, true).filter((j) => j !== b.parcel && j !== donorIndex).map((j) => ({ outer: input.parcels[j].poly, holes: [] }));
-        const blockPeers = blocks.query(roof, true).filter((j) => j !== bi).map((j) => ({ outer: input.blocks[j].poly, holes: [] }));
-        const quarterPeers = quarters.query(roof, true).filter((j) => j !== qi).map((j) => ({ outer: input.quarters[j].lp.pts, holes: [] }));
-        if (!dry || !protectedClear(roof) || !waterClear(roof)
-          || !clear(claim.pieces, parcelPeers) || !clear(roof, blockPeers) || !clear(roof, quarterPeers) || !roofClear(roof)) continue;
-        const ownerLand = mergeTransferLand(parcel.poly, roof), donorRest = tryDifference(donor.poly, claim.pieces);
+        if (!clear(claim, parcelPeers)) continue;
+        const ownerLand = mergeTransferLand(parcel.poly, roof), donorRest = tryDifference(donor.poly, claim);
         const newOwner = ownerLand?.length === 1 && !ownerLand[0].holes.length && isSimple(ownerLand[0].outer) ? ownerLand[0].outer : null;
         if (!newOwner || donorRest.failed || donorRest.pieces.length !== 1 || donorRest.pieces[0].holes.length
           || !isSimple(donorRest.pieces[0].outer) || mpArea(donorRest.pieces) < MIN_BW * MIN_BW) continue;
         const newDonor = donorRest.pieces[0].outer;
         if (!preservesFront(parcel, newOwner) || !preservesFront(donor, newDonor) || !clear(newOwner, donorRest.pieces)) continue;
-        const donorRoofs = input.buildings.filter((other) => other.parcel === donorIndex);
+        const donorRoofs = (byParcel.get(donorIndex) ?? []).map((other) => other.b);
         const donorLost = donorRoofs.map((other) => tryDifference(other.poly, newDonor));
         if (donorLost.some((d) => d.failed || mpArea(d.pieces) > 1e-6)) continue;
         // Conserve the existing union, including any inherited microscopic interface overlap, rather
@@ -750,7 +812,7 @@ export function finishEdgeRoofs(input: EdgeRoofPartition): { grown: number; fitt
         const phases = (input.phases ?? []).map((p) => ({ p,
           region: p.id >= quarter.phase ? mergeTransferLand(p.region, roof) : p.region,
           band: p.id === quarter.phase ? mergeTransferLand(p.band, roof) : p.band }));
-        const ownRoofs = input.buildings.filter((p) => p.parcel === owner).map((p) => ({ outer: p.poly, holes: [] }));
+        const ownRoofs = (byParcel.get(owner) ?? []).map((p) => ({ outer: p.b.poly, holes: [] }));
         const retained = newOwner ? tryDifference(ownRoofs, newOwner) : null;
         const ownersUnchanged = newOwner && parcels.query(newOwner, true).filter((j) => j !== owner).every((j) => {
           const oldOverlap = tryIntersection(parcel.poly, input.parcels[j].poly);
@@ -808,7 +870,7 @@ export function finishEdgeRoofs(input: EdgeRoofPartition): { grown: number; fitt
           || !isSimple(donorRest.pieces[0].outer) || mpArea(donorRest.pieces) < MIN_BW * MIN_BW) continue;
         const newDonor = donorRest.pieces[0].outer;
         if (!preservesFront(parcel, newOwner) || !preservesFront(donor, newDonor) || !clear(newOwner, donorRest.pieces)) continue;
-        const donorRoofs = input.buildings.flatMap((other, j) => other.parcel === donorIndex ? [{ b: other, index: j }] : []);
+        const donorRoofs = byParcel.get(donorIndex) ?? [];
         const donorLost = donorRoofs.map((other) => ({ other, lost: tryDifference(other.b.poly, newDonor) }));
         if (donorLost.some((d) => d.lost.failed)) continue;
         const displaced = donorLost.filter((d) => mpArea(d.lost.pieces) > 1e-6);
