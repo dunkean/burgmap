@@ -1,5 +1,6 @@
 // Native integration checks against a built single-file app, including file:// and main fallback.
 // node scripts/optimization_verify.mjs --html dist/index.html --out out/optimization/native
+// Add --url https://dunkean.github.io/burgmap/ to check the identical published build.
 import { chromium } from 'playwright';
 import { createServer } from 'node:http';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
@@ -11,13 +12,20 @@ const args = process.argv.slice(2);
 const arg = (key, fallback) => { const i = args.indexOf(key); return i < 0 ? fallback : args[i + 1]; };
 const htmlPath = resolve(arg('--html', 'dist/index.html'));
 const out = resolve(arg('--out', 'out/optimization-implementation-2026-10-05/native'));
+const publishedUrl = arg('--url', null);
+if (publishedUrl) {
+  const url = new URL(publishedUrl);
+  if (!['https:', 'http:'].includes(url.protocol) || url.search || url.hash) {
+    throw new Error('--url must be an HTTP(S) application URL without a query or fragment');
+  }
+}
 mkdirSync(out, { recursive: true });
 const html = readFileSync(htmlPath);
 const server = createServer((_request, response) => {
   response.writeHead(200, { 'Content-Type': 'text/html' }); response.end(html);
 });
 await new Promise(ok => server.listen(0, '127.0.0.1', ok));
-const local = `http://127.0.0.1:${server.address().port}/`;
+const local = publishedUrl ?? `http://127.0.0.1:${server.address().port}/`;
 const browser = await chromium.launch({ headless: true });
 const checks = [];
 const assert = (condition, message) => { if (!condition) throw new Error(message); };
@@ -35,6 +43,13 @@ const canonical = value => {
 const hash = value => createHash('sha256').update(JSON.stringify(canonical(value))).digest('hex');
 
 try {
+  if (publishedUrl) {
+    const url = new URL(publishedUrl);
+    url.searchParams.set('verification', String(Date.now()));
+    const response = await fetch(url);
+    assert(response.ok && html.equals(Buffer.from(await response.arrayBuffer())),
+      'Published HTML does not match the supplied single-file build');
+  }
   for (const mode of ['offscreen', 'main', 'offline', 'refused']) {
     const context = await browser.newContext({ viewport: { width: 1400, height: 900 }, acceptDownloads: true });
     if (mode === 'refused') await context.addInitScript(() => {
