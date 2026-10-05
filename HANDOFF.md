@@ -16,7 +16,11 @@ bugs and their evidence are recorded in [ROADMAP.md](ROADMAP.md).
   the coherent source review, 62 distinct focused tests, typecheck and build.
   Seven native cases pass across both backends, including classic SVG byte parity,
   a fortified town and a placed secondary village. Actual PNGs were inspected.
-  This does not certify a green full suite. Publication provenance follows below.
+  This does not certify a green full suite. Source `1f210b0` is integrated on main
+  and tagged `caverns-2026-10-05`; Pages `7601592` is pushed. The temporary
+  publishing worktree is removed. GitHub Pages run `37365203761` built successfully,
+  but its deploy job is still queued and the live site still serves the preceding
+  SHA `5c48b790…`; actual served-build confirmation is pending.
 - Underdark and small-screen information panels (2026-10-05): seventh biome,
   independent drow-enclave/duergar-hold/myconid-colony cultures, rock and fungal
   land use with shared SVG/Canvas motifs. Surface atlas assets are unchanged;
