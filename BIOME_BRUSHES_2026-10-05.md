@@ -7,6 +7,16 @@ Le rendu classique reste celui par défaut, protégé et publié sous
 textures** change l'apparence immédiatement, sans régénérer la carte.
 `brushes=painted` conserve ce choix dans les liens et rapports de reproduction.
 
+## Publication
+
+La version est publiée sur https://dunkean.github.io/burgmap/ : source `ea6223a`,
+tag annoté `biome-brushes-2026-10-05`, Pages `734770c`. Le SHA256 du fichier servi
+correspond au build intégré ci-dessous. Les deux cartes réelles passent aussi
+les **16 scénarios sur le site publié**, dont le fichier hors ligne sans requête
+réseau. Preuves : `brushes/publication-proof.json`,
+`brushes/native-published-default/results.json` et
+`brushes/native-published-sahel/results.json` dans le dossier de vérification.
+
 ## Rendu et variété
 
 Les six biomes ont leurs plantes et mélanges déterministes par graine : arbres,

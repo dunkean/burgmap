@@ -42,8 +42,10 @@ bugs and their evidence are recorded in [ROADMAP.md](ROADMAP.md).
   The offline HTML adds 4.68MB; originals decode only on activation, motifs have
   a 16MiB cache, monochrome tint memory is additional. No new timing claim.
   Integration passes 61 tests in ten files, typecheck and build; its HTML is
-  byte-identical to the tested candidate. Publication and five presentation
-  boards of eight maps are next.
+  byte-identical to the tested candidate. Published source `ea6223a` is tagged
+  `biome-brushes-2026-10-05`, Pages `734770c`; served SHA256 matches the checked
+  HTML and both native fixtures pass all sixteen backend/decode scenarios.
+  Five presentation boards of eight maps are being captured from this build.
 - Roof/render optimization (2026-10-05): integrated source checkpoint `12d8c225`,
   reviewed before execution. See
   [OPTIMIZATION_IMPLEMENTATION_2026-10-05.md](OPTIMIZATION_IMPLEMENTATION_2026-10-05.md)
