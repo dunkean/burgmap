@@ -107,7 +107,7 @@ export function urbanLandscapeGround(world: World, appearance = false): PolyH[] 
     const d = world.megaDetail?.[si * MEGA_KEY + q.id];
     if (d) { detailFootprints.set(d, q.pts); detailOwners.set(d, u); }
   }
-  const signature = JSON.stringify([world.mapSize, appearance && [world.options.biome, world.site?.fields.dWater, world.site?.fields.hab,
+  const signature = JSON.stringify([world.mapSize, appearance && [world.options.biome, world.site?.fields?.dWater, world.site?.fields?.hab,
     world.terrain.height.w, world.terrain.height.h, world.terrain.height.cell], hosts.map(({ u, si }) => [si, [...replaced.get(u)!]]), layers.map((u) => [u.blocks, u.blockInfo, u.parcels, u.backLand,
     u.squares, u.landmarks, u.water, u.ruralReserve, u.renderHints, u.footprintH, u.macro?.quarters, u.streets, appearance && [u.culture, u.morphology, u.archetype, u.sites]]),
     world.terrain && [world.terrain.coastline, world.terrain.islands, world.terrain.lakes, world.terrain.rivers],
@@ -162,7 +162,7 @@ export class LandscapeGroundCache {
   private appearanceInputs: unknown[] = [];
 
   prepare(world: World, terrainVersion = 0, appearance = false): void {
-    const inputs = appearance ? [world.options.biome, world.site?.fields.dWater, world.site?.fields.hab, world.landuse] : [];
+    const inputs = appearance ? [world.options.biome, world.site?.fields?.dWater, world.site?.fields?.hab, world.landuse] : [];
     this.appearance = appearance ? world : undefined;
     if (this.terrain === world.terrain && this.mapSize === world.mapSize && this.terrainVersion === terrainVersion
       && inputs.length === this.appearanceInputs.length && inputs.every((v, i) => v === this.appearanceInputs[i])) return;

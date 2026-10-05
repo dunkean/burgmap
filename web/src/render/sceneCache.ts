@@ -98,7 +98,7 @@ export class SceneBuilder {
       return buildScene(world, this.tileSize);
     }
     const staticInputs = [world.terrain, world.landuse, world.roads, world.bridges, world.mapSize, !!world.options.contours,
-      world.options.biome, world.site?.fields.dWater, world.site?.fields.hab];
+      world.options.biome, world.site?.fields?.dWater, world.site?.fields?.hab];
     const full = this.legacy || !this.staticScene || staticInputs.some((v, i) => v !== this.staticInputs[i]) || this.hints !== world.urban?.renderHints;
     this.legacy = false;
     if (full) {

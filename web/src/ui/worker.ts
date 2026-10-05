@@ -17,6 +17,7 @@ import { QuarterQueue } from './megaQueue';
 import { createQuarterExecutor } from './quarterPool';
 import { exportMeasure } from './exportMeasure';
 import { worldMeta } from './worldMeta';
+import { worldForRender } from './renderWorld';
 
 export interface WorkerRequest { id: number; options: Options }
 export interface WorkerResponse {
@@ -36,19 +37,6 @@ let lastPort: MessagePort | null = null;
 /** Megacity: the quarter detail queue of the kept World. */
 let quarters: QuarterQueue | null = null;
 
-/**
- * What the renderer needs of a World: drops `debug` and the big analysis rasters (site cost/fields, flow accumulation,
- * receivers, filled surface) so a snapshot clones in a fraction of the time. The Scene/renderer never read them.
- */
-function forRender(w: World): World {
-  const { debug: _d, ...rest } = w as World & { debug?: unknown };
-  const out: World = { ...rest } as World;
-  if (w.site) { const { cost: _c, fields: _f, ...site } = w.site; out.site = site as unknown as World['site']; }
-  const { flow: _fl, receiver: _r, filled: _fi, ...terrain } = w.terrain;
-  out.terrain = terrain as unknown as World['terrain'];
-  return out;
-}
-
 function doRun(m: GRun): void {
   const { id, options, port } = m;
   const post = (r: GResponse): void => ctx.postMessage(r);
@@ -61,7 +49,7 @@ function doRun(m: GRun): void {
       // Keep the preceding map until the final scene, without cloning and preparing discarded stage snapshots.
     });
     lastWorld = world;
-    port.postMessage({ type: 'world', gen: id, world: forRender(world), final: true, stage: 'done' } satisfies WorldMsg);
+    port.postMessage({ type: 'world', gen: id, world: worldForRender(world), final: true, stage: 'done' } satisfies WorldMsg);
     post({
       type: 'done', id, ms: Math.round(performance.now() - t0), stats: world.stats,
       meta: worldMeta(world),

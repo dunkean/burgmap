@@ -7,6 +7,7 @@ import { plotLines } from '../src/render/plotLines';
 import { campCover } from '../src/render/campCover';
 import { buildScene } from '../src/render/scene';
 import { SceneBuilder } from '../src/render/sceneCache';
+import { worldForRender } from '../src/ui/renderWorld';
 import type { MacroQuarter } from '../src/gen/urban/mega/types';
 import { renderSvg } from '../src/render/svg';
 import { createCanvasRenderer, type CanvasLike } from '../src/render/canvas';
@@ -37,6 +38,29 @@ function fixture(): World {
 const ground = (s: ReturnType<typeof buildScene>) => { const l = s.poly.get('u-landscape-ground'); return l?.polys.map((outer, i) => ({ outer, holes: l.holes?.[i] ?? [] })) ?? []; };
 
 describe('residential ground follows the landscape without erasing dedicated materials', () => {
+  it('preserves irrigation materials across a worker snapshot and invalidates changed raster inputs', () => {
+    const w = fixture(); w.options.biome = 'desert';
+    w.site = { fields: { dWater: new Float32Array(128 * 128).fill(100), hab: new Float32Array(128 * 128).fill(10) } } as World['site'];
+    const projected = worldForRender(w), builder = new SceneBuilder();
+    expect(groundAppearance(projected.urban!, projected)).toEqual(groundAppearance(w.urban!, w));
+    expect(builder.update(projected).poly.get('u-backland')!.polys).toEqual(buildScene(w).poly.get('u-backland')!.polys);
+    const changed = { ...w, site: { ...w.site!, fields: { ...w.site!.fields, dWater: new Float32Array(128 * 128).fill(1000) } } };
+    const dry = worldForRender(changed), retained = builder.update(dry), fresh = new SceneBuilder().update(dry);
+    expect(retained.poly.get('u-backland')!.polys).toEqual(fresh.poly.get('u-backland')!.polys);
+    expect(ground(retained)).toEqual(ground(fresh));
+    expect(groundAppearance(dry.urban!, dry)).toEqual(groundAppearance(changed.urban!, changed));
+    expect(retained.poly.get('u-backland')!.polys).toHaveLength(1);
+    expect(w.site!.fields.dWater[0]).toBe(100);
+  });
+
+  it('accepts non-desert worker snapshots with a site but no analysis fields', () => {
+    const w = fixture(); w.site = { fields: {} } as World['site'];
+    const projected = worldForRender(w);
+    expect(projected.site).not.toHaveProperty('fields');
+    expect(() => new SceneBuilder().update(projected)).not.toThrow();
+    expect(currentLandscapeGround(projected, true)).toEqual(currentLandscapeGround(w, true));
+  });
+
   it('exposes peripheral yards while retaining core and compound gardens in temperate/forest settlements', () => {
     for (const biome of ['temperate', 'forest'] as const) {
       const w = fixture(); w.options.biome = biome;
