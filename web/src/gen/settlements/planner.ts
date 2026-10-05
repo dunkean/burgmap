@@ -161,7 +161,7 @@ export function voronoiRegions(centers: Vec2[], S: number): Polygon[] {
 /**
  * Plan all settlements. `world` holds the terrain, the main site, the main roads and the main urban layer.
  */
-export function planSettlements(world: World, opts: Options, root: Rng, mainOptions: Options = opts): PlanResult {
+export function planSettlements(world: World, opts: Options, root: Rng, mainOptions: Options = opts, projectedPopulation = 100): PlanResult {
   const terrain = world.terrain, site = world.site!;
   const S = mapSizeOf(opts);
   const { w: n, cell } = terrain.height;
@@ -173,7 +173,7 @@ export function planSettlements(world: World, opts: Options, root: Rng, mainOpti
   const tPlan = performance.now();
 
   // ---- main settlement (index 0)
-  const mainPop = world.urban?.population ?? 100;
+  const mainPop = world.urban?.population ?? projectedPopulation;
   const foot = world.urban?.footprintH ?? [];
   let footArea = 0;
   for (const ph of foot) footArea += Math.abs(polygonArea(ph.outer));

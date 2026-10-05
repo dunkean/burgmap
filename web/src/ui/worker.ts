@@ -19,8 +19,9 @@ import { exportMeasure } from './exportMeasure';
 import { worldMeta } from './worldMeta';
 import { worldForRender } from './renderWorld';
 import { refreshCavernMask } from '../gen/terrain/caverns';
+import { DebugGeneration, debugConfigurationKey, type DebugStage } from '../gen/debugPipeline';
 
-export interface WorkerRequest { id: number; options: Options }
+export interface WorkerRequest { id: number; options: Options; debugStage?: DebugStage }
 export interface WorkerResponse {
   id: number; world?: World; stats?: Record<string, number | string>; error?: string; ms?: number; /** progress message: the stage about to run */ stage?: string;
   /** legacy mode, lazy detail (M3c): the plan of one secondary settlement */
@@ -39,6 +40,12 @@ let lastPort: MessagePort | null = null;
 let quarters: QuarterQueue | null = null;
 /** Stages reused between runs (terrain on a biome change, the main town when only secondaries change). */
 const genCache = createGenerationCache();
+let debugSession: DebugGeneration | null = null;
+function generateRequest(options: Options, debugStage: DebugStage | undefined, onStage: (stage: string) => void): World {
+  if (debugStage === undefined) { debugSession = null; return generate(options, onStage, { cache: genCache }); }
+  if (debugStage === 0 || !debugSession || debugConfigurationKey(debugSession.options) !== debugConfigurationKey(options)) debugSession = new DebugGeneration(options);
+  return debugSession.advance(debugStage, onStage, options);
+}
 
 function doRun(m: GRun): void {
   const { id, options, port } = m;
@@ -47,10 +54,10 @@ function doRun(m: GRun): void {
     const t0 = performance.now();
     quarters?.stop(); quarters = null;
     lastWorld = null; lastId = id; lastPort = port;
-    const world = generate(options, (stage: string) => {
+    const world = generateRequest(options, m.debugStage, (stage: string) => {
       post({ type: 'stage', id, stage });
       // Keep the preceding map until the final scene, without cloning and preparing discarded stage snapshots.
-    }, { cache: genCache });
+    });
     lastWorld = world;
     port.postMessage({ type: 'world', gen: id, world: worldForRender(world), final: true, stage: 'done' } satisfies WorldMsg);
     post({
@@ -58,7 +65,7 @@ function doRun(m: GRun): void {
       meta: worldMeta(world),
     });
     // megacity: the old core's quarters are detailed in the background right away
-    if (world.urban?.macro) quarterQueue(id)?.prefetch();
+    if (m.debugStage === undefined && world.urban?.macro) quarterQueue(id)?.prefetch();
   } catch (err) {
     post({ type: 'error', id, error: String((err as Error)?.stack ?? err) });
   }
@@ -70,6 +77,7 @@ function doRun(m: GRun): void {
  */
 function quarterQueue(id: number): QuarterQueue | null {
   if (!lastWorld || lastId !== id) return null;
+  if (Number(lastWorld.stats['developer.stage'] ?? 4) < 4) return null;
   if (!quarters) {
     const port = lastPort;
     quarters = new QuarterQueue(lastWorld, (layers, drop, st) => {
@@ -128,6 +136,7 @@ function doDetail(m: GDetail): void {
   const t0 = performance.now();
   try {
     if (!lastWorld || lastId !== m.id) return;
+    if (Number(lastWorld.stats['developer.stage'] ?? 4) < 4) return;
     const s = lastWorld.settlements?.[m.index];
     if (!s || s.urban) return;
     const res = generateSettlementDetail(lastWorld, m.index);
@@ -152,12 +161,12 @@ self.onmessage = (e: MessageEvent<GRequest | WorkerRequest>) => {
   if (m.type === 'detail') return doDetail(m);
   if (m.type === 'quarters') return doQuarters(m);
   // legacy: whole World back by structured clone
-  const { id, options } = e.data as WorkerRequest;
+  const { id, options, debugStage } = e.data as WorkerRequest;
   const post = (r: WorkerResponse): void => ctx.postMessage(r);
   try {
     const t0 = performance.now();
     quarters?.stop(); quarters = null;
-    const world = generate(options, (stage) => post({ id, stage }), { cache: genCache });
+    const world = generateRequest(options, debugStage, (stage) => post({ id, stage }));
     lastWorld = world; lastId = id; lastPort = null;
     post({ id, world, stats: world.stats, ms: Math.round(performance.now() - t0) });
   } catch (err) {

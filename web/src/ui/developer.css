@@ -1,0 +1,13 @@
+.developer { margin:16px 2px 0; border-top:1px solid var(--line); padding-top:7px; }
+.developer > summary { font-size:10px; color:var(--ink2); opacity:.62; cursor:pointer; letter-spacing:.04em; }
+.developer[open] > summary, .developer > summary:hover, .developer > summary:focus-visible { opacity:1; }
+.developer-body { margin-top:10px; padding:11px; border:1px solid var(--line); border-radius:12px; background:var(--field); }
+.developer-body > button, .developer-body li button { width:100%; text-align:left; }
+.developer-body ol { padding-left:22px; margin:8px 0; }
+.developer-body li { padding:3px 0; font-size:11px; }
+.developer-body .complete { opacity:.6; }
+.developer-state { margin:10px 0; font-size:11px; line-height:1.5; }
+.developer-body .developer-note { font-size:10px; line-height:1.5; }
+.developer-centroids { position:absolute; inset:0; z-index:3; pointer-events:none; overflow:hidden; }
+.developer-centroid { position:absolute; left:0; top:0; width:12px; height:12px; margin:-6px; border:2px solid #544933; border-radius:50%; background:#f3ead3; box-shadow:0 0 0 4px rgba(243,234,211,.65); }
+.developer-centroid b { position:absolute; left:17px; top:-5px; white-space:nowrap; padding:3px 5px; color:#443826; background:rgba(250,246,232,.9); border-radius:4px; font:11px/1.3 Georgia,serif; }

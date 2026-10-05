@@ -2,9 +2,25 @@ import { describe, expect, it } from 'vitest';
 import { fromQuery, generationUid, makeOptions, optionsForMainSettlement, optionsForSettlement, toQuery } from '../src/gen/options';
 import { Rng } from '../src/gen/core/rng';
 import { mainPopulation } from '../src/gen/pipeline';
-import { appendSettlementDraft, freshMapOptions, initialMapOptions, mainSettlementSpec, newSettlementSpec, settlementComposition } from '../src/ui/workflowDraft';
+import { appendSettlementDraft, freshMapOptions, generatedSettlementSize, initialMapOptions, mainSettlementSpec, newSettlementSpec, regionAsList, settlementComposition } from '../src/ui/workflowDraft';
 
 describe('map creation actions', () => {
+  it('keeps the displayed automatic type identical when its editor takes over the region', () => {
+    for (const population of [180, 1000, 8000, 20000, 40000]) {
+      const theme = makeOptions({ seed: 'type-boundaries', workflow: 'automatic', mapSize: 6000, population });
+      const places = [{ key: 'main', population, center: { x: 3000, y: 3000 } },
+        { key: 'village:0', population, center: { x: 1000, y: 1000 } }];
+      const listed = fromQuery(toQuery(regionAsList(theme, places)));
+      if (!listed.settlements || typeof listed.settlements !== 'object' || !('list' in listed.settlements)) throw new Error('missing list');
+      for (let i = 0; i < places.length; i++) expect(generatedSettlementSize(theme, places[i])).toBe(optionsForSettlement(listed, listed.settlements.list[i]).size);
+    }
+    const legacy = makeOptions({ seed: 'type-boundaries', workflow: 'automatic', size: 'town', population: 300 });
+    expect(generatedSettlementSize(legacy, { key: 'main', population: 300 })).toBe('town');
+    const explicit = makeOptions({ workflow: 'list', mapSize: 6000, settlements: { list: [{ population: 300, options: { size: 'city' } }] } });
+    expect(generatedSettlementSize(explicit, { key: 'main', population: 300 })).toBe('city');
+    expect(optionsForMainSettlement(explicit).size).toBe('city');
+  });
+
   it('starts with an automatic populated region and keeps old URL parsing separate', () => {
     const firstVisit = initialMapOptions();
     expect(firstVisit.workflow).toBe('automatic');

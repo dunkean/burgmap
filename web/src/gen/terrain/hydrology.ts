@@ -501,16 +501,46 @@ export function generateTerrain(opts: Options, root: Rng): { terrain: TerrainLay
  * map shows regional relief (several valleys, big river, bays) and a small one local relief.
  * `opts.lakes` ('auto' | 'none' | 'some', not part of the typed Options yet) is read when present.
  */
-export function terrainForExtent(opts: Options, mapSize: number, root?: Rng): { terrain: TerrainLayer; timings: TerrainTimings } {
+export interface PreparedTerrain { height: Grid; plan: HeightPlan; ms: number }
+
+/** Relief only: no lake carving, drainage or river routing has run yet. */
+export function prepareTerrain(opts: Options, mapSize: number, root?: Rng): PreparedTerrain {
+  const t = performance.now();
+  const { height, plan } = generateHeightfield(opts, mapSize, gridForExtent(mapSize), (root ?? new Rng('burgmap:' + opts.seed)).fork('terrain'));
+  if (opts.importedHeight || plan.relief === 'flat') resolveDepressions(height, 2, 0.35);
+  return { height, plan, ms: performance.now() - t };
+}
+
+/** Renderable empty map containing relief and the initial coast, with no inland hydrology. */
+export function emptyTerrain(prepared: PreparedTerrain): TerrainLayer {
+  const height = structuredClone(prepared.height), { plan } = prepared;
+  const { w: n, cell } = height, N = n * n;
+  const water = seaMaskOf(height, 0), seaField = new Float32Array(N);
+  let seaCells = 0;
+  for (let i = 0; i < N; i++) {
+    if (water[i]) seaCells++;
+    seaField[i] = water[i] ? Math.max(0.05, -height.data[i]) : -Math.max(0.05, height.data[i]);
+  }
+  const loops = regionPolygons(seaField, n, n, cell, cell * cell * 6);
+  const areas = loops.map(p => Math.abs(polygonArea(p))), coastline: Polygon[] = [], islands: Polygon[] = [];
+  for (let i = 0; i < loops.length; i++) {
+    const depth = loops.filter((p, j) => areas[j] > areas[i] && polygonContains(p, loops[i][0])).length;
+    (depth % 2 ? islands : coastline).push(loops[i]);
+  }
+  return { height, slope: slopeGrid(height), water, flow: createGrid(n, n, cell), seaLevel: 0, seaFraction: seaCells / N,
+    coastline, islands, lakes: [], rivers: [], receiver: new Int32Array(N).fill(-1), filled: height.data.slice(), downSide: plan.downSide, seaSide: plan.seaSide };
+}
+
+export function terrainForExtent(opts: Options, mapSize: number, root?: Rng, prepared?: PreparedTerrain): { terrain: TerrainLayer; timings: TerrainTimings } {
   const n = gridForExtent(mapSize);
   const rng = (root ?? new Rng('burgmap:' + opts.seed)).fork('terrain');
   const lakesOpt: LakesOpt = ((opts as unknown as { lakes?: LakesOpt }).lakes) ?? 'auto';
   const t0 = performance.now();
-  const { height, plan } = generateHeightfield(opts, mapSize, n, rng);
+  const { height, plan } = prepared ? { height: structuredClone(prepared.height), plan: prepared.plan } : generateHeightfield(opts, mapSize, n, rng);
   // The procedural relief solver already evolves drainage. Re-breaching its resampled surface before
   // carving the real main river created kilometre-long, one-cell knife cuts across valley floors.
   // Flat/noise fields and imports still need the bounded depression treatment.
-  if (opts.importedHeight || plan.relief === 'flat') resolveDepressions(height, 2, 0.35);
+  if (!prepared && (opts.importedHeight || plan.relief === 'flat')) resolveDepressions(height, 2, 0.35);
   const t1 = performance.now();
   const seaLevel = 0;
   const cell = height.cell;

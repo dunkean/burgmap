@@ -68,8 +68,8 @@
   #loadbar { position:absolute; left:0; right:0; top:0; height:3px; z-index:4; pointer-events:none; opacity:0; transition:opacity .3s; background:rgba(0,0,0,.12); }
   #loadbar.on { opacity:1; }
   #loadbar > i { display:block; height:100%; width:0; background:var(--accent); box-shadow:0 0 6px var(--accent); transition:width .35s ease-out; }
-  /* debug readouts kept in the DOM for scripts, never shown */
-  #hud, #busy, #pinMode, #coordCopy { display:none !important; }
+  /* legacy controls kept in the DOM for scripts */
+  #busy, #pinMode, #coordCopy { display:none !important; }
 
   /* top-right tools */
   /* above the rail and the drawer: its menus drop over them */
@@ -88,6 +88,10 @@
   #rail::-webkit-scrollbar { display:none; }
   .tile { position:relative; display:flex; flex-direction:column; align-items:center; gap:2px; width:100%; padding:5px 2px 4px; border-radius:10px; border:1px solid var(--edge); background:rgba(255,255,255,.06); color:var(--ink); font-size:10px; font-weight:600; letter-spacing:.02em; line-height:1.1; white-space:normal; }
   .tile .ico { width:18px; height:18px; }
+  .rail-art { display:block; width:100%; height:100%; flex:none; pointer-events:none; background-image:url('./assets/rail-icons.png'); background-size:500% 500%; background-repeat:no-repeat; }
+  .tile .rail-art { width:30px; height:30px; }
+  .dot:not(.swatch) { background:rgba(0,0,0,.22); }
+  .dot .rail-art { border-radius:50%; }
   .tile:hover { background:rgba(255,255,255,.13); filter:none; }
   .tile.primary { background:linear-gradient(#f0c46c, #d39a39); border-color:#f6d98f; color:#2a1d0c; box-shadow:0 2px 10px rgba(230,180,85,.35); }
   #menuBtn[aria-expanded=true] { background:rgba(230,180,85,.24); border-color:var(--accent); }
@@ -101,25 +105,26 @@
   .dot[aria-pressed=true] { border-color:#fff3d0; box-shadow:0 0 0 2px var(--accent), 0 0 10px 1px rgba(230,180,85,.7); }
   #tip { position:absolute; z-index:9; padding:3px 8px; border-radius:7px; background:#171209; color:#f3ead2; border:1px solid var(--edge); font-size:11.5px; white-space:nowrap; pointer-events:none; transform:translate(-100%, -50%); }
 
-  /* bottom-right corner: info, coordinates, minimap with its fit button */
-  #corner { right:10px; bottom:10px; display:flex; align-items:flex-end; gap:8px; pointer-events:none; }
-  #corner > * { pointer-events:auto; }
-  #mapMessages { display:flex; flex-direction:column; align-items:flex-end; gap:3px; max-width:min(330px, calc(100vw - 190px)); color:var(--ink); font-size:11px; pointer-events:none; }
-  #mapMessages > div:not(:empty) { background:rgba(30,24,18,.78); border-radius:8px; padding:2px 9px; text-align:right; }
-  #mapMessages button { pointer-events:auto; }
-  /* keep the corner readable beside the open drawer */
-  #app.drawer-open #mapMessages { margin-right:216px; max-width:min(360px, calc(100vw - 690px)); }
-  #status { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; pointer-events:auto; }
+  /* discreet generation/render information at the bottom-left */
+  #mapMessages { left:10px; bottom:10px; display:flex; flex-direction:column; gap:3px; width:max-content; max-width:min(360px, calc(100vw - 160px)); padding:8px 11px; border-radius:10px; background:rgba(30,24,18,.8); color:var(--ink2); font-size:11px; }
+  #mapMessages > div { min-width:0; }
+  #status { display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+  #gentime { color:var(--ink); }
+  #hud { font:10.5px/1.4 ui-monospace,Consolas,monospace; }
   #draftState:not(:empty) { color:#ffc48f; }
-  #draftState:empty, #status:empty, #gentime:empty, #generationIdentity:empty, #settlWarn:empty { display:none; }
-  #generationIdentity { font:10.5px/1.4 ui-monospace,Consolas,monospace; max-width:min(100%, 260px); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; pointer-events:auto; cursor:copy; }
-  #placementPrompt { background:var(--accent) !important; color:var(--accent-ink); font-weight:600; font-size:12px; pointer-events:auto; }
+  #draftState:empty, #status:empty, #gentime:empty, #hud:empty, #generationIdentity:empty, #settlWarn:empty { display:none; }
+  #generationIdentity { font:10.5px/1.4 ui-monospace,Consolas,monospace; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; cursor:copy; }
+  #placementPrompt { padding:4px 6px; border-radius:6px; background:var(--accent); color:var(--accent-ink); font-weight:600; font-size:12px; }
   #placementPrompt button { border-color:var(--accent-ink); color:var(--accent-ink); }
-  #progress { height:4px; width:120px; border-radius:2px; background:var(--line); overflow:hidden; opacity:0; transition:opacity .2s; padding:0 !important; }
-  #progress.on { opacity:1; }
+  #progress { display:none; height:3px; width:100%; border-radius:2px; background:var(--line); overflow:hidden; }
+  #progress.on { display:block; }
   #progress > i { display:block; height:100%; width:38%; background:var(--accent); animation:slide 1s infinite ease-in-out; }
   @keyframes slide { 0% { transform:translateX(-110%); } 100% { transform:translateX(290%); } }
-  #coords { display:grid; gap:1px; padding:4px 8px; border-radius:8px; background:rgba(30,22,14,.72); color:#f3ead2; font:10.5px/1.3 ui-monospace,Consolas,monospace; white-space:pre; text-align:right; min-width:86px; }
+
+  /* bottom-right minimap, with plain cursor coordinates just above it */
+  #corner { right:10px; bottom:10px; display:flex; align-items:flex-end; gap:8px; pointer-events:none; }
+  #corner > * { pointer-events:auto; }
+  #coords { position:absolute; left:0; bottom:calc(100% + 5px); z-index:1; display:grid; padding:0; border:0; background:none; color:#000; font:10.5px/1.3 ui-monospace,Consolas,monospace; white-space:pre; pointer-events:none; }
   #miniFrame { position:relative; width:120px; height:120px; flex:none; }
   #minimap { position:absolute; inset:0; width:100%; height:100%; border:2px solid var(--edge); border-radius:10px; box-shadow:0 2px 10px rgba(0,0,0,.5); background:#eee2c3; cursor:pointer; }
   #fit { position:absolute; right:4px; top:4px; z-index:1; width:24px; height:24px; padding:0; display:grid; place-items:center; border-radius:7px; background:rgba(30,24,18,.85); border:1px solid var(--edge); color:var(--ink); }
@@ -161,11 +166,25 @@
   #settingsFeedback { flex:1; min-width:0; font-size:11px; color:var(--ink2); }
   #settingsFeedback.dirty { color:#ffc48f; }
   .settings-footer > button { padding:8px 14px; font-weight:700; background:linear-gradient(#f0c46c, #d39a39); border-color:#f6d98f; }
+  #layoutFlyout { position:absolute; z-index:6; top:56px; right:calc(var(--rail) + 378px); width:350px; max-height:calc(100dvh - 66px); display:flex; flex-direction:column; overflow:hidden; }
+  #layoutFlyout .drawer-head h2 { font-size:14px; }
+  #layoutFlyout .settings-content { padding-top:4px; }
+  #layoutFlyout .settings-footer { justify-content:space-between; }
+  #layoutFlyout .settings-footer [data-back] { background:transparent; border-color:var(--line); color:var(--ink2); }
+  #sec-plan > summary::before { content:'\2039'; }
+  #sec-plan[open] > summary::before { transform:none; }
+  @media (max-width:830px) {
+    #layoutFlyout { left:10px; right:calc(var(--rail) + 18px); width:auto; }
+    #app.layout-overlay #panel { visibility:hidden; pointer-events:none; }
+  }
+  @media (max-width:640px) {
+    #layoutFlyout { left:8px; right:8px; top:auto; bottom:8px; max-height:74dvh; }
+  }
   .sub { margin:14px 0 4px; font-size:10.5px; letter-spacing:.14em; text-transform:uppercase; color:var(--accent); font-weight:700; }
   .sub:first-child { margin-top:8px; }
   .generate { width:100%; margin-top:12px; }
   #extentControls input { width:100%; }
-  #settlWarn { margin-top:8px; }
+  #settlWarn { margin:0; }
 
   /* settlements: segmented composition, a theme card, then one card per settlement; the editor opens inside the selected card */
   .seg { display:flex; gap:3px; padding:3px; margin-top:8px; border-radius:10px; background:rgba(0,0,0,.28); }
@@ -235,11 +254,13 @@
     .tile .lbl { display:none; }
     .dock-row { gap:4px; }
     #corner { right:8px; bottom:8px; gap:6px; }
-    #miniFrame { width:64px; height:64px; }
+    #miniFrame { width:84px; height:84px; }
     #fit { right:2px; top:2px; width:20px; height:20px; }
-    #mapMessages { max-width:calc(100vw - 100px); }
-    #app.drawer-open #mapMessages { margin-right:0; }
-    #status, #generationIdentity, #coords { display:none !important; }
+    #mapMessages { left:8px; bottom:8px; max-width:calc(100vw - 108px); padding:6px 8px; font-size:10px; }
+    #status { -webkit-line-clamp:2; }
+    #hud { font-size:9px; }
+    #generationIdentity { display:none !important; }
+    #coords { font-size:9px; }
     #panel { top:auto; left:8px; right:8px; bottom:8px; width:auto; max-width:none; max-height:74dvh; transform:translateY(24px); }
     #panel.open { transform:none; }
   }
@@ -272,18 +293,17 @@
       </div></div></details>
     </div>
     <nav id="rail" class="hud glass" aria-label="Map actions">
-      <button id="newMap" type="button" class="tile primary" title="A new seed with the applied settings"><svg class="ico" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3.5"/><circle cx="9" cy="9" r="1" fill="currentColor"/><circle cx="15" cy="9" r="1" fill="currentColor"/><circle cx="9" cy="15" r="1" fill="currentColor"/><circle cx="15" cy="15" r="1" fill="currentColor"/></svg><span class="lbl">New map</span></button>
-      <button id="surprise" type="button" class="tile" title="Random biome, culture, size and seed"><svg class="ico" viewBox="0 0 24 24"><path d="M11 3l1.9 5.6L18.5 10.5l-5.6 1.9L11 18l-1.9-5.6L3.5 10.5l5.6-1.9z"/><path d="M19 15l.8 2.2 2.2.8-2.2.8L19 21l-.8-2.2-2.2-.8 2.2-.8z"/></svg><span class="lbl">Surprise</span></button>
-      <button id="menuBtn" type="button" class="tile" aria-controls="panel" aria-expanded="false" title="Customize the world and its settlements"><svg class="ico" viewBox="0 0 24 24"><path d="M4 7h9M19 7h1M4 17h1M11 17h9"/><circle cx="16" cy="7" r="2.5"/><circle cx="8" cy="17" r="2.5"/></svg><span class="lbl">Customize</span></button>
+      <button id="newMap" type="button" class="tile primary" title="A new seed with the applied settings"><span class="rail-art" aria-hidden="true" style="background-position:0% 0%"></span><span class="lbl">New map</span></button>
+      <button id="surprise" type="button" class="tile" title="Random biome, culture, size and seed"><span class="rail-art" aria-hidden="true" style="background-position:25% 0%"></span><span class="lbl">Surprise</span></button>
+      <button id="menuBtn" type="button" class="tile" aria-controls="panel" aria-expanded="false" title="Customize the world and its settlements"><span class="rail-art" aria-hidden="true" style="background-position:50% 0%"></span><span class="lbl">Customize</span></button>
       <div id="dock"></div>
     </nav>
+    <div id="mapMessages" class="hud glass" aria-label="Generation and rendering information"><div id="placementPrompt" hidden>Click the map to place it <button id="cancelPlacement" type="button" class="secondary small">Cancel</button></div><div id="draftState" role="status" aria-live="polite"></div><div id="settlWarn" class="hint"></div><div id="status" role="status" aria-live="polite"></div><div id="progress" aria-label="Working"><i></i></div><div id="gentime"></div><div id="hud" title="Render detail level, zoom in pixels per meter, and last frame time"></div><div id="generationIdentity" title="Map ID (click to copy)"></div></div>
     <div id="corner" class="hud">
-      <div id="mapMessages"><div id="placementPrompt" hidden>Click the map to place it <button id="cancelPlacement" type="button" class="secondary small">Cancel</button></div><div id="draftState" role="status" aria-live="polite"></div><div id="settlWarn" class="hint"></div><div id="status" role="status" aria-live="polite"></div><div id="progress" aria-label="Working"><i></i></div><div id="gentime"></div><div id="generationIdentity" title="Map ID (click to copy)"></div></div>
-      <div id="coords" aria-label="Cursor position"><span id="coordText">x  –
-y  –</span><button id="coordCopy" type="button" tabindex="-1">Copy</button></div>
-      <div id="miniFrame"><canvas id="minimap"></canvas><button id="fit" type="button" title="Fit the whole map (0)" aria-label="Fit the whole map"><svg class="ico" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button></div>
+      <div id="miniFrame"><canvas id="minimap"></canvas><button id="fit" type="button" title="Fit the whole map (0)" aria-label="Fit the whole map"><svg class="ico" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button><div id="coords" aria-label="Cursor position in map meters"><span id="coordText">x  –
+y  –</span><button id="coordCopy" type="button" tabindex="-1">Copy</button></div></div>
     </div>
-    <div id="hud"></div><button id="pinMode" type="button" tabindex="-1">Pin</button><div id="busy">generating...</div>
+    <button id="pinMode" type="button" tabindex="-1">Pin</button><div id="busy">generating...</div>
   </main>
 
   <aside id="panel" class="glass" aria-labelledby="settingsTitle">

@@ -311,7 +311,7 @@ export function generateSettlementDetail(world: World, index: number): ReturnTyp
  * Names typed by the user (list mode) replace the generated toponyms in the labels, the cartouche and the derived
  * landmark names ("<town> Castle"). Applied after naming, so no other name or random stream moves.
  */
-function applyNameOverrides(world: World): void {
+export function applyNameOverrides(world: World): void {
   const o = world.options, names = world.names;
   if (o.workflow !== 'list' || !names || !world.settlements || !o.settlements || typeof o.settlements !== 'object' || !('list' in o.settlements)) return;
   const specs = o.settlements.list;

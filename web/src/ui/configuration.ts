@@ -63,6 +63,8 @@ export function initConfiguration(cancelPick: () => void): {
     if (event.key !== 'Escape' || !isOpen() || event.defaultPrevented || document.querySelector('dialog[open]')) return;
     // Esc first cancels a placement in progress (settlementsPanel), the next one closes the drawer
     if (document.getElementById('map')!.classList.contains('picking')) return;
+    const layout = document.getElementById('sec-plan') as HTMLDetailsElement;
+    if (layout.open) { event.preventDefault(); layout.open = false; return; }
     event.preventDefault(); close();
   });
   document.getElementById('cancelPlacement')!.addEventListener('click', cancelPick);

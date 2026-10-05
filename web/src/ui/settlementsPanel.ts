@@ -9,10 +9,10 @@
  * The single shared editor is moved into the selected card, so what it edits is always visible.
  */
 import type { Options, SettlementSpec, SettlementOverrides } from '../gen/options';
-import { SETTLEMENT_OVERRIDE_KEYS, optionsForSettlement, mapSizeOf, MAP_SIZE_MIN, MAP_SIZE_MAX, POP_MIN, POP_MAX, classOfPop, sizeForPop, cleanSettlementName } from '../gen/options';
+import { SETTLEMENT_OVERRIDE_KEYS, SIZE_PRESETS, optionsForSettlement, mapSizeOf, MAP_SIZE_MIN, MAP_SIZE_MAX, POP_MIN, POP_MAX, sizeForPop, cleanSettlementName } from '../gen/options';
 import { CULTURE_LIST } from '../gen/urban/cultures';
 import type { ControlRegistry } from './controls';
-import { appendSettlementDraft, regionAsList, settlementComposition, type GeneratedPlace } from './workflowDraft';
+import { appendSettlementDraft, generatedSettlementSize, regionAsList, settlementComposition, type GeneratedPlace } from './workflowDraft';
 
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, attrs: Record<string, string> = {}, text?: string): HTMLElementTagNameMap[K] => {
   const e = document.createElement(tag);
@@ -190,7 +190,7 @@ export function initSettlementsUI(registry: ControlRegistry, getOpts: () => Opti
       specs.forEach((spec, index) => {
         const settings = optionsForSettlement(o, spec);
         choices.append(card(index, displayName(o, index),
-          `${classOfPop(spec.population)} · ${spec.population.toLocaleString('en')} · ${cultureLabel(settings.culture)}${settings.cultureMix ? ' + mix' : ''}${spec.position ? '' : ' · auto'}`,
+          `${SIZE_PRESETS[settings.size].label} · ${spec.population.toLocaleString('en')} · ${cultureLabel(settings.culture)}${settings.cultureMix ? ' + mix' : ''}${spec.position ? '' : ' · auto'}`,
           () => changeEditor((draft) => { selected = selected === index ? -1 : index; setPicking(null); render(draft); return draft; }),
           () => { changeEditor((draft) => { selected = index; render(draft); return draft; }); setPicking(index); },
           specs.length > 1 ? () => removeAt(index) : null));
@@ -198,7 +198,7 @@ export function initSettlementsUI(registry: ControlRegistry, getOpts: () => Opti
     } else {
       // the displayed region, read-only until one place is touched
       places.forEach((p, index) => {
-        choices.append(card(index, p.name ?? (index === 0 ? 'Main town' : `Place ${index + 1}`), `${p.cls} · ${p.population.toLocaleString('en')} · ${cultureLabel(o.culture)}`,
+        choices.append(card(index, p.name ?? (index === 0 ? 'Main town' : `Place ${index + 1}`), `${SIZE_PRESETS[generatedSettlementSize(o, p)].label} · ${p.population.toLocaleString('en')} · ${cultureLabel(o.culture)}`,
           () => takeOver(index), () => { takeOver(index); setPicking(index); }, places.length > 1 ? () => { takeOver(-1); removeAt(index); } : null));
       });
     }

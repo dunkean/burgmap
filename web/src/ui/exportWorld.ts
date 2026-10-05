@@ -17,7 +17,9 @@ export function worldToJson(world: World): string {
   const doc = {
     format: 'burgmap-world',
     version: 1,
-    note: 'Units are meters, origin top-left, y down. Rasters (terrain grids) are omitted; regenerate from seed + options to get them.',
+    note: typeof world.stats['developer.stage'] === 'number'
+      ? `Developer pipeline snapshot, stage ${world.stats['developer.stage']}/4. Centroids use projected reserves before roads and buildings. Units are meters, origin top-left, y down. Rasters are omitted; reproduce with DebugGeneration(seed/options).advance(stage). Shared IDs open normal generation.`
+      : 'Units are meters, origin top-left, y down. Rasters (terrain grids) are omitted; regenerate from seed + options to get them.',
     world: { ...rest, options },
   };
   return JSON.stringify(doc, (_k, v: unknown) => {

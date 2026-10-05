@@ -10,6 +10,7 @@ import GenWorker from './worker?worker&inline';
 import RenderWorker from './renderWorker?worker&inline';
 import type { GResponse, GDone, RResponse, RContent, RFrame, DisplayOpts, GDetailDone, GQuartersDone } from './protocol';
 import type { FrameRequest } from './viewer';
+import type { DebugStage } from '../gen/debugPipeline';
 
 export interface BackendEvents {
   onStage(id: number, stage: string): void;
@@ -99,7 +100,7 @@ export class OffscreenBackend {
   get generating(): boolean { return this.busy; }
 
   /** Generate `options` as run `id`; a running generation is superseded (its worker is restarted, as generation cannot be interrupted). */
-  run(id: number, options: Options): void {
+  run(id: number, options: Options, debugStage?: DebugStage): void {
     this.currentRun = id;
     if (this.gen && this.busy) { this.gen.terminate(); this.gen = null; }
     this.gen ??= this.spawnGen();
@@ -108,7 +109,7 @@ export class OffscreenBackend {
     const ch = new MessageChannel();
     this.render.postMessage({ type: 'attach', gen: id, port: ch.port1 }, [ch.port1]);
     this.busy = true;
-    this.gen.postMessage({ type: 'run', id, options, port: ch.port2 }, [ch.port2]);
+    this.gen.postMessage({ type: 'run', id, options, debugStage, port: ch.port2 }, [ch.port2]);
   }
 
   /** Lazy detail (M3c): generate settlement `index` of run `id` in the generation worker. */

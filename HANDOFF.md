@@ -5,6 +5,73 @@ bugs and their evidence are recorded in [ROADMAP.md](ROADMAP.md).
 
 ## Current status
 
+- Publication preparation (2026-10-06): the staged-generation/controller bundle
+  passes 16 focused debug/cache/workflow/Kraal tests, typecheck and the offline
+  build. A release review found a late-completion race after settings edits;
+  `developer.ts` now retains invalidation until an explicit restart. Actual HTTP
+  worker runs verify edits during stages 0 and 1 cannot enable a later stage;
+  isolated browser checks cover stage 3 and restart recovery as well.
+  Sol xhigh release review passes with no remaining blockers; two Roman-core
+  probes preserve settlement reachability after urban gate approach shaping.
+  Evidence: `web/out/developer-ui/race-check.json` and controller-check scripts.
+  `deploy_pages.sh` now publishes the English guide at `docs/generation.html`,
+  rewriting source references to commit-specific GitHub URLs, plus `version.json`
+  identifying the full source revision. Git credentials or GITHUB_TOKEN_FILE
+  are supported. App build SHA256:
+  `8707af6def81c53209f03fe96fa27d81b91f793aad000a42f3d9d9a8bace57b1`.
+
+- Generation guide translated to English (2026-10-06, user follow-up):
+  `web/docs/generation.html` now has English prose, tables, diagram labels,
+  accessibility labels and metadata (`lang=en`). All IDs, source links, CSS,
+  JS and SVG geometry are preserved. Offline desktop/mobile checks verify
+  all 12 sections, five diagrams, stages 0/2/4, no horizontal overflow and no
+  browser errors; images inspected. Evidence: `web/out/doc-english/`.
+
+- Settlement UI follow-ups (2026-10-06, local changes): Style mix, layout &
+  landmarks now opens a separate glass panel to the left of Customize; below
+  830 px it replaces the drawer while open. Existing controls/listeners retain
+  their selected settlement, Back/Esc returns to Customize, and its Apply action
+  captures and generates the same draft (verified desktop/mobile JSON exports).
+  Closed settlement cards and opened Type fields now share generation presets,
+  rather than mixing those presets with regional population-class thresholds.
+  Main legacy/explicit overrides retain their actual generation type.
+  Ten focused workflow/Kraal tests, typecheck and build pass. Offline Chromium
+  checks compare five population boundaries, desktop/mobile layout and real
+  Hamlet/Village/Town generation. Kraal 80/600/3000 populations are respected:
+  round thatched huts at 600, connected `kraal-town` streets at 3000; no tipi,
+  ger or store-tent buildings in these seeded cases. Generation behavior was
+  not changed: hut architecture remains culture-specific as population grows.
+  Inspected map and UI images: `web/out/layout-flyout/`. Final HTML SHA256:
+  `6ec35c7fd0ec2fe334601edd2739779c9ec76a6b7b00bb27bd9d3ce2bab75a48`.
+  No full-suite claim; nothing published.
+
+- HUD, rail artwork and staged developer tools (2026-10-06, local changes):
+  generation/render timings, zoom and map identity share a discreet bottom-left
+  glass frame; x/y coordinates sit just above the minimap, in plain black text
+  without a background, including on phones (user follow-up).
+  Right-rail action/biome/relief/coast/river icons use the transparent ImageGen
+  atlas in `web/src/ui/assets/rail-icons.png`; palette swatches stay exact.
+  Customize ends with a collapsed Developer section: empty relief/coast, then
+  rivers/lakes, settlement centroids, roads, and quarters/buildings/rural/names.
+  `gen/debugPipeline.ts` retains actual intermediate state; lazy detail is blocked
+  before stage 4. The production pipeline retains its ordering. Debug secondary
+  placement uses projected reserves, so it can differ from production placement;
+  a single-main regression preserves production geometry and names exactly.
+  JSON exports identify the stage; shared IDs reopen normal generation. Display
+  changes retain the debug session; generation edits require restarting it.
+  Offline French guide: `web/docs/generation.html` (41 cultures, eight biomes,
+  five inline diagrams, interactive steps). Six focused tests (debug + cache),
+  typecheck and single-file build pass. Offline desktop/mobile checks verify
+  the HUD, inline icons and all five developer frames; Worker-disabled fallback
+  also passes, including actual stage-3 JSON downloads without urban geometry.
+  Native images were inspected; no browser errors or external asset requests.
+  Evidence: `web/out/ui-hud/`, `web/out/developer-ui/`, and
+  `web/out/generation-doc/`. Final HTML SHA256:
+  `daec3e93ec1646390689e04e6c80fe53a6accf2d517a0ca4ad35a687613a130d`
+  after the coordinate placement follow-up. That CSS update also passes the
+  build and inspected desktop/mobile offline checks (`web/out/coords-above/`).
+  No full-suite claim. Nothing is published as part of this request.
+
 - Compact share IDs (2026-10-05, local commit `d341f2e`): `?id=` now carries the seed and configuration
   in a versioned binary/base64url format, optionally DEFLATE-compressed against a
   frozen plan dictionary (`web/src/gen/mapId.ts`). Old links remain readable;

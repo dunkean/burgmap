@@ -1,4 +1,4 @@
-import { effectiveSize, makeOptions, POP_MIN, POP_MAX, type Options, type SettlementSpec } from '../gen/options';
+import { effectiveSize, makeOptions, optionsForMainSettlement, sizeForPop, POP_MIN, POP_MAX, type Options, type SettlementSpec } from '../gen/options';
 import { Rng } from '../gen/core/rng';
 import { mainPopulation } from '../gen/pipeline';
 
@@ -48,6 +48,14 @@ export function settlementComposition(theme: Options, individual: boolean): Opti
 
 /** A settlement of a displayed map, as the page knows it (worker summary or World). */
 export interface GeneratedPlace { key: string; name?: string; population: number; center: { x: number; y: number } }
+
+/** Match the generation preset and the editor, rather than the separate regional population class. */
+export function generatedSettlementSize(theme: Options, place: Pick<GeneratedPlace, 'key' | 'population'>): Options['size'] {
+  if (place.key !== 'main') return sizeForPop(place.population);
+  const first = theme.workflow === 'list' && theme.settlements && typeof theme.settlements === 'object' && 'list' in theme.settlements
+    ? theme.settlements.list[0] : undefined;
+  return first?.options?.size ?? effectiveSize(optionsForMainSettlement(theme));
+}
 
 /**
  * Take over an automatic region as an editable list: every place keeps its generation key, population, position and

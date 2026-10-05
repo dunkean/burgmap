@@ -14,12 +14,13 @@ import type { MapStyle } from '../render/styles';
 import type { BrushSources } from '../render/brushes';
 import type { FrameStats } from '../render/canvas';
 import type { MapInformation } from '../render/legend';
+import type { DebugStage } from '../gen/debugPipeline';
 
 /** Display-only options (changing them never regenerates the world). */
 export interface DisplayOpts { style: MapStyle; contours?: boolean; landuse?: boolean; labels?: boolean; legend?: boolean; painted?: boolean }
 
 // ---- M -> G ----
-export interface GRun { type: 'run'; id: number; options: Options; /** snapshot channel to the render worker */ port: MessagePort }
+export interface GRun { type: 'run'; id: number; options: Options; debugStage?: DebugStage; /** snapshot channel to the render worker */ port: MessagePort }
 export interface GExport { type: 'export'; id: number; gen: number; kind: 'svg' | 'json'; display: DisplayOpts; brushes?: BrushSources; /** Actual SVG raster export width in pixels; omitted for intrinsic SVG. */ width?: number; /** megacity: generate the detail of every quarter first (slow) */ full?: boolean }
 /** Lazy detail (M3c): generate the plan of secondary settlement `index` of run `id`. */
 export interface GDetail { type: 'detail'; id: number; index: number }

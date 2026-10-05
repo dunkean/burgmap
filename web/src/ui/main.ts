@@ -39,6 +39,7 @@ import { exportSnapshot, type ExportSnapshot } from './exportSnapshot';
 import { initSettlementsUI, showSettlementWarnings } from './settlementsPanel';
 import { initPlanEditor } from './planEditor';
 import { initConfiguration } from './configuration';
+import { initLayoutFlyout } from './layoutFlyout';
 import { freshMapOptions, initialMapOptions } from './workflowDraft';
 import { screenToWorld } from '../render/view';
 import { Pin, ViewState, fullQuery, uiStateFromQuery, bugReport } from './share';
@@ -50,6 +51,11 @@ import { mapInformationHtml } from './mapInformation';
 import { initDock } from './dock';
 import { createMarks } from './marks';
 import { surprisePatch } from './randomMap';
+import { DebugGeneration, debugConfigurationKey, type DebugStage } from '../gen/debugPipeline';
+import { initDeveloper, type DeveloperControls } from './developer';
+let developer: DeveloperControls | null = null;
+let debugRunStage: DebugStage | undefined;
+let mainDebug: DebugGeneration | null = null;
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 
@@ -106,7 +112,7 @@ const feedbackEl = $('settingsFeedback');
 const marks = createMarks($('marks'), { select: (t) => settlUI.select(t), move: (t, p) => settlUI.move(t, p) });
 function refreshMarks(): void {
   const editing = configuration.isOpen && configuration.tab === 'settlementsPane';
-  marks.set(editing || settlUI.picking !== null ? settlUI.markers(draft) : null);
+  marks.set(debugRunStage !== undefined && debugRunStage < 4 ? null : editing || settlUI.picking !== null ? settlUI.markers(draft) : null);
 }
 const menuBtn = $<HTMLButtonElement>('menuBtn');
 // the rail's one-click pickers: biome and relief regenerate (the terrain is reused across biomes), a style only redraws
@@ -235,6 +241,7 @@ registry.add(checkControl($<HTMLInputElement>('legend'), 'legend', true));
   registry.add({ ...sc, live: false, write: (o) => { sc.write(o); show(); } });
 }
 initPlanEditor(registry);
+const layoutFlyout = initLayoutFlyout();
 registry.writeAll(settlUI.editorOptions(draft));
 // ---------- Plan section: population-driven growth or the culture's scale cap
 {
@@ -382,10 +389,12 @@ function showStats(stats: Record<string, number | string>, ms: number): void {
   statusEl.textContent = `terrain ${stats['ms.terrain']} ms, urban ${stats['ms.urban'] ?? 0} ms - ${stats.rivers} rivers, ${stats.lakes} lakes, sea ${seaPct}% - ${stats.roads ?? 0} roads, ${stats.bridges ?? 0} bridges - ${stats['urban.archetype'] ?? ''} pop ${stats['urban.pop'] ?? 0}: ${stats['urban.blocks'] ?? 0} blocks, ${stats['urban.buildings'] ?? 0} buildings`
     + (Number(stats['settlements'] ?? 0) > 1 ? ` - ${stats['settlements']} settlements (${stats['ms.settlements'] ?? 0} ms)` : '')
     + (stats['urban.mega'] ? ` - megacity plan: ${stats['urban.quarters']} quarters in ${stats['urban.rings']} rings, ${stats['urban.nuclei']} nuclei (zoom in to detail the quarters)` : '');
+  if (typeof stats['developer.stage'] === 'number') genTimeEl.textContent = `Developer · stage ${stats['developer.stage']}/4 · ${(ms / 1000).toFixed(2)} s`;
   ($('exportSvgFull') as HTMLButtonElement).hidden = !stats['urban.mega'];
   showSettlementWarnings(stats);
   // generated names and positions are now known: placeholders and markers follow the displayed map
   settlUI.refresh(); refreshMarks();
+  developer?.complete(stats, settlementList());
 }
 
 // Thin determinate bar at the top of the map: jumps to each pipeline stage and creeps inside the long ones.
@@ -417,6 +426,7 @@ function setLoad(on: boolean, stage = ''): void {
 }
 
 function setBusy(on: boolean, stage = ''): void {
+  developer?.busy(on);
   setLoad(on, stage);
   busyEl.classList.toggle('on', on);
   progressEl.classList.toggle('on', on || exporting);
@@ -452,12 +462,12 @@ const backendEvents: BackendEvents = {
   },
   onError(id, error) {
     if (id !== reqId) return;
-    setBusy(false); genTimeEl.textContent = 'Generation failed'; statusEl.textContent = 'Error: ' + error.split('\n')[0]; console.error(error);
+    setBusy(false); developer?.failed(); genTimeEl.textContent = 'Generation failed'; statusEl.textContent = 'Error: ' + error.split('\n')[0]; console.error(error);
   },
   onRenderError(id, error) {
     if (id !== reqId) return;
     renderFailedGen = id;
-    setBusy(false); genTimeEl.textContent = 'Rendering failed'; statusEl.textContent = 'Error: ' + error.split('\n')[0];
+    setBusy(false); developer?.failed(); genTimeEl.textContent = 'Rendering failed'; statusEl.textContent = 'Error: ' + error.split('\n')[0];
   },
   onContent(c) {
     if (!handoff.acceptsContent(c.gen)) return;
@@ -523,7 +533,7 @@ function spawnWorker(): void {
     if (r.detail) { applyDetail(r.detail.index, r.detail.urban, r.detail.bridges); return; }
     if (r.quarters) { applyQuarters(r.quarters.layers, r.quarters.drop); megaProgress(r.quarters.done, r.quarters.queued, r.quarters.total, r.quarters.failed); return; }
     workerBusy = false;
-    if (r.error) { setBusy(false); genTimeEl.textContent = 'Generation failed'; statusEl.textContent = 'Error: ' + r.error.split('\n')[0]; console.error(r.error); return; }
+    if (r.error) { setBusy(false); developer?.failed(); genTimeEl.textContent = 'Generation failed'; statusEl.textContent = 'Error: ' + r.error.split('\n')[0]; console.error(r.error); return; }
     show(r.world!, r.stats!, r.ms!);
   };
   // e.g. blob workers are refused on file:// - fall back to generating on the main thread
@@ -538,18 +548,21 @@ function genKey(): string {
   return toQuery({ ...opts, style: DEFAULTS.style, contours: DEFAULTS.contours, landuse: DEFAULTS.landuse, labels: true, legend: false }) + '|' + heightId;
 }
 
-function run(): void {
+function run(debugStage?: DebugStage): void {
   if (!backendSettled) return; // the first run starts when the backend probe has answered
+  debugRunStage = debugStage;
+  developer?.started(debugStage);
+  if (debugStage === undefined) mainDebug = null;
   const id = ++reqId;
   handoff.begin(id); pendingDone = null; pendingMain = null; awaitVer = 0; renderFailedGen = 0;
   for (const p of legacyExports.values()) p.reject(new Error('superseded'));
   legacyExports.clear();
   detailAsked.clear();
   megaLocal?.stop(); megaLocal = null; megaRect = null;
-  lastGenKey = genKey();
+  lastGenKey = genKey() + (debugStage === undefined ? '' : '|developer:' + debugStage);
   genStart = performance.now();
   setBusy(true, 'starting');
-  if (backend) { backend.run(id, opts); return; }
+  if (backend) { backend.run(id, opts, debugStage); return; }
   if (!worker && !legacyWorkerRefused) spawnWorker();
   if (worker) {
     // a newer request supersedes a running one: restart the worker instead of queueing behind it
@@ -557,15 +570,16 @@ function run(): void {
   }
   if (worker) {
     workerBusy = true;
-    worker.postMessage({ id, options: opts });
+    worker.postMessage({ id, options: opts, debugStage });
   } else {
     setTimeout(() => {
       if (id !== reqId) return;
       try {
-        const world = generate(opts, undefined, { cache: mainCache });
+        if (debugStage !== undefined && (debugStage === 0 || !mainDebug || debugConfigurationKey(mainDebug.options) !== debugConfigurationKey(opts))) mainDebug = new DebugGeneration(opts);
+        const world = debugStage === undefined ? generate(opts, undefined, { cache: mainCache }) : mainDebug!.advance(debugStage, undefined, opts);
         show(world, world.stats, Math.round(performance.now() - genStart));
       } catch (err) {
-        setBusy(false); statusEl.textContent = 'Error: ' + String((err as Error).message);
+        setBusy(false); developer?.failed(); statusEl.textContent = 'Error: ' + String((err as Error).message);
       }
     }, 10);
   }
@@ -600,6 +614,7 @@ function commit(mode: 'push' | 'replace' | 'none', displayOnly = false): void {
 }
 
 function markDraft(): void {
+  developer?.invalidate();
   pendingSettings = true; menuBtn.classList.add('dirty');
   feedbackEl.textContent = 'Unapplied changes'; feedbackEl.classList.add('dirty');
   $('draftState').textContent = 'Unapplied changes in Customize';
@@ -623,18 +638,20 @@ registry.onChange((control) => {
     if (currentWorld || backend) rerender(true);
   } else markDraft();
 });
-function applyGeneration(environment: boolean, keepOpen = false): void {
+function applyGeneration(environment: boolean, keepOpen = false): boolean {
   if (!registry.controls.every((control) => Array.from(control.el.matches('input') ? [control.el] : control.el.querySelectorAll('input')).every((input) => !(input instanceof HTMLInputElement) || input.checkValidity()))) {
     $('draftState').textContent = 'Check the highlighted values before generating.';
-    for (const input of Array.from(document.querySelectorAll<HTMLInputElement>('#panel input'))) if (!input.checkValidity()) {
-      configuration.open(input.closest('[role=tabpanel]')?.id); input.reportValidity(); break;
+    for (const input of Array.from(document.querySelectorAll<HTMLInputElement>('#panel input, #layoutFlyout input'))) if (!input.checkValidity()) {
+      configuration.open(input.closest('[role=tabpanel]')?.id);
+      if (input.closest('#layoutFlyout')) layoutFlyout.open();
+      input.reportValidity(); break;
     }
-    return;
+    return false;
   }
   const x = $<HTMLInputElement>('centerX'), y = $<HTMLInputElement>('centerY');
   if (!!x.value !== !!y.value) {
     $('draftState').textContent = 'Enter both position coordinates, or clear both for automatic placement.';
-    configuration.open('settlementsPane'); (x.value ? y : x).focus(); return;
+    configuration.open('settlementsPane'); (x.value ? y : x).focus(); return false;
   }
   draft = settlUI.capture(registry.readAll(settlUI.editorOptions(draft)), draft);
   heightId = heightDraftId;
@@ -642,6 +659,7 @@ function applyGeneration(environment: boolean, keepOpen = false): void {
   settlUI.cancelPick();
   commit('push');
   if (!keepOpen) configuration.close();
+  return true;
 }
 $('generateEnvironment').addEventListener('click', () => applyGeneration(true));
 $('generateSettlements').addEventListener('click', () => applyGeneration(false));
@@ -762,7 +780,7 @@ const canvasEl = $<HTMLCanvasElement>('view');
 const hudEl = $('hud');
 const viewer = createViewer({
   container: map, canvas: canvasEl, minimap: $<HTMLCanvasElement>('minimap'),
-  onView: (v, w, h) => { pinsUI.update(v, w, h); marks.update(v, w, h); renderCoords(); if (viewReady) syncUrl(); },
+  onView: (v, w, h) => { pinsUI.update(v, w, h); marks.update(v, w, h); developer?.update(v, w, h); renderCoords(); if (viewReady) syncUrl(); },
   onError: (error) => {
     if (pendingMain?.id === reqId) backendEvents.onRenderError?.(reqId, String(error.message));
     else console.error('canvas draw:', error);
@@ -781,6 +799,12 @@ const viewer = createViewer({
   },
 });
 $('fit').addEventListener('click', () => viewer.fit());
+developer = initDeveloper($('panel').querySelector<HTMLElement>('.settings-content')!, map, (stage) => {
+  if (stage === 0 && !applyGeneration(false, true)) return;
+  window.clearTimeout(timer);
+  run(stage);
+});
+developer.update(viewer.getView(), map.clientWidth, map.clientHeight);
 
 // ---------- debug / feedback tools: coordinate readout, pins ----------
 const coordText = $('coordText');
@@ -790,14 +814,27 @@ const mapPoint = (e: MouseEvent): [number, number] => {
   const r = map.getBoundingClientRect();
   return screenToWorld(viewer.getView(), r.width, r.height, e.clientX - r.left, e.clientY - r.top);
 };
-/** Two lines in the corner frame: the cursor, else the last click. */
+/** Two lines just above the minimap: the cursor, else the last click. */
 function renderCoords(): void {
   const p = hover ?? lastClick;
   const f = (n: number): string => `${Math.round(n)} m`.padStart(8);
   coordText.textContent = p ? `x${f(p[0])}\ny${f(p[1])}` : 'x       –\ny       –';
 }
-map.addEventListener('pointermove', (e) => { hover = mapPoint(e); renderCoords(); });
+map.addEventListener('pointermove', (e) => {
+  if ((e.target as Element).closest('.hud, #pinpop')) return;
+  hover = mapPoint(e); renderCoords();
+});
 map.addEventListener('pointerleave', () => { hover = null; renderCoords(); });
+const minimapEl = $<HTMLCanvasElement>('minimap');
+const miniPoint = (e: PointerEvent): [number, number] => {
+  const r = minimapEl.getBoundingClientRect();
+  const size = (backend ? meta?.mapSize : presentedWorld?.mapSize ?? currentWorld?.mapSize) ?? mapSizeOf(opts);
+  const clamp = (n: number): number => Math.max(0, Math.min(size, n));
+  return [clamp((e.clientX - r.left) / r.width * size), clamp((e.clientY - r.top) / r.height * size)];
+};
+minimapEl.addEventListener('pointermove', (e) => { hover = miniPoint(e); renderCoords(); });
+minimapEl.addEventListener('pointerdown', (e) => { hover = lastClick = miniPoint(e); renderCoords(); });
+minimapEl.addEventListener('pointerleave', () => { hover = null; renderCoords(); });
 $('coordCopy').addEventListener('click', async (e) => {
   const p = lastClick ?? hover;
   if (!p) return;
@@ -847,6 +884,7 @@ function applyDetail(index: number, urban: NonNullable<World['urban']>, bridges:
 /** Detail level: settlements generated lazily are built when the view comes close enough (in a worker). */
 const DETAIL_SCALE = 0.12;
 function maybeDetail(v: { cx: number; cy: number; scale: number }): void {
+  if (debugRunStage !== undefined && debugRunStage < 4) return;
   if (busyEl.classList.contains('on') || renderFailedGen === reqId || (backend ? handoff.displayedGen !== reqId : mainPresentedGen !== reqId)) return;
   maybeQuarters(v);
   if (v.scale < DETAIL_SCALE) return;
@@ -890,6 +928,7 @@ function applyQuarters(layers: Record<number, NonNullable<World['urban']>>, drop
   }, 400);
 }
 function maybeQuarters(v: { cx: number; cy: number; scale: number }): void {
+  if (debugRunStage !== undefined && debugRunStage < 4) return;
   if (v.scale < MEGA_SCALE || !isMega()) return;
   const r = map.getBoundingClientRect();
   const hw = r.width / (2 * v.scale), hh = r.height / (2 * v.scale);
@@ -967,7 +1006,8 @@ async function exportFile(name: string, data: Blob | string, mime: string): Prom
   }
 }
 function captureExport(): ExportSnapshot {
-  if (busyEl.classList.contains('on') || genKey() !== lastGenKey) throw new Error('the map is still being generated');
+  const currentKey = genKey() + (debugRunStage === undefined ? '' : '|developer:' + debugRunStage);
+  if (busyEl.classList.contains('on') || currentKey !== lastGenKey) throw new Error('the map is still being generated');
   if (renderFailedGen === reqId || (backend && !finalFrame.ready)) throw new Error('the requested map has not been presented');
   if (paintedTextures && brushStatus === 'loading') throw new Error('painted textures are still loading');
   const snapshot = exportSnapshot(opts, backend ? null : presentedWorld, reqId, backend ? handoff.displayedGen : mainPresentedGen);
