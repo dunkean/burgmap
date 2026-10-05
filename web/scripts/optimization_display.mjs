@@ -61,7 +61,7 @@ const optPost = self.postMessage.bind(self) as (...values: any[]) => void;
 (self as any).postMessage = (...values: any[]) => {
   const m = values[0];
   if (m?.type === 'content' || m?.type === 'frame') optEmit(m.type, { gen: m.gen, ver: m.ver, seq: m.seq,
-    ms: m.ms, sceneMs: m.sceneMs, details: Object.keys(world?.megaDetail ?? {}).length });
+    ms: m.ms, sceneMs: m.sceneMs, stats: m.stats, details: Object.keys(world?.megaDetail ?? {}).length });
   optPost(...values);
 };\n` + next;
     }
@@ -174,7 +174,7 @@ try {
       loadingRecords, records, messages, warm };
     writeFileSync(resolve(out, `${name}-${sample}.json`), JSON.stringify(data, null, 2));
     result.push(data);
-    console.log(`DONE ${name}: first=${data.firstImageMs.toFixed(0)}ms, full=${data.completeImageMs.toFixed(0)}ms, complete=${complete}, errors=${errors.length}`);
+    console.log(`DONE ${name}: first=${data.firstImageMs?.toFixed(0) ?? 'missing'}ms, full=${data.completeImageMs?.toFixed(0) ?? 'missing'}ms, complete=${complete}, errors=${errors.length}`);
     await context.close();
     if (!complete || errors.length) throw new Error(`Browser verification failed for ${name}`);
   }
