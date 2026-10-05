@@ -428,7 +428,8 @@ export function megaQuarterDetail(world: World, key: number): UrbanLayer | null 
   }));
   if (host.renderHints?.carvedDoors) lines.push(...swahiliDoorLines(buildings, parcels));
   if (host.renderHints?.primitive) lines.push(...primitiveGardenLines(mq.culture, parcels));
-  if (host.renderHints?.primitive && mq.culture === 'halfling') trees.push(...halflingGardenTrees(parcels, buildings));
+  if (world.options.biome !== 'underdark' && host.renderHints?.primitive && mq.culture === 'halfling') trees.push(...halflingGardenTrees(parcels, buildings));
+  if (world.options.biome === 'underdark') trees.length = 0;
   const layer: UrbanLayer = {
     footprint: [], footprintH: [], streets, blocks: carved.map((b) => b.poly), parcels, buildings, walls, landmarks, squares: [],
     archetype: 'town', population: mq.pop, morphology: P.id, phases: [], quarters: [],

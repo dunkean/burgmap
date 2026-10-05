@@ -21,6 +21,7 @@ const CULTURE_FAMILY: Record<string, NameFamily | 'european'> = {
   norse: 'norse', 'russian-kremlin': 'norse', hanseatic: 'german', 'celtic-oppidum': 'english',
   elven: 'elven', 'wizard-city': 'elven', dwarven: 'dwarven', gnomish: 'dwarven', orcish: 'orcish', necropolis: 'orcish',
   halfling: 'halfling', 'stilt-town': 'halfling',
+  'drow-enclave': 'elven', 'duergar-hold': 'dwarven', 'myconid-colony': 'elven',
 };
 
 function hashStr(s: string): number {

@@ -85,6 +85,8 @@ export interface SiteLayer {
 export type LandKind = 'field' | 'meadow' | 'pasture' | 'forest' | 'orchard' | 'garden' | 'marsh' | 'commons';
 export interface LandArea {
   kind: LandKind; poly: Polygon; holes?: Polygon[];
+  /** Underdark cultivation beds; absent on surface maps and uncultivated cover. */
+  cultivation?: 'fungal';
   /** Furlongs (kind 'field'): strip direction in radians and the strips themselves. */
   stripAngle?: number; strips?: Polygon[];
 }
@@ -118,6 +120,8 @@ export interface Farmstead {
   gate?: Vec2; entry?: Vec2;
   /** Site context tags: slope, wet, exposed, bank-barn, warft. */
   tags?: string[];
+  /** Underdark farm production, independent of the chosen surface language family. */
+  cultivation?: 'fungal';
 }
 export interface LandUseLayer {
   areas: LandArea[];

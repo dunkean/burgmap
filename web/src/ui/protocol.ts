@@ -13,6 +13,7 @@ import type { View } from '../render/view';
 import type { MapStyle } from '../render/styles';
 import type { BrushSources } from '../render/brushes';
 import type { FrameStats } from '../render/canvas';
+import type { MapInformation } from '../render/legend';
 
 /** Display-only options (changing them never regenerates the world). */
 export interface DisplayOpts { style: MapStyle; contours?: boolean; landuse?: boolean; labels?: boolean; legend?: boolean; painted?: boolean }
@@ -37,7 +38,7 @@ export interface GStage { type: 'stage'; id: number; stage: string }
 export interface GDone {
   type: 'done'; id: number; ms: number; stats: Record<string, number | string>;
   /** Small summary for the page (title, debug hooks); the World itself stays in the workers. */
-  meta: { center: Vec2; anchors: Record<string, Vec2[]>; mapSize: number; settlements?: SettlementMeta[]; /** megacity: lazily detailed quarters */ mega?: { quarters: number; cityR: number } };
+  meta: { center: Vec2; anchors: Record<string, Vec2[]>; mapSize: number; settlements?: SettlementMeta[]; /** Panels belonging to this rendered snapshot, for the compact viewer's dialog. */ mapInfo?: MapInformation; /** megacity: lazily detailed quarters */ mega?: { quarters: number; cityR: number } };
 }
 /** Megacity: progress of the quarter detail queue. */
 export interface GQuartersDone { type: 'quartersDone'; id: number; done: number; queued: number; total: number; ms: number; failed?: number }

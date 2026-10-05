@@ -42,8 +42,28 @@ import { screenToWorld } from '../render/view';
 import { Pin, ViewState, fullQuery, uiStateFromQuery, bugReport } from './share';
 import { createPins } from './pins';
 import { generateSettlementDetail, EAGER_MAIN_POP } from '../gen/pipeline';
+import type { MapInformation } from '../render/legend';
+import { mapInformationHtml } from './mapInformation';
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
+
+const mapInfoButton = $<HTMLButtonElement>('mapInfoButton');
+const mapInfoDialog = $<HTMLDialogElement>('mapInfoDialog');
+let displayedMapInfo: MapInformation | null = null;
+function showMapInformation(info?: MapInformation): void {
+  if (!info || info === displayedMapInfo || (displayedMapInfo && info.cartouche === displayedMapInfo.cartouche
+    && info.legend === displayedMapInfo.legend && info.fontFamily === displayedMapInfo.fontFamily)) return;
+  displayedMapInfo = info;
+  $('mapInfoContent').innerHTML = mapInformationHtml(info);
+  mapInfoButton.disabled = false;
+}
+mapInfoButton.addEventListener('click', () => {
+  if (mapInfoDialog.open) return;
+  mapInfoDialog.showModal();
+  mapInfoButton.setAttribute('aria-expanded', 'true');
+});
+$('closeMapInfo').addEventListener('click', () => mapInfoDialog.close());
+mapInfoDialog.addEventListener('close', () => mapInfoButton.setAttribute('aria-expanded', 'false'));
 
 /** The URL style can be any MapStyle; gen/options.ts only whitelists the first two, so read it here. */
 function parseOptions(q: string): Options {
@@ -426,6 +446,7 @@ const backendEvents: BackendEvents = {
     lastLabels = f.labels; perf.extra.lastFrameView = f.view;
     handoff.presented(f.gen, f.ver);
     meta = handoff.displayedMeta;
+    showMapInformation(meta?.mapInfo);
     if (f.gen === reqId) renderFailedGen = 0;
     if (f.gen === reqId && awaitVer && f.ver >= awaitVer && f.bitmap) {
       awaitVer = 0;
@@ -663,6 +684,7 @@ const viewer = createViewer({
     else console.error('canvas draw:', error);
   },
   onFrame: (ms, band, scale) => {
+    if (!backend) showMapInformation(currentRenderer?.getMapInfo());
     if (!backend && pendingMain?.id === reqId) {
       const d = pendingMain; pendingMain = null;
       renderFailedGen = 0;

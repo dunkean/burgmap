@@ -8,6 +8,7 @@ import type { Palette, MapStyle } from './styles';
 import { FONT_STACKS } from './labelStyles';
 import { SETTLEMENT_CLASS } from '../gen/names';
 import { NameFamily } from '../gen/names/types';
+import { underdarkMark } from './underdark';
 
 export type Prim =
   | { t: 'rect'; x: number; y: number; w: number; h: number; fill?: string; stroke?: string; sw?: number; op?: number }
@@ -16,6 +17,9 @@ export type Prim =
   | { t: 'circle'; x: number; y: number; r: number; fill?: string; stroke?: string; sw?: number; op?: number }
   | { t: 'text'; x: number; y: number; s: string; size: number; anchor: 'start' | 'middle' | 'end'; fill: string; italic?: boolean; bold?: boolean; caps?: boolean; spacing?: number };
 export interface Panel { w: number; h: number; prims: Prim[] }
+export interface MapInformation { cartouche: Panel; legend: Panel; fontFamily: string }
+/** Interactive viewport dimensions are CSS pixels, independent of its backing-store DPR. */
+export const compactMapPanels = (w: number, h: number): boolean => w <= 640 || h <= 360;
 
 const NICE = [10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 2500, 5000, 10000];
 /** A round length (m) whose on-screen size is close to `targetPx` at `pxPerM`. */
@@ -59,13 +63,13 @@ function panelFrame(pal: Palette, W: number, H: number): Prim[] {
   return out;
 }
 
-export function cartoucheModel(world: World, pal: Palette, pxPerM: number): Panel {
+export function cartoucheModel(world: World, pal: Palette, pxPerM: number, includeScale = true): Panel {
   const { title, sub } = townTitle(world);
   const W = 244;
   const L = niceLength(pxPerM, 112);
   const barW = Math.max(24, L * pxPerM);
   const prims: Prim[] = [];
-  const H = 104;
+  const H = includeScale ? 104 : 76;
   const titleChars = Array.from(title.toUpperCase());
   const titleUnits = titleChars.reduce((sum, ch) => sum + (ch === ' ' ? 0.4 : /[MW@%]/.test(ch) ? 1 : /[I|!1.,:'’]/.test(ch) ? 0.5 : 0.9), 0);
   const titleSize = Math.min(title.length > 12 ? 19 : 24, (W - 24 - Math.max(0, titleChars.length - 1) * 1.2) / Math.max(1, titleUnits));
@@ -73,13 +77,26 @@ export function cartoucheModel(world: World, pal: Palette, pxPerM: number): Pane
   prims.push({ t: 'text', x: W / 2, y: 33, s: title, size: Math.max(6, titleSize), anchor: 'middle', fill: pal.lab.town, bold: true, caps: true, spacing: 1.2 });
   prims.push({ t: 'text', x: W / 2, y: 50, s: sub, size: 11.5, anchor: 'middle', fill: pal.inkSoft, italic: true });
   // scale bar
+  if (includeScale) {
   const x0 = (W - barW) / 2, y0 = 76, bh = 5;
   const seg = 4;
   for (let i = 0; i < seg; i++) prims.push({ t: 'rect', x: x0 + (barW * i) / seg, y: y0, w: barW / seg, h: bh, fill: i % 2 ? pal.paper : pal.ink, stroke: pal.ink, sw: 0.7 });
   prims.push({ t: 'text', x: x0, y: y0 - 4, s: '0', size: 10, anchor: 'middle', fill: pal.ink });
   prims.push({ t: 'text', x: x0 + barW / 2, y: y0 - 4, s: String(L / 2), size: 10, anchor: 'middle', fill: pal.ink });
   prims.push({ t: 'text', x: x0 + barW, y: y0 - 4, s: L >= 1000 ? `${L / 1000} km` : `${L} m`, size: 10, anchor: 'middle', fill: pal.ink });
+  }
   prims.push({ t: 'text', x: W / 2, y: H - 9, s: `seed ${world.seed}`, size: 9, anchor: 'middle', fill: pal.inkSoft, italic: true });
+  return { w: W, h: H, prims };
+}
+
+/** The only map overlay on compact screens; its scale follows the actual view. */
+export function compactScaleModel(pal: Palette, pxPerM: number): Panel {
+  const L = niceLength(pxPerM, 80), bw = L * pxPerM;
+  const W = Math.max(60, bw + 20), H = 28;
+  const prims: Prim[] = [{ t: 'rect', x: 0, y: 0, w: W, h: H, fill: pal.cart.fill, op: pal.cart.op }];
+  prims.push({ t: 'text', x: 8, y: 11, s: '0', size: 9, anchor: 'start', fill: pal.ink },
+    { t: 'text', x: bw + 8, y: 11, s: L >= 1000 ? `${L / 1000} km` : `${L} m`, size: 9, anchor: 'end', fill: pal.ink });
+  for (let i = 0; i < 4; i++) prims.push({ t: 'rect', x: 8 + bw * i / 4, y: 17, w: bw / 4, h: 4, fill: i % 2 ? pal.paper : pal.ink, stroke: pal.ink, sw: .6 });
   return { w: W, h: H, prims };
 }
 
@@ -112,16 +129,27 @@ function lineSwatch(edge: string, fill: string | null, w: number, dash?: number[
 }
 
 export function legendModel(world: World, pal: Palette): Panel {
+  const underground = world.options.biome === 'underdark';
   const U = pal.urban;
   const items: Item[] = [];
   const add = (label: string, draw: Item['draw']): void => { items.push({ label, draw }); };
   const kinds = new Set(world.landuse?.areas.map((a) => a.kind) ?? []);
   const lu = world.options.landuse;
   const t = world.terrain;
-  if (t.coastline.length) add('Sea', fillSwatch(pal.seaFill, pal.waterEdge, 1, pal.waterLines?.color));
-  if (t.lakes.length) add('Lake', fillSwatch(pal.lakeFill, pal.waterEdge, 1, pal.waterLines?.color));
+  if (t.coastline.length) add(underground ? 'Underground basin' : 'Sea', fillSwatch(pal.seaFill, pal.waterEdge, 1, pal.waterLines?.color));
+  if (t.lakes.length) add(underground ? 'Underground lake' : 'Lake', fillSwatch(pal.lakeFill, pal.waterEdge, 1, pal.waterLines?.color));
   if (t.rivers.length) add('River', (x, y) => [{ t: 'line', pts: [[x, y + 9], [x + 8, y + 3], [x + 16, y + 9], [x + SW, y + 3]], stroke: pal.riverEdge, sw: 4.6 }, { t: 'line', pts: [[x, y + 9], [x + 8, y + 3], [x + 16, y + 9], [x + SW, y + 3]], stroke: pal.riverFill, sw: 3 }]);
   if (lu) {
+    if (underground) {
+      const swatch = (kind: 'commons' | 'garden' | 'marsh') => (x: number, y: number): Prim[] => [
+        { t: 'rect', x, y, w: SW, h: SH, fill: pal.land[kind] },
+        ...[[5, 5], [12, 8], [19, 4]].flatMap(([dx, dy]) => underdarkMark(kind, x + dx, y + dy, 2, pal)),
+      ];
+      if (kinds.has('commons')) add('Rock', swatch('commons'));
+      if (kinds.has('garden') || kinds.has('field') || kinds.has('orchard')) add('Fungal cultivation', swatch('garden'));
+      if (kinds.has('marsh') || kinds.has('forest')) add('Wet fungi', swatch('marsh'));
+      if (kinds.has('meadow') || kinds.has('pasture')) add('Lichen', (x, y) => underdarkMark('meadow', x + 12, y + 6, 3, pal));
+    } else {
     if (kinds.has('field')) add('Fields (strips)', (x, y) => [{ t: 'rect', x, y, w: SW, h: SH, fill: pal.land.field, stroke: pal.hedge, sw: 0.7 }, ...[3, 6, 9].map((d): Prim => ({ t: 'line', pts: [[x + 1, y + d], [x + SW - 1, y + d]], stroke: pal.furrow, sw: 0.6, op: 0.7 }))]);
     if (kinds.has('meadow')) add('Meadow', fillSwatch(pal.land.meadow, undefined, 0.9));
     if (kinds.has('pasture')) add('Pasture', fillSwatch(pal.land.pasture, undefined, 0.9));
@@ -130,6 +158,7 @@ export function legendModel(world: World, pal: Palette): Panel {
     if (kinds.has('orchard')) add('Orchard', (x, y) => [{ t: 'rect', x, y, w: SW, h: SH, fill: pal.land.orchard }, ...[[6, 4], [12, 4], [18, 4], [6, 9], [12, 9], [18, 9]].flatMap(([dx, dy]) => treeSymbol(pal, x + dx, y + dy, 1.7))]);
     if (kinds.has('marsh')) add('Marsh', (x, y) => [{ t: 'rect', x, y, w: SW, h: SH, fill: pal.land.marsh }, ...[5, 12, 19].map((dx): Prim => ({ t: 'line', pts: [[x + dx - 2, y + 8], [x + dx + 2, y + 8]], stroke: pal.reed, sw: 0.9 }))]);
     if (kinds.has('garden')) add('Gardens', fillSwatch(pal.land.garden, undefined, 0.9));
+    }
   }
   if (world.roads?.some((r) => r.kind !== 'track')) add('Road', lineSwatch(pal.roadEdge, pal.roadFill, 3.2));
   if (world.roads?.some((r) => r.kind === 'track')) add('Track', (x, y) => [{ t: 'line', pts: [[x, y + SH / 2], [x + SW, y + SH / 2]], stroke: pal.roadEdge, sw: 1.3, dash: [4, 3] }]);
@@ -149,7 +178,7 @@ export function legendModel(world: World, pal: Palette): Panel {
       add('Church', (x, y) => [{ t: 'rect', x: x + 4, y: y + 1, w: 16, h: SH - 2, fill: U.landmark, stroke: U.landmarkEdge, sw: 0.9 }, { t: 'line', pts: [[x + 12, y + 3], [x + 12, y + 9]], stroke: U.landmarkEdge, sw: 0.9 }, { t: 'line', pts: [[x + 9.5, y + 5.2], [x + 14.5, y + 5.2]], stroke: U.landmarkEdge, sw: 0.9 }]);
     }
     if (world.urban.squares.length || world.urban.landmarks.some((l) => l.kind === 'market' || l.kind === 'green')) add('Market place, green', fillSwatch(U.place, U.placeInk, 1));
-    add('Gardens, yards', (x, y) => [{ t: 'rect', x, y, w: SW, h: SH, fill: U.garden }, { t: 'line', pts: [[x + 3, y + 4], [x + 11, y + 4]], stroke: U.gardenInk, sw: 0.8 }, { t: 'line', pts: [[x + 11, y + 8], [x + 19, y + 8]], stroke: U.gardenInk, sw: 0.8 }]);
+    add(underground ? 'Fungal beds, yards' : 'Gardens, yards', (x, y) => underground ? [{ t: 'rect', x, y, w: SW, h: SH, fill: U.garden }, ...underdarkMark('garden', x + 8, y + 6, 2.4, pal), ...underdarkMark('garden', x + 17, y + 6, 2.4, pal)] : [{ t: 'rect', x, y, w: SW, h: SH, fill: U.garden }, { t: 'line', pts: [[x + 3, y + 4], [x + 11, y + 4]], stroke: U.gardenInk, sw: 0.8 }, { t: 'line', pts: [[x + 11, y + 8], [x + 19, y + 8]], stroke: U.gardenInk, sw: 0.8 }]);
     if (world.urban.walls?.length) add('Town wall, gate', (x, y) => [{ t: 'line', pts: [[x, y + SH / 2], [x + 9, y + SH / 2]], stroke: U.wall, sw: 3.4 * U.wallScale + 1.6 }, { t: 'line', pts: [[x, y + SH / 2], [x + 9, y + SH / 2]], stroke: U.wallFill, sw: 3.4 * U.wallScale }, { t: 'line', pts: [[x + 15, y + SH / 2], [x + SW, y + SH / 2]], stroke: U.wall, sw: 3.4 * U.wallScale + 1.6 }, { t: 'line', pts: [[x + 15, y + SH / 2], [x + SW, y + SH / 2]], stroke: U.wallFill, sw: 3.4 * U.wallScale }, { t: 'circle', x: x + 9, y: y + SH / 2, r: 2.4, fill: U.wallFill, stroke: U.wall, sw: 0.8 }, { t: 'circle', x: x + 15, y: y + SH / 2, r: 2.4, fill: U.wallFill, stroke: U.wall, sw: 0.8 }]);
   }
   if (world.options.contours) add('Contour (index heavier)', (x, y) => [{ t: 'line', pts: [[x, y + 9], [x + 10, y + 3], [x + SW, y + 7]], stroke: pal.contour, sw: 0.9, op: pal.contourOpacity + 0.2 }]);

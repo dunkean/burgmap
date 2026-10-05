@@ -50,9 +50,16 @@ web/
 
 ## Biomes
 
-`gen/biomes.ts` defines `temperate`, `forest`, `desert`, `steppe`, `tropical` and `tundra` climates. `Options.biome` is optional: existing links and the default temperate generator retain their output. The biome selector is a generation control and round-trips through `biome=` in links and exports.
+`gen/biomes.ts` defines `temperate`, `forest`, `desert`, `steppe`, `tropical`, `tundra` and `underdark` landscapes. `Options.biome` is optional: existing links and the default temperate generator retain their output. The biome selector is a generation control and round-trips through `biome=` in links and exports.
 
-Rural classification combines the selected biome with water distance, height above water, slope, soil variation and settlement access. Desert fields and oasis groves require nearby water; woodland/tropical clearings shrink around settlements; steppe keeps riverine groves; tundra is treeless. Farm lots in deserts require water access. `render/biomes.ts` supplies a shared, immutable palette to both renderers and their terrain/legend layers. `scripts/biome_previews.ts` renders the six landscapes for visual checks.
+Rural classification combines the selected biome with water distance, height above water, slope, soil variation and settlement access. Desert fields and oasis groves require nearby water; woodland/tropical clearings shrink around settlements; steppe keeps riverine groves; tundra is treeless. Farm lots in deserts require water access. `render/biomes.ts` supplies a shared, immutable palette to both renderers and their terrain/legend layers. `scripts/biome_previews.ts` renders each landscape for visual checks.
+
+Underdark treats the terrain as a subterranean floor: natural cover is rock or wet fungi,
+and cultivated fungal beds remain near settlements. Its cultures are `drow-enclave`,
+`duergar-hold` and `myconid-colony`; existing cultures remain independently selectable.
+Shared vector patterns depict the underground cover even in painted mode. On compact
+interactive viewports the title and legend move into a Map info dialog; the scale stays
+on the map. Exports retain their full decorative panels.
 
 ## Wet moats
 

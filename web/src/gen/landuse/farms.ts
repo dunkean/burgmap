@@ -15,17 +15,20 @@
 import type { Rng } from '../core/rng';
 import type { Vec2, Polygon, Polyline } from '../core/geom';
 import type { FarmBuilding, FarmPlot, FarmSize, RoofKind } from '../types';
+import type { BiomeName } from '../biomes';
 
 export type FarmType =
   | 'vierkanthof' | 'u-yard' | 'l-yard' | 'haufenhof' | 'longere' | 'einhaus' | 'masseria' | 'dvor'
   | 'norse-longhouse' | 'roundhouse' | 'minka' | 'hanok' | 'chinese-court' | 'indian-court' | 'ksar'
-  | 'sahel-compound' | 'kraal' | 'ail' | 'native-longhouse' | 'pueblo-ranch' | 'solar' | 'kancha' | 'stilt';
+  | 'sahel-compound' | 'kraal' | 'ail' | 'native-longhouse' | 'pueblo-ranch' | 'solar' | 'kancha' | 'stilt'
+  | 'fungal-farm' | 'spore-farm';
 
 export const FARM_SIZES: FarmSize[] = ['cottage', 'family', 'large', 'manor'];
 
 /** Context of a farm site (all world-derived). */
 export interface FarmContext {
   culture: string;
+  biome?: BiomeName;
   /** Soil quality −1 … 1 (the land-use soil field). */
   soil: number;
   /** Smoothed slope (rise / run) and the downhill direction (world, unit) when the ground is not flat. */
@@ -91,6 +94,8 @@ const REGIMES: Record<string, [FarmType, number][]> = {
   meso: [['solar', 1]],
   andes: [['kancha', 1]],
   stilt: [['stilt', 1]],
+  underdark: [['fungal-farm', 1]],
+  myconid: [['spore-farm', 1]],
 };
 const CULTURE_REGIME: Record<string, string> = {
   hanseatic: 'hanse', bastide: 'bastide', 'roman-core': 'med', 'byzantine-greek': 'med', 'venetian-lagoon': 'med',
@@ -99,6 +104,7 @@ const CULTURE_REGIME: Record<string, string> = {
   'indian-temple': 'india', medina: 'islam', persian: 'islam', ottoman: 'ottoman', sahel: 'sahel', kraal: 'kraal', orcish: 'kraal',
   'nomad-camp': 'steppe', 'native-plains': 'steppe', 'native-iroquoian': 'iroquois', 'native-pueblo': 'pueblo', maya: 'meso', aztec: 'meso',
   inca: 'andes', khmer: 'stilt', 'stilt-town': 'stilt', dwarven: 'europe', elven: 'europe', halfling: 'europe', gnomish: 'europe',
+  'drow-enclave': 'underdark', 'duergar-hold': 'underdark', 'myconid-colony': 'myconid',
 };
 /** Farm types the culture builds (its rural vernacular). */
 export function farmRegime(culture: string): [FarmType, number][] {
@@ -131,6 +137,7 @@ function affinity(t: FarmType, c: FarmContext, size: FarmSize): number {
 
 /** Type of a farm: the culture's vernacular weighted by the site (a context-driven draw: plausible types only). */
 export function farmType(c: FarmContext, size: FarmSize, r: Rng): FarmType {
+  if (c.biome === 'underdark') return c.culture === 'myconid-colony' ? 'spore-farm' : 'fungal-farm';
   let best: FarmType = farmRegime(c.culture)[0][0], bs = -1;
   for (const [t, w] of farmRegime(c.culture)) {
     const s = w * affinity(t, c, size) * (0.45 + r.float());
@@ -166,6 +173,8 @@ const DRESS: Record<FarmType, Dress> = {
   solar: { arch: 'solar', roof: 'hip', material: 'thatch', roofs: { granary: 'conical', bath: 'dome' } },
   kancha: { arch: 'kancha', roof: 'gable', material: 'stone' },
   stilt: { arch: 'stilt', roof: 'gable', material: 'bamboo' },
+  'fungal-farm': { arch: 'fungal-farm', roof: 'flat', material: 'dark-stone', names: { house: 'dwelling', barn: 'cultivation-hall', byre: 'spore-store', shed: 'store' } },
+  'spore-farm': { arch: 'spore-farm', roof: 'dome', material: 'fungal', names: { roundhouse: 'dwelling', hut: 'cultivation-pod', byre: 'cultivation-pod', granary: 'spore-store' } },
 };
 
 function dress(t: FarmType, p: LPart, tags: string[]): Omit<FarmBuilding, 'poly'> {
@@ -180,6 +189,10 @@ function dress(t: FarmType, p: LPart, tags: string[]): Omit<FarmBuilding, 'poly'
   if (p.round && roof === 'gable') roof = 'conical';
   const storeys = use === 'tower' ? 3 : use === 'house' && (t === 'masseria' || t === 'vierkanthof' || t === 'dvor') ? 2 : 1;
   const out: Omit<FarmBuilding, 'poly'> = { use, arch, roof, storeys, material: d.mats?.[use] ?? d.material };
+  if (t === 'fungal-farm' || t === 'spore-farm') {
+    if (use === 'barn' || use === 'byre' || use === 'hut') out.use = 'cultivation';
+    else if (use === 'granary' || use === 'shed') out.use = 'spore-store';
+  }
   if (tags.includes('wet') && (t === 'stilt' || t === 'native-longhouse' || t === 'solar')) out.arch += '-raised';
   if (p.passage) out.passage = true;
   return out;
@@ -645,6 +658,8 @@ function ksar(x: Ctx): Zone {
 function zoneOf(x: Ctx, type: FarmType, tags: string[], plots: LPlot[]): Zone {
   const { si, r } = x;
   switch (type) {
+    case 'fungal-farm': return court(x, ['back', 'left'], tags, { walled: si >= 2, uses: ['house', si === 0 ? 'byre' : 'barn'] });
+    case 'spore-farm': return ring(x, 'roundhouse', plots);
     case 'vierkanthof': return court(x, ['back', 'left', 'right', 'front'], tags, { walled: false, dovecote: true });
     case 'u-yard': return court(x, ['back', 'left', 'right'], tags, { walled: si >= 2, dovecote: true });
     case 'l-yard': return court(x, ['back', x.f.west[0] < 0 ? 'left' : 'right'], tags, { walled: si >= 3, uses: ['house', si === 0 ? 'byre' : 'barn'], dovecote: true });
@@ -713,6 +728,7 @@ const NO_ORCHARD = new Set<FarmType>(['kraal', 'ail', 'sahel-compound', 'roundho
  * frame (u along the track, v inward).
  */
 export function layoutFarm(type: FarmType, size: FarmSize, c: FarmContext, frame: Frame, r: Rng): LocalFarm {
+  const subterranean = c.biome === 'underdark' || type === 'fungal-farm' || type === 'spore-farm';
   const si = FARM_SIZES.indexOf(size);
   const x: Ctx = { c, f: frame, size, si, r, slopeF: clamp01(c.slope / 0.16) };
   const tags: string[] = [];
@@ -746,7 +762,7 @@ export function layoutFarm(type: FarmType, size: FarmSize, c: FarmContext, frame
     const gw = W * gShare;
     const g = gSide > 0 ? R(W / 2 - gw, Dz, W / 2, D) : R(-W / 2, Dz, -W / 2 + gw, D);
     const o = gSide > 0 ? R(-W / 2, Dz, W / 2 - gw, D) : R(-W / 2 + gw, Dz, W / 2, D);
-    const orchard = !NO_ORCHARD.has(type) && c.wet < 0.55;
+    const orchard = !subterranean && !NO_ORCHARD.has(type) && c.wet < 0.55;
     lotPlots.push({ kind: 'garden', poly: g }, { kind: orchard ? 'orchard' : 'paddock', poly: o });
     pondHost = o;
     if (orchard) {
@@ -778,7 +794,7 @@ export function layoutFarm(type: FarmType, size: FarmSize, c: FarmContext, frame
     }
   }
   // shelter belt on the windward (west) edges of exposed farms
-  if (c.exposed > 0.5) {
+  if (c.exposed > 0.5 && !subterranean) {
     const edges: [V2, V2, V2][] = [[[-W / 2 + 1.5, 1], [-W / 2 + 1.5, D - 1], [-1, 0]], [[W / 2 - 1.5, 1], [W / 2 - 1.5, D - 1], [1, 0]], [[-W / 2 + 1, D - 1.5], [W / 2 - 1, D - 1.5], [0, 1]]];
     for (const [a, b, n] of edges) {
       if (dot(n, frame.west) < 0.3) continue;
@@ -791,6 +807,10 @@ export function layoutFarm(type: FarmType, size: FarmSize, c: FarmContext, frame
     }
   }
   if (tags.includes('wet') || tags.includes('warft')) plots.push({ kind: 'platform', poly: R(-W / 2 + 0.5, 0.5, W / 2 - 0.5, Dz - 0.5) });
+  if (subterranean) {
+    tags.push('fungal-cultivation');
+    for (const plot of [...lotPlots, ...plots]) if (['orchard', 'paddock', 'pen', 'threshing-floor'].includes(plot.kind)) plot.kind = 'garden';
+  }
   // centre the zone's parts in the (possibly wider) lot
   return {
     type, size, W, D, parts, yard: z.yard, walls: z.walls, plots: [...lotPlots, ...plots], trees, gateU: z.gateU, entry: z.entry, tags,

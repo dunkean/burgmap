@@ -12,6 +12,7 @@ import { type Palette, ruralInk } from './styles';
 import { f1, pathD } from './util';
 import { regionalBridgeSurface, regionalRoadSurface } from './roadSurfaces';
 import { MAP_STROKES, svgMapStroke } from './strokes';
+import { underdarkPatterns, underdarkMarkSvg } from './underdark';
 
 /** Land-use tints multiply over the hillshaded terrain so relief stays readable under them (browsers; resvg falls back to plain alpha). Dark styles blend normally. */
 const mul = (pal: Palette): string => (pal.landBlend === 'multiply' ? ' style="mix-blend-mode:multiply"' : '');
@@ -24,6 +25,7 @@ const ringsD = (a: LandArea): string => {
 
 /** SVG <pattern> definitions for land-use textures. `s` scales symbols with map size. */
 function patterns(world: World, pal: Palette, s: number, scale: number): string {
+  if (world.options.biome === 'underdark') return `<defs>${underdarkPatterns(pal, s)}</defs>`;
   const out: string[] = [];
   const pat = (id: string, w: number, h: number, body: string, extra = '') =>
     out.push(`<pattern id="${id}" patternUnits="userSpaceOnUse" width="${f1(w)}" height="${f1(h)}"${extra}>${body}</pattern>`);
@@ -104,7 +106,7 @@ export function landuseLayer(world: World, pal: Palette, u: number, scale = 1600
     const list = lu.areas.filter((a) => a.kind === kind);
     if (!list.length) continue;
     out += `<g class="lu-${kind}">`;
-    if (kind === 'field') {
+    if (kind === 'field' && world.options.biome !== 'underdark') {
       out += `<g fill="${pal.land.field}" fill-opacity="${pal.landOpacity}" fill-rule="evenodd"${mul(pal)}>${list.map((a) => `<path d="${ringsD(a)}"/>`).join('')}</g>`;
       // strips: each holder's strip has its own tone; one furrow-textured path per furlong (its own direction)
       const tone: string[] = ['', '', '', ''];
@@ -192,12 +194,13 @@ function fieldNetwork(world: World, pal: Palette, s: number, scale: number, brus
 }
 
 /** One farmstead at true size: lot pieces (garden, orchard, paddock, pond), hedged lot, yard, walls, trees, buildings with ridges. */
-function farmSvg(f: Farmstead, pal: Palette, brushes?: SvgBrushes): string {
+function farmSvg(f: Farmstead, pal: Palette, brushes?: SvgBrushes, fungal = f.cultivation === 'fungal'): string {
   const plots = (k: string) => (f.plots ?? []).filter((p) => p.kind === k).map((p) => pathD(p.poly, true)).join('');
   const fill = (k: string, c: string, extra = '') => { const d = plots(k); return d ? `<path d="${d}" fill="${c}"${extra}/>` : ''; };
   let o = `<g class="farm" data-type="${f.type ?? ''}" data-size="${f.size ?? ''}">`;
   o += fill('garden', pal.land.garden, ` stroke="${pal.hedge}" stroke-width="0.4"`) + fill('orchard', pal.land.orchard) + fill('paddock', pal.land.pasture);
-  if (brushes) o += fill('garden', `url(#${brushes.pattern('garden')})`) + fill('orchard', `url(#${brushes.pattern('orchard')})`);
+  if (brushes) o += (fungal ? '' : fill('garden', `url(#${brushes.pattern('garden')})`)) + fill('orchard', `url(#${brushes.pattern('orchard')})`);
+  if (fungal) o += fill('garden', 'url(#p-fungal-farm)');
   o += fill('platform', 'none', ` stroke="${pal.farmInk}" stroke-width="0.5" stroke-dasharray="1.6 1.2" stroke-opacity="0.7"`);
   o += `<path d="${pathD(f.lot!, true)}" fill="none" stroke="${pal.hedge}" stroke-width="0.9" stroke-opacity="0.85"/>`;
   o += `<path d="${pathD(f.yard, true)}" fill="${pal.farmYard}" fill-opacity="0.9"/>`;
@@ -234,6 +237,7 @@ export function roadsLayer(world: World, pal: Palette, u: number, brushes?: SvgB
   // farm drives + farmsteads first (below roads)
   const farms = world.landuse?.farmsteads ?? [];
   if (farms.length) {
+    if (world.options.biome === 'underdark' || farms.some(f => f.cultivation === 'fungal')) out += `<defs><pattern id="p-fungal-farm" patternUnits="userSpaceOnUse" width="8" height="8">${underdarkMarkSvg('garden', 4, 4, 1.7, pal)}</pattern></defs>`;
     out += `<g class="farmsteads">`;
     for (const f of farms) {
       const dl = f.drive.length > 1 ? Math.hypot(f.drive[f.drive.length - 1].x - f.drive[0].x, f.drive[f.drive.length - 1].y - f.drive[0].y) : 0;
@@ -243,7 +247,7 @@ export function roadsLayer(world: World, pal: Palette, u: number, brushes?: SvgB
         out += `<g fill="${pal.farmRoof}" stroke="${pal.farmInk}" stroke-width="${f1(0.7 * s)}">${f.buildings.map((b) => `<path d="${pathD(b, true)}"/>`).join('')}</g>`;
         continue;
       }
-      out += farmSvg(f, pal, brushes);
+      out += farmSvg(f, pal, brushes, f.cultivation === 'fungal' || world.options.biome === 'underdark');
     }
     out += '</g>';
   }

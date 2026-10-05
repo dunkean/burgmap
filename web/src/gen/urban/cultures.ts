@@ -9,6 +9,7 @@ import { CAMP_CULTURES } from './cultures_camps';
 import { CITY_CULTURES } from './cultures_cities';
 import { MORE_CULTURES, registerMoreMorphologies } from './cultures_more';
 import { SWAHILI_CULTURE, registerSwahiliMorphologies } from './cultures_swahili';
+import { UNDERDARK_CULTURES, registerUnderdarkMorphologies } from './cultures_underdark';
 
 const EO = EO_BASE;
 const morph = (id: string, base: MorphologyParams, over: Record<string, unknown>): MorphologyParams => deepMerge(base, { ...over, id });
@@ -128,6 +129,7 @@ M['roman-castrum'].gatePlaces = 0.4;
 Object.assign(MORPHOLOGIES, M);
 registerSwahiliMorphologies();
 registerMoreMorphologies();
+registerUnderdarkMorphologies();
 
 // ---------------------------------------------------------------- cultures
 const walledEO = { shape: 'organic', wall: 'auto', fossil: 'street', towers: 'round' } as const;
@@ -307,4 +309,4 @@ const BASE_CULTURES: Culture[] = [
   },
 ];
 
-export const CULTURE_LIST: Culture[] = [...BASE_CULTURES, ...CITY_CULTURES, ...MORE_CULTURES, ...CAMP_CULTURES, SWAHILI_CULTURE];
+export const CULTURE_LIST: Culture[] = [...BASE_CULTURES, ...CITY_CULTURES, ...MORE_CULTURES, ...CAMP_CULTURES, SWAHILI_CULTURE, ...UNDERDARK_CULTURES];

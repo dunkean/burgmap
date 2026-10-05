@@ -78,7 +78,7 @@ function announce(sceneMs: number): void {
   if (!world) return;
   const pal = biomePalette(display.style, world.options.biome);
   if (!metaCache || metaCache.world !== world) metaCache = { world, meta: worldMeta(world) };
-  post({ type: 'content', gen: worldGen, ver, mapSize: world.mapSize, final, sceneMs, marker: pal.marker, paper: pal.paper, meta: metaCache.meta });
+  post({ type: 'content', gen: worldGen, ver, mapSize: world.mapSize, final, sceneMs, marker: pal.marker, paper: pal.paper, meta: { ...metaCache.meta, mapInfo: renderer?.getMapInfo() } });
 }
 
 function onWorld(m: WorldMsg): void {

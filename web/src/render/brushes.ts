@@ -11,6 +11,8 @@ export interface BrushMotif { width: number; stamps: BrushStamp[] }
 export const BRUSH_CELL = 209;
 export const BRUSH_ATLAS = 1254;
 const BIOMES = ['temperate', 'forest', 'desert', 'steppe', 'tropical', 'tundra'] as const;
+/** The selected atlases describe surface biomes. Underground cover keeps its vector symbols. */
+export const supportsPaintedBiome = (biome?: string): boolean => biomeName(biome) !== 'underdark';
 const SPECIES: number[][] = [[0, 0, 1, 2, 3, 3, 4, 5], [0, 0, 1, 1, 2, 3, 3, 4, 5], [0, 1, 2, 2, 3, 4, 4, 5], [0, 1, 2, 3, 3, 4, 5], [0, 1, 1, 2, 3, 4, 5, 5], [0, 1, 2, 3, 4, 5]];
 const LOW_FLORA = [
   { cells: [4, 5], chance: 0.18 }, { cells: [10], chance: 0.5 },
@@ -29,7 +31,8 @@ export function brushHash(seed: string, x = 0, y = 0, salt = 0): number {
 }
 
 export function brushCell(world: Pick<World, 'seed' | 'options'>, x: number, y: number, orchard = false): number {
-  const row = BIOMES.indexOf(biomeName(world.options.biome));
+  const row = BIOMES.findIndex(b => b === biomeName(world.options.biome));
+  if (row < 0) throw new RangeError('No painted atlas for this biome');
   const choices = orchard ? FRUIT[row] : SPECIES[row].map(c => row * 6 + c);
   const dominant = choices[Math.floor(brushHash(world.seed, 0, 0, orchard ? 73 : 19) * choices.length)];
   // Map-wide character, with spatially stable minority species. Never consumes generation RNG.
@@ -41,11 +44,13 @@ export function isBrushKind(kind: LandKind | string): kind is BrushKind {
 }
 
 export function brushTextureOn(kind: BrushKind, pal: Palette, biome?: string): boolean {
+  if (!supportsPaintedBiome(biome)) return false;
   return kind === 'field' || (kind === 'commons' && biomeName(biome) === 'desert') || !!pal.tex[kind];
 }
 
 /** Repeated world-anchored motif: identical placements in SVG and Canvas, bounded export size. */
 export function brushMotif(world: Pick<World, 'seed' | 'options'>, kind: BrushKind): BrushMotif {
+  if (!supportsPaintedBiome(world.options.biome)) return { width: 1, stamps: [] };
   const spacing = { forest: 9, orchard: 11, meadow: 16, pasture: 24, marsh: 15, commons: 22, garden: 8, field: 14 }[kind];
   const cells = kind === 'forest' || kind === 'orchard' ? 8 : 4;
   const stamps: BrushStamp[] = [];
@@ -54,7 +59,7 @@ export function brushMotif(world: Pick<World, 'seed' | 'options'>, kind: BrushKi
     const x = (i + (kind === 'orchard' ? 0.5 : 0.15 + h(3) * 0.7)) * spacing;
     const y = (j + (kind === 'orchard' ? 0.5 : 0.15 + h(7) * 0.7)) * spacing;
     const tree = kind === 'forest' || kind === 'orchard';
-    const flora = LOW_FLORA[BIOMES.indexOf(biomeName(world.options.biome))];
+    const flora = LOW_FLORA[BIOMES.findIndex(b => b === biomeName(world.options.biome))];
     const lowFlora = (kind === 'meadow' || kind === 'pasture') && h(31) < flora.chance;
     const row = kind === 'commons' ? biomeName(world.options.biome) === 'desert' ? 0 : 1 : kind === 'marsh' ? 3 : kind === 'garden' ? 4 : kind === 'field' ? 5 : 2;
     stamps.push({ atlas: tree || lowFlora ? 'vegetation' : 'terrain', cell: tree ? brushCell(world, i, j, kind === 'orchard') : lowFlora ? flora.cells[Math.floor(h(37) * flora.cells.length)] : row * 6 + Math.floor(h(13) * 6),

@@ -27,7 +27,8 @@ export function generateNaturalCover(terrain: TerrainLayer, biomeOption: string 
     const wet = dWater[i] < 100 && slope[i] < 0.055;
     const low = dWater[i] < 250 && slope[i] < 0.09;
     let kind: LandKind;
-    if (wet && height[i] - terrain.seaLevel < 8 && n > -0.2) kind = 'marsh';
+    if (biome === 'underdark') kind = low && n > -0.2 ? 'marsh' : 'commons';
+    else if (wet && height[i] - terrain.seaLevel < 8 && n > -0.2) kind = 'marsh';
     else if (biome === 'desert') kind = low ? (n > 0.15 ? 'pasture' : 'meadow') : 'commons';
     else if (biome === 'tundra') kind = low ? 'meadow' : n > 0.2 ? 'pasture' : 'commons';
     else if (biome === 'steppe') kind = low ? 'meadow' : n > 0.45 && dWater[i] < 500 ? 'forest' : 'pasture';

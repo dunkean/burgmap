@@ -268,6 +268,7 @@ export function generateRural(world: World, root: Rng, mainRoads?: number, strip
     const cl = (x: number) => Math.max(0, Math.min(1, x));
     return {
       culture, pop,
+      ...(biome === 'underdark' ? { biome } : {}),
       soil: noise.fbm(p.x / 380, p.y / 380, 3),
       slope: slopeL[i],
       downhill: gl / (2 * g) > 0.012 ? { x: -hx / gl, y: -hy / gl } : null,
@@ -337,6 +338,7 @@ export function generateRural(world: World, root: Rng, mainRoads?: number, strip
     farmsteads.push({
       pos: c, angle: g.angle, buildings: g.parts.map((p) => p.poly), yard: g.yard, drive: bp ? [bp, g.gate] : [g.gate, g.gate],
       type: pl.lf.type, size: pl.lf.size, culture, lot: g.lot, parts: g.parts, plots: g.plots, walls: g.walls, trees: g.trees, gate: g.gate, entry: g.entry, tags: pl.lf.tags,
+      ...(pl.lf.tags.includes('fungal-cultivation') ? { cultivation: 'fungal' as const } : {}),
     });
   };
   const nearestRoad = (p: Vec2): { d: number; bp: Vec2; t: Vec2; w: number } => {
@@ -378,7 +380,8 @@ export function generateRural(world: World, root: Rng, mainRoads?: number, strip
     if (!pl) {
       // last resort: the smallest farm in the middle of its fields
       stats['farm.forced'] = (stats['farm.forced'] ?? 0) + 1;
-      const lf = layoutFarm('l-yard', 'cottage', ctx, frameOf(d0, ctx.downhill), fr.fork('forced'));
+      const forcedType = biome === 'underdark' ? (ctx.culture === 'myconid-colony' ? 'spore-farm' : 'fungal-farm') : 'l-yard';
+      const lf = layoutFarm(forcedType, 'cottage', ctx, frameOf(d0, ctx.downhill), fr.fork('forced'));
       pl = { lf, o: { x: st.center.x - (d0.x * lf.D) / 2, y: st.center.y - (d0.y * lf.D) / 2 }, V: d0 };
     }
     accept(pl, st.culture, nr.d < 400 ? nr.bp : null);
@@ -478,7 +481,7 @@ export function generateRural(world: World, root: Rng, mainRoads?: number, strip
   const gB = (): number => noise.fbm(cwx / 110 + 40, cwy / 110 - 17, 2);
   const gC = (): number => noise.fbm(cwx / 70 - 9, cwy / 70 + 5, 2);
   const u1 = 0.05 * Lm + 30, u2 = 0.11 * Lm, u3 = 0.42 * Lm, u4 = 0.55 * Lm;
-  const vergeKind = (u: number): number => biome === 'desert' || biome === 'tundra' ? C.COMMONS
+  const vergeKind = (u: number): number => biome === 'desert' || biome === 'tundra' || biome === 'underdark' ? C.COMMONS
     : biome === 'steppe' ? C.PASTURE
       : (biome === 'forest' || biome === 'tropical') && u > u3 * 0.6 ? C.FOREST : C.MEADOW;
   for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
@@ -584,6 +587,12 @@ export function generateRural(world: World, root: Rng, mainRoads?: number, strip
   // Assarts and majority smoothing can turn a verge back into a field. The original coarse
   // exclusion remains authoritative for all cultivated classes, including enclosed fields.
   for (let i = 0; i < N; i++) if (excl[i] && cls[i] && !NATURAL_CLASSES.includes(cls[i])) cls[i] = vergeKind(uDist[i]);
+  // Smoothing does not grant access to a new remote fungal farm: retain the site constraints.
+  if (biome === 'underdark') for (let i = 0; i < N; i++) if (cls[i] === C.GARDEN) {
+    const kind = biomeLandKind('garden', biome, { water: f.dWater[i], hab: f.hab[i], slope: slopeL[i], soil: 0,
+      settlement: uDist[i], arableRadius: u3 });
+    cls[i] = KINDS.indexOf(kind);
+  }
 
   // Keep the existing rural/agricultural classification intact, then extend neighbouring natural cover
   // into the shared permission. Whole-footprint reserve still excludes farms, gardens and field networks.
@@ -711,7 +720,8 @@ export function generateRural(world: World, root: Rng, mainRoads?: number, strip
     for (const rg of regions) {
       if (k === C.FIELD) fieldRegions.push(rg);
       else if (k === C.CLOSE) closeRegions.push(rg);
-      else areas.push({ kind: KINDS[k]!, poly: rg.outer, holes: rg.holes.length ? rg.holes : undefined });
+      else areas.push({ kind: KINDS[k]!, poly: rg.outer, holes: rg.holes.length ? rg.holes : undefined,
+        ...(biome === 'underdark' && k === C.GARDEN ? { cultivation: 'fungal' as const } : {}) });
     }
     counts[KINDS[k]! + (k === C.CLOSE ? '.close' : '')] = regions.length;
   }

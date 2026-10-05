@@ -21,10 +21,10 @@ import type { MorphologyParams, ArchSpec } from './morphology';
 import type { Plot } from './plots';
 import { buildPlot, clipPlot, courtyardRing, rectify, shapeOf, dropOverlaps, MIN_BW, MAX_ASPECT, type Bldg, type HalfPlane, type CourtHint } from './buildings';
 import { area, inscribed, distToRing, orientPos, cleanRing, pointInRing, obb, isSimple } from '../geo/poly';
-import { difference, union } from '../geo/bool';
+import { difference, union, tryDifference, mpArea } from '../geo/bool';
 import { isConvex, polyInside } from '../geo/split';
 import { stitchUnion } from '../geo/stitch';
-import { disk } from '../geo/offset';
+import { disk, insetConvex } from '../geo/offset';
 
 export interface ArchBldg extends Bldg {
   arch?: string; roof?: ArchSpec['roof']; storeys?: number; material?: string; courtyards?: Polygon[]; orientation?: number;
@@ -1012,6 +1012,28 @@ function hall(pl: Plot, P: MorphologyParams, rng: Rng): ArchBldg[] {
   return out;
 }
 
+/** Duergar halls retain the old hall geometry, with a checked retreat for ambiguous shared lot edges. */
+function duergarHall(pl: Plot, P: MorphologyParams, rng: Rng): ArchBldg[] {
+  const out: ArchBldg[] = [];
+  for (const b of hall(pl, P, rng)) {
+    let poly = b.poly;
+    const owned = tryDifference(poly, pl.poly);
+    if (owned.failed || mpArea(owned.pieces) > 1e-6) {
+      // Near-coincident clipped edges can make the raw sweep refuse a contained convex footprint.
+      // Retreat only this new operator, and prove both ownership and a subset of the original roof.
+      if (!isConvex(poly)) continue;
+      const inset = insetConvex(orientPos(poly), 0.02);
+      if (inset.length < 3 || shapeOf(inset).w < MIN_BW || shapeOf(inset).asp > MAX_ASPECT) continue;
+      const subset = tryDifference(inset, poly), inside = tryDifference(inset, pl.poly);
+      if (subset.failed || inside.failed || mpArea(subset.pieces) > 1e-6 || mpArea(inside.pieces) > 1e-6) continue;
+      poly = inset;
+    }
+    out.push({ ...b, poly, arch: b.arch === 'forge' || b.arch === 'workshop' ? 'duergar-' + b.arch
+      : b.kind === 'house' ? 'duergar-hall' : 'duergar-rock-dwelling' });
+  }
+  return out;
+}
+
 /** Buildings of a plot by the morphology's building operator (gardens have kind 'garden'). */
 export function buildOn(pl: Plot, cov: number, P: MorphologyParams, rng: Rng, hint?: CourtHint): ArchBldg[] {
   const all = buildOnRaw(pl, cov, P, rng, hint);
@@ -1028,7 +1050,10 @@ function buildOnRaw(pl: Plot, cov: number, P: MorphologyParams, rng: Rng, hint?:
     case 'yashiki': return yashiki(pl, P, rng);
     case 'machiya': return machiya(pl, cov, P, rng);
     case 'treeHouse': return treeHouse(pl, P, rng);
+    // Same inscribed, separated round pods; their metadata describes fungi rather than a tree canopy.
+    case 'fungalHouse': return treeHouse(pl, P, rng).map((b) => ({ ...b, arch: b.kind === 'house' ? 'fungal-dwelling' : 'fungal-pod', material: 'fungal', storeys: 1 }));
     case 'hall': return hall(pl, P, rng);
+    case 'duergarHall': return duergarHall(pl, P, rng);
     case 'kancha': return kancha(pl, P, rng);
     case 'yardHouse': return yardHouse(pl, cov, P, rng);
     case 'tomb': return tomb(pl, P, rng);

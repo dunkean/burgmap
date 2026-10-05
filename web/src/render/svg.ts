@@ -21,6 +21,7 @@ import { litSvg, shadowSvg, gridSvg, waterLinesSvg } from './extras';
 import { FONT_STACKS } from './labelStyles';
 import { svgBrushes } from './brushSvg';
 import type { BrushSources } from './brushes';
+import { supportsPaintedBiome } from './brushes';
 import type { Measure } from './mapLabels';
 
 export interface RenderOptions {
@@ -83,7 +84,7 @@ export function renderSvg(world0: World, opts: RenderOptions = {}): string {
   const width = opts.width !== undefined && Number.isFinite(opts.width) ? Math.max(1, opts.width) : 1600;
   const scale = width / S;
   const t = world.terrain;
-  const painted = opts.brushes ? svgBrushes(world, pal, opts.brushes) : undefined;
+  const painted = opts.brushes && supportsPaintedBiome(world.options.biome) ? svgBrushes(world, pal, opts.brushes) : undefined;
   const parts: string[] = [];
   parts.push(`<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 ${S} ${S}" width="${width}" height="${width}" data-seed="${world.seed}" data-style="${style}">`);
   parts.push(`<defs><clipPath id="mapclip"><rect x="0" y="0" width="${S}" height="${S}"/></clipPath></defs>`);

@@ -1,10 +1,11 @@
 import type { LandKind } from './types';
 
-export const BIOME_NAMES = ['temperate', 'forest', 'desert', 'steppe', 'tropical', 'tundra'] as const;
+export const BIOME_NAMES = ['temperate', 'forest', 'desert', 'steppe', 'tropical', 'tundra', 'underdark'] as const;
 export type BiomeName = typeof BIOME_NAMES[number];
 export const BIOME_LABELS: [BiomeName, string][] = [
   ['temperate', 'Temperate countryside'], ['forest', 'Woodland'], ['desert', 'Desert and oases'],
   ['steppe', 'Steppe'], ['tropical', 'Tropical forest'], ['tundra', 'Tundra'],
+  ['underdark', 'Underdark'],
 ];
 export const biomeName = (value?: string): BiomeName =>
   BIOME_NAMES.includes(value as BiomeName) ? value as BiomeName : 'temperate';
@@ -16,6 +17,13 @@ export interface BiomeGround {
 /** Vegetation and cultivation follow climate, access and water; urban geometry is independent of the biome. */
 export function biomeLandKind(kind: LandKind, biome: BiomeName, g: BiomeGround): LandKind {
   if (biome === 'temperate') return kind;
+  if (biome === 'underdark') {
+    // Cultivation is supplied by nearby inhabitants, not sunlight. Wild wet fungi remain uncultivated marsh.
+    if (kind === 'marsh') return 'marsh';
+    const cultivated = kind === 'field' || kind === 'garden' || kind === 'orchard';
+    return cultivated && g.settlement < Math.max(100, g.arableRadius * 0.35) && g.slope < 0.12 && g.water < 450
+      ? 'garden' : 'commons';
+  }
   if (biome === 'desert') {
     // Irrigation and oasis groves stay close to perennial water. Dry uplands remain bare or sparse grazing land.
     if (g.water > 420 || g.hab > 28) return g.soil > 0.25 && g.slope < 0.12 ? 'pasture' : 'commons';

@@ -8,7 +8,7 @@ vi.mock('../src/render/brushes', () => ({ decodeBrushes: () => new Promise(resol
 vi.mock('../src/render/sceneCache', () => ({ SceneBuilder: class { update(): object { return {}; } } }));
 vi.mock('../src/render/canvas', () => ({ createCanvasRenderer: (_c: unknown, world: World, _style: unknown, deps: { brushes?: BrushImages }) => {
   state.builds.push({ seed: world.seed, painted: !!deps.brushes });
-  return { dispose: vi.fn(), setOverlays: vi.fn(), lastPlaced: () => [], draw: () => ({ ms: 0, band: 2, scale: 1 }) };
+  return { dispose: vi.fn(), setOverlays: vi.fn(), getMapInfo: () => ({ cartouche: { w: 10, h: 10, prims: [{ t: 'text', x: 0, y: 0, size: 10, s: world.seed, anchor: 'start', fill: '#000' }] }, legend: { w: 1, h: 1, prims: [] }, fontFamily: 'serif' }), lastPlaced: () => [], draw: () => ({ ms: 0, band: 2, scale: 1 }) };
 } }));
 afterEach(() => { vi.unstubAllGlobals(); vi.resetModules(); state.resolve = null; state.builds.length = 0; });
 
@@ -38,6 +38,7 @@ describe('asynchronous painted appearance handoff', () => {
     w.send({ type: 'display', display: { style: 'night', painted: true } });
     expect(state.builds.at(-1)).toEqual({ seed: 'current', painted: true });
     const content = w.messages.filter(m => m.type === 'content').at(-1)!; expect(content.gen).toBe(2);
+    expect(content.meta.mapInfo?.cartouche.prims).toContainEqual(expect.objectContaining({ s: 'current' }));
     w.send({ type: 'view', seq: 1, view: { cx: 800, cy: 800, scale: 1.5 }, w: 900, h: 700, dpr: 2, mini: 0 });
     expect(w.messages.filter(m => m.type === 'frame').at(-1)).toMatchObject({ gen: 2, ver: content.ver, dpr: 2 });
   });

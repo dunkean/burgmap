@@ -5,6 +5,17 @@ bugs and their evidence are recorded in [ROADMAP.md](ROADMAP.md).
 
 ## Current status
 
+- Underdark and small-screen information panels (2026-10-05): seventh biome,
+  independent drow-enclave/duergar-hold/myconid-colony cultures, rock and fungal
+  land use with shared SVG/Canvas motifs. Surface atlas assets are unchanged;
+  underground painted mode uses its vector fallback. Compact interactive maps
+  move title/legend into Map info and keep a physical scale; exports retain
+  their normal panels. See [UNDERDARK_MOBILE_2026-10-05.md](UNDERDARK_MOBILE_2026-10-05.md).
+  Reviewed source passes 60 distinct focused tests, typecheck and build. Six
+  old surface Worlds/preset registries retain exact parity with `daba01b`.
+  Five native cases pass, including both rendering backends, rotation and
+  byte-identical classic SVG exports. This does not certify a green full suite.
+  The previous release is tagged `pre-underdark-2026-10-05`.
 - Local cleanup (2026-10-05, requested by user): all seven satellite worktrees
   are removed and Git worktree metadata is pruned; only this main worktree
   remains. Uncommitted roof experiments are preserved as a binary patch and

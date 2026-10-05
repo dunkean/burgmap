@@ -9,6 +9,7 @@ vi.mock('../src/render/canvas', () => ({ createCanvasRenderer: (_canvas: unknown
   if (seed === 'broken') throw new Error('scene construction failed');
   return {
     dispose: () => {}, setOverlays: () => {}, lastPlaced: () => [], drawMinimap: () => {},
+    getMapInfo: () => ({ cartouche: { w: 10, h: 10, prims: [{ t: 'text', x: 0, y: 0, size: 10, s: seed, anchor: 'start', fill: '#000' }] }, legend: { w: 1, h: 1, prims: [] }, fontFamily: 'serif' }),
     draw: () => { recorded.draws.push(seed); return { ms: 1, band: 2, scale: 1 }; },
   };
 } }));
@@ -49,6 +50,10 @@ describe('final-world-only render worker handoff', () => {
     const latest = responses.filter((r) => r.type === 'content').at(-1)!;
     expect(latest.gen).toBe(2); expect(latest.final).toBe(true); expect(frames().at(-1)!.ver).toBe(latest.ver);
     expect(latest.meta.center.x).toBe(1200);
+    expect(latest.meta.mapInfo?.cartouche.prims).toContainEqual(expect.objectContaining({ s: 'new' }));
+    expect(responses.filter((r) => r.type === 'content').map(r => r.meta.mapInfo?.cartouche.prims[0])).toEqual([
+      expect.objectContaining({ s: 'old' }), expect.objectContaining({ s: 'new' }),
+    ]);
     const failed = port(); send({ type: 'attach', gen: 3, port: failed.value });
     failed.send({ type: 'world', gen: 3, world: world('broken'), final: true, stage: 'done' }); send(view(4));
     expect(responses.filter((r) => r.type === 'error').at(-1)).toMatchObject({ gen: 3, error: expect.stringContaining('scene construction failed') });

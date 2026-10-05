@@ -42,6 +42,11 @@
   #mapMessages { position:absolute; left:16px; bottom:12px; max-width:min(600px, calc(100vw - 185px)); z-index:4; pointer-events:none; color:var(--ink); font-size:12px; }
   #mapMessages > div:not(:empty) { background:var(--panel); padding:3px 10px; }
   #mapMessages button { pointer-events:auto; }
+  #mapInfoDialog { padding:0; border:1px solid var(--line); border-radius:12px; color:var(--ink); background:var(--panel); width:min(620px, calc(100vw - 20px)); max-height:calc(100dvh - 20px); }
+  #mapInfoDialog::backdrop { background:rgba(15,11,19,.55); }
+  #mapInfoDialog .settings-header { padding:16px; }
+  #mapInfoContent { display:flex; flex-wrap:wrap; justify-content:center; align-items:flex-start; gap:16px; padding:8px 16px 20px; overflow:auto; }
+  #mapInfoContent svg { display:block; width:100%; max-width:350px; height:auto; }
   #draftState:empty, #status:empty, #gentime:empty, #generationIdentity:empty, #settlWarn:empty { display:none; }
   #generationIdentity { font:10px/1.5 ui-monospace,Consolas,monospace; overflow-wrap:anywhere; opacity:.8; }
   #addSettlementDialog { width:min(560px, calc(100vw - 28px)); max-height:calc(100dvh - 28px); padding:0; overflow:auto; }
@@ -150,9 +155,20 @@
     #planExtra { grid-template-columns:1fr; gap:4px; }
     #planExtra label { margin-top:10px; }
     .settlement-choice { flex-direction:column; gap:3px; }
-    #minimap { width:88px; height:88px; }
+    #minimap { right:8px; bottom:8px; width:64px; height:64px; }
+    #fit { right:54px; top:8px; }
+    #pinMode { right:8px; top:8px; }
+    #coords { right:8px; top:42px; font-size:10px; }
+    #hud { display:none; }
+    #busy { top:76px; right:8px; }
     #mapMessages { left:8px; bottom:8px; max-width:calc(100vw - 110px); font-size:11px; }
     #addSettlementForm { padding:0 16px 18px; }
+  }
+  @media (max-height: 420px) {
+    #minimap { right:8px; bottom:8px; width:64px; height:64px; }
+    #fit { right:54px; top:8px; } #pinMode { right:8px; top:8px; }
+    #coords { right:8px; top:42px; font-size:10px; } #hud { display:none; }
+    #busy { top:76px; right:8px; }
   }
   @media (prefers-reduced-motion: reduce) { * { animation:none !important; transition:none !important; } }
 </style>
@@ -164,6 +180,7 @@
     <div class="topbar-actions">
       <button id="newMap" type="button" title="Generate a new seed with the applied settings">New map</button>
       <button id="menuBtn" type="button" class="secondary" aria-controls="panel" aria-expanded="false" aria-haspopup="dialog">Customize</button>
+      <button id="mapInfoButton" type="button" class="secondary" aria-controls="mapInfoDialog" aria-haspopup="dialog" disabled>Map info</button>
     <details class="toolbar-menu" id="sec-pins"><summary>Pins</summary><div class="body">
       <div class="btns"><button id="pinModeBtn" class="secondary" title="Click the map to drop pins (or Alt-click)">Pin mode</button><button id="pinsClear" class="secondary" title="Remove all pins">Clear all</button></div>
       <div id="pinList"></div>
@@ -174,6 +191,10 @@
 </div></div></details>
     </div>
   </header>
+  <dialog id="mapInfoDialog" aria-labelledby="mapInfoTitle">
+    <div class="settings-header"><div><h2 id="mapInfoTitle">Map info &amp; legend</h2><p class="hint">The title and symbols of the displayed map.</p></div><button id="closeMapInfo" type="button" class="secondary">Close</button></div>
+    <div id="mapInfoContent"></div>
+  </dialog>
   <dialog id="panel" aria-labelledby="settingsTitle" aria-describedby="settingsHint">
     <div class="settings-header"><div><h2 id="settingsTitle">Make it your world</h2><p id="settingsHint" class="hint">Choose a few essentials or tune every detail. Generate when you're ready.</p></div><button id="closeSettings" type="button" class="secondary" aria-label="Close settings">Close</button></div>
     <div class="settings-tabs" role="tablist" aria-label="Map settings">
@@ -189,7 +210,7 @@
       <h2 id="environmentHeading">Environment</h2>
       <p class="hint">Shape your landscape, or generate it on its own before adding settlements.</p>
       <div id="extentControls"><label for="mapSize">Map extent (m)</label><input id="mapSize" type="number" min="600" max="40000" step="100"></div>
-      <label for="biome">Climate &amp; biome</label><select id="biome"></select>
+      <label for="biome">Landscape &amp; biome</label><select id="biome"></select>
       <label for="relief">Relief</label><select id="relief"></select>
       <div class="row"><div style="flex:1"><label for="coast">Coast</label><select id="coast"></select></div><div style="flex:1"><label for="river">Rivers</label><select id="river"></select></div></div>
       <label for="seaLevel">Coastal water level</label><input id="seaLevel" type="range" min="-1" max="1" step="0.05" value="0">

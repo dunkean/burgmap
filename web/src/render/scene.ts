@@ -251,7 +251,7 @@ export function buildScene(world0: World, tileSize = TILE_SIZE, build: SceneBuil
       const l = byKind.get(kind);
       if (!l) continue;
       addPoly('lu-' + kind, l.map((x) => x.poly), l.map((x) => x.holes));
-      if (TEXTURE_KINDS.includes(kind)) {
+      if (TEXTURE_KINDS.includes(kind) || (world.options.biome === 'underdark' && (kind === 'garden' || kind === 'field'))) {
         const areas: TextureArea[] = l.map((x) => ({ kind, poly: x.poly, holes: x.holes }));
         textures.push({ kind, areas, index: new TileIndex(S, tileSize, boxesOf(areas.map((a) => a.poly)), 'overlap') });
       }
@@ -263,7 +263,9 @@ export function buildScene(world0: World, tileSize = TILE_SIZE, build: SceneBuil
     addLines('hedges', 'field', 'hedge', 1, hedges.lines);
     // farmsteads: lot pieces, hedged lot, yard, pens and ponds, walls, trees, buildings and their roof ridges
     const fms = lu.farmsteads;
-    addPoly('farm-gardens', farmPlots(fms, 'garden'));
+    const fungalFarm = (f: typeof fms[number]): boolean => f.cultivation === 'fungal' || world.options.biome === 'underdark';
+    addPoly('farm-gardens', farmPlots(fms.filter(f => !fungalFarm(f)), 'garden'));
+    addPoly('farm-fungal-gardens', farmPlots(fms.filter(fungalFarm), 'garden'));
     addPoly('farm-orchards', farmPlots(fms, 'orchard'));
     addPoly('farm-paddocks', farmPlots(fms, 'paddock'));
     addPoly('farm-platforms', farmPlots(fms, 'platform'));

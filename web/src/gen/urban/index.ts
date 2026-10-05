@@ -1057,9 +1057,9 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     for (const f of ch.strips) landmarks.push({ kind: 'chinampa', poly: f });
   }
   // ---- elven canopy: trees over the town, clear of the houses
-  const trees: UrbanTree[] = [...compoundTrees];
-  if (hints.primitive && culture.id === 'halfling') trees.push(...halflingGardenTrees(parcels, buildings));
-  if (hints.canopy) {
+  const trees: UrbanTree[] = world.options.biome === 'underdark' ? [] : [...compoundTrees];
+  if (world.options.biome !== 'underdark' && hints.primitive && culture.id === 'halfling') trees.push(...halflingGardenTrees(parcels, buildings));
+  if (world.options.biome !== 'underdark' && hints.canopy) {
     const tr = rng.fork('trees');
     const houses = buildings.map((b) => ({ c: polygonCentroid(b.poly), r: Math.sqrt(areaOf(b.poly) / Math.PI) }));
     for (const fp of prim.footprint) {

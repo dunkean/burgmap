@@ -496,6 +496,35 @@ function mine(lot: Polygon, cx: CompoundCtx): CompoundOut {
   return out;
 }
 
+/** A compact sanctum inside the inscribed disc: no implied cavern boundary or surface religious symbol. */
+function drowSanctum(lot: Polygon, cx: CompoundCtx): CompoundOut {
+  const out = emptyOut(lot, 'compound:drow-sanctum');
+  const ins = inscribed(lot, [], 0.5), r = ins.r - 2;
+  if (r < 5) return out;
+  const hall = rectAt(ins.c, cx.angle, -0.65 * r, 0.65 * r, -0.48 * r, 0.48 * r);
+  if (polyInside(lot, hall)) out.buildings.push({ poly: hall, kind: 'landmark', parcel: 0, arch: 'drow-sanctum', roof: 'flat', material: 'dark-stone', storeys: 3 });
+  return out;
+}
+
+/** Open gathering circle and central fruiting hall, wholly inside its owned lot. */
+function myconidCircle(lot: Polygon, _cx: CompoundCtx): CompoundOut {
+  const out = emptyOut(lot, 'compound:myconid-circle');
+  const ins = inscribed(lot, [], 0.5), r = ins.r - 2;
+  if (r < 5) return out;
+  const hall = orientPos(disk(ins.c, Math.min(8, Math.max(3.2, r * 0.3)), 18));
+  if (polyInside(lot, hall)) out.buildings.push({ poly: hall, kind: 'landmark', parcel: 0, arch: 'myconid-fruiting-hall', roof: 'dome', material: 'fungal', storeys: 1 });
+  const circle = orientPos(disk(ins.c, r * 0.82, 24));
+  if (polyInside(lot, circle)) out.landmarks.push({ kind: 'myconid-spore-circle', poly: circle });
+  return out;
+}
+
+function duergarSmeltery(lot: Polygon, cx: CompoundCtx): CompoundOut {
+  const out = forge(lot, cx);
+  out.parcels[0].use = 'compound:duergar-smeltery';
+  out.buildings = out.buildings.filter(b => polyInside(lot, b.poly)).map(b => ({ ...b, arch: b.arch === 'forge-chimney' ? 'duergar-flue' : 'duergar-smeltery', material: 'dark-stone' }));
+  return out;
+}
+
 /** Registers more builders (M4 landmark plans). */
 export function registerBuilders(map: Record<string, (lot: Polygon, cx: CompoundCtx) => CompoundOut>): void { Object.assign(COMPOUND_BUILDERS, map); }
 
@@ -504,6 +533,7 @@ export const COMPOUND_BUILDERS: Record<string, (lot: Polygon, cx: CompoundCtx) =
   yamen: (l, c) => axialCompound(l, c, 'yamen'), 'chinese-temple': (l, c) => axialCompound(l, c, 'chinese-temple'),
   'walled-market': walledMarket, castle: jpCastle, 'jp-temple': jpTemple, 'hindu-temple': hinduTemple, tank,
   basilica, 'roman-temple': romanTemple, grove, 'dwarf-gate': dwarfGate, forge, palace, mine,
+  'drow-sanctum': drowSanctum, 'duergar-smeltery': duergarSmeltery, 'myconid-circle': myconidCircle,
 };
 
 /** Builds a compound; unknown kinds leave the lot as one parcel of that use. */

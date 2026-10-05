@@ -46,7 +46,7 @@ describe('optional painted natural textures', () => {
   it('varies species by map while preserving reproducible biome and fruit mixes', () => {
     const world = fakeWorld({ mapSize: 1600, buildings: 0, streets: 0, clusters: 1, landAreas: 0 });
     const fruits = [[1], [1], [12, 13], [20], [24, 26], [20]];
-    BIOME_NAMES.forEach((biome, row) => {
+    BIOME_NAMES.filter(biome => biome !== 'underdark').forEach((biome, row) => {
       world.options.biome = biome;
       const a = brushMotif(world, 'forest'), b = brushMotif(world, 'forest');
       expect(a).toEqual(b); expect(new Set(a.stamps.map(s => s.cell)).size).toBeGreaterThan(1);
@@ -62,7 +62,7 @@ describe('optional painted natural textures', () => {
   it('shares admissible low vegetation per biome without introducing trees into meadows', () => {
     const world = fakeWorld({ mapSize: 1600, buildings: 0, streets: 0, clusters: 1, landAreas: 0 });
     const allowed = [[4, 5], [10], [16, 17], [21, 22, 23], [27, 28], [30, 31, 33, 34, 35]];
-    BIOME_NAMES.forEach((biome, row) => {
+    BIOME_NAMES.filter(biome => biome !== 'underdark').forEach((biome, row) => {
       world.options.biome = biome;
       for (const kind of ['meadow', 'pasture'] as const) {
         const a = brushMotif(world, kind); expect(a).toEqual(brushMotif(world, kind));
