@@ -95,7 +95,7 @@ export function settlementRequests(opts: Options, usableKm2: number, mainPop: nu
   if (typeof s === 'object' && 'list' in s) {
     s.list.forEach((it: SettlementSpec, k) => {
       if (opts.workflow === 'list' && k === 0) return;
-      out.push({ key: String(k), cls: classOfPop(it.population), pop: it.population, culture: it.culture ?? opts.culture,
+      out.push({ key: it.key ?? String(k), cls: classOfPop(it.population), pop: it.population, culture: it.culture ?? opts.culture,
         siteType: it.siteType, position: it.position, options: it.options, explicit: true });
     });
     return out;

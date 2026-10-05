@@ -1,5 +1,6 @@
 /** Shared theme/instance controls for cultural mixing and explicit growth phases. */
 import type { ControlRegistry } from './controls';
+import { chipify, syncChips } from './controls';
 import { CULTURE_LIST } from '../gen/urban/cultures';
 import { MORPHOLOGIES } from '../gen/urban/morphology';
 import type { PlanOverride, PhaseSpec, NucleusKind } from '../gen/urban/culture';
@@ -13,16 +14,18 @@ export function initPlanEditor(registry: ControlRegistry): void {
     for (const [value, text] of items) { const option = document.createElement('option'); option.value = value; option.textContent = text; select.append(option); }
     box.append(lab, select); return select;
   };
-  const title = document.createElement('h4'); title.textContent = 'Historical mix within this settlement'; box.append(title);
-  const hint = document.createElement('p'); hint.className = 'hint'; hint.textContent = 'Add another culture to this settlement’s growth or neighbourhoods. For a separate village of another culture, use Add settlement and choose its Culture.'; box.append(hint);
-  const secondary = field('Additional culture within this settlement', 'mixCulture', [['', 'No cultural mix'], ...CULTURE_LIST.map((c): [string, string] => [c.id, c.label])]);
-  const mixMode = field('How cultures combine', 'mixMode', [['phases', 'Successive growth phases'], ['sectors', 'Neighbourhoods'], ['blend', 'Blend']]);
+  const title = document.createElement('h4'); title.textContent = 'Mix two styles'; box.append(title);
+  const hint = document.createElement('p'); hint.className = 'hint'; hint.textContent = 'Blend a second culture into this place’s growth phases or neighbourhoods, or design its growth plan yourself.'; box.append(hint);
+  const secondary = field('Second culture', 'mixCulture', [['', 'No cultural mix'], ...CULTURE_LIST.map((c): [string, string] => [c.id, c.label])]);
+  const mixMode = field('How cultures combine', 'mixMode', [['phases', 'Growth phases'], ['sectors', 'Neighbourhoods'], ['blend', 'Blend']]);
+  chipify(mixMode);
   const weightLabel = document.createElement('label'); weightLabel.htmlFor = 'mixWeight'; weightLabel.textContent = 'Second culture share';
   const weight = document.createElement('input'); weight.type = 'range'; weight.id = 'mixWeight'; weight.min = '0'; weight.max = '1'; weight.step = '0.05'; box.append(weightLabel, weight);
   const enabledLabel = document.createElement('label'); enabledLabel.className = 'check';
   const enabled = document.createElement('input'); enabled.type = 'checkbox'; enabled.id = 'customPlan'; enabledLabel.append(enabled, document.createTextNode('Custom growth plan')); box.append(enabledLabel);
   const kinds: NucleusKind[] = ['market', 'forum', 'mosque', 'drum-tower', 'castle', 'temple', 'grove', 'ushnu', 'precinct', 'mortuary', 'maidan', 'mud-mosque', 'wizard-tower', 'clocktower', 'none'];
   const nucleus = field('Settlement centre', 'planNucleus', [['', 'From culture'], ...kinds.map((kind): [string, string] => [kind, kind.replaceAll('-', ' ')])]);
+  chipify(nucleus);
   const phasesBox = document.createElement('div'); box.append(phasesBox);
   const add = document.createElement('button'); add.type = 'button'; add.className = 'secondary small'; add.textContent = '+ Add growth phase'; box.append(add);
   const fire = (): void => { box.dispatchEvent(new Event('change')); };
@@ -30,6 +33,7 @@ export function initPlanEditor(registry: ControlRegistry): void {
   const shapeItems = ['organic', 'rect', 'rounded-rect', 'square', 'oval', 'circle', 'terraces'];
   function render(): void {
     nucleus.disabled = !enabled.checked; add.disabled = !enabled.checked; phasesBox.hidden = !enabled.checked;
+    syncChips();
     phasesBox.textContent = '';
     phases.forEach((phase, index) => {
       const row = document.createElement('div'); row.className = 'row'; row.style.marginTop = '6px';

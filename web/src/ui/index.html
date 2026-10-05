@@ -5,126 +5,138 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Burgmap</title>
 <style>
-  :root { --bg:#2b2620; --panel:#f3ead2; --ink:#3d2f20; --ink2:#7a6247; --accent:#8a5a2b; --line:#d6c7a1; --field:#fffaf0; }
+  /* Game-style HUD: dark glass on the map's edges. Dialogs and popovers that sit on paper re-scope the tokens. */
+  :root {
+    --bg:#2b2620; --panel:rgba(30,24,18,.9); --ink:#f3ead2; --ink2:#b9a98a; --accent:#e6b455; --accent-ink:#2a1d0c;
+    --line:rgba(243,234,210,.2); --field:rgba(0,0,0,.34); --opt-bg:#2a221a; --edge:rgba(240,214,150,.24);
+    --dot:22px; --rail:88px;
+  }
+  dialog, #pinpop, #mapInfoContent { --panel:#f3ead2; --ink:#3d2f20; --ink2:#7a6247; --accent:#8a5a2b; --accent-ink:#fff8ea; --line:#d6c7a1; --field:#fffaf0; --opt-bg:#fffaf0; color-scheme:light; }
   * { box-sizing: border-box; }
-  html, body { margin:0; height:100%; background:var(--bg); color:var(--ink); font:14px/1.4 Georgia, 'Times New Roman', serif; overflow:hidden; }
-  #app { display:flex; flex-direction:column; height:100%; position:relative; }
-  #topbar { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:10px 18px; background:var(--panel); border-bottom:1px solid var(--line); z-index:5; box-shadow:0 2px 12px #0003; }
-  .brand h1 { margin:0; font-size:23px; letter-spacing:.04em; }
-  .brand span { font-size:12px; color:var(--ink2); }
-  .topbar-actions { display:flex; align-items:center; gap:8px; }
-  dialog { color:var(--ink); background:var(--panel); border:1px solid var(--line); border-radius:16px; box-shadow:0 20px 70px #0006; }
-  dialog::backdrop { background:#17130db3; }
-  #panel { width:min(900px, calc(100vw - 36px)); height:min(850px, calc(100dvh - 48px)); max-height:none; padding:0; overflow:hidden; }
-  #panel[open] { display:flex; flex-direction:column; }
-  .settings-header { display:flex; align-items:flex-start; gap:20px; justify-content:space-between; padding:22px 26px 16px; }
-  .settings-header h2 { margin:0; font-size:25px; }
-  .settings-header .hint { margin-top:4px; font-size:13px; }
-  .settings-tabs { display:flex; gap:6px; padding:0 26px 14px; border-bottom:1px solid var(--line); }
-  .settings-tabs button { background:transparent; color:var(--ink2); border-color:transparent; padding:9px 14px; }
-  .settings-tabs button[aria-selected=true] { background:var(--accent); color:var(--field); }
-  .settings-content { padding:20px 26px; overflow:auto; flex:1; min-height:0; }
-  .settings-content [role=tabpanel] { max-width:720px; margin:auto; }
-  .settings-footer { display:flex; align-items:center; justify-content:space-between; gap:14px; border-top:1px solid var(--line); padding:16px 26px; }
-  .settings-footer .hint { margin:0; }
-  #settingsFeedback { flex:1; min-width:0; }
-  #panel #mapMessages { position:static; max-width:none; pointer-events:auto; }
-  #panel #mapMessages > div:not(:empty) { padding:2px 0; }
-  #panel #generationIdentity { display:none; }
-  .settings-footer button { padding:10px 18px; }
-  .seed-controls { margin-bottom:18px; }
-  .toolbar-menu { position:relative; }
-  .toolbar-menu > summary { list-style:none; cursor:pointer; border:1px solid var(--line); border-radius:5px; padding:7px 10px; color:var(--accent); }
-  .toolbar-menu > summary::-webkit-details-marker { display:none; }
-  .toolbar-menu[open] > summary { background:var(--field); }
-  .toolbar-menu > .body { position:absolute; right:0; top:calc(100% + 12px); width:min(350px, calc(100vw - 24px)); padding:16px; background:var(--panel); border:1px solid var(--line); border-radius:10px; box-shadow:0 10px 35px #0005; max-height:70dvh; overflow:auto; }
-  #shareControls h3 { margin:8px 0; font-size:17px; }
-  #mapMessages { position:absolute; left:16px; bottom:12px; max-width:min(600px, calc(100vw - 185px)); z-index:4; pointer-events:none; color:var(--ink); font-size:12px; }
-  #mapMessages > div:not(:empty) { background:var(--panel); padding:3px 10px; }
-  #mapMessages button { pointer-events:auto; }
-  #mapInfoDialog { padding:0; border:1px solid var(--line); border-radius:12px; color:var(--ink); background:var(--panel); width:min(620px, calc(100vw - 20px)); max-height:calc(100dvh - 20px); }
-  #mapInfoDialog::backdrop { background:rgba(15,11,19,.55); }
-  #mapInfoDialog .settings-header { padding:16px; }
-  #mapInfoContent { display:flex; flex-wrap:wrap; justify-content:center; align-items:flex-start; gap:16px; padding:8px 16px 20px; overflow:auto; }
-  #mapInfoContent svg { display:block; width:100%; max-width:350px; height:auto; }
-  #draftState:empty, #status:empty, #gentime:empty, #generationIdentity:empty, #settlWarn:empty { display:none; }
-  #generationIdentity { font:10px/1.5 ui-monospace,Consolas,monospace; overflow-wrap:anywhere; opacity:.8; }
-  #addSettlementDialog { width:min(560px, calc(100vw - 28px)); max-height:calc(100dvh - 28px); padding:0; overflow:auto; }
-  #addSettlementForm { padding:0 26px 24px; }
-  #addSettlementForm .row > div { flex:1; }
-  fieldset { margin:16px 0; border:1px solid var(--line); border-radius:6px; }
-  legend { color:var(--ink2); padding:0 5px; }
-  :focus-visible { outline:3px solid #375d7d; outline-offset:3px; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--ink); font:13px/1.4 system-ui,'Segoe UI',Roboto,sans-serif; overflow:hidden; }
+  #app { height:100%; position:relative; }
   [hidden] { display:none !important; }
-  label { display:block; font-size:12px; letter-spacing:.03em; color:var(--ink2); margin:10px 0 3px; }
-  select, input[type=text], input[type=number] { width:100%; padding:6px 8px; border:1px solid var(--line); border-radius:4px; background:var(--field); color:var(--ink); font:inherit; }
+  :focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  .ico { width:16px; height:16px; flex:none; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
+  .sr-only { position:absolute !important; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0; }
+
+  /* ---------- controls ---------- */
+  label { display:block; font-size:11px; letter-spacing:.04em; color:var(--ink2); margin:9px 0 3px; }
+  select, input[type=text], input[type=number] { width:100%; height:28px; padding:3px 8px; border:1px solid var(--line); border-radius:8px; background:var(--field); color:var(--ink); font:inherit; font-size:12.5px; }
+  input::placeholder { color:var(--ink2); opacity:.75; }
+  select option { background:var(--opt-bg); color:var(--ink); }
   select:disabled, input:disabled { opacity:.5; }
+  input[type=range] { width:100%; accent-color:var(--accent); margin:2px 0 0; }
+  input[type=checkbox] { appearance:none; width:30px; height:17px; border-radius:9px; background:var(--field); border:1px solid var(--line); position:relative; cursor:pointer; flex:none; margin:0; transition:background .15s; }
+  input[type=checkbox]::after { content:''; position:absolute; left:2px; top:2px; width:11px; height:11px; border-radius:50%; background:var(--ink2); transition:transform .15s, background .15s; }
+  input[type=checkbox]:checked { background:var(--accent); border-color:var(--accent); }
+  input[type=checkbox]:checked::after { transform:translateX(13px); background:var(--accent-ink); }
+  button { padding:5px 11px; border:1px solid var(--accent); border-radius:8px; background:var(--accent); color:var(--accent-ink); font:inherit; font-size:12.5px; cursor:pointer; white-space:nowrap; }
+  button.secondary { background:transparent; color:var(--accent); }
+  button.small { padding:2px 8px; font-size:11.5px; }
+  button.icon { display:inline-grid; place-items:center; width:26px; height:26px; padding:0; border-radius:7px; }
+  button:hover { filter:brightness(1.1); }
+  button:disabled { opacity:.45; cursor:default; filter:none; }
   .row { display:flex; gap:6px; align-items:stretch; }
   .row > * { min-width:0; }
-  .row > input { flex:1 1 auto; width:auto; min-width:70px; }
+  .row > input { flex:1 1 auto; width:auto; min-width:60px; }
   .row > button { flex:none; min-width:max-content; }
-  button { padding:6px 10px; border:1px solid var(--accent); border-radius:4px; background:var(--accent); color:#fff8ea; font:inherit; cursor:pointer; white-space:nowrap; }
-  button.secondary { background:transparent; color:var(--accent); }
-  button.small { padding:3px 8px; font-size:12px; }
-  button:hover { filter:brightness(1.08); }
-  button:disabled { opacity:.5; cursor:default; }
-  .check { display:flex; align-items:center; gap:8px; margin-top:9px; font-size:13px; }
-  .btns { display:flex; gap:6px; margin-top:4px; }
-  .btns { flex-wrap:wrap; }
-  #panel [hidden] { display:none; }
-  .btns button { flex:1 1 auto; padding-left:6px; padding-right:6px; font-size:13px; }
-  .workflow-step { border:1px solid var(--line); border-radius:10px; padding:20px; background:var(--field); }
-  .workflow-step h2 { font:600 18px/1.3 Georgia,serif; margin:0 0 5px; }
-  .step-number { display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; margin-right:7px; border-radius:50%; background:var(--accent); color:white; font:12px sans-serif; }
-  .workflow-step > .hint { margin:0 0 12px; }
-  .generate { width:100%; padding:10px; margin-top:12px; }
-
-  .settlement-choice { width:100%; text-align:left; display:flex; justify-content:space-between; white-space:normal; margin-bottom:6px; padding:9px; }
-  .settlement-choice[aria-pressed=true] { background:var(--accent); color:var(--field); }
-  .settlement-choice small { display:block; font-size:11px; opacity:.8; }
-  #settlementChoices { display:grid; grid-template-columns:repeat(auto-fit, minmax(210px, 1fr)); gap:6px; }
-  #planExtra { display:grid; grid-template-columns:minmax(160px, 1fr) minmax(140px, 1fr); gap:6px 16px; align-items:center; }
-  #planExtra label { margin:0; }
-  #cultureOverrides h4 { margin:20px 0 4px; font-size:15px; color:var(--ink); }
-  #settlementEditor { border-top:1px solid var(--line); margin-top:12px; padding-top:8px; }
-  #settlementEditor h3 { margin:2px 0 8px; font-size:15px; }
-  #settlementEditor details { margin-top:10px; }
-  /* collapsible sections (native <details>) */
-  details.sec { border:1px solid var(--line); border-radius:6px; background:rgba(255,250,240,.45); }
-  details.sec > summary { cursor:pointer; padding:7px 10px; font-size:12px; letter-spacing:.1em; text-transform:uppercase; color:var(--accent); font-weight:bold; list-style:none; user-select:none; }
+  .cell { flex:1; min-width:0; }
+  .g2 { display:grid; grid-template-columns:1fr 1fr; gap:0 8px; }
+  .g2 > .full { grid-column:1 / -1; }
+  .check { display:flex; align-items:center; gap:9px; margin:0; padding:6px 0; font-size:12.5px; letter-spacing:0; color:var(--ink); cursor:pointer; }
+  .btns { display:flex; flex-wrap:wrap; gap:6px; margin-top:4px; }
+  .btns button { flex:1 1 auto; }
+  .hint { font-size:11.5px; color:var(--ink2); margin:5px 0 0; }
+  .hint.warn { color:#e58a62; }
+  .chip { display:inline-block; margin-top:6px; padding:2px 8px; border-radius:10px; background:rgba(230,180,85,.2); color:var(--ink); font-size:12px; }
+  .chip.warn { background:rgba(229,138,98,.3); }
+  details.sec { margin-top:10px; border:1px solid var(--line); border-radius:10px; }
+  details.sec > summary { cursor:pointer; padding:6px 10px; font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:var(--accent); font-weight:600; list-style:none; user-select:none; }
   details.sec > summary::-webkit-details-marker { display:none; }
   details.sec > summary::before { content:'\25B8'; display:inline-block; width:1.1em; transition:transform .15s; }
   details.sec[open] > summary::before { transform:rotate(90deg); }
   details.sec > .body { padding:0 10px 10px; }
-  .hint { font-size:12px; color:var(--ink2); margin:6px 0 0; }
-  .slot { margin-top:8px; padding:8px; border:1px dashed var(--line); border-radius:4px; font-size:12px; color:var(--ink2); }
-  .chip { display:inline-block; margin-top:6px; padding:2px 8px; border-radius:10px; background:#e6d6a8; color:var(--ink); font-size:12px; }
-  .chip.warn { background:#e9c7b6; }
-  #status { font-size:12px; color:var(--ink2); min-height:2.6em; }
-  #progress { height:4px; border-radius:2px; background:var(--line); overflow:hidden; opacity:0; transition:opacity .2s; }
+  .glass { background:var(--panel); border:1px solid var(--edge); border-radius:14px; box-shadow:0 6px 24px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.06); backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); color-scheme:dark; }
+
+  /* ---------- map ---------- */
+  #map { position:absolute; inset:0; overflow:hidden; cursor:grab; touch-action:none; }
+  #map.drag { cursor:grabbing; }
+  #map.picking, #map.pinning { cursor:crosshair; }
+  #view { position:absolute; left:0; top:0; display:block; will-change:transform; transform-origin:50% 50%; }
+  .hud { position:absolute; z-index:4; }
+  #loadbar { position:absolute; left:0; right:0; top:0; height:3px; z-index:4; pointer-events:none; opacity:0; transition:opacity .3s; background:rgba(0,0,0,.12); }
+  #loadbar.on { opacity:1; }
+  #loadbar > i { display:block; height:100%; width:0; background:var(--accent); box-shadow:0 0 6px var(--accent); transition:width .35s ease-out; }
+  /* debug readouts kept in the DOM for scripts, never shown */
+  #hud, #busy, #pinMode, #coordCopy { display:none !important; }
+
+  /* top-right tools */
+  /* above the rail and the drawer: its menus drop over them */
+  #tools { z-index:7; right:10px; top:10px; display:flex; gap:4px; align-items:flex-start; padding:5px; }
+  #tools > button, .toolbar-menu > summary { display:inline-flex; align-items:center; gap:6px; height:28px; padding:0 10px; border:1px solid transparent; border-radius:9px; background:transparent; color:var(--ink); font-size:12.5px; cursor:pointer; list-style:none; }
+  #tools > button:hover, .toolbar-menu > summary:hover, .toolbar-menu[open] > summary { background:rgba(255,255,255,.1); filter:none; }
+  .toolbar-menu { position:relative; }
+  .toolbar-menu > summary::-webkit-details-marker { display:none; }
+  .toolbar-menu > .body { position:absolute; right:0; top:calc(100% + 10px); width:min(350px, calc(100vw - 20px)); padding:14px; background:var(--panel); border:1px solid var(--edge); border-radius:14px; box-shadow:0 10px 35px rgba(0,0,0,.55); max-height:min(76dvh, 600px); overflow:auto; color-scheme:dark; z-index:8; }
+  #shareControls h3 { margin:14px 0 6px; font-size:11px; color:var(--accent); font-weight:700; letter-spacing:.12em; text-transform:uppercase; }
+  #shareControls h3:first-child { margin-top:0; }
+  #mapIdBox { font:11px/1.35 ui-monospace,Consolas,monospace; overflow-wrap:anywhere; max-height:5.5em; overflow:auto; padding:6px 8px; border-radius:8px; background:var(--field); border:1px solid var(--line); user-select:all; }
+
+  /* right rail: the main actions, then one-click biome / relief / style */
+  #rail { right:10px; top:56px; width:var(--rail); padding:6px; display:flex; flex-direction:column; align-items:center; gap:5px; max-height:calc(100% - 66px - 130px); overflow-y:auto; overflow-x:hidden; scrollbar-width:none; }
+  #rail::-webkit-scrollbar { display:none; }
+  .tile { position:relative; display:flex; flex-direction:column; align-items:center; gap:2px; width:100%; padding:5px 2px 4px; border-radius:10px; border:1px solid var(--edge); background:rgba(255,255,255,.06); color:var(--ink); font-size:10px; font-weight:600; letter-spacing:.02em; line-height:1.1; white-space:normal; }
+  .tile .ico { width:18px; height:18px; }
+  .tile:hover { background:rgba(255,255,255,.13); filter:none; }
+  .tile.primary { background:linear-gradient(#f0c46c, #d39a39); border-color:#f6d98f; color:#2a1d0c; box-shadow:0 2px 10px rgba(230,180,85,.35); }
+  #menuBtn[aria-expanded=true] { background:rgba(230,180,85,.24); border-color:var(--accent); }
+  #menuBtn.dirty::after { content:''; position:absolute; right:4px; top:4px; width:8px; height:8px; border-radius:50%; background:#ff9a52; box-shadow:0 0 6px #ff9a52; }
+  #dock { display:flex; flex-direction:column; align-items:center; gap:5px; width:100%; }
+  .rail-cap { width:100%; margin:3px 0 0; padding-top:5px; border-top:1px solid var(--line); text-align:center; font-size:9px; letter-spacing:.16em; text-transform:uppercase; color:var(--accent); font-weight:700; }
+  .dock-row { display:grid; grid-template-columns:repeat(3, var(--dot)); gap:5px; justify-content:center; }
+  .dot { position:relative; width:var(--dot); height:var(--dot); padding:0; flex:none; border-radius:50%; border:2px solid rgba(255,255,255,.16); display:grid; place-items:center; color:rgba(255,255,255,.92); transition:transform .12s, box-shadow .12s; }
+  .dot svg { width:70%; height:70%; fill:none; stroke:currentColor; stroke-width:1.4; stroke-linecap:round; stroke-linejoin:round; }
+  .dot:hover { transform:scale(1.14); filter:none; }
+  .dot[aria-pressed=true] { border-color:#fff3d0; box-shadow:0 0 0 2px var(--accent), 0 0 10px 1px rgba(230,180,85,.7); }
+  #tip { position:absolute; z-index:9; padding:3px 8px; border-radius:7px; background:#171209; color:#f3ead2; border:1px solid var(--edge); font-size:11.5px; white-space:nowrap; pointer-events:none; transform:translate(-100%, -50%); }
+
+  /* bottom-right corner: info, coordinates, minimap with its fit button */
+  #corner { right:10px; bottom:10px; display:flex; align-items:flex-end; gap:8px; pointer-events:none; }
+  #corner > * { pointer-events:auto; }
+  #mapMessages { display:flex; flex-direction:column; align-items:flex-end; gap:3px; max-width:min(330px, calc(100vw - 190px)); color:var(--ink); font-size:11px; pointer-events:none; }
+  #mapMessages > div:not(:empty) { background:rgba(30,24,18,.78); border-radius:8px; padding:2px 9px; text-align:right; }
+  #mapMessages button { pointer-events:auto; }
+  /* keep the corner readable beside the open drawer */
+  #app.drawer-open #mapMessages { margin-right:216px; max-width:min(360px, calc(100vw - 690px)); }
+  #status { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; pointer-events:auto; }
+  #draftState:not(:empty) { color:#ffc48f; }
+  #draftState:empty, #status:empty, #gentime:empty, #generationIdentity:empty, #settlWarn:empty { display:none; }
+  #generationIdentity { font:10.5px/1.4 ui-monospace,Consolas,monospace; max-width:min(100%, 260px); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; pointer-events:auto; cursor:copy; }
+  #placementPrompt { background:var(--accent) !important; color:var(--accent-ink); font-weight:600; font-size:12px; pointer-events:auto; }
+  #placementPrompt button { border-color:var(--accent-ink); color:var(--accent-ink); }
+  #progress { height:4px; width:120px; border-radius:2px; background:var(--line); overflow:hidden; opacity:0; transition:opacity .2s; padding:0 !important; }
   #progress.on { opacity:1; }
   #progress > i { display:block; height:100%; width:38%; background:var(--accent); animation:slide 1s infinite ease-in-out; }
   @keyframes slide { 0% { transform:translateX(-110%); } 100% { transform:translateX(290%); } }
-  #gentime { font-size:12px; color:var(--ink); }
-  #map { position:relative; flex:1; min-height:0; overflow:hidden; cursor:grab; touch-action:none; }
-  #map > button { background:var(--panel); color:var(--accent); }
-  #map.drag { cursor:grabbing; }
-  #map.picking { cursor:crosshair; }
-  .hint.warn { color:#9a3b1b; }
-  /* CANVAS-VIEWER styles */
-  #view { position:absolute; left:0; top:0; display:block; will-change:transform; transform-origin:50% 50%; }
-  #minimap { position:absolute; right:12px; bottom:12px; width:140px; height:140px; border:1px solid var(--line); box-shadow:0 2px 10px rgba(0,0,0,.5); background:#eee2c3; cursor:pointer; }
-  #hud { position:absolute; right:12px; top:124px; color:#f3ead2; font-size:11px; opacity:.75; pointer-events:none; }
-  #fit { position:absolute; right:12px; top:36px; padding:4px 8px; font-size:12px; }
-  #pinMode { position:absolute; right:12px; top:70px; padding:4px 8px; font-size:12px; }
-  #pinMode.on { background:#2b2118; color:#f3ead2; border-color:#2b2118; }
-  #map.pinning { cursor:crosshair; }
-  #coords { position:absolute; right:12px; top:148px; max-width:calc(100% - 24px); height:24px; display:flex; gap:6px; align-items:center; padding:2px 4px 2px 8px; border-radius:4px; background:rgba(30,22,14,.55); color:#f3ead2; font:11px ui-monospace,Consolas,monospace; z-index:3; }
-  #coords button { padding:1px 6px; font-size:11px; }
-  #pins { position:absolute; inset:0; overflow:hidden; pointer-events:none; z-index:2; }
+  #coords { display:grid; gap:1px; padding:4px 8px; border-radius:8px; background:rgba(30,22,14,.72); color:#f3ead2; font:10.5px/1.3 ui-monospace,Consolas,monospace; white-space:pre; text-align:right; min-width:86px; }
+  #miniFrame { position:relative; width:120px; height:120px; flex:none; }
+  #minimap { position:absolute; inset:0; width:100%; height:100%; border:2px solid var(--edge); border-radius:10px; box-shadow:0 2px 10px rgba(0,0,0,.5); background:#eee2c3; cursor:pointer; }
+  #fit { position:absolute; right:4px; top:4px; z-index:1; width:24px; height:24px; padding:0; display:grid; place-items:center; border-radius:7px; background:rgba(30,24,18,.85); border:1px solid var(--edge); color:var(--ink); }
+  #fit .ico { width:14px; height:14px; }
+
+  /* pins and settlement markers */
+  #pins, #marks { position:absolute; inset:0; overflow:hidden; pointer-events:none; z-index:2; }
   .pin { position:absolute; left:-10px; top:-10px; width:20px; height:20px; padding:0; border-radius:50%; background:#2b2118; color:#f3ead2; border:2px solid #f3ead2; box-shadow:0 1px 4px rgba(0,0,0,.6); font:bold 11px/16px sans-serif; text-align:center; cursor:pointer; pointer-events:auto; }
-  #pinpop { position:absolute; z-index:5; width:190px; padding:6px 8px; border-radius:6px; background:#f6efdc; border:1px solid var(--line); box-shadow:0 2px 10px rgba(0,0,0,.5); font-size:12px; display:grid; grid-template-columns:1fr auto; gap:4px 6px; align-items:center; }
-  #pinpop[hidden] { display:none; }
+  .mark { position:absolute; left:0; top:0; display:flex; align-items:center; gap:5px; padding:0; border:0; background:none; color:#fff; font:600 11.5px/1 system-ui,sans-serif; cursor:grab; pointer-events:auto; touch-action:none; transform:translate(-13px, -13px); filter:none; }
+  .mark:hover { filter:none; }
+  .mark i { display:grid; place-items:center; width:26px; height:26px; border-radius:50% 50% 50% 4px; transform:rotate(-45deg); background:#6b4b22; border:2px solid #f3ead2; box-shadow:0 2px 6px rgba(0,0,0,.6); }
+  .mark i b { transform:rotate(45deg); font-style:normal; }
+  .mark.auto i { background:rgba(60,45,25,.75); border-style:dashed; }
+  .mark.sel i { background:var(--accent); color:var(--accent-ink); border-color:#fff; box-shadow:0 0 0 3px rgba(230,180,85,.45), 0 2px 8px rgba(0,0,0,.6); }
+  .mark span { padding:2px 7px; border-radius:7px; background:rgba(20,15,10,.8); white-space:nowrap; }
+  .mark.dragging { cursor:grabbing; opacity:.85; }
+  #pinpop { position:absolute; z-index:5; width:190px; padding:6px 8px; border-radius:8px; background:#f6efdc; color:var(--ink); border:1px solid var(--line); box-shadow:0 2px 10px rgba(0,0,0,.5); font-size:12px; display:grid; grid-template-columns:1fr auto; gap:4px 6px; align-items:center; }
   #pinpop input { grid-column:1 / 3; margin:0; }
   #pinpop .pc { color:var(--ink2); font-size:11px; }
   .pinrow { display:flex; gap:4px; margin-top:4px; }
@@ -132,148 +144,231 @@
   .pinbtn span { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .pinbtn span.dim { opacity:.55; }
   .pinbtn small { color:var(--ink2); }
-  #busy { position:absolute; right:14px; top:12px; color:#f3ead2; font-size:12px; opacity:0; transition:opacity .2s; pointer-events:none; }
-  #busy.on { opacity:1; }
-  #loadbar { position:absolute; left:0; right:0; top:0; height:3px; z-index:4; pointer-events:none; opacity:0; transition:opacity .3s; background:rgba(0,0,0,.12); }
-  #loadbar.on { opacity:1; }
-  #loadbar > i { display:block; height:100%; width:0; background:var(--accent); box-shadow:0 0 6px var(--accent); transition:width .35s ease-out; }
+
+  /* ---------- customize drawer ---------- */
+  #panel { position:absolute; z-index:6; top:56px; right:calc(var(--rail) + 18px); width:350px; max-width:calc(100vw - var(--rail) - 28px); max-height:calc(100dvh - 66px); display:flex; flex-direction:column; overflow:hidden;
+    visibility:hidden; opacity:0; transform:translateX(16px); transition:transform .18s ease, opacity .18s ease, visibility 0s .18s; }
+  #panel.open { visibility:visible; opacity:1; transform:none; transition:transform .18s ease, opacity .18s ease; }
+  .drawer-head { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 10px 6px 14px; }
+  .drawer-head h2 { margin:0; font:600 15px/1.2 Georgia,serif; letter-spacing:.03em; }
+  .drawer-head button { padding:2px 9px; font-size:15px; line-height:1.2; }
+  .settings-tabs { display:flex; gap:3px; margin:0 12px; padding:3px; border-radius:11px; background:rgba(0,0,0,.28); }
+  .settings-tabs button { flex:1; height:30px; padding:0 6px; border-color:transparent; background:transparent; color:var(--ink2); font-size:12.5px; font-weight:600; }
+  .settings-tabs button[aria-selected=true] { background:var(--accent); color:var(--accent-ink); }
+  .settings-content { padding:4px 14px 12px; overflow:auto; flex:1; min-height:0; }
+  .settings-content::-webkit-scrollbar { width:8px; } .settings-content::-webkit-scrollbar-thumb { background:var(--line); border-radius:4px; }
+  .settings-footer { display:flex; align-items:center; gap:10px; border-top:1px solid var(--line); padding:10px 12px; }
+  #settingsFeedback { flex:1; min-width:0; font-size:11px; color:var(--ink2); }
+  #settingsFeedback.dirty { color:#ffc48f; }
+  .settings-footer > button { padding:8px 14px; font-weight:700; background:linear-gradient(#f0c46c, #d39a39); border-color:#f6d98f; }
+  .sub { margin:14px 0 4px; font-size:10.5px; letter-spacing:.14em; text-transform:uppercase; color:var(--accent); font-weight:700; }
+  .sub:first-child { margin-top:8px; }
+  .generate { width:100%; margin-top:12px; }
+  #extentControls input { width:100%; }
+  #settlWarn { margin-top:8px; }
+
+  /* settlements: segmented composition, a theme card, then one card per settlement; the editor opens inside the selected card */
+  .seg { display:flex; gap:3px; padding:3px; margin-top:8px; border-radius:10px; background:rgba(0,0,0,.28); }
+  .seg button { flex:1; height:28px; padding:0 4px; border-color:transparent; background:transparent; color:var(--ink2); font-size:12px; font-weight:600; }
+  .seg button[aria-pressed=true] { background:rgba(230,180,85,.22); color:var(--ink); border-color:var(--accent); }
+  .card { margin-top:8px; border:1px solid var(--line); border-radius:11px; background:rgba(255,255,255,.03); }
+  .card.sel { border-color:var(--accent); background:rgba(230,180,85,.07); }
+  .card-head { display:flex; align-items:center; gap:7px; padding:6px 6px 6px 8px; }
+  .card-main { flex:1; min-width:0; display:flex; align-items:center; gap:8px; padding:0; border:0; background:none; color:var(--ink); text-align:left; white-space:normal; }
+  .card-main:hover { filter:none; }
+  .card-main .txt { min-width:0; }
+  .card-main b { display:block; font-size:12.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .card-main small { display:block; font-size:10.5px; color:var(--ink2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .badge { flex:none; display:grid; place-items:center; width:22px; height:22px; border-radius:50% 50% 50% 4px; transform:rotate(-45deg); background:#6b4b22; border:1.5px solid #f3ead2; color:#fff; font:700 10.5px/1 system-ui,sans-serif; }
+  .badge > span { transform:rotate(45deg); }
+  .badge.theme { border-radius:7px; transform:none; background:rgba(230,180,85,.25); border-color:var(--accent); }
+  .badge.theme > span { transform:none; }
+  .card.sel .badge:not(.theme) { background:var(--accent); color:var(--accent-ink); }
+  .card-tools { display:flex; gap:3px; flex:none; }
+  .card-body { padding:0 10px 10px; border-top:1px solid var(--line); }
+  .auto-block { padding:8px 10px 9px; }
+  .auto-row { display:flex; align-items:flex-end; gap:8px; }
+  .auto-row label { margin-top:0; }
+  .auto-row button { height:28px; font-weight:700; }
+  .places-head { display:flex; align-items:flex-end; justify-content:space-between; margin-top:6px; }
+  .places-head .sub { margin-bottom:0; }
+  .chips { display:flex; flex-wrap:wrap; gap:3px; }
+  .chips button { padding:3px 7px; font-size:11.5px; border-radius:7px; background:transparent; color:var(--ink2); border-color:var(--line); }
+  .chips button[aria-pressed=true] { background:rgba(230,180,85,.22); color:var(--ink); border-color:var(--accent); }
+  #settlAdd { width:100%; margin-top:8px; border-style:dashed; padding:7px; }
+  #themeHint { margin:6px 2px 0; }
+  .editor-head { display:flex; justify-content:flex-end; gap:6px; margin-top:8px; }
+  .editor-head:empty { display:none; }
+  #positionControls { display:grid; grid-template-columns:1fr 1fr; gap:4px 6px; }
+  #positionControls > label, #positionControls > .row, #positionControls > .hint { grid-column:1 / -1; }
+  #positionControls > label { margin-bottom:0; }
+  #positionControls > .hint { margin:0; font-size:11px; }
+  #planExtra { display:grid; grid-template-columns:1fr 1fr; gap:0 8px; }
+  #planExtra > .cell { min-width:0; }
+  #planExtra > .full { grid-column:1 / -1; }
+  #cultureOverrides h4 { margin:14px 0 2px; font-size:10.5px; letter-spacing:.14em; text-transform:uppercase; color:var(--accent); }
+  #cultureOverrides .check { padding:4px 0; }
+  #cultureOverrides .row { margin-top:5px; }
+  #cultureOverrides .row select { padding-left:4px; padding-right:2px; font-size:12px; }
+
+  /* ---------- paper dialogs ---------- */
+  dialog { color:var(--ink); background:var(--panel); border:1px solid var(--line); border-radius:14px; box-shadow:0 20px 70px #0006; font:14px/1.4 Georgia,'Times New Roman',serif; }
+  dialog::backdrop { background:#17130db3; }
+  dialog button { border-radius:5px; font-size:14px; }
+  .settings-header { display:flex; align-items:flex-start; gap:20px; justify-content:space-between; padding:18px 22px 12px; }
+  .settings-header h2 { margin:0; font-size:22px; }
+  .settings-header .hint { margin-top:4px; font-size:13px; }
+  #mapInfoDialog { padding:0; width:min(620px, calc(100vw - 20px)); max-height:calc(100dvh - 20px); }
+  #mapInfoDialog::backdrop { background:rgba(15,11,19,.55); }
+  #mapInfoDialog .settings-header { padding:16px; }
+  #mapInfoContent { display:flex; flex-wrap:wrap; justify-content:center; align-items:flex-start; gap:16px; padding:8px 16px 20px; overflow:auto; }
+  #mapInfoContent svg { display:block; width:100%; max-width:350px; height:auto; }
+
+  @media (max-width: 900px) { #tools .lbl { display:none; } }
+  /* phones: a slimmer rail, the drawer becomes a bottom sheet, the corner keeps only the essentials */
   @media (max-width: 640px) {
-    #topbar { padding:8px 10px; gap:8px; align-items:flex-start; }
-    .brand h1 { font-size:19px; }
-    .brand span { display:none; }
-    .topbar-actions { flex-wrap:wrap; justify-content:flex-end; gap:5px; }
-    .topbar-actions > button, .toolbar-menu > summary { padding:6px 8px; font-size:12px; }
-    #panel { width:calc(100vw - 12px); height:calc(100dvh - 12px); border-radius:10px; }
-    .settings-header { padding:16px 14px 12px; gap:10px; }
-    .settings-header h2 { font-size:22px; }
-    .settings-tabs { padding:0 10px 10px; gap:2px; overflow-x:auto; flex:none; }
-    .settings-tabs button { font-size:12px; padding:8px; }
-    .settings-content { padding:14px; }
-    .settings-footer { padding:12px 14px; flex-wrap:wrap; }
-    .settings-footer button { width:100%; }
-    .workflow-step { padding:14px; }
-    #planExtra { grid-template-columns:1fr; gap:4px; }
-    #planExtra label { margin-top:10px; }
-    .settlement-choice { flex-direction:column; gap:3px; }
-    #minimap { right:8px; bottom:8px; width:64px; height:64px; }
-    #fit { right:54px; top:8px; }
-    #pinMode { right:8px; top:8px; }
-    #coords { right:8px; top:42px; font-size:10px; }
-    #hud { display:none; }
-    #busy { top:76px; right:8px; }
-    #mapMessages { left:8px; bottom:8px; max-width:calc(100vw - 110px); font-size:11px; }
-    #addSettlementForm { padding:0 16px 18px; }
+    :root { --dot:17px; --rail:66px; }
+    #tools { right:8px; top:8px; padding:3px; gap:2px; }
+    #tools > button, .toolbar-menu > summary { padding:0 7px; }
+    #rail { right:8px; top:50px; padding:5px 4px; max-height:calc(100% - 58px - 84px); }
+    .tile { padding:6px 2px; }
+    .tile .lbl { display:none; }
+    .dock-row { gap:4px; }
+    #corner { right:8px; bottom:8px; gap:6px; }
+    #miniFrame { width:64px; height:64px; }
+    #fit { right:2px; top:2px; width:20px; height:20px; }
+    #mapMessages { max-width:calc(100vw - 100px); }
+    #app.drawer-open #mapMessages { margin-right:0; }
+    #status, #generationIdentity, #coords { display:none !important; }
+    #panel { top:auto; left:8px; right:8px; bottom:8px; width:auto; max-width:none; max-height:74dvh; transform:translateY(24px); }
+    #panel.open { transform:none; }
   }
-  @media (max-height: 420px) {
-    #minimap { right:8px; bottom:8px; width:64px; height:64px; }
-    #fit { right:54px; top:8px; } #pinMode { right:8px; top:8px; }
-    #coords { right:8px; top:42px; font-size:10px; } #hud { display:none; }
-    #busy { top:76px; right:8px; }
+  @media (max-height: 520px) {
+    #miniFrame { width:72px; height:72px; }
+    #rail { max-height:calc(100% - 58px - 90px); }
   }
   @media (prefers-reduced-motion: reduce) { * { animation:none !important; transition:none !important; } }
 </style>
 </head>
 <body>
 <div id="app">
-  <header id="topbar">
-    <div class="brand"><h1>Burgmap</h1><span>Settlements &amp; landscapes</span></div>
-    <div class="topbar-actions">
-      <button id="newMap" type="button" title="Generate a new seed with the applied settings">New map</button>
-      <button id="menuBtn" type="button" class="secondary" aria-controls="panel" aria-expanded="false" aria-haspopup="dialog">Customize</button>
-      <button id="mapInfoButton" type="button" class="secondary" aria-controls="mapInfoDialog" aria-haspopup="dialog" disabled>Map info</button>
-    <details class="toolbar-menu" id="sec-pins"><summary>Pins</summary><div class="body">
-      <div class="btns"><button id="pinModeBtn" class="secondary" title="Click the map to drop pins (or Alt-click)">Pin mode</button><button id="pinsClear" class="secondary" title="Remove all pins">Clear all</button></div>
-      <div id="pinList"></div>
-      <div class="hint">Pins and the view are saved in the link only; they never change the map.</div>
-    </div></details>
-
-      <details class="toolbar-menu" id="quickShare"><summary>Share &amp; export</summary><div class="body" id="quickShareBody"><div id="shareControls"><h3>Share this map</h3><p class="hint">Links and exports use the applied map. Your unfinished settings stay in Customize.</p><div class="btns"><button id="copyLink" class="secondary" title="Copy this map, pins and current view">Copy link</button><button id="copyId" class="secondary" title="Copy the compact ID containing this map configuration and seed">Copy ID</button><button id="copyBug" class="secondary" title="Copy a bug report with reproduction options and pins">Copy bug report</button></div><div id="shareState" class="hint"></div><h3>Download</h3>    <div class="btns"><button id="exportSvg">Export SVG</button><button id="exportPng">Export PNG</button><button id="exportJson" class="secondary" title="World data (options + vector layers, no rasters) for other tools">Export JSON</button><button id="exportSvgFull" class="secondary" hidden title="Megacity: generate the detail of every quarter, then export the SVG (slow)">SVG, all quarters (slow)</button></div>
-</div></div></details>
+  <main id="map">
+    <div id="loadbar"><i></i></div><canvas id="view"></canvas><div id="marks"></div><div id="pins"></div><div id="pinpop" hidden></div>
+    <div id="tools" class="hud glass">
+      <button id="mapInfoButton" type="button" aria-controls="mapInfoDialog" aria-haspopup="dialog" aria-label="Map info and legend" title="Map info and legend" disabled><svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg></button>
+      <details class="toolbar-menu" id="sec-pins"><summary title="Pins"><svg class="ico" viewBox="0 0 24 24"><path d="M12 21s6-5.4 6-10a6 6 0 10-12 0c0 4.6 6 10 6 10z"/><circle cx="12" cy="11" r="2"/></svg><span class="lbl">Pins</span></summary><div class="body">
+        <div class="btns"><button id="pinModeBtn" class="secondary" title="Click the map to drop pins (or Alt-click)">Pin mode</button><button id="pinsClear" class="secondary" title="Remove all pins">Clear all</button></div>
+        <div id="pinList"></div>
+        <div class="hint">Pins and the view are saved in the link only; they never change the map.</div>
+      </div></details>
+      <details class="toolbar-menu" id="quickShare"><summary title="Share and export"><svg class="ico" viewBox="0 0 24 24"><path d="M12 4v11M7 11l5 5 5-5M5 20h14"/></svg><span class="lbl">Share &amp; export</span></summary><div class="body" id="quickShareBody"><div id="shareControls">
+        <h3>Map ID</h3>
+        <div id="mapIdBox" title="The one identifier of this map: settings and seed. Paste it below (or in a link as ?id=...) to get the same map back."></div>
+        <div class="btns"><button id="copyId" class="secondary" title="Copy the compact ID containing this map configuration and seed">Copy ID</button><button id="copyLink" class="secondary" title="Copy this map, pins and current view">Copy link</button><button id="copyBug" class="secondary" title="Copy a bug report with reproduction options and pins">Copy bug report</button></div>
+        <form id="openIdForm" class="row" style="margin-top:8px"><input id="openIdInput" type="text" spellcheck="false" placeholder="Paste a map ID or link" aria-label="Map ID or link to open"><button id="openId" type="submit">Open</button></form>
+        <div id="openIdState" class="hint"></div>
+        <div id="shareState" class="hint"></div>
+        <h3>Download</h3><div class="btns"><button id="exportSvg">Export SVG</button><button id="exportPng">Export PNG</button><button id="exportJson" class="secondary" title="World data (options + vector layers, no rasters) for other tools">Export JSON</button><button id="exportSvgFull" class="secondary" hidden title="Megacity: generate the detail of every quarter, then export the SVG (slow)">SVG, all quarters (slow)</button></div>
+      </div></div></details>
     </div>
-  </header>
+    <nav id="rail" class="hud glass" aria-label="Map actions">
+      <button id="newMap" type="button" class="tile primary" title="A new seed with the applied settings"><svg class="ico" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3.5"/><circle cx="9" cy="9" r="1" fill="currentColor"/><circle cx="15" cy="9" r="1" fill="currentColor"/><circle cx="9" cy="15" r="1" fill="currentColor"/><circle cx="15" cy="15" r="1" fill="currentColor"/></svg><span class="lbl">New map</span></button>
+      <button id="surprise" type="button" class="tile" title="Random biome, culture, size and seed"><svg class="ico" viewBox="0 0 24 24"><path d="M11 3l1.9 5.6L18.5 10.5l-5.6 1.9L11 18l-1.9-5.6L3.5 10.5l5.6-1.9z"/><path d="M19 15l.8 2.2 2.2.8-2.2.8L19 21l-.8-2.2-2.2-.8 2.2-.8z"/></svg><span class="lbl">Surprise</span></button>
+      <button id="menuBtn" type="button" class="tile" aria-controls="panel" aria-expanded="false" title="Customize the world and its settlements"><svg class="ico" viewBox="0 0 24 24"><path d="M4 7h9M19 7h1M4 17h1M11 17h9"/><circle cx="16" cy="7" r="2.5"/><circle cx="8" cy="17" r="2.5"/></svg><span class="lbl">Customize</span></button>
+      <div id="dock"></div>
+    </nav>
+    <div id="corner" class="hud">
+      <div id="mapMessages"><div id="placementPrompt" hidden>Click the map to place it <button id="cancelPlacement" type="button" class="secondary small">Cancel</button></div><div id="draftState" role="status" aria-live="polite"></div><div id="settlWarn" class="hint"></div><div id="status" role="status" aria-live="polite"></div><div id="progress" aria-label="Working"><i></i></div><div id="gentime"></div><div id="generationIdentity" title="Map ID (click to copy)"></div></div>
+      <div id="coords" aria-label="Cursor position"><span id="coordText">x  –
+y  –</span><button id="coordCopy" type="button" tabindex="-1">Copy</button></div>
+      <div id="miniFrame"><canvas id="minimap"></canvas><button id="fit" type="button" title="Fit the whole map (0)" aria-label="Fit the whole map"><svg class="ico" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button></div>
+    </div>
+    <div id="hud"></div><button id="pinMode" type="button" tabindex="-1">Pin</button><div id="busy">generating...</div>
+  </main>
+
+  <aside id="panel" class="glass" aria-labelledby="settingsTitle">
+    <div class="drawer-head"><h2 id="settingsTitle">Customize</h2><button id="closeSettings" type="button" class="secondary" aria-label="Close customize panel" title="Close (Esc)">&times;</button></div>
+    <div class="settings-tabs" role="tablist" aria-label="Map settings">
+      <button id="environmentTab" type="button" role="tab" data-tab="environmentPane" aria-controls="environmentPane" aria-selected="false" tabindex="-1">World</button>
+      <button id="settlementsTab" type="button" role="tab" data-tab="settlementsPane" aria-controls="settlementsPane" aria-selected="true">Settlements</button>
+      <button id="appearanceTab" type="button" role="tab" data-tab="appearancePane" aria-controls="appearancePane" aria-selected="false" tabindex="-1">Look</button>
+    </div>
+    <div class="settings-content">
+      <div id="environmentPane" role="tabpanel" aria-labelledby="environmentTab" hidden>
+        <section id="sec-terrain">
+          <label for="seed">Seed</label>
+          <div class="row"><input id="seed" type="text" spellcheck="false"><button id="dice" type="button" class="secondary" title="Choose a random seed (R)">Random</button></div>
+          <div class="g2">
+            <div class="full"><label for="biome">Biome</label><select id="biome"></select></div>
+            <div><label for="relief">Relief</label><select id="relief"></select></div>
+            <div id="extentControls"><label for="mapSize">Extent (m)</label><input id="mapSize" type="number" min="600" max="40000" step="100"></div>
+            <div><label for="coast">Coast</label><select id="coast"></select></div>
+            <div><label for="river">Rivers</label><select id="river"></select></div>
+            <div class="full"><label for="seaLevel">Coastal water level</label><input id="seaLevel" type="range" min="-1" max="1" step="0.05" value="0"></div>
+          </div>
+          <details class="sec"><summary>Import terrain</summary><div class="body">
+            <button id="hmImport" class="secondary" style="width:100%">Import heightmap (PNG/JPG)</button>
+            <input id="hmFile" type="file" accept="image/png,image/jpeg,image/*" hidden>
+            <div class="row" style="align-items:center;justify-content:space-between;margin-top:6px"><span id="hmInfo" class="hint" style="margin:0"></span><button id="hmClear" class="secondary small" hidden>Remove</button></div>
+            <div id="hmParams" hidden><label for="hmScale">Vertical scale (m, white pixel)</label><input id="hmScale" type="number" min="1" max="9000" step="any"><label for="hmSea">Sea level (m)</label><input id="hmSea" type="number" min="-1000" max="9000" step="any"></div>
+          </div></details>
+          <button id="generateEnvironment" class="generate secondary" type="button" title="Generate the landscape alone, before adding settlements">Generate terrain only</button>
+        </section>
+      </div>
+      <div id="settlementsPane" role="tabpanel" aria-labelledby="settlementsTab">
+        <section id="sec-settlement">
+          <select id="settlMode" class="sr-only" aria-label="Composition" tabindex="-1"><option value="automatic">Automatic region</option><option value="list">My places</option></select>
+          <div class="card" id="themeCard">
+            <div class="card-head"><button type="button" class="card-main" id="editTheme" title="Theme culture, place names and the default layout of every place"><span class="badge theme"><span>&#9881;</span></span><span class="txt"><b id="themeTitle">General</b><small id="themeSummary"></small></span></button></div>
+            <div class="card-body" id="themeSlot"></div>
+          </div>
+          <div class="card auto-block">
+            <div class="auto-row"><div class="cell"><label for="autoPop">Target population</label><input id="autoPop" type="number" min="10" max="5000000" step="1" value="3000"></div><button id="autoGenerate" type="button">Generate places</button></div>
+            <p class="hint">A town of this size, with its villages, hamlets and farms placed around it. Or add the places one by one below.</p>
+          </div>
+          <div class="places-head"><div class="sub" id="placesTitle">Places</div><button id="settlClear" type="button" class="secondary small" title="Empty the list and start with a single place">Start from scratch</button></div>
+          <div id="themeHint" class="hint"></div>
+          <div id="settlementChoices"></div>
+          <div id="compositionActions"><button id="settlAdd" type="button" class="secondary" title="Add a place: name it, then place it on the map or let it find its site">+ Add a place</button></div>
+          <div id="settlementEditor">
+            <div id="nameRow"><label for="settlName">Name</label><input id="settlName" type="text" maxlength="60" spellcheck="false" placeholder="Generated name"></div>
+            <div class="row" id="kindRow"><div class="cell"><label for="size">Type</label><select id="size"></select></div><div class="cell"><label for="population">Population</label><input id="population" type="number" min="0" max="5000000" step="1"></div></div>
+            <label for="culture">Culture</label><select id="culture"></select>
+            <div id="langRow"><label for="language">Place names</label><select id="language"></select></div>
+            <div id="positionControls"></div>
+            <div id="siteCell"><label for="siteType">Site</label><select id="siteType"></select></div>
+            <details class="sec" id="sec-plan"><summary>Style mix, layout &amp; landmarks</summary><div class="body">
+              <div id="cultureOverrides"></div>
+              <div class="sub">Layout &amp; landmarks</div>
+              <div id="roadsCell"><label for="roads">Regional road exits</label><select id="roads"></select></div>
+              <div id="planExtra"></div>
+            </div></details>
+            <div class="editor-head" id="editorTools"><button id="inheritTheme" type="button" class="secondary small" title="Drop this place's own choices and follow the general settings again">Reset to general</button></div>
+            <h3 id="settlementEditorHeading" class="sr-only"></h3>
+            <button id="settlRemove" type="button" class="sr-only" tabindex="-1">Remove</button>
+          </div>
+        </section>
+      </div>
+      <div id="appearancePane" role="tabpanel" aria-labelledby="appearanceTab" hidden>
+        <section id="sec-map">
+          <label for="style" style="margin-top:6px">Style</label><select id="style"></select>
+          <p class="hint">Style and layers update the map immediately (the dots on the right rail switch style in one click).</p>
+          <div class="sub">Layers</div>
+          <label class="check"><input id="paintedTextures" type="checkbox"><span>Painted natural textures</span></label>
+          <label class="check"><input id="contours" type="checkbox"><span>Contour lines</span></label>
+          <label class="check"><input id="landuse" type="checkbox"><span>Land use (fields, woods...)</span></label>
+          <label class="check"><input id="labels" type="checkbox"><span>Names (labels)</span></label>
+          <label class="check"><input id="legend" type="checkbox"><span>Legend</span></label>
+        </section>
+      </div>
+    </div>
+    <div class="settings-footer"><div id="settingsFeedback">Changes apply when you generate.</div><button id="generateSettlements" type="button" title="Apply every pending change and generate the map">Apply &amp; generate</button></div>
+  </aside>
+
   <dialog id="mapInfoDialog" aria-labelledby="mapInfoTitle">
     <div class="settings-header"><div><h2 id="mapInfoTitle">Map info &amp; legend</h2><p class="hint">The title and symbols of the displayed map.</p></div><button id="closeMapInfo" type="button" class="secondary">Close</button></div>
     <div id="mapInfoContent"></div>
   </dialog>
-  <dialog id="panel" aria-labelledby="settingsTitle" aria-describedby="settingsHint">
-    <div class="settings-header"><div><h2 id="settingsTitle">Make it your world</h2><p id="settingsHint" class="hint">Choose a few essentials or tune every detail. Generate when you're ready.</p></div><button id="closeSettings" type="button" class="secondary" aria-label="Close settings">Close</button></div>
-    <div class="settings-tabs" role="tablist" aria-label="Map settings">
-      <button id="environmentTab" type="button" role="tab" data-tab="environmentPane" aria-controls="environmentPane" aria-selected="false" tabindex="-1">Environment</button>
-      <button id="settlementsTab" type="button" role="tab" data-tab="settlementsPane" aria-controls="settlementsPane" aria-selected="true">Settlements</button>
-      <button id="appearanceTab" type="button" role="tab" data-tab="appearancePane" aria-controls="appearancePane" aria-selected="false" tabindex="-1">Appearance</button>
-      <button id="shareTab" type="button" role="tab" data-tab="sharePane" aria-controls="sharePane" aria-selected="false" tabindex="-1">Share &amp; export</button>
-    </div>
-    <div class="settings-content">
-      <div id="environmentPane" role="tabpanel" aria-labelledby="environmentTab" hidden>
-        <div class="seed-controls"><label for="seed">Seed</label><div class="row"><input id="seed" type="text" spellcheck="false"><button id="dice" type="button" class="secondary" title="Choose a random seed (R)">Random</button></div><p class="hint">The same seed and settings reproduce the same map.</p></div>
-    <section class="workflow-step" id="sec-terrain" aria-labelledby="environmentHeading">
-      <h2 id="environmentHeading">Environment</h2>
-      <p class="hint">Shape your landscape, or generate it on its own before adding settlements.</p>
-      <div id="extentControls"><label for="mapSize">Map extent (m)</label><input id="mapSize" type="number" min="600" max="40000" step="100"></div>
-      <label for="biome">Landscape &amp; biome</label><select id="biome"></select>
-      <label for="relief">Relief</label><select id="relief"></select>
-      <div class="row"><div style="flex:1"><label for="coast">Coast</label><select id="coast"></select></div><div style="flex:1"><label for="river">Rivers</label><select id="river"></select></div></div>
-      <label for="seaLevel">Coastal water level</label><input id="seaLevel" type="range" min="-1" max="1" step="0.05" value="0">
-      <details class="sec"><summary>Import terrain</summary><div class="body">
-        <button id="hmImport" class="secondary" style="width:100%">Import heightmap (PNG/JPG)</button>
-        <input id="hmFile" type="file" accept="image/png,image/jpeg,image/*" hidden>
-        <div class="row" style="align-items:center;justify-content:space-between;margin-top:6px"><span id="hmInfo" class="hint" style="margin:0"></span><button id="hmClear" class="secondary small" hidden>Remove</button></div>
-        <div id="hmParams" hidden><label for="hmScale">Vertical scale (m, white pixel)</label><input id="hmScale" type="number" min="1" max="9000" step="any"><label for="hmSea">Sea level (m)</label><input id="hmSea" type="number" min="-1000" max="9000" step="any"></div>
-      </div></details>
-      <button id="generateEnvironment" class="generate" type="button">Generate environment</button>
-    </section>
-
-      </div>
-      <div id="settlementsPane" role="tabpanel" aria-labelledby="settlementsTab">
-    <section class="workflow-step" id="sec-settlement" aria-labelledby="settlementsHeading">
-      <h2 id="settlementsHeading">Settlements</h2>
-      <p class="hint">Build an automatic region or configure each settlement yourself.</p>
-      <label for="settlMode">Composition</label><select id="settlMode"><option value="automatic">Automatic region</option><option value="list">Individual settlements</option></select>
-      <div id="settlementChoices"></div>
-      <div class="btns" id="compositionActions"><button id="settlAdd" type="button" class="secondary">+ Add settlement</button><button id="settlRemove" type="button" class="secondary small">Remove selected</button></div>
-      <div id="settlementEditor">
-        <h3 id="settlementEditorHeading">Main settlement</h3>
-        <div class="row"><div style="flex:1"><label for="size">Type</label><select id="size"></select></div><div style="flex:1"><label for="population">Population</label><input id="population" type="number" min="0" max="5000000" step="1"></div></div>
-        <label for="culture">Culture of this settlement</label><select id="culture"></select>
-        <label for="language">Place-name language</label><select id="language"></select>
-        <label for="siteType">Site</label><select id="siteType"></select>
-        <div id="positionControls"></div>
-        <details class="sec" id="sec-plan"><summary>Layout &amp; landmarks</summary><div class="body">
-          <label for="roads">Regional road exits</label><select id="roads"></select>
-          <div id="planExtra"></div><div id="cultureOverrides"></div>
-        </div></details>
-      </div>
-
-
-    </section>
-      </div>
-      <div id="appearancePane" role="tabpanel" aria-labelledby="appearanceTab" hidden>
-    <section class="workflow-step" id="sec-map"><h2>Appearance</h2><p class="hint">Style and layers update the displayed map immediately.</p>
-      <label for="style">Style</label><select id="style"></select>
-      <label class="check"><input id="paintedTextures" type="checkbox"><span>Painted natural textures</span></label>
-      <label class="check"><input id="contours" type="checkbox"><span>Contour lines</span></label>
-      <label class="check"><input id="landuse" type="checkbox"><span>Land use (fields, woods...)</span></label>
-      <label class="check"><input id="labels" type="checkbox"><span>Names (labels)</span></label>
-      <label class="check"><input id="legend" type="checkbox"><span>Legend</span></label>
-    </section>
-
-      </div>
-      <div id="sharePane" role="tabpanel" aria-labelledby="shareTab" hidden></div>
-    </div>
-    <div class="settings-footer"><div id="settingsFeedback"><p class="hint">Environment and settlement changes apply when you generate.</p></div><button id="generateSettlements" type="button">Apply &amp; generate map</button></div>
-  </dialog>
-  <dialog id="addSettlementDialog" aria-labelledby="addSettlementTitle">
-    <div class="settings-header"><div><h2 id="addSettlementTitle">Add a settlement</h2><p class="hint">Choose its own culture and location. The general theme stays the same.</p></div><button id="cancelAddSettlement" type="button" class="secondary">Cancel</button></div>
-    <form id="addSettlementForm">
-      <div class="row"><div><label for="addSettlementType">Type</label><select id="addSettlementType"></select></div><div><label for="addSettlementPopulation">Population</label><input id="addSettlementPopulation" type="number" min="10" max="5000000" step="1" value="300" required></div></div>
-      <label for="addSettlementCulture">Culture</label><select id="addSettlementCulture"></select>
-      <p class="hint">This culture belongs only to the new settlement. To mix cultures within one settlement, use Historical mix in its layout settings.</p>
-      <fieldset><legend>Position</legend><label class="check"><input type="radio" name="addPlacement" value="automatic" checked>Find a suitable place automatically</label><label class="check"><input type="radio" name="addPlacement" value="manual">Choose a place on the map</label></fieldset>
-      <div class="btns"><button id="confirmAddSettlement" type="submit">Add settlement</button></div>
-    </form>
-  </dialog>
-  <div id="mapMessages"><div id="placementPrompt" hidden>Click the map to place the selected settlement. <button id="cancelPlacement" type="button" class="secondary small">Cancel</button></div><div id="draftState" role="status" aria-live="polite"></div><div id="settlWarn" class="hint"></div><div id="status" role="status" aria-live="polite"></div><div id="progress" aria-label="Working"><i></i></div><div id="gentime"></div><div id="generationIdentity"></div></div>
-  <main id="map"><div id="loadbar"><i></i></div><canvas id="view"></canvas><canvas id="minimap"></canvas><div id="pins"></div><div id="pinpop" hidden></div><div id="coords"><span id="coordText">x -, y - m</span><button id="coordCopy" class="secondary small" title="Copy x,y of the last click (or the cursor)">Copy</button></div><div id="hud"></div><button id="pinMode" class="secondary" title="Pin mode: click to drop a pin (or Alt-click)">Pin</button><button id="fit" class="secondary" title="Fit map (0)">Fit</button><div id="busy">generating...</div></main>
 </div>
 <script type="module" src="./main.ts"></script>
 </body>

@@ -139,6 +139,23 @@ export interface SettlementSpec {
   position?: { x: number; y: number };
   /** Town controls specific to this instance. Unspecified values inherit the general theme in list mode. */
   options?: SettlementOverrides;
+  /** Name chosen by the user, replacing the generated toponym (labels only; the plan is unchanged). */
+  name?: string;
+  /**
+   * Generation key of a settlement taken over from an automatic region ('village:2'...): it keeps that
+   * settlement's random streams, so the listed region reproduces the automatic one. Default: its list index.
+   */
+  key?: string;
+}
+/** Keys an automatic region gives its secondary settlements. */
+export const SETTLEMENT_KEY = /^[a-z]+:\d{1,4}$/;
+/** Longest accepted settlement name. */
+export const SETTLEMENT_NAME_MAX = 60;
+/** Trimmed, single-line, bounded; undefined when empty. */
+export function cleanSettlementName(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const name = value.replace(/\s+/g, ' ').trim().slice(0, SETTLEMENT_NAME_MAX);
+  return name || undefined;
 }
 export type SettlementOverrides = Partial<Pick<Options,
   'size' | 'sitePrefs' | 'walls' | 'moat' | 'castles' | 'castle' | 'cathedral' | 'palace' |
@@ -232,8 +249,14 @@ export function settlementListToString(list: SettlementSpec[]): string {
       return value;
     });
     while (values.length && values[values.length - 1] == null) values.pop();
-    return [spec.population, spec.culture ?? null, spec.siteType ?? null,
+    const row: unknown[] = [spec.population, spec.culture ?? null, spec.siteType ?? null,
       spec.position?.x ?? null, spec.position?.y ?? null, values];
+    // appended only when set, so unnamed lists keep their former links and identities
+    const name = cleanSettlementName(spec.name);
+    const key = spec.key && SETTLEMENT_KEY.test(spec.key) ? spec.key : undefined;
+    if (name || key) row.push(name ?? null);
+    if (key) row.push(key);
+    return row;
   }));
 }
 
@@ -305,7 +328,7 @@ export function settlementListFromString(value: string | null): SettlementSpec[]
   const list: SettlementSpec[] = [];
   for (const row of parsed.slice(0, 2000)) {
     if (!Array.isArray(row)) continue;
-    const [population, culture, siteType, x, y, overrides] = row;
+    const [population, culture, siteType, x, y, overrides, name, key] = row;
     if (typeof population !== 'number' || !Number.isFinite(population) || population <= 0) continue;
     const spec: SettlementSpec = { population: Math.max(POP_MIN, Math.min(POP_MAX, Math.round(population))) };
     if (typeof culture === 'string' && CULTURE_IDS.includes(culture)) spec.culture = culture;
@@ -315,6 +338,9 @@ export function settlementListFromString(value: string | null): SettlementSpec[]
     }
     const parsedOverrides = validOverrides(overrides);
     if (parsedOverrides) spec.options = parsedOverrides;
+    const cleanName = cleanSettlementName(name);
+    if (cleanName) spec.name = cleanName;
+    if (typeof key === 'string' && SETTLEMENT_KEY.test(key)) spec.key = key;
     list.push(spec);
   }
   return list;

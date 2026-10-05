@@ -1,40 +1,51 @@
-/** Native modal settings with keyboard navigation and temporary map placement. */
+/** The Customize drawer: a compact, non-modal panel beside the map (a bottom sheet on phones). */
 export function initConfiguration(cancelPick: () => void): {
   open(tab?: string): void;
   close(): void;
+  readonly isOpen: boolean;
+  readonly tab: string;
+  toggle(): void;
   picking(active: boolean): void;
 } {
-  const dialog = document.getElementById('panel') as HTMLDialogElement;
+  const panel = document.getElementById('panel') as HTMLElement;
   const trigger = document.getElementById('menuBtn') as HTMLButtonElement;
-  const tabs = Array.from(dialog.querySelectorAll<HTMLButtonElement>('[role=tab]'));
-  const panes = Array.from(dialog.querySelectorAll<HTMLElement>('[role=tabpanel]'));
-  const share = document.getElementById('shareControls')!;
-  const quick = document.getElementById('quickShareBody')!;
-  const sharePane = document.getElementById('sharePane')!;
-  const messages = document.getElementById('mapMessages')!;
-  const feedback = document.getElementById('settingsFeedback')!;
-  const map = document.getElementById('map')!;
+  const tabs = Array.from(panel.querySelectorAll<HTMLButtonElement>('[role=tab]'));
+  const panes = Array.from(panel.querySelectorAll<HTMLElement>('[role=tabpanel]'));
   let returnFocus: HTMLElement | null = null;
   let suspended = false;
+  const sheet = window.matchMedia('(max-width: 640px)');
+  const isOpen = (): boolean => panel.classList.contains('open');
   function select(id: string): void {
     for (const tab of tabs) {
       const active = tab.dataset.tab === id;
       tab.setAttribute('aria-selected', String(active)); tab.tabIndex = active ? 0 : -1;
     }
     for (const pane of panes) pane.hidden = pane.id !== id;
-    if (dialog.open && id === 'sharePane') sharePane.append(share);
-    else quick.append(share);
+    panel.dispatchEvent(new Event('toggle'));
   }
   function open(tab?: string): void {
-    if (!dialog.open) {
-      returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : trigger;
-      dialog.showModal(); trigger.setAttribute('aria-expanded', 'true');
+    if (!isOpen()) {
+      returnFocus = document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : trigger;
+      panel.classList.add('open'); panel.inert = false;
+      trigger.setAttribute('aria-expanded', 'true');
+      panel.dispatchEvent(new Event('toggle'));
     }
-    feedback.append(messages);
-    select(tab ?? tabs.find((item) => item.getAttribute('aria-selected') === 'true')?.dataset.tab ?? 'environmentPane');
+    select(tab ?? tabs.find((item) => item.getAttribute('aria-selected') === 'true')?.dataset.tab ?? 'settlementsPane');
   }
-  function close(): void { suspended = false; cancelPick(); if (dialog.open) dialog.close(); }
-  trigger.addEventListener('click', () => open());
+  function hide(): void {
+    if (!isOpen()) return;
+    panel.classList.remove('open'); panel.inert = true;
+    trigger.setAttribute('aria-expanded', 'false');
+    panel.dispatchEvent(new Event('toggle'));
+  }
+  function close(): void {
+    suspended = false; cancelPick();
+    const wasOpen = isOpen();
+    hide();
+    if (wasOpen) returnFocus?.focus();
+  }
+  const toggle = (): void => { if (isOpen()) close(); else open(); };
+  trigger.addEventListener('click', toggle);
   document.getElementById('closeSettings')!.addEventListener('click', close);
   for (const [index, tab] of tabs.entries()) {
     tab.addEventListener('click', () => select(tab.dataset.tab!));
@@ -48,22 +59,24 @@ export function initConfiguration(cancelPick: () => void): {
       event.preventDefault(); select(tabs[next].dataset.tab!); tabs[next].focus();
     });
   }
-  dialog.addEventListener('cancel', (event) => { event.preventDefault(); close(); });
-  dialog.addEventListener('close', () => {
-    if (dialog.open) return;
-    quick.append(share); trigger.setAttribute('aria-expanded', 'false');
-    map.insertAdjacentElement('beforebegin', messages);
-    if (!suspended) returnFocus?.focus();
+  window.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape' || !isOpen() || event.defaultPrevented || document.querySelector('dialog[open]')) return;
+    // Esc first cancels a placement in progress (settlementsPanel), the next one closes the drawer
+    if (document.getElementById('map')!.classList.contains('picking')) return;
+    event.preventDefault(); close();
   });
   document.getElementById('cancelPlacement')!.addEventListener('click', cancelPick);
+  panel.inert = true;
   select('settlementsPane');
-  return { open, close,
+  return { open, close, toggle,
+    get isOpen() { return isOpen(); },
+    get tab() { return tabs.find((t) => t.getAttribute('aria-selected') === 'true')?.dataset.tab ?? ''; },
     picking(active) {
       document.getElementById('placementPrompt')!.hidden = !active;
-      if (active && dialog.open) { suspended = true; dialog.close(); }
+      // on phones the bottom sheet covers the map: it steps aside while a position is chosen, then comes back
+      if (active && isOpen() && sheet.matches) { suspended = true; hide(); }
       else if (!active && suspended) {
-        const originalFocus = returnFocus;
-        suspended = false; open('settlementsPane'); returnFocus = originalFocus;
+        suspended = false; open('settlementsPane');
         document.getElementById('centerPick')?.focus();
       }
     },

@@ -45,3 +45,22 @@ export function settlementComposition(theme: Options, individual: boolean): Opti
   return individual ? { ...theme, workflow: 'list', settlements: { list: list.length ? list : [mainSettlementSpec(theme)] } }
     : { ...theme, workflow: 'automatic', settlements: list.length ? theme.settlements : 'auto' };
 }
+
+/** A settlement of a displayed map, as the page knows it (worker summary or World). */
+export interface GeneratedPlace { key: string; name?: string; population: number; center: { x: number; y: number } }
+
+/**
+ * Take over an automatic region as an editable list: every place keeps its generation key, population, position and
+ * name, so generating the list reproduces the region; afterwards each place is edited like a hand-made one.
+ */
+export function regionAsList(theme: Options, places: GeneratedPlace[]): Options {
+  // exact positions: a rounded main centre would shift its site and redraw its plan
+  const at = (p: GeneratedPlace) => ({ x: p.center.x, y: p.center.y });
+  const main = places.find((p) => p.key === 'main');
+  const auto = { ...theme, workflow: 'automatic' as const };
+  const first: SettlementSpec = { ...mainSettlementSpec(auto), ...(main ? { position: at(main) } : {}), ...(main?.name ? { name: main.name } : {}) };
+  const rest = places.filter((p) => p.key !== 'main').map((p): SettlementSpec => ({
+    population: p.population, position: at(p), key: p.key, ...(p.name ? { name: p.name } : {}),
+  }));
+  return { ...theme, workflow: 'list', settlementMode: 'list', center: undefined, settlements: { list: [first, ...rest] } };
+}

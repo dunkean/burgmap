@@ -13,8 +13,6 @@ Agents: fix the open reports; parallel work is allowed. Remove a report after it
 
 ## List (written by the user)
 
-- les cadres sur petit ecran empietent sur la carte. Essaye de trouver une solution. → fixed in `79d5f0f`
-
 - Le problème de démarcation ville environnement vient de la ligne noire autour de la ville. Elle sert à rien vire là. Idem por les hameaux et extensions et le fait que les maison qui devraient être carrés soient coupés à la frontiere de la ville. Il faut garder le carré de la maison et qu'il déborde sur l'extérieur. En fait la fille avec enceinte coupe les maisons, celle sans, ne les coupe pas. Et tu remplis systématiquement les quatrier de gardens/yards et de fait le background est tout vert et ca peut choquer. Il serait bien que quelques quartier de la périphérique soit avec un background équivalent à lenvironnement. Regarde ce que tu peux faire pour améliorer ce visuel. Les background de jardins dans les villes doivent vraiment globalement être dans le style du biome. Par exemple une ville desertique comme tombouctou semble être construite à meme le desert. Vue de dessus, la ville ne se découpe pas, on ne voit que les maisons. J'aimerai qu'on puisse retrouver ca selon le biome et le type de ville. (Un citadelle est marquée parce que pavée ou autre, une tribu indienne dans la plain non, etc. etc.)
 
 État partiel du 2026-10-05 : bordures administratives supprimées et sols adaptés
@@ -24,3 +22,27 @@ offscreen/main/offline réussis. Les murs physiques et jardins irrigués restent
 préservés. Les maisons coupées restent ouvertes : huit dans la génération
 actuelle du cas muré seed 42 ; les essais locaux ne donnent aucun gain
 et ne sont pas intégrés. Voir [les résultats et limites](BUGFIXES_VISUAL_2026-10-05.md).
+
+- LEs gros batiment en espace bizarre. Ne pas hésiter à prendre tout le bat, à faire un trou au mileu et à couper un bout sur le coté.
+
+- Bugs: ville coupée vizarre dans la foret: https://dunkean.github.io/burgmap/?seed=owrcg3&relief=mountains&walls=none&culture=russian-kremlin&population=3000&port=yes&activities=yes&suburbs=many&shanty=many&seaLevel=0&mix=wizard-city%3A0.5%3Ablend&plan=eyJudWNsZXVzIjp7ImtpbmQiOiJtYXJrZXQifSwicGhhc2VzIjpbeyJtb3JwaG9sb2d5IjoicG9zYWQiLCJlbmNsb3N1cmUiOnsic2hhcGUiOiJvcmdhbmljIiwid2FsbCI6InBhbGlzYWRlIiwiZm9zc2lsIjoic3RyZWV0IiwidG93ZXJzIjoic3F1YXJlIn19LHsibW9ycGhvbG9neSI6ImNlbHRpYy1vcHBpZHVtLXRvd24iLCJlbmNsb3N1cmUiOnsic2hhcGUiOiJvdmFsIiwid2FsbCI6IndhbGwiLCJmb3NzaWwiOiJzdHJlZXQiLCJ0b3dlcnMiOiJzcXVhcmUifX0seyJtb3JwaG9sb2d5Ijoib3BwaWR1bSIsImVuY2xvc3VyZSI6eyJzaGFwZSI6ImNpcmNsZSIsIndhbGwiOiJ3YWxsIiwiZm9zc2lsIjoic3RyZWV0IiwidG93ZXJzIjoic3F1YXJlIn19XX0&map=2500&mode=a&uid=asg9qspnhnjy041hb7nqd3mko&pins=1031.4%2C1709.5%2C%3B1026.3%2C1955%2C&view=433.2%2C1761%2C0.7257
+
+- le mix avec elven forest en 2 ne marche pas.
+
+- il faut refondre une partie de la création de batimetns à la frontieres entre quartier. Y a des choix incohérents à pleins d'endroit. A détailler avec des pins pour l'agent (en particuliers dans wizard city)
+
+##FEATURES (a planifier - 1 prioritaire - 5 non prioritaire):
+3 - ruines: chaque style mais en ruine pour certains villages
+3 - 3d
+5 - Street view (3D + qwenImage)
+2 - accélerer encore et toujours
+2 - Répartition population et identification batiment + click pour propriétés
+4 - Edition des textes
+4 - Edition des formes de quartiers avec rendu interactif. Idem rivieres.
+1 - Revoir l'ui avec une barre de tools simples
+1 - revoir le contour des villes non fortifiées médiévale et le nombre de route qui finissent dans le vide
+2 - url en une seule chaine de caractères et ajout copier id
+2 - revoir les brush: ajouter des patterns, densités, des variations dans les biomes (pins, feuillus, etc.), améliorer la qualité des brushs, etc.
+1 - random customization (random settlement + biome)
+2 - hybrid culture par quartier
+4 - travailler le cultural mix

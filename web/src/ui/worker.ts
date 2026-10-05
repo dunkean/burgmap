@@ -6,7 +6,7 @@
  * - `export`: builds the SVG / JSON of the kept World here, so the page never blocks on it.
  * - legacy request `{ id, options }`: returns the whole World by structured clone (used when there is no render worker).
  */
-import { generate, generateSettlementDetail } from '../gen/pipeline';
+import { generate, generateSettlementDetail, createGenerationCache } from '../gen/pipeline';
 import type { Options } from '../gen/options';
 import type { World } from '../gen/types';
 import { renderSvg } from '../render/svg';
@@ -37,6 +37,8 @@ let lastId = -1;
 let lastPort: MessagePort | null = null;
 /** Megacity: the quarter detail queue of the kept World. */
 let quarters: QuarterQueue | null = null;
+/** Stages reused between runs (terrain on a biome change, the main town when only secondaries change). */
+const genCache = createGenerationCache();
 
 function doRun(m: GRun): void {
   const { id, options, port } = m;
@@ -48,7 +50,7 @@ function doRun(m: GRun): void {
     const world = generate(options, (stage: string) => {
       post({ type: 'stage', id, stage });
       // Keep the preceding map until the final scene, without cloning and preparing discarded stage snapshots.
-    });
+    }, { cache: genCache });
     lastWorld = world;
     port.postMessage({ type: 'world', gen: id, world: worldForRender(world), final: true, stage: 'done' } satisfies WorldMsg);
     post({
@@ -155,7 +157,7 @@ self.onmessage = (e: MessageEvent<GRequest | WorkerRequest>) => {
   try {
     const t0 = performance.now();
     quarters?.stop(); quarters = null;
-    const world = generate(options, (stage) => post({ id, stage }));
+    const world = generate(options, (stage) => post({ id, stage }), { cache: genCache });
     lastWorld = world; lastId = id; lastPort = null;
     post({ id, world, stats: world.stats, ms: Math.round(performance.now() - t0) });
   } catch (err) {

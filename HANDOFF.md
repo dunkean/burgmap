@@ -5,6 +5,33 @@ bugs and their evidence are recorded in [ROADMAP.md](ROADMAP.md).
 
 ## Current status
 
+- Compact share IDs (2026-10-05, local commit `d341f2e`): `?id=` now carries the seed and configuration
+  in a versioned binary/base64url format, optionally DEFLATE-compressed against a
+  frozen plan dictionary (`web/src/gen/mapId.ts`). Old links remain readable;
+  internal generation hashes stay unchanged. Share & export adds Copy ID, while
+  Copy link retains pins/view/brushes. The BUGS forest reproduction's configuration
+  shrinks from 716 to 140 characters. Validation: 31 focused tests, typecheck/build,
+  and offline Chromium copy/link/reload with the blueprint style; screenshot checked.
+  Evidence is in ignored `web/out/compact-id/`. Clean committed release passes 27
+  focused tests, typecheck/build and offline copy/link/reload. Integrated on local
+  master with all other working files preserved. User will push; not published.
+  No full-suite claim.
+
+- Game-style control UI (2026-10-06): right rail with New map / Surprise / Customize and
+  one-click biome, relief, coast, river and style dots; Pins / Share at the top right (Share
+  shows the single Map ID, copy and "open an ID or link"); info, x/y frame and minimap (with
+  Fit) in the bottom-right corner. Customize is a non-modal drawer: World / Settlements / Look.
+  Settlements: a General card (theme culture, place names, default layout), "Generate places"
+  from a target population, then the list of every place (main town included, no separate
+  main card). Touching a generated place takes the region over as an editable list
+  (`regionAsList`, workflowDraft.ts): each place keeps its generation `key` (new optional
+  `SettlementSpec.key`, 8th `set2` element) and exact position, so the list reproduces the
+  region (tests/settlements.region-list.test.ts). Places are added inline, renamed
+  (`SettlementSpec.name`, 7th element, `applyNameOverrides`), placed by site or by click,
+  dragged (`src/ui/marks.ts`) and deleted. Layout & landmarks use one-click chips (`chipify`,
+  controls.ts) over hidden selects. Generation cache (`GenerateOptions.cache`, kept by the
+  generation worker): terrain reused when only non-terrain options change, main town reused when
+  only secondary places change; World-identical (tests/pipeline.cache.test.ts).
 - Cavern tailoring (2026-10-05, source integrated; Pages queued): empty
   footprints and surface cultivation no longer force large cave rooms. Around
   75% of each river course has tight banks; seeded widening lengths, gaps and

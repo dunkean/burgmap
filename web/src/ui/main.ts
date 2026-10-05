@@ -1,5 +1,5 @@
+import { Options, SIZE_PRESETS, mapSizeOf, DEFAULT_ROADS, fromQuery, toQuery, wantsCustomHeight, DEFAULTS, withCulture, generationUid, SITE_ARCHETYPES, mapId } from '../gen/options';
 import { expandMapQuery } from '../gen/mapId';
-import { Options, SIZE_PRESETS, DEFAULT_ROADS, fromQuery, toQuery, wantsCustomHeight, DEFAULTS, withCulture, generationUid, SITE_ARCHETYPES, mapId } from '../gen/options';
 import { generate } from '../gen/pipeline';
 import { BRUSH_SOURCES } from '../render/assets/brushAssets';
 import { decodeBrushes, type BrushImages } from '../render/brushes';
@@ -12,7 +12,7 @@ import type { World } from '../gen/types';
 // CANVAS-VIEWER (end imports)
 import GenWorker from './worker?worker&inline';
 import type { WorkerResponse } from './worker';
-import { ControlRegistry, fillSelect, selectControl, checkControl, numberControl } from './controls';
+import { ControlRegistry, fillSelect, selectControl, checkControl, numberControl, chipify } from './controls';
 import { readHeightmap } from './heightmap';
 import { NAME_FAMILIES } from '../gen/names/types';
 import { BIOME_LABELS, biomeName } from '../gen/biomes';
@@ -43,9 +43,13 @@ import { freshMapOptions, initialMapOptions } from './workflowDraft';
 import { screenToWorld } from '../render/view';
 import { Pin, ViewState, fullQuery, uiStateFromQuery, bugReport } from './share';
 import { createPins } from './pins';
-import { generateSettlementDetail, EAGER_MAIN_POP } from '../gen/pipeline';
+import { generateSettlementDetail, EAGER_MAIN_POP, createGenerationCache } from '../gen/pipeline';
+const mainCache = createGenerationCache();
 import type { MapInformation } from '../render/legend';
 import { mapInformationHtml } from './mapInformation';
+import { initDock } from './dock';
+import { createMarks } from './marks';
+import { surprisePatch } from './randomMap';
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 
@@ -97,6 +101,28 @@ const statusEl = $('status');
 const busyEl = $('busy');
 const progressEl = $('progress');
 const genTimeEl = $('gentime');
+const feedbackEl = $('settingsFeedback');
+/** Settlement markers: visible while the Settlements tab of Customize is open (or while placing one). */
+const marks = createMarks($('marks'), { select: (t) => settlUI.select(t), move: (t, p) => settlUI.move(t, p) });
+function refreshMarks(): void {
+  const editing = configuration.isOpen && configuration.tab === 'settlementsPane';
+  marks.set(editing || settlUI.picking !== null ? settlUI.markers(draft) : null);
+}
+const menuBtn = $<HTMLButtonElement>('menuBtn');
+// the rail's one-click pickers: biome and relief regenerate (the terrain is reused across biomes), a style only redraws
+const dock = initDock($('dock'), {
+  biome: (biome) => { if (biomeName(opts.biome) !== biome) quickApply({ biome }); },
+  relief: (relief) => { if (opts.relief !== relief) quickApply({ relief }); },
+  coast: (coast) => { if (opts.coast !== coast) quickApply({ coast }); },
+  river: (river) => { if (opts.river !== river) quickApply({ river }); },
+  style: (style) => { styleEl.value = style; styleEl.dispatchEvent(new Event('change')); },
+});
+const syncDock = (): void => dock.sync({ biome: biomeName(opts.biome), relief: opts.relief, coast: opts.coast, river: opts.river, style: mapStyle() });
+syncDock();
+for (const hud of Array.from(document.querySelectorAll<HTMLElement>('.hud'))) {
+  hud.addEventListener('pointerdown', (e) => e.stopPropagation());
+  hud.addEventListener('pointerup', (e) => e.stopPropagation());
+}
 
 // ---------- controls (registry: new panel sections only have to add their controls here) ----------
 const registry = new ControlRegistry();
@@ -122,7 +148,7 @@ fillSelect(roadsEl, [['0', `Auto (${DEFAULT_ROADS[opts.size]})`], ...[1, 2, 3, 4
 fillSelect(styleEl, STYLE_LIST.map((s) => [s.id, s.label] as [string, string]), opts.style);
 // Show caps only for cultures without population-driven urban growth.
 fillSelect(cultureEl, CULTURE_LIST.map((c) => [c.id, `${c.label}${!c.urbanGrowth && c.scale && c.scale.max !== 'megacity' ? ` (up to ${c.scale.max})` : ''}${c.fantasy ? ' (fantasy)' : ''}`] as [string, string]), opts.culture);
-fillSelect(languageEl, [['auto', 'Automatic (from the plan)'], ...NAME_FAMILIES.map((f) => [f, f[0].toUpperCase() + f.slice(1)] as [string, string])], opts.language ?? 'auto');
+fillSelect(languageEl, [['auto', 'Auto (from plan)'], ...NAME_FAMILIES.map((f) => [f, f[0].toUpperCase() + f.slice(1)] as [string, string])], opts.language ?? 'auto');
 
 const seedControl = {
   el: seedEl, live: true,
@@ -132,17 +158,29 @@ const seedControl = {
 registry.add(seedControl);
 // map extent (preset or custom), population slider and the settlement system (M3c)
 const configuration = initConfiguration(() => settlUI.cancelPick());
-const settlUI = initSettlementsUI(registry, () => draft, changeEditor, (active) => configuration.picking(active));
+/** Set at the end of start-up; before it the generation state (`backend`, `meta`...) is not declared yet. */
+let pageReady = false;
+const settlUI = initSettlementsUI(registry, () => draft, changeEditor, (active) => { configuration.picking(active); refreshMarks(); },
+  // (the generated map is read only once the page is initialised: list links render the panel before that)
+  { all: () => (pageReady ? settlementList().map((s) => ({ key: s.key, name: s.name, population: s.population, center: s.center, cls: s.cls })) : []) },
+  // 'Generate places': the automatic region is applied and generated at once
+  () => applyGeneration(false, true));
+$('panel').addEventListener('toggle', () => { $('app').classList.toggle('drawer-open', configuration.isOpen); refreshMarks(); });
 registry.add(selectControl(reliefEl, 'relief', (v) => v as Options['relief']));
 registry.add({ ...selectControl(biomeEl, 'biome', (v) => biomeName(v)), write: (o) => { biomeEl.value = biomeName(o.biome); } });
 registry.add(selectControl(coastEl, 'coast', (v) => v as Options['coast']));
 registry.add(selectControl(riverEl, 'river', (v) => v as Options['river']));
 registry.add({ ...numberControl($<HTMLInputElement>('seaLevel'), 'seaLevel', 0), live: false });
 registry.add(selectControl(roadsEl, 'roads', (v) => Number(v)));
+chipify(roadsEl);
 const siteEl = $<HTMLSelectElement>('siteType');
 fillSelect(siteEl, [['auto', 'Automatic'], ...SITE_ARCHETYPES.map((site): [string, string] => [site, site])], opts.siteType ?? 'auto');
 registry.add({ ...selectControl(siteEl, 'siteType', (v) => v as Options['siteType']), write: (o) => { siteEl.value = o.siteType ?? 'auto'; } });
-registry.add(numberControl($<HTMLInputElement>('population'), 'population', 0));
+{
+  // an automatic population (0) shows as an empty field with an 'auto' placeholder
+  const pc = numberControl($<HTMLInputElement>('population'), 'population', 0);
+  registry.add({ ...pc, write: (o) => { pc.el.setAttribute('value', ''); ($<HTMLInputElement>('population')).value = o.population > 0 ? String(o.population) : ''; } });
+}
 // (a culture switch drops the previous culture's plan override / mix: see withCulture)
 registry.add({ ...selectControl(cultureEl, 'culture', (v) => v as Options['culture']), read: (o) => withCulture(o, cultureEl.value as Options['culture']) });
 registry.add(selectControl(languageEl, 'language', (v) => v as Options['language']));
@@ -161,14 +199,14 @@ registry.add(checkControl($<HTMLInputElement>('legend'), 'legend', true));
   const tri: [string, string][] = [['auto', 'Auto'], ['yes', 'On'], ['no', 'Off']];
   const rows: [keyof Options, string, [string, string][]][] = [
     ['walls', 'Town wall', [['auto', 'Auto'], ['none', 'None (open town)'], ['single', 'Single curtain'], ['double', 'Double enceinte']]],
-    ['moat', 'Wet moat (where terrain permits)', tri],
+    ['moat', 'Wet moat', tri],
     ['castles', 'Castles', [['auto', 'Auto'], ['0', 'None'], ['1', '1'], ['2', '2'], ['3', '3']]],
     ['cathedral', 'Cathedral close', tri],
     ['palace', 'Palace', tri],
     ['monasteries', 'Monasteries', tri],
-    ['port', 'Port (quays, piers, shipyard)', tri],
+    ['port', 'Port (quays, shipyard)', tri],
     ['arena', 'Arena (fossil oval)', tri],
-    ['activities', 'Mills, trades, inns, gallows', tri],
+    ['activities', 'Mills, trades, inns', tri],
     ['suburbs', 'Suburbs', [['auto', 'Auto'], ['none', 'None'], ['some', 'Some'], ['many', 'Many']]],
     ['shantytowns', 'Shanty towns', [['auto', 'Auto'], ['none', 'None'], ['some', 'Some'], ['many', 'Many']]],
   ];
@@ -179,7 +217,9 @@ registry.add(checkControl($<HTMLInputElement>('legend'), 'legend', true));
     const sel = document.createElement('select');
     sel.id = id;
     fillSelect(sel, items, String(opts[key] ?? 'auto'));
-    slot.append(lab, sel);
+    const cell = document.createElement('div'); cell.className = 'cell full';
+    cell.append(lab, sel); slot.append(cell);
+    chipify(sel);
     registry.add({ ...selectControl(sel, key, (v) => v as never), write: (o) => { sel.value = String(o[key] ?? 'auto'); } });
   }
   // sprawl: the same population on more or less land (0.5 compact … 2 loose), relative to the plan's baseline
@@ -189,7 +229,8 @@ registry.add(checkControl($<HTMLInputElement>('legend'), 'legend', true));
   inp.type = 'range'; inp.id = 'sprawl'; inp.min = '0.5'; inp.max = '2'; inp.step = '0.05';
   const show = (): void => { lab.textContent = `Sprawl ${Number(inp.value).toFixed(2)} (0.5 dense … 2 loose)`; };
   inp.addEventListener('input', show);
-  slot.append(lab, inp);
+  const sprawlCell = document.createElement('div'); sprawlCell.className = 'cell full';
+  sprawlCell.append(lab, inp); slot.append(sprawlCell);
   const sc = numberControl(inp, 'sprawl', 1);
   registry.add({ ...sc, live: false, write: (o) => { sc.write(o); show(); } });
 }
@@ -343,6 +384,8 @@ function showStats(stats: Record<string, number | string>, ms: number): void {
     + (stats['urban.mega'] ? ` - megacity plan: ${stats['urban.quarters']} quarters in ${stats['urban.rings']} rings, ${stats['urban.nuclei']} nuclei (zoom in to detail the quarters)` : '');
   ($('exportSvgFull') as HTMLButtonElement).hidden = !stats['urban.mega'];
   showSettlementWarnings(stats);
+  // generated names and positions are now known: placeholders and markers follow the displayed map
+  settlUI.refresh(); refreshMarks();
 }
 
 // Thin determinate bar at the top of the map: jumps to each pipeline stage and creeps inside the long ones.
@@ -519,7 +562,7 @@ function run(): void {
     setTimeout(() => {
       if (id !== reqId) return;
       try {
-        const world = generate(opts);
+        const world = generate(opts, undefined, { cache: mainCache });
         show(world, world.stats, Math.round(performance.now() - genStart));
       } catch (err) {
         setBusy(false); statusEl.textContent = 'Error: ' + String((err as Error).message);
@@ -536,7 +579,8 @@ function schedule(): void {
 /** Bring everything in line with `opts`: panel, URL (push / replace / none) and the map (regenerate or just redraw). */
 function commit(mode: 'push' | 'replace' | 'none', displayOnly = false): void {
   if (!displayOnly) {
-    pendingSettings = false;
+    pendingSettings = false; menuBtn.classList.remove('dirty');
+    feedbackEl.textContent = 'Changes apply when you generate.'; feedbackEl.classList.remove('dirty');
     draft = structuredClone(opts);
     settlUI.load(draft);
     registry.writeAll(settlUI.editorOptions(draft));
@@ -549,13 +593,17 @@ function commit(mode: 'push' | 'replace' | 'none', displayOnly = false): void {
   }
   if (!displayOnly && genKey() !== lastGenKey) schedule();
   else if (displayOnly && (currentWorld || backend)) rerender(true);
+  syncDock();
   $('draftState').textContent = '';
-  $('generationIdentity').textContent = opts.workflow ? `Generation ${generationUid(opts)}` : '';
+  showMapId();
+  refreshMarks();
 }
 
 function markDraft(): void {
-  pendingSettings = true;
-  $('draftState').textContent = 'Unapplied settings — open Customize to apply & generate.';
+  pendingSettings = true; menuBtn.classList.add('dirty');
+  feedbackEl.textContent = 'Unapplied changes'; feedbackEl.classList.add('dirty');
+  $('draftState').textContent = 'Unapplied changes in Customize';
+  refreshMarks();
 }
 function changeEditor(change: (o: Options) => Options): void {
   const before = toQuery(draft);
@@ -569,12 +617,13 @@ registry.onChange((control) => {
   draft = settlUI.capture(registry.readAll(settlUI.editorOptions(draft)), draft);
   if (control.display) {
     opts = { ...opts, style: draft.style, contours: draft.contours, landuse: draft.landuse, labels: draft.labels, legend: draft.legend };
+    syncDock();
     const q = '?' + curQuery();
     if (q !== location.search) history.pushState(null, '', q);
     if (currentWorld || backend) rerender(true);
   } else markDraft();
 });
-function applyGeneration(environment: boolean): void {
+function applyGeneration(environment: boolean, keepOpen = false): void {
   if (!registry.controls.every((control) => Array.from(control.el.matches('input') ? [control.el] : control.el.querySelectorAll('input')).every((input) => !(input instanceof HTMLInputElement) || input.checkValidity()))) {
     $('draftState').textContent = 'Check the highlighted values before generating.';
     for (const input of Array.from(document.querySelectorAll<HTMLInputElement>('#panel input'))) if (!input.checkValidity()) {
@@ -592,7 +641,7 @@ function applyGeneration(environment: boolean): void {
   opts = environment ? { ...draft, workflow: 'environment', settlementMode: settlUI.mode } : settlUI.composition(draft);
   settlUI.cancelPick();
   commit('push');
-  configuration.close();
+  if (!keepOpen) configuration.close();
 }
 $('generateEnvironment').addEventListener('click', () => applyGeneration(true));
 $('generateSettlements').addEventListener('click', () => applyGeneration(false));
@@ -614,16 +663,27 @@ window.addEventListener('popstate', () => {
 });
 
 function randomSeed(): string { return Math.random().toString(36).slice(2, 8); }
-$('newMap').addEventListener('click', () => {
+/**
+ * Apply `patch` to the applied map right away (one click on the map: new seed, biome, surprise) and regenerate.
+ * Unfinished Customize edits survive: they stay a draft on top of the new map.
+ */
+function quickApply(patch: Partial<Options>): void {
   const pending = pendingSettings ? settlUI.capture(registry.readAll(settlUI.editorOptions(draft)), draft) : null;
-  opts = freshMapOptions(opts, randomSeed());
+  opts = { ...freshMapOptions(opts, opts.seed), ...patch };
   settlUI.cancelPick();
   commit('push');
   if (pending) {
-    draft = { ...pending, seed: opts.seed };
+    draft = { ...pending, ...patch };
     settlUI.load(draft); registry.writeAll(settlUI.editorOptions(draft));
     updateHeightmapUI(); markDraft();
   }
+}
+$('newMap').addEventListener('click', () => quickApply({ seed: randomSeed() }));
+const knownCultures = new Set(CULTURE_LIST.map((c) => c.id));
+$('surprise').addEventListener('click', () => {
+  const patch = surprisePatch(Math.random, knownCultures);
+  // a bigger settlement needs at least its preset's room; a larger extent chosen by the user is kept
+  quickApply({ ...patch, seed: randomSeed(), mapSize: Math.max(mapSizeOf(opts), SIZE_PRESETS[patch.size].mapSize) });
 });
 function reroll(): void {
   draft = settlUI.capture(registry.readAll(settlUI.editorOptions(draft)), draft);
@@ -672,6 +732,27 @@ function wireCopy(btn: HTMLButtonElement, text: () => string, done: string): voi
 }
 wireCopy($<HTMLButtonElement>('copyLink'), () => location.origin + location.pathname + '?' + curQuery(), 'Link copied');
 wireCopy($<HTMLButtonElement>('copyId'), () => mapId(opts), 'ID copied');
+/** The one reusable identifier of the applied map (settings + seed), shown in the corner and the share menu. */
+function showMapId(): void {
+  const id = mapId(opts);
+  $('generationIdentity').textContent = 'ID ' + id;
+  $('mapIdBox').textContent = id;
+}
+$('generationIdentity').addEventListener('click', async () => {
+  const el = $('generationIdentity');
+  const ok = await copyText(mapId(opts));
+  el.textContent = ok ? 'ID copied' : 'Copy failed';
+  window.setTimeout(showMapId, 1200);
+});
+/** Open a pasted ID (or a whole link, or a legacy query): the page reloads on it, exactly like a shared link. */
+$('openIdForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const raw = $<HTMLInputElement>('openIdInput').value.trim();
+  const query = raw.includes('?') ? raw.slice(raw.indexOf('?')) : /^[a-z]+=/.test(raw) ? '?' + raw : '?id=' + encodeURIComponent(raw);
+  const options = raw ? fromQuery(query) : null;
+  if (!options || !expandMapQuery(query).get('seed')) { $('openIdState').textContent = 'This is not a Burgmap ID or link.'; return; }
+  location.search = query;
+});
 wireCopy($<HTMLButtonElement>('copyBug'), () => bugReport(opts, pinsUI.pins, viewer.getView(), location.origin + location.pathname, map.clientWidth, paintedTextures ? appearanceQuery(fullQuery(opts, pinsUI.pins, viewer.getView()), true) : undefined), 'Report copied');
 
 // ---------- viewer (canvas, LOD) ----------
@@ -681,7 +762,7 @@ const canvasEl = $<HTMLCanvasElement>('view');
 const hudEl = $('hud');
 const viewer = createViewer({
   container: map, canvas: canvasEl, minimap: $<HTMLCanvasElement>('minimap'),
-  onView: (v, w, h) => { pinsUI.update(v, w, h); renderCoords(); if (viewReady) syncUrl(); },
+  onView: (v, w, h) => { pinsUI.update(v, w, h); marks.update(v, w, h); renderCoords(); if (viewReady) syncUrl(); },
   onError: (error) => {
     if (pendingMain?.id === reqId) backendEvents.onRenderError?.(reqId, String(error.message));
     else console.error('canvas draw:', error);
@@ -709,9 +790,11 @@ const mapPoint = (e: MouseEvent): [number, number] => {
   const r = map.getBoundingClientRect();
   return screenToWorld(viewer.getView(), r.width, r.height, e.clientX - r.left, e.clientY - r.top);
 };
+/** Two lines in the corner frame: the cursor, else the last click. */
 function renderCoords(): void {
-  const f = (p: [number, number]): string => `${p[0].toFixed(1)}, ${p[1].toFixed(1)}`;
-  coordText.textContent = `${hover ? 'x,y ' + f(hover) : 'x,y -'} m${lastClick ? ' | click ' + f(lastClick) : ''} | ${viewer.getView().scale.toPrecision(3)} px/m`;
+  const p = hover ?? lastClick;
+  const f = (n: number): string => `${Math.round(n)} m`.padStart(8);
+  coordText.textContent = p ? `x${f(p[0])}\ny${f(p[1])}` : 'x       –\ny       –';
 }
 map.addEventListener('pointermove', (e) => { hover = mapPoint(e); renderCoords(); });
 map.addEventListener('pointerleave', () => { hover = null; renderCoords(); });
@@ -830,10 +913,11 @@ function focusSettlement(s: SettlementMeta): void {
   let down: { x: number; y: number; t: number } | null = null;
   map.addEventListener('pointerdown', (e) => { down = { x: e.clientX, y: e.clientY, t: performance.now() }; });
   map.addEventListener('pointerup', (e) => {
-    if (!down || (e.target as HTMLElement).closest('button, #pinpop, #coords')) { down = null; return; }
+    if (!down || (e.target as HTMLElement).closest('button, #pinpop, #coords, .hud')) { down = null; return; }
     const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y), dt = performance.now() - down.t;
     down = null;
-    if (moved > 5 || dt > 500) return;
+    // placing a settlement tolerates a slightly shaky or slow click; ordinary clicks stay strict (drags pan)
+    if (settlUI.picking !== null ? moved > 12 : moved > 5 || dt > 500) return;
     const r = map.getBoundingClientRect();
     const v = viewer.getView();
     const [x, y] = screenToWorld(v, r.width, r.height, e.clientX - r.left, e.clientY - r.top);
@@ -973,8 +1057,9 @@ exportPngBtn.addEventListener('click', () => {
   });
 });
 
+pageReady = true;
 history.replaceState(null, '', '?' + curQuery());
-$('generationIdentity').textContent = opts.workflow ? `Generation ${generationUid(opts)}` : '';
+showMapId();
 updateHeightmapUI();
 // Probe the offscreen pipeline first (a few ms), then start the first run on whichever path works.
 const backendReady: Promise<OffscreenBackend | null> = forceMain ? Promise.resolve(null) : OffscreenBackend.create(backendEvents, window.devicePixelRatio || 1);

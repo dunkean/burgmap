@@ -7,7 +7,7 @@ import type { GRequest, GResponse } from '../src/ui/protocol';
 import type { WorkerRequest, WorkerResponse } from '../src/ui/worker';
 
 const state = vi.hoisted(() => ({ world: null as World | null, measures: [] as number[] }));
-vi.mock('../src/gen/pipeline', () => ({ generate: () => state.world, generateSettlementDetail: () => null }));
+vi.mock('../src/gen/pipeline', () => ({ generate: () => state.world, generateSettlementDetail: () => null, createGenerationCache: () => ({}) }));
 vi.mock('../src/render/svg', () => ({ renderSvg: (_world: World, options: { measure: (text: string, size: number, style: { italic: boolean; bold: boolean }) => number }) => {
   state.measures.push(options.measure('WWWW', 16, { italic: false, bold: false })); return '<svg/>';
 } }));
