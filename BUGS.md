@@ -39,10 +39,10 @@ et ne sont pas intégrés. Voir [les résultats et limites](BUGFIXES_VISUAL_2026
 2 - Répartition population et identification batiment + click pour propriétés
 4 - Edition des textes
 4 - Edition des formes de quartiers avec rendu interactif. Idem rivieres.
-1 - Revoir l'ui avec une barre de tools simples
+1 - Revoir l'ui avec une barre de tools simples → fixed in `fa7459f`
 1 - revoir le contour des villes non fortifiées médiévale et le nombre de route qui finissent dans le vide
-2 - url en une seule chaine de caractères et ajout copier id
+2 - url en une seule chaine de caractères et ajout copier id → fixed in `d341f2e`
 2 - revoir les brush: ajouter des patterns, densités, des variations dans les biomes (pins, feuillus, etc.), améliorer la qualité des brushs, etc.
-1 - random customization (random settlement + biome)
+1 - random customization (random settlement + biome) → fixed in `fa7459f`
 2 - hybrid culture par quartier
 4 - travailler le cultural mix
