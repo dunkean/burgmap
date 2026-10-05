@@ -5,6 +5,28 @@ bugs and their evidence are recorded in [ROADMAP.md](ROADMAP.md).
 
 ## Current status
 
+- Roof/render optimization (2026-10-05): integrated source checkpoint `12d8c225`,
+  reviewed before execution. See
+  [OPTIMIZATION_IMPLEMENTATION_2026-10-05.md](OPTIMIZATION_IMPLEMENTATION_2026-10-05.md)
+  for measurements, exact-output checks, native exports and validation results.
+  The protected reference is `pre-optimization-2026-10-05` at `0da0a9d`;
+  it was published as `gh-pages` `fa161ee` before implementation. Roof search
+  keeps checked Boolean proofs and candidate ordering. Persistent scenes and
+  bounded raster tiles accelerate warm views; SVG export remains vectorial.
+  The complete 60k World hash is unchanged (103 quarters, 42,802 buildings).
+  Browser complete presentation improves from 48.169s to median 20.017s with
+  four workers; warm pans take 46–98ms, while a cold zoom still takes ~2.38s.
+  GPU diagnostics are SwiftShader software; no hardware GPU gain is claimed.
+  The exhaustive run was stopped after 133 minutes: 56/88 files reported,
+  with 40 assertion failures reproduced on the protected baseline. Both workers
+  were stuck on the same Japanese `p4uefz` Boolean operation; captured arguments
+  also time out in a supervised baseline replay. The full suite is incomplete,
+  not green. Thirty remaining files run separately in a frozen `ee202a3` checkout.
+  A bounded traversal repair and the visual/roof BUGS fixes are separate stages.
+  All 211 production source files match the reviewed checkpoint, and both user
+  reproduction scripts are unchanged. The user's local `BUGS.md` feedback is
+  preserved and excluded from the optimization commits. Temporary baseline,
+  roof, renderer and Pages worktrees remain registered for reproducibility.
 - Profiling audit (2026-10-05): see
   [OPTIMIZATION_AUDIT_2026-10-05.md](OPTIMIZATION_AUDIT_2026-10-05.md) for measured
   generation phases, CPU hotspots and progressive display costs. The source at
