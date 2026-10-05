@@ -2,7 +2,7 @@
  * Boolean operations (polygon-clipping) on polygons with holes, with 1 cm snapping and ring cleanup of
  * every result, as required by URBAN_GEOMETRY.md §0.
  */
-import polygonClipping from 'polygon-clipping';
+import polygonClipping from '../../vendor/polygonClipping';
 import type { Vec2, Polygon } from '../core/geom';
 import { cleanRing, orientPos, area } from './poly';
 import { GridIndex } from './spatial';
