@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { World, UrbanLayer } from '../src/gen/types';
 import * as detail from '../src/gen/urban/mega/detail';
 import { QuarterQueue, type QuarterExecutor, type QueueStats } from '../src/ui/megaQueue';
-import { QuarterPool, worldForQuarters, type QuarterRequest, type QuarterResult, type QuarterWorkerHandle } from '../src/ui/quarterPoolCore';
+import { QuarterPool, quarterWorkerCount, worldForQuarters, type QuarterRequest, type QuarterResult, type QuarterWorkerHandle } from '../src/ui/quarterPoolCore';
 
 const layer = (key: number): UrbanLayer => ({
   footprint: [], footprintH: [], streets: [], blocks: [], parcels: [], buildings: [], walls: [],
@@ -174,6 +174,16 @@ class FakeWorker implements QuarterWorkerHandle {
 }
 
 describe('quarter worker lifetime and snapshots', () => {
+  it('reserves render capacity and bounds parallel heaps on small devices', () => {
+    expect(quarterWorkerCount(16, 8)).toBe(4);
+    expect(quarterWorkerCount(8)).toBe(4);
+    expect(quarterWorkerCount(4, 8)).toBe(2);
+    expect(quarterWorkerCount(16, 4)).toBe(2);
+    expect(quarterWorkerCount(16, 2)).toBe(1);
+    expect(quarterWorkerCount(2, 8)).toBe(1);
+    expect(quarterWorkerCount(NaN, 8)).toBe(1);
+    expect(quarterWorkerCount(Infinity, 8)).toBe(1);
+  });
   it('copies only needed inputs, keeping analysis cost/fields and stable secondary indices', () => {
     const w = fixture(), eager = layer(23);
     w.settlements = [{ index: 0, main: true }, { index: 1, urban: eager }, { index: 2, urban: w.urban }] as World['settlements'];
@@ -191,14 +201,14 @@ describe('quarter worker lifetime and snapshots', () => {
     expect(w.terrain.flow).toBeDefined(); expect(w.megaDetail).toBeDefined();
   });
 
-  it('initializes at most two workers and reuses their world for subsequent jobs', async () => {
+  it('caps explicit pools at eight workers, matches out-of-order jobs, and reuses snapshots', async () => {
     const workers: FakeWorker[] = [];
     const pool = new QuarterPool(fixture(), () => { const w = new FakeWorker(); workers.push(w); return w; }, 20);
-    const p0 = pool.run(0), p1 = pool.run(1);
-    expect(workers).toHaveLength(2); expect(pool.concurrency).toBe(2);
-    workers[1].reply(layer(1)); workers[0].reply(layer(0));
-    expect((await p0)?.population).toBe(0); expect((await p1)?.population).toBe(1);
-    const p2 = pool.run(2); workers[0].reply(layer(2)); await p2;
+    const pending = Array.from({ length: 8 }, (_, key) => pool.run(key));
+    expect(workers).toHaveLength(8); expect(pool.concurrency).toBe(8);
+    for (let key = 7; key >= 0; key--) workers[key].reply(layer(key));
+    expect((await Promise.all(pending)).map((result) => result?.population)).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+    const next = pool.run(8); workers[0].reply(layer(8)); await next;
     expect(workers[0].messages.filter((m) => m.type === 'world')).toHaveLength(1);
     pool.stop(); expect(workers.every((w) => w.terminate.mock.calls.length === 1)).toBe(true);
   });

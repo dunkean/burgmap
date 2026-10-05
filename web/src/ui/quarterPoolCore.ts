@@ -15,6 +15,16 @@ interface Job {
 }
 interface Slot { worker: QuarterWorkerHandle; revision: number; job?: Job }
 
+/** Leave CPU capacity for rendering, and avoid multiplying worker heaps on small devices. */
+export function quarterWorkerCount(cores: number, memoryGiB?: number): number {
+  const threads = Number.isFinite(cores) ? Math.max(1, Math.floor(cores)) : 1;
+  const cpuLimit = threads >= 8 ? 4 : threads >= 4 ? 2 : 1;
+  const memoryLimit = memoryGiB !== undefined && Number.isFinite(memoryGiB) && memoryGiB > 0
+    ? memoryGiB <= 2 ? 1 : memoryGiB <= 4 ? 2 : 4
+    : 4;
+  return Math.min(cpuLimit, memoryLimit);
+}
+
 /** Retain every urban input (including cost and site fields), omit completed output/terrain analysis. */
 export function worldForQuarters(world: World): World {
   const { flow: _f, receiver: _r, filled: _fi, ...terrain } = world.terrain;
@@ -40,7 +50,7 @@ export class QuarterPool implements QuarterExecutor {
   constructor(world: World, private makeWorker: () => QuarterWorkerHandle, concurrency = 2, private timeoutMs = 60000) {
     this.world = worldForQuarters(world);
     this.hosts = megaHosts(world);
-    this.concurrency = Math.max(1, Math.min(2, Math.floor(concurrency) || 1));
+    this.concurrency = Number.isFinite(concurrency) ? Math.max(1, Math.min(8, Math.floor(concurrency))) : 1;
   }
 
   setWorld(world: World): void {
