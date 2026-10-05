@@ -5,10 +5,22 @@ bugs and their evidence are recorded in [ROADMAP.md](ROADMAP.md).
 
 ## Current status
 
+- Profiling audit (2026-10-05): see
+  [OPTIMIZATION_AUDIT_2026-10-05.md](OPTIMIZATION_AUDIT_2026-10-05.md) for measured
+  generation phases, CPU hotspots and progressive display costs. The source at
+  `a7974a1` is pushed to `main` and published on Pages (`gh-pages` `49a0213`).
+  Only the primary worktree remains registered; the remaining integration cache
+  directory was moved to `E:/CodexArtifacts/city-generator-2026-10-05/obsolete-worktree-cache`.
+  This audit changes no generation/rendering behavior. The Russian profiling
+  rerun was stopped when the user requested a quick conclusion; its partial run
+  is excluded. The report contains 17 complete generation scenarios and six
+  complete browser loads. The user's new garden/background feedback stays open
+  in `BUGS.md`.
 - Local acceleration/quality checkpoint (2026-10-05): assembled source tree
   `001c320c`, 24 reviewed paths. It integrates urban V7 `ad4e15bf`, terrain V4
   `01dab2ec`, distinct castle names, UI V2, adaptive titles and the final roof
-  repair `f78699c`. These changes are not published. Grouped Sol xhigh source
+  repair `f78699c`. These changes were subsequently published at `a7974a1`.
+  Grouped Sol xhigh source
   gates preceded execution. Final integration passes 52 focused regressions,
   all 13 existing M5a controls, strict typecheck and the offline single-file build.
   All 207 source files and the three preserved user files match their closing
@@ -51,7 +63,8 @@ bugs and their evidence are recorded in [ROADMAP.md](ROADMAP.md).
   verified ZIP backups are in the sibling `archive` directory. Automatic policy
   refused deletion of two generated Vite cache files (169 bytes) under the old
   `D:/Workspace/Self/RPG/city_generator-integration/web/.vite/deps` directory;
-  that unregistered residual directory remains. Root dependencies, the manual
+  that unregistered residual directory was subsequently archived during the audit.
+  Root dependencies, the manual
   preview, `AGENTS.md` and the user's two reproduction scripts are preserved.
 - Live site: https://dunkean.github.io/burgmap/.
 - Repository: https://github.com/dunkean/burgmap. Local `master` publishes to

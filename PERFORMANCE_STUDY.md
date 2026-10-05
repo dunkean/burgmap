@@ -2,6 +2,11 @@
 
 Measured 2026-10-04. Bug fixes take priority; this study does not introduce a renderer rewrite or Rust dependency.
 
+For the current combined source, see the
+[2026-10-05 profiling tables](OPTIMIZATION_AUDIT_2026-10-05.md): 17 generation
+scenarios and the CPU/display hotspots of the default Medieval organic capital.
+The measurements below describe earlier checkpoints.
+
 ## Major slowdown investigation, 2026-10-05
 
 The generation-only baseline at `ea100e5` confirms the regression. Weighted V8
