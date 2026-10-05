@@ -1,6 +1,7 @@
 // Native integration checks against a built single-file app, including file:// and main fallback.
 // node scripts/optimization_verify.mjs --html dist/index.html --out out/optimization/native
 // Add --url https://dunkean.github.io/burgmap/ to check the identical published build.
+// --query selects a non-macro village/town fixture for native regression checks.
 import { chromium } from 'playwright';
 import { createServer } from 'node:http';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
@@ -13,6 +14,7 @@ const arg = (key, fallback) => { const i = args.indexOf(key); return i < 0 ? fal
 const htmlPath = resolve(arg('--html', 'dist/index.html'));
 const out = resolve(arg('--out', 'out/optimization-implementation-2026-10-05/native'));
 const publishedUrl = arg('--url', null);
+const fixtureQuery = arg('--query', 'seed=7&size=village&legend=1&style=illuminated');
 if (publishedUrl) {
   const url = new URL(publishedUrl);
   if (!['https:', 'http:'].includes(url.protocol) || url.search || url.hash) {
@@ -60,7 +62,12 @@ try {
     page.on('pageerror', error => errors.push(error.message));
     page.on('request', request => requests.push(request.url()));
     const base = mode === 'offline' ? pathToFileURL(htmlPath).href : local;
-    await page.goto(base + '?seed=7&size=village&legend=1&style=illuminated' + (mode === 'main' ? '&render=main' : ''));
+    const query = new URLSearchParams(fixtureQuery);
+    query.delete('render');
+    if (mode === 'main') query.set('render', 'main');
+    const navigation = await page.goto(base + '?' + query.toString());
+    if (mode !== 'offline') assert(navigation?.ok() && html.equals(await navigation.body()),
+      `${mode}: navigated HTML differs from the supplied build`);
     await ready(page); await paint(page);
     const actualMode = await page.evaluate(() => window.__burgmap.mode());
     // file:// can refuse module workers; the native main fallback remains an offline-supported backend.
@@ -81,6 +88,8 @@ try {
         const document = JSON.parse(data.toString());
         assert(document.format === 'burgmap-world', `${mode}: incorrect World format`);
         const world = document.world;
+        assert(!world.urban?.macro && !(world.settlements ?? []).some(settlement => settlement.urban?.macro),
+          `${mode}: use a non-macro fixture; this harness does not wait for all macro quarters`);
         assert(world.urban?.buildings?.length > 0, `${mode}: exported World lacks buildings`);
         exports.worldHash = hash(world);
         exports.buildings = world.urban.buildings.length;
@@ -113,13 +122,14 @@ try {
     const beforeStyleImage = await page.locator('#view').screenshot();
     const styleTick = await page.evaluate(() => ({ frames: window.__perf.frames.length, ver: window.__burgmap.rendering().frameVer }));
     await page.click('#menuBtn'); await page.click('#appearanceTab');
-    await page.selectOption('#style', 'parchment');
+    const nextStyle = initial.options.style === 'parchment' ? 'night' : 'parchment';
+    await page.selectOption('#style', nextStyle);
     await page.click('#closeSettings');
     await page.waitForFunction(({ frames, ver }) => window.__perf.frames.length > frames
       && (window.__burgmap.mode() === 'main' || window.__burgmap.rendering().frameVer > ver), styleTick, { timeout: 60000 });
     await ready(page); await paint(page);
     const afterStyle = await page.evaluate(() => ({ options: window.__burgmap.options(), rendering: window.__burgmap.rendering() }));
-    assert(afterStyle.options.style === 'parchment' && afterStyle.rendering.gen === initial.rendering.gen, `${mode}: appearance regenerated the World`);
+    assert(afterStyle.options.style === nextStyle && afterStyle.rendering.gen === initial.rendering.gen, `${mode}: appearance regenerated the World`);
     assert(!beforeStyleImage.equals(await page.locator('#view').screenshot()), `${mode}: appearance failed to change native image`);
     await page.screenshot({ path: resolve(out, `${mode}-style.png`) });
     // Two real generation requests; require the latest requested generation to be presented.
