@@ -5,7 +5,7 @@ bugs and their evidence are recorded in [ROADMAP.md](ROADMAP.md).
 
 ## Current status
 
-- Cavern tailoring (2026-10-05, publication in progress): empty
+- Cavern tailoring (2026-10-05, source integrated; Pages queued): empty
   footprints and surface cultivation no longer force large cave rooms. Around
   75% of each river course has tight banks; seeded widening lengths, gaps and
   amplitudes vary without a periodic cycle. Road galleries follow physical
@@ -17,6 +17,11 @@ bugs and their evidence are recorded in [ROADMAP.md](ROADMAP.md).
   `web/out/optimization-implementation-2026-10-05/presentation-boards/final/06-underdark-cavernes-final.png`.
   Build SHA `7605043ea6e25e3e0d28f9c8b9ba8c960c26a0ac23dc373d5072a4ba8a60c9c0`.
   User explicitly authorized publication after preparation of this revised board.
+  Runtime source `3aa7d93` is integrated on main and tagged
+  `caverns-tailored-2026-10-05`. Pages `d3f372e` is pushed; temporary worktree
+  removed. Run `37370914829` is queued; actual live SHA is still `5c48b790…`.
+  GitHub reports hosted runner assignment/start delays in its active Actions
+  incident `3q1yb5m7ltvb`; live deployment remains an external pending step.
   BUGS.md remains outside this work. No full-suite certification is claimed.
 - Underdark cavern redesign (2026-10-05): the cavern variant
   generates the normal Underdark layout first, then adds an irregular dark rock
@@ -32,8 +37,8 @@ bugs and their evidence are recorded in [ROADMAP.md](ROADMAP.md).
   This does not certify a green full suite. Source `1f210b0` is integrated on main
   and tagged `caverns-2026-10-05`; Pages `7601592` is pushed. The temporary
   publishing worktree is removed. GitHub Pages run `37365203761` built successfully,
-  but its deploy job is still queued and the live site still serves the preceding
-  SHA `5c48b790…`; actual served-build confirmation is pending.
+  but its deployment was subsequently cancelled. The tailoring release above
+  supersedes that attempt.
 - Underdark and small-screen information panels (2026-10-05): seventh biome,
   independent drow-enclave/duergar-hold/myconid-colony cultures, rock and fungal
   land use with shared SVG/Canvas motifs. Surface atlas assets are unchanged;
