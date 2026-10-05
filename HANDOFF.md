@@ -5,6 +5,19 @@ bugs and their evidence are recorded in [ROADMAP.md](ROADMAP.md).
 
 ## Current status
 
+- Published UI/developer/guide release (2026-10-06): source `3f61c90` is pushed
+  to remote `main`, tagged `ui-developer-tools-2026-10-06`, with a public GitHub
+  release containing offline app/guide/version artifacts. GitHub Pages build
+  `40ebb68` is built successfully. Live `version.json` identifies the full
+  source `3f61c9044f6412d6df831e352ee9eed0f8aed200`; downloaded app SHA256
+  matches the validated `8707af6d…` build exactly. The English guide is live at
+  https://dunkean.github.io/burgmap/docs/generation.html, with commit-specific
+  source links. Live desktop/mobile checks pass: black transparent coordinates,
+  matching card/editor labels, flyout, English diagrams and interactive stages;
+  actual desktop developer stages 0–4 and a stage-3 JSON without urban geometry
+  also pass. No browser errors; screenshots inspected. Evidence:
+  `web/out/release/`. This later handoff-only record does not change the app.
+
 - Publication preparation (2026-10-06): the staged-generation/controller bundle
   passes 16 focused debug/cache/workflow/Kraal tests, typecheck and the offline
   build. A release review found a late-completion race after settings edits;
