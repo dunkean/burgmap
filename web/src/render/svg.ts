@@ -19,6 +19,8 @@ import { cartoucheModel, legendModel, panelSvg } from './legend';
 import { frameModel, panelMargin } from './frame';
 import { litSvg, shadowSvg, gridSvg, waterLinesSvg } from './extras';
 import { FONT_STACKS } from './labelStyles';
+import { svgBrushes } from './brushSvg';
+import type { BrushSources } from './brushes';
 import type { Measure } from './mapLabels';
 
 export interface RenderOptions {
@@ -29,6 +31,8 @@ export interface RenderOptions {
   labels?: boolean; legend?: boolean; cartouche?: boolean;
   /** Text width measurer for label placement (browser: canvas based; default: estimate). */
   measure?: Measure;
+  /** Optional display-only raster stamps; omitted keeps classic output byte-for-byte. */
+  brushes?: BrushSources;
 }
 
 function contourLayer(world: World, pal: Palette, u: number, scale: number): string {
@@ -79,9 +83,11 @@ export function renderSvg(world0: World, opts: RenderOptions = {}): string {
   const width = opts.width !== undefined && Number.isFinite(opts.width) ? Math.max(1, opts.width) : 1600;
   const scale = width / S;
   const t = world.terrain;
+  const painted = opts.brushes ? svgBrushes(world, pal, opts.brushes) : undefined;
   const parts: string[] = [];
   parts.push(`<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 ${S} ${S}" width="${width}" height="${width}" data-seed="${world.seed}" data-style="${style}">`);
   parts.push(`<defs><clipPath id="mapclip"><rect x="0" y="0" width="${S}" height="${S}"/></clipPath></defs>`);
+  if (painted) parts.push(painted.defs);
   parts.push(`<rect x="0" y="0" width="${S}" height="${S}" fill="${pal.paper}"/>`);
   parts.push('<g clip-path="url(#mapclip)">');
 
@@ -92,7 +98,7 @@ export function renderSvg(world0: World, opts: RenderOptions = {}): string {
   if (pal.grid) parts.push(gridSvg(world, pal, u));
   if (opts.contours ?? world.options.contours) parts.push(contourLayer(world, pal, u, scale));
 
-  if (opts.landuse ?? world.options.landuse) parts.push(landuseLayer(world, pal, u, scale));
+  if (opts.landuse ?? world.options.landuse) parts.push(landuseLayer(world, pal, u, scale, painted?.brushes));
 
   // rivers: casing first, then fill so confluences merge cleanly
   const minW = 1.1 * u;
@@ -130,10 +136,10 @@ export function renderSvg(world0: World, opts: RenderOptions = {}): string {
   const lakeD = t.lakes.filter((p) => p.length >= 3).map((p) => pathD(p, true)).join('');
   const masked = seaD.length > 0 || lakeD.length > 0;
   if (masked) parts.push(`<clipPath id="landclip"><path d="M-50 -50H${S + 50}V${S + 50}H-50Z${seaD.join('')}${lakeD}" clip-rule="evenodd"/></clipPath>`);
-  parts.push(`<g id="regional-road-ground"${masked ? ' clip-path="url(#landclip)"' : ''}>${roadsLayer(world, pal, u)}</g>`);
+  parts.push(`<g id="regional-road-ground"${masked ? ' clip-path="url(#landclip)"' : ''}>${roadsLayer(world, pal, u, painted?.brushes)}</g>`);
   if (world.urban) {
     const landscape = world0.landuse?.landscapeGround !== undefined;
-    parts.push(urbanLayer(world, pal, u, !!opts.debug, opts.debug || landscape ? { bands: [], ground: [], streets: [] } : countrysideFringe(world0), opts.raster !== false, opts.landuse ?? world.options.landuse, opts.debug || landscape ? [] : (world0.landuse?.naturalGround ?? []), opts.contours ?? world.options.contours, opts.debug ? [] : currentLandscapeGround(world0, true), worldGroundAppearance(world0), opts.debug ? [] : worldCampCover(world0)));
+    parts.push(urbanLayer(world, pal, u, !!opts.debug, opts.debug || landscape ? { bands: [], ground: [], streets: [] } : countrysideFringe(world0), opts.raster !== false, opts.landuse ?? world.options.landuse, opts.debug || landscape ? [] : (world0.landuse?.naturalGround ?? []), opts.contours ?? world.options.contours, opts.debug ? [] : currentLandscapeGround(world0, true), worldGroundAppearance(world0), opts.debug ? [] : worldCampCover(world0), painted?.brushes));
     if (!opts.debug) { parts.push(shadowSvg(world, pal, u)); parts.push(litSvg(world, pal, u)); }
   } else parts.push(siteLayer(world, pal, u, !!opts.debug));
 

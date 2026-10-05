@@ -4,6 +4,7 @@
  * (no workers, blob workers refused on file://, no OffscreenCanvas/Path2D/ImageBitmap in workers): the page then
  * uses its original main-thread path.
  */
+import type { BrushSources } from '../render/brushes';
 import type { Options } from '../gen/options';
 import GenWorker from './worker?worker&inline';
 import RenderWorker from './renderWorker?worker&inline';
@@ -19,6 +20,7 @@ export interface BackendEvents {
   onFrame(f: RFrame): void;
   /** A worker died after startup. */
   onFatal(msg: string): void;
+  onBrushStatus?(ready: boolean): void;
   /** A lazily requested settlement plan was generated (M3c). */
   onDetail?(d: GDetailDone): void;
   /** Megacity: progress of the quarter detail queue. */
@@ -35,7 +37,8 @@ export class OffscreenBackend {
   private constructor(private render: Worker, private ev: BackendEvents) {
     render.onmessage = (e: MessageEvent<RResponse>): void => {
       const r = e.data;
-      if (r.type === 'content') ev.onContent(r);
+      if (r.type === 'brushStatus') ev.onBrushStatus?.(r.ready);
+      else if (r.type === 'content') ev.onContent(r);
       else if (r.type === 'frame') ev.onFrame(r);
       else if (r.type === 'error') { console.error('render worker:', r.error); ev.onRenderError?.(r.gen, r.error); }
     };
@@ -120,17 +123,19 @@ export class OffscreenBackend {
     this.gen.postMessage({ type: 'quarters', id, rect });
   }
 
+  setBrushSources(sources: BrushSources): void { this.render.postMessage({ type: 'brushes', sources }); }
+
   setDisplay(display: DisplayOpts): void { this.render.postMessage({ type: 'display', display }); }
 
   request(r: FrameRequest): void { this.render.postMessage({ type: 'view', ...r }); }
 
   /** Build the SVG / JSON of the current world in the generation worker. */
-  export(gen: number, kind: 'svg' | 'json', display: DisplayOpts, full = false, width?: number): Promise<Blob> {
+  export(gen: number, kind: 'svg' | 'json', display: DisplayOpts, full = false, width?: number, brushes?: BrushSources): Promise<Blob> {
     return new Promise((resolve, reject) => {
       if (!this.gen || this.busy || gen !== this.currentRun) { reject(new Error('the requested map is unavailable')); return; }
       const id = ++this.exportId;
       this.pending.set(id, { resolve, reject });
-      try { this.gen.postMessage({ type: 'export', id, gen, kind, display, full, width }); }
+      try { this.gen.postMessage({ type: 'export', id, gen, kind, display, full, width, brushes }); }
       catch (error) { this.pending.delete(id); reject(error); }
     });
   }

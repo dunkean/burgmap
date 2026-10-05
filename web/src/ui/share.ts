@@ -74,9 +74,9 @@ export function cropAround(x: number, y: number, w: number, mapSize: number): st
   return `${cl(x)},${cl(y)},${ww}`;
 }
 
-export function bugReport(o: Options, pins: Pin[], view: ViewState, linkBase: string, viewW: number): string {
+export function bugReport(o: Options, pins: Pin[], view: ViewState, linkBase: string, viewW: number, displayQuery?: string): string {
   const ms = generationMapSize(o);
-  const link = linkBase + '?' + fullQuery(o, pins, view);
+  const link = linkBase + '?' + (displayQuery ?? fullQuery(o, pins, view));
   const q = new URLSearchParams(toQuery(o));
   const key = ['seed', 'size', 'culture', 'style', ...[...q.keys()].filter((k) => !['seed', 'size', 'culture', 'style', 'hm', 'hscale', 'hsea'].includes(k))]
     .map((k) => `${k}=${k === 'seed' ? o.seed : q.get(k) ?? (o as unknown as Record<string, unknown>)[k]}`).join(', ');

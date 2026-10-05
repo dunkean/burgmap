@@ -11,14 +11,15 @@ import type { Options } from '../gen/options';
 import type { World, Vec2 } from '../gen/types';
 import type { View } from '../render/view';
 import type { MapStyle } from '../render/styles';
+import type { BrushSources } from '../render/brushes';
 import type { FrameStats } from '../render/canvas';
 
 /** Display-only options (changing them never regenerates the world). */
-export interface DisplayOpts { style: MapStyle; contours?: boolean; landuse?: boolean; labels?: boolean; legend?: boolean }
+export interface DisplayOpts { style: MapStyle; contours?: boolean; landuse?: boolean; labels?: boolean; legend?: boolean; painted?: boolean }
 
 // ---- M -> G ----
 export interface GRun { type: 'run'; id: number; options: Options; /** snapshot channel to the render worker */ port: MessagePort }
-export interface GExport { type: 'export'; id: number; gen: number; kind: 'svg' | 'json'; display: DisplayOpts; /** Actual SVG raster export width in pixels; omitted for intrinsic SVG. */ width?: number; /** megacity: generate the detail of every quarter first (slow) */ full?: boolean }
+export interface GExport { type: 'export'; id: number; gen: number; kind: 'svg' | 'json'; display: DisplayOpts; brushes?: BrushSources; /** Actual SVG raster export width in pixels; omitted for intrinsic SVG. */ width?: number; /** megacity: generate the detail of every quarter first (slow) */ full?: boolean }
 /** Lazy detail (M3c): generate the plan of secondary settlement `index` of run `id`. */
 export interface GDetail { type: 'detail'; id: number; index: number }
 /**
@@ -60,7 +61,8 @@ export interface RAttach { type: 'attach'; gen: number; port: MessagePort }
 export interface RDisplay { type: 'display'; display: DisplayOpts }
 export interface RView { type: 'view'; seq: number; view: View; w: number; h: number; dpr: number; mini: number }
 export interface RPng { type: 'dispose' }
-export type RRequest = RInit | RAttach | RDisplay | RView | RPng;
+export interface RBrushes { type: 'brushes'; sources: BrushSources }
+export type RRequest = RInit | RAttach | RDisplay | RView | RPng | RBrushes;
 
 // ---- R -> M ----
 export interface RReady { type: 'ready'; ok: boolean; reason?: string }
@@ -73,4 +75,5 @@ export interface RFrame {
   labels: { kind: string; text: string; size: number }[];
   stats?: FrameStats;
 }
-export type RResponse = RReady | RContent | RFrame | { type: 'error'; gen: number; error: string };
+export interface RBrushStatus { type: 'brushStatus'; ready: boolean }
+export type RResponse = RBrushStatus | RReady | RContent | RFrame | { type: 'error'; gen: number; error: string };

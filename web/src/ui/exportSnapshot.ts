@@ -1,9 +1,10 @@
+import type { BrushSources } from '../render/brushes';
 import type { Options } from '../gen/options';
 import type { World } from '../gen/types';
 import type { MapStyle } from '../render/styles';
 import type { DisplayOpts } from './protocol';
 
-export interface ExportSnapshot { name: string; gen: number; display: DisplayOpts; world: World | null }
+export interface ExportSnapshot { name: string; gen: number; display: DisplayOpts; world: World | null; brushes?: BrushSources }
 /** Capture identity and display choices before any await; rerolls cannot rename an earlier image. */
 export function exportSnapshot(options: Options, world: World | null, gen: number, presentedGen: number): ExportSnapshot {
   if (gen !== presentedGen || (world && (world.options.seed !== options.seed || world.options.size !== options.size))) {
