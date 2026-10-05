@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { Resvg } from '@resvg/resvg-js';
 import type { World, Polygon, PolyH, UrbanLayer } from '../src/gen/types';
 import { urbanLandscapeGround, currentLandscapeGround, landscapeCoverGround } from '../src/gen/landuse/landscapeGround';
+import { groundAppearance } from '../src/gen/landuse/groundAppearance';
 import { intersectionS, differenceSafeS, mpArea } from '../src/gen/geo/bool';
 import { offsetRibbon, polygonContains, polygonArea } from '../src/gen/core/geom';
 import { orientPos } from '../src/gen/geo/poly';
@@ -222,7 +223,7 @@ describe('opaque landscape ground across settlement models', () => {
     expectCanvasGround(w, after, 1150, 450);
   });
 
-  it('preserves gardens, paving and street gaps from actual footprint-free megaQuarterDetail output', () => {
+  it('preserves dedicated gardens, paving and street gaps while exposing peripheral yards in actual footprint-free megaQuarterDetail output', () => {
     const w = generate(makeOptions({ seed: '42', mapSize: 4000, population: 60000, coast: 'S', siteType: 'harbor', walls: 'none' }));
     const plan = w.urban!.macro!, id = 98, detail = megaQuarterDetail(w, id)!;
     // Actual seeded shoreline detail: 30 ordinary blocks and 256 garden pieces on the reviewed producer.
@@ -239,12 +240,17 @@ describe('opaque landscape ground across settlement models', () => {
     expect(mpArea(gaps)).toBeGreaterThan(0);
     expect(mpArea(intersectionS(ground, gaps))).toBeLessThan(0.01);
     expect(mpArea(intersectionS(ground, quarter.pts))).toBeGreaterThan(100);
-    expect(buildScene(w).poly.get('u-landscape-ground')?.polys).toEqual(ground.map((p) => p.outer));
+    const displayed = currentLandscapeGround(w, true), material = groundAppearance(detail, w);
+    for (const poly of [...material.gardens, ...detail.parcels.filter((p) => p.use !== 'plot' && p.use !== 'hut-lot' && !material.naturalParcels.has(p.poly)).map((p) => piece(p.poly))]) {
+      expect(mpArea(intersectionS(displayed, poly))).toBeLessThan(0.01);
+    }
+    expect(mpArea(intersectionS(displayed, gaps))).toBeLessThan(0.01);
+    expect(buildScene(w).poly.get('u-landscape-ground')?.polys).toEqual(displayed.map((p) => p.outer));
     const svg = renderSvg(w, { ...opts, width: 1000, raster: false });
     expect(svg).toContain('class="u-landscape-ground"');
     const clip = svg.match(/id="urban-landscape-ground"[^]*?<\/clipPath>/)?.[0];
-    for (const p of ground) expect(clip).toContain(pathD(p.outer, true));
-    expectCanvasGround(w, ground, w.site!.center.x, w.site!.center.y);
+    for (const p of displayed) expect(clip).toContain(pathD(p.outer, true));
+    expectCanvasGround(w, displayed, w.site!.center.x, w.site!.center.y);
     expect(JSON.stringify(w.landuse!.landscapeGround)).toBe(before);
   }, 300000);
 

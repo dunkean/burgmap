@@ -3,10 +3,13 @@
  * Pure (no DOM, no Path2D) so it can be built and tested in Node.
  * Read-only w.r.t. the World; tolerant of missing optional layers.
  */
-import type { World, LandKind, Polygon, Polyline, Vec2, PolyH } from '../gen/types';
+import type { World, LandKind, LandArea, Polygon, Polyline, Vec2, PolyH } from '../gen/types';
 import { contourSet } from './contours';
 import { countrysideFringe, fringeStreetWidth } from './countryside';
 import { currentLandscapeGround } from '../gen/landuse/landscapeGround';
+import { worldGroundAppearance, earthCourt, type GroundAppearance } from '../gen/landuse/groundAppearance';
+import { plotLines } from './plotLines';
+import { worldCampCover } from './campCover';
 import { renderView } from '../gen/settlements/merge';
 import { seaWithIslands } from './util';
 import { farmPlots, farmRidges, treePolys } from './farms';
@@ -61,6 +64,7 @@ export interface Scene {
   dirty?: { minX: number; minY: number; maxX: number; maxY: number }[];
   /** Exact merged renderer view assembled from retained immutable parts, avoiding repeated stand-in generation. */
   renderedWorld?: World;
+  earthStreets?: boolean;
 }
 
 /**
@@ -164,12 +168,17 @@ export interface SceneBuildOptions {
   ground?: PolyH[];
   skipGround?: boolean;
   strokeSpace?: PolyH[];
+  appearance?: GroundAppearance;
+  plotBoundary?: PolyH[];
+  cover?: LandArea[];
   /** Geometry-only parts use one compact index; polyline chunk lengths remain unchanged. */
   indexTileSize?: number;
 }
 
 export function buildScene(world0: World, tileSize = TILE_SIZE, build: SceneBuildOptions = {}): Scene {
   const world = build.rendered ?? renderView(world0);
+  const appearance = build.appearance ?? worldGroundAppearance(world0);
+  const cover = build.scope === 'static' ? [] : build.cover ?? worldCampCover(world0);
   const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
   const S = world.mapSize;
   const poly = new Map<string, PolyLayer>();
@@ -287,7 +296,7 @@ export function buildScene(world0: World, tileSize = TILE_SIZE, build: SceneBuil
     addH('u-country-fringe', fringe.ground);
     addH('u-natural-ground', (!build.skipGround && world0.landuse?.landscapeGround === undefined ? world0.landuse?.naturalGround ?? [] : []).map((p) => ({ outer: orientPos(p.outer),
       holes: p.holes.map((h) => orientPos(h).slice().reverse()) })));
-    addH('u-landscape-ground', (build.ground ?? (build.skipGround ? [] : currentLandscapeGround(world0))).map((p) => ({ outer: orientPos(p.outer),
+    addH('u-landscape-ground', (build.ground ?? (build.skipGround ? [] : currentLandscapeGround(world0, true))).concat(cover.map((a) => ({ outer: a.poly, holes: a.holes ?? [] }))).map((p) => ({ outer: orientPos(p.outer),
       holes: p.holes.map((h) => orientPos(h).slice().reverse()) })));
     const fringeStreets = new Map<number, Polyline[]>();
     for (const st of fringe.streets) {
@@ -297,6 +306,15 @@ export function buildScene(world0: World, tileSize = TILE_SIZE, build: SceneBuil
     }
     for (const [width, paths] of fringeStreets) addLines('country-street-' + width, 'fringe-street', 'street', width, paths);
     addPoly('footprint', ur.footprint);
+    for (const kind of TEXTURE_KINDS) {
+      const added = cover.filter((a) => a.kind === kind);
+      if (!added.length) continue;
+      addPoly('u-cover-' + kind, added.map((a) => a.poly), added.map((a) => a.holes));
+      const i = textures.findIndex((t) => t.kind === kind);
+      const areas: TextureArea[] = (i >= 0 ? textures[i].areas : []).concat(added.map((a) => ({ kind, poly: a.poly, holes: a.holes })));
+      const layer = { kind, areas, index: new TileIndex(S, tileSize, boxesOf(areas.map((a) => a.poly)), 'overlap') };
+      if (i >= 0) textures[i] = layer; else textures.push(layer);
+    }
     addH('u-streets', ur.quarters.map((q) => ({ outer: orientPos(q.poly.outer), holes: q.poly.holes.map((h) => orientPos(h).slice().reverse()) })));
     addH('u-stroke-space', build.strokeSpace ?? urbanStrokeSpace(ur));
     const parcelsOf = (use: string[]): Polygon[] => ur.parcels.filter((p) => use.includes(p.use)).map((p) => p.poly);
@@ -326,13 +344,13 @@ export function buildScene(world0: World, tileSize = TILE_SIZE, build: SceneBuil
     addPoly('u-garth', lmOf('garth'));
     addPoly('u-cemetery', lmOf('cemetery'));
     addPoly('u-bases', lmOf('tenshu-base', 'mebon'));
-    addPoly('u-patios', ur.buildings.flatMap((b) => (b.kind === 'house' && b.courtyards?.length ? b.courtyards.filter((c) => c.length >= 3) : [])));
+    addPoly('u-patios', ur.buildings.flatMap((b) => (b.kind === 'house' && !earthCourt(b, world) && b.courtyards?.length ? b.courtyards.filter((c) => c.length >= 3) : [])));
     addPoly('u-trees', (ur.trees ?? []).map((t) => ngon(t, t.r, 8)));
     addPoly('u-cornfields', ur.landmarks.filter((l) => l.kind === 'cornfield' || l.kind === 'garden-bed').map((l) => l.poly));
     addPoly('u-terraces', ur.landmarks.filter((l) => l.kind === 'terrace-field').map((l) => l.poly));
     addPoly('u-chinampa-canals', ur.landmarks.filter((l) => l.kind === 'chinampa-canal' || l.kind === 'baray' || l.kind === 'pond').map((l) => l.poly));
     addPoly('u-chinampas', ur.landmarks.filter((l) => l.kind === 'chinampa').map((l) => l.poly));
-    addH('u-backland', ur.backLand);
+    addH('u-backland', appearance.gardens);
     addH('u-masses', ur.masses);
     {
       // individual roofs (landmarks are drawn by u-church / landmarks); courtyards are holes
@@ -342,7 +360,7 @@ export function buildScene(world0: World, tileSize = TILE_SIZE, build: SceneBuil
       const inside = (b: { poly: Polygon }, c: Polygon) => c.length >= 3 && pointInRing(b.poly, polygonCentroid(c));
       addPoly('u-bldg', bs.map((b) => b.poly), bs.map((b) => { const h = (b.courtyards ?? []).filter((c) => inside(b, c)); return h.length ? h : undefined; }));
     }
-    addPoly('u-plots', ur.renderHints?.plotLines === false ? [] : parcelsOf([...PU.plots]));
+    addLines('u-plots', 'plot', 'cadastre', 0, plotLines(ur, build.plotBoundary ?? ur.footprintH));
     addPoly('u-church', ur.buildings.filter((b) => b.kind === 'church' || b.kind === 'cathedral').map((b) => b.poly));
     // landmark buildings (keeps, halls, temples, minarets...), urban water (moats, tanks, mill races) and the plan
     // lines (compound and ward walls, moats, quay edges, terraces, hedges, footpaths)
@@ -381,8 +399,9 @@ export function buildScene(world0: World, tileSize = TILE_SIZE, build: SceneBuil
     const secondary = new Set<unknown>();
     for (const s of world0.settlements ?? []) if (!s.main) for (const st of s.urban?.streets ?? []) secondary.add(st);
     const byW = new Map<string, Polyline[]>();
+    const earthSources = new Set(appearance.streetSources);
     for (const st of ur.streets) {
-      const k = `${secondary.has(st) ? 'v' : ''}${st.rank}|${st.role === 'close' ? 'c' : ''}|${Math.round(st.width * 2) / 2}`;
+      const k = `${secondary.has(st) ? 'v' : ''}${st.rank}|${st.role === 'close' ? 'c' : ''}|${Math.round(st.width * 2) / 2}${earthSources.has(st) ? '|earth' : ''}`;
       let l = byW.get(k);
       if (!l) byW.set(k, (l = []));
       l.push(st.path);
@@ -390,9 +409,9 @@ export function buildScene(world0: World, tileSize = TILE_SIZE, build: SceneBuil
     const rankOf = (k: string): number => Number(k.split('|')[0].replace('v', ''));
     const sorted = [...byW.entries()].sort((a, b) => rankOf(b[0]) - rankOf(a[0]));
     for (const [k, src] of sorted) {
-      const [rank, close, w] = k.split('|');
+      const [rank, close, w, material] = k.split('|');
       const v = rank.startsWith('v');
-      addLines((v ? 'vstreet-' : 'street-') + k, 'street', `r${v ? rank.slice(1) : rank}${close}`, Number(w), src);
+      addLines((v ? 'vstreet-' : 'street-') + k, 'street', `r${v ? rank.slice(1) : rank}${material ? 'e' : ''}${close}`, Number(w), src);
     }
     if (ur.walls) {
       const towers: Polygon[] = [], gateTowers: Polygon[] = [];
@@ -415,7 +434,7 @@ export function buildScene(world0: World, tileSize = TILE_SIZE, build: SceneBuil
   const density = build.scope ? null : buildDensity(world);
   const t1 = typeof performance !== 'undefined' ? performance.now() : Date.now();
   const furrows = furrowAreas.length ? { areas: furrowAreas, index: new TileIndex(S, tileSize, boxesOf(furrowAreas.map((a) => a.poly)), 'overlap') } : undefined;
-  return { mapSize: S, tileSize, poly, lines, textures, furrows, density, counts, buildMs: t1 - t0 };
+  return { mapSize: S, tileSize, poly, lines, textures, furrows, density, counts, buildMs: t1 - t0, earthStreets: appearance.earthStreets };
 }
 
 /** Deterministic integer hash -> [0,1). Independent of view/tile so marks never flicker. */

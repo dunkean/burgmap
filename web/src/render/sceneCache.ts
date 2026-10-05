@@ -1,13 +1,15 @@
 /** Persistent scene preparation for immutable worker snapshots. Painter order stays layer-major. */
 import type { World, UrbanLayer, PolyH } from '../gen/types';
 import { LandscapeGroundCache } from '../gen/landuse/landscapeGround';
+import { groundAppearance } from '../gen/landuse/groundAppearance';
+import { campCover } from './campCover';
 import { megaView, placeholderUrban, mergeUrban } from '../gen/settlements/merge';
 import { fabricBudget } from '../gen/urban/mega/standin';
 import { MEGA_KEY } from '../gen/urban/mega/types';
 import { buildScene, buildDensity, TILE_SIZE, type Scene, type PolyLayer, type LineLayer } from './scene';
 import { boxesOf, TileIndex, type Rect } from './tileindex';
 
-interface Part { source: unknown; owner?: UrbanLayer; variant: string; scene: Scene; urban: UrbanLayer; id: number; bounds?: Rect }
+interface Part { source: unknown; owner?: UrbanLayer; coverOwners?: UrbanLayer[]; variant: string; scene: Scene; urban: UrbanLayer; id: number; bounds?: Rect }
 let nextPart = 1;
 
 function emptyUrban(u: UrbanLayer): UrbanLayer {
@@ -61,10 +63,19 @@ function join(parts: Part[], staticScene: Scene, world: World, tile: number): Sc
     urbanLines.push({ ...group[0].layer, name, lines: source, index, ...identities(group, index) }); counts[name] = source.length;
   }
   // buildScene groups every merged street by descending rank, including widths first encountered in detail.
-  const streets = urbanLines.filter((l) => l.role === 'street').sort((a, b) => Number(b.kind.slice(1, 2)) - Number(a.kind.slice(1, 2)));
+  const plots = urbanLines.filter((l) => l.role === 'plot'), remainder = urbanLines.filter((l) => l.role !== 'plot');
+  const streets = remainder.filter((l) => l.role === 'street').sort((a, b) => Number(b.kind.slice(1, 2)) - Number(a.kind.slice(1, 2)));
   let si = 0;
-  lines.push(...urbanLines.map((l) => l.role === 'street' ? streets[si++] : l));
-  return { ...staticScene, poly, lines, counts, density: buildDensity(world), renderedWorld: world, buildMs: 0 };
+  lines.push(...plots, ...remainder.map((l) => l.role === 'street' ? streets[si++] : l));
+  const addedTextures = parts.flatMap((p) => p.scene.textures);
+  let textures = staticScene.textures;
+  if (addedTextures.length) {
+    const groups = new Map(staticScene.textures.map((t) => [t.kind, t.areas.slice()]));
+    for (const t of addedTextures) groups.set(t.kind, (groups.get(t.kind) ?? []).concat(t.areas));
+    textures = [...groups].map(([kind, areas]) => ({ kind, areas, index: new TileIndex(world.mapSize, tile, boxesOf(areas.map((a) => a.poly)), 'overlap') }));
+  }
+  return { ...staticScene, poly, lines, textures, counts, density: buildDensity(world), renderedWorld: world, buildMs: 0,
+    earthStreets: parts.some((p) => p.scene.earthStreets) };
 }
 
 export class SceneBuilder {
@@ -86,30 +97,35 @@ export class SceneBuilder {
       this.legacy = true;
       return buildScene(world, this.tileSize);
     }
-    const staticInputs = [world.terrain, world.landuse, world.roads, world.bridges, world.mapSize, !!world.options.contours];
+    const staticInputs = [world.terrain, world.landuse, world.roads, world.bridges, world.mapSize, !!world.options.contours,
+      world.options.biome, world.site?.fields.dWater, world.site?.fields.hab];
     const full = this.legacy || !this.staticScene || staticInputs.some((v, i) => v !== this.staticInputs[i]) || this.hints !== world.urban?.renderHints;
     this.legacy = false;
     if (full) {
       this.staticScene = buildScene(world, this.tileSize, { scope: 'static', rendered: world });
       this.staticInputs = staticInputs; this.parts.clear(); this.hints = world.urban?.renderHints; this.stats.staticBuilds++;
     }
-    this.ground.prepare(world);
+    this.ground.prepare(world, 0, true);
     const desired = new Map<string, Part>(), dirty: Rect[] = [];
     const hosts = [{ index: 0, urban: world.urban, settlement: undefined }, ...(world.settlements ?? []).filter((s) => !s.main).map((s) => ({ index: s.index, urban: s.urban, settlement: s }))];
     const macroCount = hosts.reduce((n, h) => n + (h.urban?.macro?.quarters.length ?? 0), 0), budget = fabricBudget(macroCount);
     const variant = `${budget.blocks},${budget.masses}`;
+    const coverOwners = [...hosts.map((h) => h.urban), ...Object.values(world.megaDetail ?? {})].filter((u): u is UrbanLayer => !!u);
     const hasQuarters = hosts.some((h) => h.urban?.quarters.length) || Object.values(world.megaDetail ?? {}).some((u) => u.quarters.length);
     const add = (key: string, source: unknown, make: () => UrbanLayer, ground: () => PolyH[], suffix = '', dependencyOwner?: UrbanLayer): Part => {
       const shape = variant + '|' + hasQuarters + '|' + suffix;
       const old = this.parts.get(key);
       let part = old;
-      if (!old || old.source !== source || old.owner !== dependencyOwner || old.variant !== shape) {
-        const u = { ...make(), renderHints: this.hints };
+      const coverChanged = old?.coverOwners && (old.coverOwners.length !== coverOwners.length || old.coverOwners.some((u, i) => u !== coverOwners[i]));
+      if (!old || old.source !== source || old.owner !== dependencyOwner || old.variant !== shape || coverChanged) {
+        const sourceUrban = make(), u = { ...sourceUrban, renderHints: this.hints };
         const input = { ...world, urban: u, settlements: undefined, megaDetail: undefined };
         // Parts need geometry preparation, not a map-wide dense grid each. The joined scene indexes them once.
         const scene = buildScene(world, this.tileSize, { scope: 'urban', indexTileSize: world.mapSize, rendered: input, skipGround: true, ground: ground(),
-          strokeSpace: hasQuarters && !u.quarters.length ? [] : undefined });
-        part = { source, owner: dependencyOwner, variant: shape, scene, urban: u, id: nextPart++, bounds: bounds(scene) }; this.stats.partBuilds++;
+          strokeSpace: hasQuarters && !u.quarters.length ? [] : undefined, appearance: groundAppearance(sourceUrban, world),
+          plotBoundary: dependencyOwner?.footprintH ?? sourceUrban.footprintH, cover: campCover(world, sourceUrban) });
+        part = { source, owner: dependencyOwner, coverOwners: sourceUrban.renderHints?.openGround ? coverOwners : undefined,
+          variant: shape, scene, urban: u, id: nextPart++, bounds: bounds(scene) }; this.stats.partBuilds++;
         if (old?.bounds) dirty.push(old.bounds); if (part.bounds) dirty.push(part.bounds);
       } else this.stats.retainedParts++;
       desired.set(key, part!);
@@ -136,7 +152,8 @@ export class SceneBuilder {
         }
         for (const key of Object.keys(world.megaDetail ?? {}).map(Number).filter((k) => Math.floor(k / MEGA_KEY) === host.index).sort((a, b) => a - b)) {
           const detail = world.megaDetail![key];
-          details.push(add(`q:${key}`, detail, () => detail, () => this.ground.layer(detail), 'detail').urban);
+          const q = M.quarters.find((q) => q.id === key % MEGA_KEY);
+          details.push(add(`q:${key}`, detail, () => detail, () => this.ground.layer(detail, 0, q?.pts, owner), 'detail', owner).urban);
         }
         // Reconstruct megaView's base with retained stand-ins. Keep its original quarter metadata;
         // mergeUrban on each stand-in would incorrectly offset the macro quarter ids.

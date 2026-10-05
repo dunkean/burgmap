@@ -6,6 +6,8 @@ import { contourSet, ContourSet } from './contours';
 import { MAP_STROKES, svgMapStroke } from './strokes';
 import { countrysideFringe } from './countryside';
 import { currentLandscapeGround } from '../gen/landuse/landscapeGround';
+import { worldGroundAppearance } from '../gen/landuse/groundAppearance';
+import { worldCampCover } from './campCover';
 import { Palette, MapStyle } from './styles';
 import { biomePalette } from './biomes';
 import { renderTerrainRaster, pngDataUrl } from './raster';
@@ -131,7 +133,7 @@ export function renderSvg(world0: World, opts: RenderOptions = {}): string {
   parts.push(`<g id="regional-road-ground"${masked ? ' clip-path="url(#landclip)"' : ''}>${roadsLayer(world, pal, u)}</g>`);
   if (world.urban) {
     const landscape = world0.landuse?.landscapeGround !== undefined;
-    parts.push(urbanLayer(world, pal, u, !!opts.debug, opts.debug || landscape ? { bands: [], ground: [], streets: [] } : countrysideFringe(world0), opts.raster !== false, opts.landuse ?? world.options.landuse, opts.debug || landscape ? [] : (world0.landuse?.naturalGround ?? []), opts.contours ?? world.options.contours, opts.debug ? [] : currentLandscapeGround(world0)));
+    parts.push(urbanLayer(world, pal, u, !!opts.debug, opts.debug || landscape ? { bands: [], ground: [], streets: [] } : countrysideFringe(world0), opts.raster !== false, opts.landuse ?? world.options.landuse, opts.debug || landscape ? [] : (world0.landuse?.naturalGround ?? []), opts.contours ?? world.options.contours, opts.debug ? [] : currentLandscapeGround(world0, true), worldGroundAppearance(world0), opts.debug ? [] : worldCampCover(world0)));
     if (!opts.debug) { parts.push(shadowSvg(world, pal, u)); parts.push(litSvg(world, pal, u)); }
   } else parts.push(siteLayer(world, pal, u, !!opts.debug));
 

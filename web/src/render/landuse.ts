@@ -130,18 +130,18 @@ export function landuseLayer(world: World, pal: Palette, u: number, scale = 1600
 }
 
 /** Identical cover marks in the base landscape and in restored urban ground; pattern defs live in landuseLayer. */
-function coverAreasSvg(kind: LandKind, list: LandArea[], pal: Palette, s: number): string {
+function coverAreasSvg(kind: LandKind, list: LandArea[], pal: Palette, s: number, edges = true): string {
   const d = list.map(ringsD).join('');
   const alpha = kind === 'forest' ? 0.7 : pal.landOpacity;
   let out = `<path d="${d}" fill="${pal.land[kind]}" fill-opacity="${alpha}" fill-rule="evenodd" stroke="${pal.land[kind]}" stroke-width="${f1(0.6 * s)}"${mul(pal)}/>`;
   if (pal.tex[kind]) out += `<path d="${d}" fill="url(#p-${kind})" fill-rule="evenodd"/>`;
-  if (kind === 'forest') out += `<path d="${d}" fill="none" stroke="${pal.treeInk}" stroke-width="${f1(0.7 * s)}" stroke-opacity="0.55" stroke-linejoin="round"/>`;
+  if (edges && kind === 'forest') out += `<path d="${d}" fill="none" stroke="${pal.treeInk}" stroke-width="${f1(0.7 * s)}" stroke-opacity="0.55" stroke-linejoin="round"/>`;
   else if (kind === 'orchard' || kind === 'garden') out += `<path d="${d}" fill="none" stroke="${pal.hedge}" stroke-width="${f1(0.8 * s)}" stroke-opacity="0.7"/>`;
   return out;
 }
 
 /** Replays actual natural areas under a caller's occupation clip; it never invents forest or draws agriculture. */
-export function naturalLanduseLayer(world: World, pal: Palette, u: number, ground?: PolyH[]): string {
+export function naturalLanduseLayer(world: World, pal: Palette, u: number, ground?: PolyH[], cover: LandArea[] = []): string {
   const s = Math.max(1, u), boxes = ground?.map((p) => bboxOf(p.outer));
   const relevant = (a: LandArea): boolean => {
     if (!boxes) return true;
@@ -152,6 +152,8 @@ export function naturalLanduseLayer(world: World, pal: Palette, u: number, groun
   for (const kind of NATURAL_LAND_KINDS) {
     const areas = (world.landuse?.areas ?? []).filter((a) => a.kind === kind && relevant(a));
     if (areas.length) out += `<g class="lu-${kind}">${coverAreasSvg(kind, areas, pal, s)}</g>`;
+    const added = cover.filter((a) => a.kind === kind && relevant(a));
+    if (added.length) out += `<g class="u-cover-${kind}">${coverAreasSvg(kind, added, pal, s, false)}</g>`;
   }
   return out + '</g>';
 }
