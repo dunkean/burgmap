@@ -1,4 +1,4 @@
-import { Options, SIZE_PRESETS, DEFAULT_ROADS, fromQuery, toQuery, wantsCustomHeight, DEFAULTS, withCulture, makeOptions, generationUid, SITE_ARCHETYPES } from '../gen/options';
+import { Options, SIZE_PRESETS, DEFAULT_ROADS, fromQuery, toQuery, wantsCustomHeight, DEFAULTS, withCulture, generationUid, SITE_ARCHETYPES } from '../gen/options';
 import { generate } from '../gen/pipeline';
 import { renderSvg } from '../render/svg';
 // CANVAS-VIEWER (begin imports)
@@ -33,6 +33,8 @@ import { exportPng } from './pngExport';
 import { exportSnapshot, type ExportSnapshot } from './exportSnapshot';
 import { initSettlementsUI, showSettlementWarnings } from './settlementsPanel';
 import { initPlanEditor } from './planEditor';
+import { initConfiguration } from './configuration';
+import { freshMapOptions, initialMapOptions } from './workflowDraft';
 import { screenToWorld } from '../render/view';
 import { Pin, ViewState, fullQuery, uiStateFromQuery, bugReport } from './share';
 import { createPins } from './pins';
@@ -48,8 +50,9 @@ function parseOptions(q: string): Options {
 }
 const mapStyle = (): MapStyle => opts.style as MapStyle;
 
-let opts: Options = location.search ? parseOptions(location.search) : makeOptions({ workflow: 'environment', population: 20000, size: 'city', mapSize: 10000 });
+let opts: Options = location.search ? parseOptions(location.search) : initialMapOptions();
 let draft: Options = structuredClone(opts);
+let pendingSettings = false;
 /** The imported image of this session (kept out of the URL; the link only carries a `hm=custom` marker). */
 let importedMem: ImportedHeight | null = null;
 /** Set when the page was opened from a link that used a custom heightmap we do not have. */
@@ -98,7 +101,8 @@ const seedControl = {
 };
 registry.add(seedControl);
 // map extent (preset or custom), population slider and the settlement system (M3c)
-const settlUI = initSettlementsUI(registry, () => draft, changeEditor);
+const configuration = initConfiguration(() => settlUI.cancelPick());
+const settlUI = initSettlementsUI(registry, () => draft, changeEditor, (active) => configuration.picking(active));
 registry.add(selectControl(reliefEl, 'relief', (v) => v as Options['relief']));
 registry.add({ ...selectControl(biomeEl, 'biome', (v) => biomeName(v)), write: (o) => { biomeEl.value = biomeName(o.biome); } });
 registry.add(selectControl(coastEl, 'coast', (v) => v as Options['coast']));
@@ -491,6 +495,7 @@ function schedule(): void {
 /** Bring everything in line with `opts`: panel, URL (push / replace / none) and the map (regenerate or just redraw). */
 function commit(mode: 'push' | 'replace' | 'none', displayOnly = false): void {
   if (!displayOnly) {
+    pendingSettings = false;
     draft = structuredClone(opts);
     settlUI.load(draft);
     registry.writeAll(settlUI.editorOptions(draft));
@@ -508,14 +513,16 @@ function commit(mode: 'push' | 'replace' | 'none', displayOnly = false): void {
 }
 
 function markDraft(): void {
-  $('draftState').textContent = 'Settings ready. Press Generate environment or Generate settlements to apply them.';
+  pendingSettings = true;
+  $('draftState').textContent = 'Unapplied settings — open Customize to apply & generate.';
 }
 function changeEditor(change: (o: Options) => Options): void {
+  const before = toQuery(draft);
   draft = settlUI.capture(registry.readAll(settlUI.editorOptions(draft)), draft);
   draft = change(draft);
   registry.writeAll(settlUI.editorOptions(draft));
   roadsEl.options[0].textContent = `Auto (${DEFAULT_ROADS[settlUI.editorOptions(draft).size]})`;
-  markDraft();
+  if (toQuery(draft) !== before) markDraft();
 }
 registry.onChange((control) => {
   draft = settlUI.capture(registry.readAll(settlUI.editorOptions(draft)), draft);
@@ -529,16 +536,22 @@ registry.onChange((control) => {
 function applyGeneration(environment: boolean): void {
   if (!registry.controls.every((control) => Array.from(control.el.matches('input') ? [control.el] : control.el.querySelectorAll('input')).every((input) => !(input instanceof HTMLInputElement) || input.checkValidity()))) {
     $('draftState').textContent = 'Check the highlighted values before generating.';
-    for (const input of Array.from(document.querySelectorAll<HTMLInputElement>('#panel input'))) if (!input.checkValidity()) { input.reportValidity(); break; }
+    for (const input of Array.from(document.querySelectorAll<HTMLInputElement>('#panel input'))) if (!input.checkValidity()) {
+      configuration.open(input.closest('[role=tabpanel]')?.id); input.reportValidity(); break;
+    }
     return;
   }
   const x = $<HTMLInputElement>('centerX'), y = $<HTMLInputElement>('centerY');
-  if (!!x.value !== !!y.value) { $('draftState').textContent = 'Enter both position coordinates, or clear both for automatic placement.'; return; }
+  if (!!x.value !== !!y.value) {
+    $('draftState').textContent = 'Enter both position coordinates, or clear both for automatic placement.';
+    configuration.open('settlementsPane'); (x.value ? y : x).focus(); return;
+  }
   draft = settlUI.capture(registry.readAll(settlUI.editorOptions(draft)), draft);
   heightId = heightDraftId;
   opts = environment ? { ...draft, workflow: 'environment', settlementMode: settlUI.mode } : settlUI.composition(draft);
   settlUI.cancelPick();
   commit('push');
+  configuration.close();
 }
 $('generateEnvironment').addEventListener('click', () => applyGeneration(true));
 $('generateSettlements').addEventListener('click', () => applyGeneration(false));
@@ -552,6 +565,17 @@ window.addEventListener('popstate', () => {
 });
 
 function randomSeed(): string { return Math.random().toString(36).slice(2, 8); }
+$('newMap').addEventListener('click', () => {
+  const pending = pendingSettings ? settlUI.capture(registry.readAll(settlUI.editorOptions(draft)), draft) : null;
+  opts = freshMapOptions(opts, randomSeed());
+  settlUI.cancelPick();
+  commit('push');
+  if (pending) {
+    draft = { ...pending, seed: opts.seed };
+    settlUI.load(draft); registry.writeAll(settlUI.editorOptions(draft));
+    updateHeightmapUI(); markDraft();
+  }
+});
 function reroll(): void {
   draft = settlUI.capture(registry.readAll(settlUI.editorOptions(draft)), draft);
   draft = { ...draft, seed: randomSeed() };
@@ -769,8 +793,6 @@ function focusSettlement(s: SettlementMeta): void {
     if (best) focusSettlement(best);
   });
 }
-$('menuBtn').addEventListener('click', () => $('app').classList.toggle('open'));
-map.addEventListener('pointerdown', () => $('app').classList.remove('open'));
 // debug hook for scripted screenshots (scripts/ui_check.mjs)
 (window as unknown as Record<string, unknown>).__burgmap = {
   setView: (v: { cx: number; cy: number; scale: number }) => viewer.setView(v),

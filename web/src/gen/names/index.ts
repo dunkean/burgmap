@@ -151,6 +151,16 @@ export function generateNames(world: World, root: Rng): NamesLayer {
     if (dec !== townBase) { usedPlaces.add(dec); townBase = dec; }
   }
   const town = townBase;
+  const castleLabels = new Map<string, NameEntry>();
+  const castleName = (anchor: Vec2, siteId?: string, providedName?: string): string => {
+    const castles = entries.filter((e) => e.kind === 'castle');
+    const existing = siteId ? castleLabels.get(siteId) : castles.find((e) => dist(e.anchor, anchor) < 150);
+    if (existing) return existing.text;
+    const text = providedName ?? V.castle(castles.length ? unique('castle:' + castles.length, 1) : town);
+    const entry = add({ kind: 'castle', text, rank: 2, anchor });
+    if (siteId) castleLabels.set(siteId, entry);
+    return text;
+  };
   {
     // anchored above the built-up core (not the faubourg ribbons along the roads)
     let anchor = center, span = 300;
@@ -280,7 +290,8 @@ export function generateNames(world: World, root: Rng): NamesLayer {
         if (ex) { ex.big = ex.big || /cathedral/.test(k); continue; }
         worship.push({ c, big: /cathedral/.test(k) });
       } else if (/castle|keep|citadel|palace|kasbah|fort/.test(k)) {
-        if (!entries.some((e) => e.kind === 'castle' && dist(e.anchor, c) < 150)) add({ kind: 'castle', text: V.castle(town), rank: 2, anchor: c });
+        const site = u.sites?.find((st) => /castle|keep|citadel|palace|kasbah|fort|motte/.test(st.kind) && polygonContains(st.lot, c));
+        castleName(site?.anchor ?? c, site?.id, site?.name);
       }
     }
     worship.forEach((w0, i) => {
@@ -292,7 +303,7 @@ export function generateNames(world: World, root: Rng): NamesLayer {
     // M4 name hooks: landmark sites get a name unless a user generator already set one
     for (const st of u.sites ?? []) {
       if (st.name) continue;
-      if (st.kind === 'castle' || st.kind === 'kasbah' || st.kind === 'motte') st.name = V.castle(town);
+      if (st.kind === 'castle' || st.kind === 'kasbah' || st.kind === 'motte') st.name = castleName(st.anchor, st.id);
       else if (st.kind === 'cathedral-close') st.name = V.worship(saintOf('cathedral'), true);
       else if (st.kind === 'monastery' || st.kind === 'madrasa') st.name = V.worship(saintOf('site:' + st.id), false);
     }
@@ -405,7 +416,7 @@ export function generateNames(world: World, root: Rng): NamesLayer {
         add({ kind: 'quarter', text, rank: nu.kind === 'town' ? 1 : 2, anchor: nu.p, span: Math.max(300, nu.r * 2.2), sub: nu.kind });
       });
       for (const st of u.sites ?? []) {
-        if (st.kind === 'palace') add({ kind: 'castle', text: V.castle(town), rank: 2, anchor: st.anchor });
+        if (st.kind === 'palace') st.name = castleName(st.anchor, st.id, st.name);
         if ((st.kind === 'satellite-town' || st.kind === 'absorbed-village') && !st.name) st.name = M.nuclei[Number(st.id.split(':')[1])]?.name;
       }
       // wards: per ring band, one name for every ~ 60° sector (on its largest quarter)

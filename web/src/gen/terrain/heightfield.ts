@@ -149,7 +149,8 @@ export function generateHeightfield(
     : relief === 'hills'
       ? mountainRelief({ ...simCfg, amp: hiNominal * 1.05, talus: 0.2, detail: 0.025, iters: 18, nc: mapSize > 8000 ? 224 : 176, diffuse: 0.7 })
       : relief === 'valley'
-        ? mountainRelief({ ...simCfg, amp: hiNominal * 0.5, talus: 0.2, detail: 0.02, iters: 18, nc: mapSize > 8000 ? 224 : 176, diffuse: 0.7 })
+        ? mountainRelief({ ...simCfg, amp: hiNominal * 0.65, talus: 0.2, detail: 0.02, iters: 18, nc: mapSize > 8000 ? 224 : 176, diffuse: 0.7,
+          valley: { width: valleyWidth, offset: valleyOff, noiseOffset: off } })
         : null;
   for (let y = 0; y < n; y++) {
     for (let x = 0; x < n; x++) {
@@ -174,14 +175,9 @@ export function generateHeightfield(
           break;
         }
         case 'valley': {
-          const sMeander = 320 * k * noise.fbm((along + off) / (2600 * k), 0.37, 2) + 120 * k * noise.fbm((along + off) / (900 * k), 5.1, 2);
-          const s = across - valleyOff + sMeander;
-          const ds = Math.abs(s);
-          const floorW = valleyWidth * (0.8 + 0.4 * noise2.fbm(along / (1500 * k), 3.3, 2));
-          const wall = smooth((ds - floorW) / (mapSize * 0.42));
-          const hills = mtn ? mtn[y * n + x] - 0.3 * hiNominal * 0.5 : 0;
-          const ridge = 0;
-          h = 4 + 62 * (hiNominal / 110) * Math.pow(wall, 1.25) + (hills + ridge) * (0.12 + 0.88 * wall) + 12 * (hiNominal / 110) * (0.5 - q);
+          // The corridor and tributary valleys were evolved together; only the regional grade remains.
+          // A regional falling grade keeps the evolved alluvial floor gently sloped (about 2% at 2.4 km).
+          h = (mtn ? mtn[y * n + x] : 0) + 44 * (hiNominal / 110) * (0.5 - q);
           break;
         }
       }

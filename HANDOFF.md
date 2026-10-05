@@ -1,9 +1,48 @@
 # Burgmap — handoff
 
-Updated 2026-10-04. This file describes the current implementation; completed
+Updated 2026-10-05. This file describes the current implementation; completed
 bugs and their evidence are recorded in [ROADMAP.md](ROADMAP.md).
 
 ## Current status
+
+- Local acceleration/quality checkpoint (2026-10-05): assembled source tree
+  `001c320c`, 24 reviewed paths. It integrates urban V7 `ad4e15bf`, terrain V4
+  `01dab2ec`, distinct castle names, UI V2, adaptive titles and the final roof
+  repair `f78699c`. These changes are not published. Grouped Sol xhigh source
+  gates preceded execution. Final integration passes 52 focused regressions,
+  all 13 existing M5a controls, strict typecheck and the offline single-file build.
+  All 207 source files and the three preserved user files match their closing
+  hashes. Local/offline native maps match excluding stats: 1222 roofs, three
+  rivers, no page errors; the final image was inspected. The full suite was not run.
+  The manual preview remains at http://localhost:5173/.
+  Exact-output V7 alone preserves six complete World hashes and gives 2.38–4.55×
+  gains on the original four measured cases. Russian repair still takes 219.23s.
+  Terrain quality intentionally changes output and costs more in valleys; exposed
+  plains images no longer show the original straight drainage trenches. Main and
+  offscreen export parity also passes on the actual 20k/10km valley URL with
+  the new terrain: 8790 main roofs, six rivers, zero town walls. These earlier
+  browser checks precede the final roof-only repair and are not quiet benchmarks.
+  UI first visit, draft/applied state, mobile, themes, manual placement, individual
+  cultures and the actual Roman20k plus two Germanic500 settlements pass. French/
+  Italian titles fit in desktop/mobile views. Matching resolved BUGS rows are removed.
+  Final actual open42 generation retains all 85 prior repaired roofs and repairs
+  426/798/823; neighbour790 moves rigidly 0.5mm. Counts, metadata, raw planning
+  unions, physical clearance and all 65 checked accesses are retained. There is
+  no new ownership overlap; inherited 428/427 remains an absolute audit FAIL.
+  The four-case cut inventory falls from 21 to 18; the original house report stays open.
+  Evidence is retained in `web/out/acceleration-2026-10-04/`, including reviewed
+  manifests, final captures and opening/closing integration certificates.
+  All four temporary worktrees were archived, byte-verified and removed from Git.
+  ZIPs and their manifest are at
+  `E:/CodexArtifacts/city-generator-2026-10-04/archive/acceleration-final-20261005/`.
+  Older worktree-relative paths below describe files preserved inside these archives.
+  Root dependencies, manual preview, AGENTS.md and both user reproduction scripts remain.
+- Native main/offscreen checks confirm the user's exact `walls=none` URL has
+  zero town walls and retains its castle enclosure. Changing single to none,
+  applying and reloading also passes. Three actual generated castles have
+  distinct site/label names after reload. Two initial harness failures (closed
+  controls and assuming main-render data after an offscreen reload) are retained
+  alongside the final passing proof; they were test-script errors.
 
 - Local code checkpoint: `a8c6f14`. All 19 secondary worktrees were archived,
   verified and removed from Git; only the primary checkout remains registered.
@@ -40,6 +79,12 @@ bugs and their evidence are recorded in [ROADMAP.md](ROADMAP.md).
   Chrome loads the published Persian village with 276 buildings, 250 parcels,
   Swahili registration and no page errors. This publication is not a full-suite
   certificate.
+- Later on 2026-10-04, the user explicitly requested improved erosion and a
+  major generation-acceleration pass, reporting an approximately sevenfold
+  slowdown. Performance work is now authorized; the full-suite rerun remains
+  deferred. Reproduce seed 1, valley, automatic city, 20,000 inhabitants, and
+  the exact open-town 10 km URL in BUGS.md. Keep optimization equivalence
+  evidence separate from intentional terrain/rivers changes.
 - Local checkpoint: reviewed 40-path source tree `923a5cad` (geometry
   `18d1c47` plus the scoped hidden-control CSS correction). The new Environment /
   Settlements workflow has a general theme, independent instance overrides and

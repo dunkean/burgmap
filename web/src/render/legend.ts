@@ -66,8 +66,11 @@ export function cartoucheModel(world: World, pal: Palette, pxPerM: number): Pane
   const barW = Math.max(24, L * pxPerM);
   const prims: Prim[] = [];
   const H = 104;
+  const titleChars = Array.from(title.toUpperCase());
+  const titleUnits = titleChars.reduce((sum, ch) => sum + (ch === ' ' ? 0.4 : /[MW@%]/.test(ch) ? 1 : /[I|!1.,:'’]/.test(ch) ? 0.5 : 0.9), 0);
+  const titleSize = Math.min(title.length > 12 ? 19 : 24, (W - 24 - Math.max(0, titleChars.length - 1) * 1.2) / Math.max(1, titleUnits));
   prims.push(...panelFrame(pal, W, H));
-  prims.push({ t: 'text', x: W / 2, y: 33, s: title, size: title.length > 16 ? 19 : 24, anchor: 'middle', fill: pal.lab.town, bold: true, caps: true, spacing: 1.2 });
+  prims.push({ t: 'text', x: W / 2, y: 33, s: title, size: Math.max(6, titleSize), anchor: 'middle', fill: pal.lab.town, bold: true, caps: true, spacing: 1.2 });
   prims.push({ t: 'text', x: W / 2, y: 50, s: sub, size: 11.5, anchor: 'middle', fill: pal.inkSoft, italic: true });
   // scale bar
   const x0 = (W - barW) / 2, y0 = 76, bh = 5;

@@ -6,6 +6,16 @@ Current review gate: the user's latest 2026-10-04 instruction calls for grouped 
 
 ## User bugs, in priority order
 
+- [x] Major acceleration and erosion pass (2026-10-05, assembled source `001c320c`): generation gains of 2.38–4.55× on four reference cases, improved exposed relief/drainage, castle names and the new settlement workflow are validated. Final integration: 52 focused +13 existing M5a tests, typecheck/build, matching native local/offline Worlds and inspected image. All source hashes are unchanged after validation. The user now has the manual preview; full-suite testing and publication remain deferred. Remaining houses and the Russian outlier are tracked separately below.
+
+- [x] Plain straight erosion lines and exposed relief (2026-10-05, local terrain tree `01dab2ec`): bounded physical drainage replaces long straight trench excavation; coarse erosion uses continuous receiver weighting and river courses retain terrain-aware irregular bends. Sol xhigh approved the frozen source before execution. Twelve new tests, nine unchanged terrain controls, typecheck/build, seven paired physical fixtures and four actual monotone river beds pass. Desert/tropical/tundra/forest images at 2.4/10 km were inspected independently; no original straight trenches or knife-like valley cuts remain. This intentionally changes terrain, separately from exact-output optimization.
+- [x] Distinct castles (2026-10-05, local names tree `87087507`): unique generated sites retain distinct names even close together; compound keep geometry shares its actual site name. Two focused tests/typecheck and native three-castle main/offscreen/reload labels pass, with inspected images. Evidence: `web/out/acceleration-2026-10-04/native-v4-names-remedy/` and `native-v4-names-reload-proof/`.
+- [x] Open-town report (2026-10-05): the exact reported URL has zero town walls in both native render paths. Applied single→none and canonical reload retain zero town walls and legitimate castle enclosures. User confirmed the initial observation was probably stale refresh. Passing JSON export/reload proofs retained; no removal of castle walls was necessary.
+- [x] Exact-output urban acceleration (2026-10-05, local V7 `ad4e15bf`): six complete World hashes excluding stats are unchanged; 18 focused regressions and typecheck pass. The original four cases gain 2.38–4.55×. Reviewed bounded caches retry failed Boolean computations and retain the original physical thresholds/candidate order. Terrain/UI are validated separately; no full-suite or publication certificate is claimed.
+- [x] Generation interface and individual cultures (2026-10-05, local UI V2): eight focused and six selected existing checks, typecheck/build, zero-click first visit, one-click New map, native draft/applied/reload/manual-position/mobile checks pass. An actual Roman city of 20k plus two Germanic villages of 500, one automatic and one manually positioned, exports and reloads correctly; general theme and historical mixed growth remain. Adaptive shared titles pass French/Italian desktop/mobile and two legend controls. Matching user reports are removed from `BUGS.md`.
+- [ ] Remaining edge houses: final reviewed repair `f78699c` passes 12 hybrid +18 speed regressions and the actual open42 pipeline retains all 85 prior repairs. Three roofs (426/798/823) become whole under strict caps; neighbour790 retains the approved rigid 0.5mm translation. Raw planning unions, metadata, physical guards and 65 accesses pass; no NEW owner overlap appears. The inherited 428↔427 overlap remains an absolute FAIL. Four-case exposed-cut inventory is 18 (five open, eight wall, five port), down from 21. Existing candidate and actual roof-edge axes were diagnosed; other roofs hit actual neighbour, protected-ground or WALL constraints. Further reassignment needs a separate remedy; this does not establish global impossibility. Keep the original user report open.
+- [ ] Russian worst-case density performance: V4 329.30s→V7 219.23s (1.50×), exact World; required access 86.60s and obstacle clearance 75.37s still dominate, with inclusive times overlapping. Successive Roman/Germanic growth remains ~15.8s. Further structural acceleration requires a separate measured pass after the user's manual test.
+
 Validated in the reviewed integration checkpoint (2026-10-04): attached optional
 road fringes, opaque ground, organic shanty fabric, bounded regional population
 and tiny mountain settlements. Large-map reproduction: 14 instances, with
@@ -20,8 +30,8 @@ remains `54072c1`. No optimisation or full-suite rerun was performed.
 
 The first user report remains open: artificial settlement outlines are
 removed and several whole roofs are restored, but the four actual reference
-maps still have 21 exposed/wall cuts (8 open-town, 8 standing-wall, 5 served
-port cases). Tiny-owner bounds describe current parcels, not global
+maps had 21 exposed/wall cuts at the preceding checkpoint (8 open-town, 8
+standing-wall, 5 served port cases); the current repair reduces that inventory to 18. Tiny-owner bounds describe current parcels, not global
 impossibility of safe reassignment. The actual683 remedy retains all homes,
 frontage, access and the raw two-owner union; the town-density repair keeps
 70% coverage and cumulative road contact below the original1e-6 threshold.

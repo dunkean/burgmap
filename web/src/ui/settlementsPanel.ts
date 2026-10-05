@@ -3,6 +3,7 @@ import type { Options, SettlementSpec, SettlementOverrides } from '../gen/option
 import { SETTLEMENT_OVERRIDE_KEYS, optionsForSettlement, mapSizeOf, MAP_SIZE_MIN, MAP_SIZE_MAX, POP_MIN, POP_MAX, classOfPop, sizeForPop } from '../gen/options';
 import { CULTURE_LIST } from '../gen/urban/cultures';
 import type { ControlRegistry } from './controls';
+import { appendSettlementDraft, mainSettlementSpec as mainSpec, settlementComposition } from './workflowDraft';
 
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, attrs: Record<string, string> = {}, text?: string): HTMLElementTagNameMap[K] => {
   const e = document.createElement(tag);
@@ -13,7 +14,6 @@ const el = <K extends keyof HTMLElementTagNameMap>(tag: K, attrs: Record<string,
 const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);
 const defaultValue = (key: string, value: unknown): unknown => value ?? (key === 'sprawl' ? 1 : key === 'cultureMix' || key === 'plan' ? null : key === 'sitePrefs' ? undefined : key === 'size' ? undefined : key === 'roads' ? 0 : 'auto');
 const copy = <T>(value: T): T => structuredClone(value);
-const mainSpec = (o: Options): SettlementSpec => ({ population: o.population || 20000, position: o.center });
 const listOf = (o: Options): SettlementSpec[] => o.settlements && typeof o.settlements === 'object' && 'list' in o.settlements ? o.settlements.list : [];
 
 export interface SettlementsUI {
@@ -27,7 +27,7 @@ export interface SettlementsUI {
   cancelPick(): void;
 }
 
-export function initSettlementsUI(registry: ControlRegistry, getOpts: () => Options, changeEditor: (change: (o: Options) => Options) => void): SettlementsUI {
+export function initSettlementsUI(registry: ControlRegistry, getOpts: () => Options, changeEditor: (change: (o: Options) => Options) => void, onPicking: (active: boolean) => void = () => undefined): SettlementsUI {
   const modeEl = document.getElementById('settlMode') as HTMLSelectElement;
   const choices = document.getElementById('settlementChoices')!;
   const actions = document.getElementById('compositionActions')!;
@@ -84,15 +84,17 @@ export function initSettlementsUI(registry: ControlRegistry, getOpts: () => Opti
   });
 
   function setPicking(value: 'main' | number | null): void {
+    const wasPicking = picking !== null;
     picking = value;
     document.getElementById('map')!.classList.toggle('picking', value !== null);
     pick.textContent = value === null ? 'Place on map' : 'Click the map…';
     posHint.textContent = value === null ? 'Automatic unless you choose a position. Unsuitable sites move to nearby usable land.' : 'Click the landscape to place this settlement. Escape cancels.';
+    if (wasPicking !== (value !== null)) onPicking(value !== null);
   }
   function render(o: Options): void {
     modeEl.value = mode;
     const specs = listOf(o);
-    actions.hidden = mode !== 'list';
+    actions.hidden = false;
     choices.textContent = '';
     specs.forEach((spec, index) => {
       if (mode !== 'list') return;
@@ -103,7 +105,8 @@ export function initSettlementsUI(registry: ControlRegistry, getOpts: () => Opti
       button.addEventListener('click', () => changeEditor((draft) => { selected = index; setPicking(null); render(draft); return draft; }));
       choices.append(button);
     });
-    heading.textContent = selected < 0 ? 'General theme' : `Settlement ${selected + 1}${selected === 0 ? ' · main' : ''}`;
+    heading.textContent = selected < 0 ? mode === 'list' ? 'General theme' : 'Main settlement & general theme' : `Settlement ${selected + 1}${selected === 0 ? ' · main' : ''}`;
+    document.querySelector('label[for="culture"]')!.textContent = selected < 0 ? 'General theme culture' : 'Culture of this settlement';
     themeButton.setAttribute('aria-pressed', String(selected < 0));
     themeHint.textContent = `${CULTURE_LIST.find((c) => c.id === o.culture)?.label ?? o.culture} · shared layout and landmarks. Individual changes override only the fields you edit.`;
     resetButton.hidden = selected < 0;
@@ -150,10 +153,41 @@ export function initSettlementsUI(registry: ControlRegistry, getOpts: () => Opti
     });
   });
   themeButton.addEventListener('click', () => changeEditor((draft) => { selected = -1; setPicking(null); render(draft); return draft; }));
-  document.getElementById('settlAdd')!.addEventListener('click', () => changeEditor((draft) => {
-    const specs = [...copy(listOf(draft)), { population: 300 }];
-    selected = specs.length - 1; setPicking(null); const next = { ...draft, settlements: { list: specs } }; render(next); return next;
-  }));
+  const addDialog = document.getElementById('addSettlementDialog') as HTMLDialogElement;
+  const addForm = document.getElementById('addSettlementForm') as HTMLFormElement;
+  const addType = document.getElementById('addSettlementType') as HTMLSelectElement;
+  const addPopulation = document.getElementById('addSettlementPopulation') as HTMLInputElement;
+  const addCulture = document.getElementById('addSettlementCulture') as HTMLSelectElement;
+  for (const [value, population] of Object.entries(populations)) addType.append(el('option', { value }, `${value[0].toUpperCase()}${value.slice(1)} · ${population.toLocaleString('en')}`));
+  addCulture.append(el('option', { value: '' }, 'Use general theme'));
+  for (const culture of CULTURE_LIST) addCulture.append(el('option', { value: culture.id }, culture.label));
+  addType.addEventListener('change', () => { addPopulation.value = String(populations[addType.value as Options['size']]); });
+  addPopulation.addEventListener('input', () => { if (Number(addPopulation.value) > 0) addType.value = sizeForPop(Number(addPopulation.value)); });
+  const addButton = document.getElementById('settlAdd') as HTMLButtonElement;
+  let addCommitted = false;
+  addButton.addEventListener('click', () => {
+    addCommitted = false;
+    addForm.reset(); addType.value = 'village'; addPopulation.value = '300';
+    addCulture.options[0].textContent = `Use general theme (${CULTURE_LIST.find((culture) => culture.id === getOpts().culture)?.label ?? getOpts().culture})`;
+    addDialog.showModal(); addType.focus();
+  });
+  document.getElementById('cancelAddSettlement')!.addEventListener('click', () => addDialog.close());
+  addDialog.addEventListener('close', () => { if (picking === null) (addCommitted ? document.getElementById('culture') : addButton)?.focus(); });
+  addForm.addEventListener('submit', (event) => {
+    event.preventDefault();
+    if (!addForm.reportValidity()) return;
+    const manual = new FormData(addForm).get('addPlacement') === 'manual';
+    const population = Number(addPopulation.value), culture = addCulture.value;
+    addCommitted = true;
+    addDialog.close();
+    changeEditor((draft) => {
+      const next = appendSettlementDraft(draft, mode === 'list', population, culture);
+      mode = 'list';
+      selected = listOf(next).length - 1; setPicking(null);
+      render(next); return next;
+    });
+    if (manual) setPicking(selected);
+  });
   document.getElementById('settlRemove')!.addEventListener('click', () => changeEditor((draft) => {
     const specs = copy(listOf(draft));
     if (selected < 0 || specs.length <= 1) return draft;
@@ -168,15 +202,15 @@ export function initSettlementsUI(registry: ControlRegistry, getOpts: () => Opti
   }));
   pick.addEventListener('click', () => setPicking(picking !== null ? null : mode === 'list' ? selected : 'main'));
   auto.addEventListener('click', () => { xEl.value = ''; yEl.value = ''; setPicking(null); positionBox.dispatchEvent(new Event('change')); });
-  window.addEventListener('keydown', (event) => { if (event.key === 'Escape') setPicking(null); });
+  window.addEventListener('keydown', (event) => { if (event.key === 'Escape' && picking !== null) { event.preventDefault(); setPicking(null); } });
   function load(o: Options): void {
-    mode = o.workflow === 'list' || o.workflow === 'environment' && (o.settlementMode === 'list' || !o.settlementMode && listOf(o).length > 0) ? 'list' : 'automatic';
+    mode = o.settlementMode === 'list' || o.workflow === 'list' || o.workflow === 'environment' && !o.settlementMode && listOf(o).length > 0 ? 'list' : 'automatic';
     selected = mode === 'list' ? Math.min(Math.max(0, selected), listOf(o).length - 1) : -1;
     setPicking(null); render(o);
   }
   load(getOpts());
   return { get picking() { return picking; }, get mode() { return mode; }, editorOptions, capture, load,
-    composition(o) { return mode === 'list' ? { ...o, workflow: 'list', settlements: { list: listOf(o).length ? listOf(o) : [mainSpec(o)] } } : { ...o, workflow: 'automatic', population: o.population || 20000, size: o.population ? o.size : 'city', settlements: listOf(o).length ? o.settlements : 'auto' }; },
+    composition(o) { return settlementComposition(o, mode === 'list'); },
     place(point) {
       const extent = Number(msEl.value) || mapSizeOf(getOpts());
       if (picking === null || !Number.isFinite(point.x) || !Number.isFinite(point.y) || point.x < 0 || point.y < 0 || point.x > extent || point.y > extent) return;

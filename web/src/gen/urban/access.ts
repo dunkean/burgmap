@@ -9,7 +9,7 @@
  * centre. Those contact cells restore the doorway apron removed by the clearance check at a terminal facade.
  *
  * Plots whose rear buildings are cut off get a passage along one side line, shared with the neighbouring plot of
- * the same frontage run (each gives half its width, like the allées and closes of medieval towns), cut through the
+ * the same frontage run (each gives half its width, like the allÃ©es and closes of medieval towns), cut through the
  * front range from the street to the deepest building; buildings still unreachable are dropped.
  */
 import type { Vec2, Polygon } from '../core/geom';
@@ -33,7 +33,7 @@ export const ACC_STATS = { calls: 0, cells: 0, ms: 0, msRaster: 0, msStreet: 0 }
  * The rasters of a block that do not depend on its buildings (block mask, street-side cells, their ~1 m reach),
  * kept for the next call on the same block (the access pass asks twice: before and after carving passages).
  */
-interface BlockStatic { block: Polygon; streetAt: unknown; cell: number; x0: number; y0: number; w: number; h: number; inB: Uint8Array; streetCell: Uint8Array; near: Uint8Array; streetSeeds: number[] }
+interface BlockStatic { block: Polygon; streetAt: unknown; cell: number; x0: number; y0: number; w: number; h: number; inB: Uint8Array; streetCell: Uint8Array; near: Uint8Array; streetSeeds: number[]; footprints: WeakMap<Polygon, { coordinates: Float64Array; cells: number[]; hash: number }>; reachMemo: Map<string, { cells: number[][]; ok: boolean[] }> }
 let LAST_BLOCK: BlockStatic | null = null;
 /** Scratch buffers of blockReach (grown on demand). */
 let POOL: { bid: Int32Array; seen: Uint32Array; queue: Int32Array; ep: number } | null = null;
@@ -105,13 +105,13 @@ function blockStatic(block: Polygon, streetAt0: StreetAt | ((p: Vec2) => boolean
     streetSeeds.push(i);
   }
   ACC_STATS.msStreet += performance.now() - tS;
-  LAST_BLOCK = { block, streetAt: streetAt0, cell, x0, y0, w, h, inB, streetCell, near, streetSeeds };
+  LAST_BLOCK = { block, streetAt: streetAt0, cell, x0, y0, w, h, inB, streetCell, near, streetSeeds, footprints: new WeakMap(), reachMemo: new Map() };
   return LAST_BLOCK;
 }
 
 export function blockReach(block: Polygon, blds: Polygon[], streetAt0: StreetAt | ((p: Vec2) => boolean), cell = ACCESS_CELL): boolean[] {
   if (!blds.length) return [];
-  const { x0, y0, w, h, inB, streetCell, near, streetSeeds } = blockStatic(block, streetAt0, cell);
+  const { x0, y0, w, h, inB, streetCell, near, streetSeeds, footprints, reachMemo } = blockStatic(block, streetAt0, cell);
   const shift = (p: Polygon) => p.map((q) => ({ x: q.x - x0, y: q.y - y0 }));
   ACC_STATS.calls++; ACC_STATS.cells += w * h;
   const tA = performance.now();
@@ -123,7 +123,21 @@ export function blockReach(block: Polygon, blds: Polygon[], streetAt0: StreetAt 
   const bid = pool.bid;
   const cellsOf: number[][] = blds.map(() => []);
   const xs: number[] = [];
+  let stateHash = 0x811c9dc5;
+  const addState = (hash: number, length: number) => {
+    stateHash = Math.imul(stateHash ^ hash, 16777619);
+    stateHash = Math.imul(stateHash ^ length, 16777619);
+  };
   blds.forEach((b0, k) => {
+    // Density/roof proposals replace one footprint while every peer keeps the same coordinates.
+    // Reuse those exact scanlines; coordinate checks also invalidate in-place caller edits.
+    const cached = footprints.get(b0);
+    if (cached && cached.coordinates.length === b0.length * 2
+      && b0.every((p, i) => p.x === cached.coordinates[2 * i] && p.y === cached.coordinates[2 * i + 1])) {
+      cellsOf[k] = cached.cells;
+      addState(cached.hash, cached.cells.length);
+      return;
+    }
     const b = shift(b0);
     let ya = Infinity, yb = -Infinity;
     for (const q of b) { ya = Math.min(ya, q.y); yb = Math.max(yb, q.y); }
@@ -139,19 +153,44 @@ export function blockReach(block: Polygon, blds: Polygon[], streetAt0: StreetAt 
       xs.sort((u, v) => u - v);
       for (let t = 0; t + 1 < xs.length; t += 2) {
         const c0 = Math.max(0, Math.ceil(xs[t] / cell - 0.5)), c1 = Math.min(w - 1, Math.floor(xs[t + 1] / cell - 0.5));
-        for (let c = c0; c <= c1; c++) { bid[r * w + c] = k + 1; own.push(r * w + c); }
+        for (let c = c0; c <= c1; c++) own.push(r * w + c);
       }
     }
+    const coordinates = new Float64Array(b0.length * 2);
+    b0.forEach((p, i) => { coordinates[2 * i] = p.x; coordinates[2 * i + 1] = p.y; });
+    let hash = 0x811c9dc5;
+    for (const i of own) hash = Math.imul(hash ^ i, 16777619);
+    footprints.set(b0, { coordinates, cells: own, hash });
+    addState(hash, own.length);
   });
+  const memoKey = `${blds.length}:${stateHash}`, memo = reachMemo.get(memoKey);
+  // Footprint hashes only select a candidate. Exact ordered cell equality proves the
+  // same occupancy, including every later-building overwrite; collisions are misses.
+  if (memo && memo.cells.every((previous, k) => previous === cellsOf[k]
+    || (previous.length === cellsOf[k].length && previous.every((i, j) => i === cellsOf[k][j])))) {
+    reachMemo.delete(memoKey); reachMemo.set(memoKey, memo);
+    ACC_STATS.msRaster += performance.now() - tA; ACC_STATS.ms += performance.now() - tA;
+    return [...memo.ok];
+  }
+  // Stamp only uncached states, in the original footprint order. Rasterization itself
+  // does not depend on occupancy, so moving these writes leaves the grid identical.
+  cellsOf.forEach((own, k) => { for (const i of own) bid[i] = k + 1; });
   ACC_STATS.msRaster += performance.now() - tA;
   // A building is reached when one of its cells lies within ~1 m of the street edge (`near`) or next to a reached
-  // cell (8-neighbourhood). Reached cells: flood from the street side through passable cells (free — inside the
-  // block, outside every footprint — with their four neighbours free or the street outside). The flood settles
+  // cell (8-neighbourhood). Reached cells: flood from the street side through passable cells (free â€” inside the
+  // block, outside every footprint â€” with their four neighbours free or the street outside). The flood settles
   // the buildings around each cell it reaches and stops once every building is settled (same verdicts as a full
   // flood followed by a scan of the building cells).
   const ok = blds.map(() => false);
   let left = blds.length;
-  const done = (): boolean[] => { for (const own of cellsOf) for (const i of own) bid[i] = 0; ACC_STATS.ms += performance.now() - tA; return ok; };
+  const done = (): boolean[] => {
+    for (const own of cellsOf) for (const i of own) bid[i] = 0;
+    // Keep a bounded per-static-block LRU. Stored verdicts never alias caller arrays.
+    reachMemo.delete(memoKey);
+    if (reachMemo.size >= 256) reachMemo.delete(reachMemo.keys().next().value!);
+    reachMemo.set(memoKey, { cells: cellsOf, ok: [...ok] });
+    ACC_STATS.ms += performance.now() - tA; return ok;
+  };
   cellsOf.forEach((own, k) => { for (const i of own) if (bid[i] === k + 1 && near[i]) { ok[k] = true; left--; break; } });
   if (left === 0) return done();
   const free = (j: number) => inB[j] === 1 && bid[j] === 0;
@@ -324,8 +363,8 @@ export type StreetAt = ((p: Vec2) => boolean) & {
 };
 
 /**
- * No matchsticks: a dwelling footprint longer than 3 × its width (ranges of courtyard houses, side halls) is cut
- * across its long axis into equal parts of aspect ≤ 3 (party walls between rooms / houses).
+ * No matchsticks: a dwelling footprint longer than 3 Ã— its width (ranges of courtyard houses, side halls) is cut
+ * across its long axis into equal parts of aspect â‰¤ 3 (party walls between rooms / houses).
  */
 export function splitLong<T extends { poly: Polygon; kind: string }>(list: T[], maxAsp = 2.95): T[] {
   const out: T[] = [];
@@ -349,7 +388,7 @@ export function splitLong<T extends { poly: Polygon; kind: string }>(list: T[], 
   return out;
 }
 
-/** The no-matchstick rule as the density test measures it: oriented-box width ≥ 4.5 m and aspect ≤ 3. */
+/** The no-matchstick rule as the density test measures it: oriented-box width â‰¥ 4.5 m and aspect â‰¤ 3. */
 export function shapeOkObb(p: Polygon): boolean {
   const o = obbOf(p);
   return 2 * o.hv >= 4.45 && o.hu / Math.max(1e-6, o.hv) <= 3.0;

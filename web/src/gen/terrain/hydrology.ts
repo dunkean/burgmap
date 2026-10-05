@@ -2,14 +2,14 @@ import { Rng } from '../core/rng';
 import { Noise2D } from '../core/noise';
 import { MinHeap } from '../core/pq';
 import { priorityFloodFast, type FloodResult } from '../core/flood';
-import { Grid, createGrid, sampleGrid, slopeGrid, blurGrid, D8, D8_DIST, kthSmallest } from '../core/grid';
+import { Grid, createGrid, sampleGrid, slopeGrid, blurGrid, D8, D8_DIST, visitSegmentCells } from '../core/grid';
 import { Vec2, Polyline, Polygon, chaikin, simplify, resample, polylineLength, dist, polygonArea, polygonContains, distToPolyline } from '../core/geom';
 import { Options, SIZE_PRESETS, RiverOpt } from '../options';
 import type { TerrainLayer, River } from '../types';
 import { generateHeightfield, HeightPlan, OPPOSITE, SIDE_VEC, Side } from './heightfield';
 import { marchingSquares } from './contour';
 import { carveEstuary } from './estuary';
-import { resolveDepressions } from './erosion';
+import { resolveDepressions, steepestReceivers } from './erosion';
 import { scaleFor, areaOfWidth, assembleChannels, assignHydraulics, RawChan } from './rivernet';
 
 const EPS = 0.002;
@@ -44,7 +44,9 @@ export type { FloodResult };
  * `order` lists cells in pop order (receivers always precede their donors).
  */
 export function priorityFlood(h: Grid, sea: Uint8Array): FloodResult {
-  return priorityFloodFast(h.data, h.w, h.h, sea, EPS);
+  const result = priorityFloodFast(h.data, h.w, h.h, sea, EPS);
+  steepestReceivers(result, h.w, h.h);
+  return result;
 }
 
 export function accumulate(receiver: Int32Array, order: Int32Array, inject?: { idx: number; amount: number }[]): Float32Array {
@@ -155,10 +157,53 @@ function movingAvg(a: number[], r: number): number[] {
   return out;
 }
 
+/** Remove grid-scale turns from an edge-fed course at a physical river-width scale, before adding bends. */
+export function smoothMainRoute(pl: Polyline, width: number, spacing: number, height: Grid, sea: Uint8Array): Polyline {
+  const base = resample(pl, spacing);
+  if (base.length < 6) return base;
+  const step = polylineLength(base) / (base.length - 1);
+  const radius = Math.max(2, Math.ceil(2.5 * width / step));
+  const wet = (q: Vec2): boolean => {
+    const x = clamp(Math.floor(q.x / height.cell), 0, height.w - 1);
+    const y = clamp(Math.floor(q.y / height.cell), 0, height.h - 1);
+    return sea[y * height.w + x] !== 0;
+  };
+  const wetPrefix = new Int32Array(base.length + 1);
+  for (let i = 0; i < base.length; i++) wetPrefix[i + 1] = wetPrefix[i] + (wet(base[i]) ? 1 : 0);
+  const pinned = base.map((_, i) => wetPrefix[Math.min(base.length, i + radius + 1)] > wetPrefix[Math.max(0, i - radius)]);
+  const drySegment = (a: Vec2, b: Vec2): boolean => {
+    let dry = true;
+    visitSegmentCells(height, a, b, i => { if (sea[i]) dry = false; });
+    return dry;
+  };
+  let p = base;
+  for (let pass = 0; pass < 2; pass++) {
+    const xs = movingAvg(p.map(q => q.x), radius), ys = movingAvg(p.map(q => q.y), radius);
+    const next = p.map((q, i) => {
+      if (i === 0 || i === p.length - 1 || pinned[i]) return { ...q };
+      const taper = smooth(Math.min(i, p.length - 1 - i) / radius);
+      let dx = (xs[i] - base[i].x) * taper, dy = (ys[i] - base[i].y) * taper;
+      const scale = Math.min(1, 1.5 * width / Math.max(1e-6, Math.hypot(dx, dy)));
+      dx *= scale; dy *= scale;
+      const candidate = { x: base[i].x + dx, y: base[i].y + dy };
+      // Stay in the original valley and retain the real approach to the receiving sea.
+      if (sampleGrid(height, candidate.x, candidate.y) > sampleGrid(height, base[i].x, base[i].y) + Math.max(.5, .06 * width)) return { ...q };
+      if (!drySegment(p[i - 1], candidate) || !drySegment(candidate, p[i + 1])) return { ...q };
+      return candidate;
+    });
+    for (let i = 1; i < next.length; i++) {
+      if (pinned[i - 1] || pinned[i] || drySegment(next[i - 1], next[i])) continue;
+      next[i - 1] = { ...p[i - 1] }; next[i] = { ...p[i] };
+    }
+    p = next;
+  }
+  return p;
+}
+
 /** Smooth, resample and add gentle meanders where the terrain is flat. */
 function smoothAndMeander(
   pl: Polyline, spacing: number, width: number, slopeAt: (p: Vec2) => number, rng: Rng, meander: boolean, tailFree: boolean,
-  lamMin = 90, ampMin = 16,
+  lamMin = 90, ampMin = 16, terrainAt?: (p: Vec2) => number,
 ): Polyline {
   let p = chaikin(pl, 4);
   p = resample(p, spacing);
@@ -170,6 +215,7 @@ function smoothAndMeander(
   const L = s[n - 1];
   const lambda = Math.max(lamMin, 12 * width) * rng.range(0.85, 1.25);
   const phi1 = rng.range(0, 6.28), phi2 = rng.range(0, 6.28);
+  const bendNoise = new Noise2D(rng.fork('bend-variation'));
   const ampBase = Math.min(0.3 * lambda, Math.max(ampMin, 3.6 * width));
   const flatRaw = p.map((q) => Math.max(0.3, 1 - smooth((slopeAt(q) - 0.02) / 0.11)));
   const flat = movingAvg(movingAvg(flatRaw, 8), 8);
@@ -177,14 +223,27 @@ function smoothAndMeander(
   for (let i = 0; i < n; i++) {
     const t = s[i] / L;
     const taper = smooth(t / 0.05) * (tailFree ? smooth((1 - t) / 0.03) : 1);
-    const wave = Math.sin((2 * Math.PI * s[i]) / lambda + phi1) + 0.45 * Math.sin((2 * Math.PI * s[i]) / (lambda * 0.57) + phi2);
-    off.push(ampBase * flat[i] * taper * wave / 1.3);
+    // A continuous, nonperiodic bend field; there is no repeating sinusoidal wavelength.
+    const wish = ampBase * flat[i] * taper * 1.8 * bendNoise.fbm(s[i] / (lambda * 0.8) + phi1, phi2, 2);
+    if (!terrainAt || wish === 0) { off.push(wish); continue; }
+    const a = p[Math.max(0, i - 1)], b = p[Math.min(n - 1, i + 1)];
+    const dx = b.x - a.x, dy = b.y - a.y, length = Math.hypot(dx, dy) || 1;
+    let chosen = wish, score = Infinity;
+    for (const offset of [wish, wish * 0.5, 0]) {
+      const q = { x: p[i].x - dy / length * offset, y: p[i].y + dx / length * offset };
+      const h = terrainAt(q);
+      if (h <= 0 && t < 0.94) continue;
+      const penalty = Math.max(0.4, width * 0.04) * ((offset - wish) / Math.max(1, ampBase)) ** 2;
+      if (h + penalty < score) { score = h + penalty; chosen = offset; }
+    }
+    off.push(chosen);
   }
+  const offsets = movingAvg(movingAvg(off, 3), 3);
   const out: Vec2[] = [];
   for (let i = 0; i < n; i++) {
     const a = p[Math.max(0, i - 1)], b = p[Math.min(n - 1, i + 1)];
     const dx = b.x - a.x, dy = b.y - a.y, l = Math.hypot(dx, dy) || 1;
-    out.push({ x: p[i].x - (dy / l) * off[i], y: p[i].y + (dx / l) * off[i] });
+    out.push({ x: p[i].x - (dy / l) * offsets[i], y: p[i].y + (dx / l) * offsets[i] });
   }
   return resample(chaikin(out, 2), spacing);
 }
@@ -421,38 +480,6 @@ function regionPolygons(field: ArrayLike<number>, w: number, h: number, cell: nu
   return out;
 }
 
-/** Stream-power style incision: carve dendritic valleys along the drainage network. */
-function incise(height: Grid, amp: number, strength: number): void {
-  const N = height.w * height.h;
-  const sea = seaMaskOf(height, 0);
-  const fl = priorityFlood(height, sea);
-  const acc = accumulate(fl.receiver, fl.order);
-  const slope = slopeGrid(height);
-  const raw = new Float32Array(N);
-  const vals: number[] = [];
-  for (let i = 0; i < N; i++) {
-    if (sea[i] || acc[i] < 12) continue;
-    const r = Math.sqrt(acc[i]) * Math.pow(Math.min(0.6, slope.data[i]) + 0.02, 0.6);
-    raw[i] = r;
-    if ((i & 3) === 0) vals.push(r);
-  }
-  // (the 98.5th percentile: an order statistic, no full sort)
-  const norm = vals.length ? kthSmallest(vals, Math.floor(vals.length * 0.985)) : 1;
-  const depthMax = amp * strength;
-  const fine = createGrid(height.w, height.h, height.cell);
-  for (let i = 0; i < N; i++) fine.data[i] = depthMax * Math.min(1.4, raw[i] / (norm || 1));
-  // D8 flow paths are 45-degree biased: blur the incision delta so no diagonal channels show in the shading
-  const fineS = blurGrid(fine, 2, 2);
-  const broad = blurGrid(fine, 4, 2);
-  const mid = blurGrid(fine, 2, 1);
-  for (let i = 0; i < N; i++) {
-    if (sea[i]) continue;
-    const dh = 0.15 * fineS.data[i] + 0.55 * mid.data[i] + 1.4 * broad.data[i];
-    const cur = height.data[i];
-    height.data[i] = Math.max(Math.min(cur, 0.4), cur - dh);
-  }
-}
-
 export interface TerrainTimings { height: number; hydrology: number; rivers: number; polygons: number }
 
 /** Grid resolution for an extent: ~4 m cells for small maps, coarser for big ones, capped at MAX_GRID. */
@@ -480,8 +507,10 @@ export function terrainForExtent(opts: Options, mapSize: number, root?: Rng): { 
   const lakesOpt: LakesOpt = ((opts as unknown as { lakes?: LakesOpt }).lakes) ?? 'auto';
   const t0 = performance.now();
   const { height, plan } = generateHeightfield(opts, mapSize, n, rng);
-  // closed depressions are breached instead of filled (no flat plateaus); real lakes are carved on purpose later
-  resolveDepressions(height, 2, 0.7);
+  // The procedural relief solver already evolves drainage. Re-breaching its resampled surface before
+  // carving the real main river created kilometre-long, one-cell knife cuts across valley floors.
+  // Flat/noise fields and imports still need the bounded depression treatment.
+  if (opts.importedHeight || plan.relief === 'flat') resolveDepressions(height, 2, 0.35);
   const t1 = performance.now();
   const seaLevel = 0;
   const cell = height.cell;
@@ -511,7 +540,9 @@ export function terrainForExtent(opts: Options, mapSize: number, root?: Rng): { 
       if (route) {
       const hasSea = plan.seaSide !== null;
       const approxW = (cls.wSrc + cls.wMouth) / 2;
-      const poly = smoothAndMeander(route.poly, Math.max(cell * 0.9, 3), approxW, slopeAt, rrng.fork('meander'), true, hasSea, 90 * Math.min(ek, 6), 16 * Math.min(ek, 6));
+      const spacing = Math.max(cell * 0.9, 3);
+      const course = smoothMainRoute(route.poly, approxW, spacing, height, sea);
+      const poly = smoothAndMeander(course, spacing, approxW, slopeAt, rrng.fork('meander'), true, hasSea, 90 * Math.min(ek, 6), 16 * Math.min(ek, 6), q => sampleGrid(height, q.x, q.y));
       if (poly.length > 1) {
         // the head always sits exactly on the map edge (and so does the tail when the river leaves the map)
         const mapS = n * cell;
@@ -541,11 +572,6 @@ export function terrainForExtent(opts: Options, mapSize: number, root?: Rng): { 
       mainWidths = provisional;
     }
   }
-
-  // erosion: dendritic valleys along drainage (main river trench already cut, so it stays dominant)
-  const iters = plan.relief === 'mountains' ? [0.02] : plan.relief === 'flat' ? [0.05] : [0.04, 0.03];
-  for (const st of iters) incise(height, plan.amp, st);
-  if (plan.relief === 'mountains') { const sm = blurGrid(height, 1, 1); for (let i = 0; i < N; i++) if (height.data[i] > 1) height.data[i] = sm.data[i]; }
 
   // ---- lakes: carve a few natural basins into valley floors (before the final hydrology pass)
   const lakeSites: { idx: number }[] = [];

@@ -8,11 +8,50 @@
   :root { --bg:#2b2620; --panel:#f3ead2; --ink:#3d2f20; --ink2:#7a6247; --accent:#8a5a2b; --line:#d6c7a1; --field:#fffaf0; }
   * { box-sizing: border-box; }
   html, body { margin:0; height:100%; background:var(--bg); color:var(--ink); font:14px/1.4 Georgia, 'Times New Roman', serif; overflow:hidden; }
-  #app { display:flex; height:100%; position:relative; }
-  #panel { width:360px; flex:none; background:var(--panel); border-right:1px solid var(--line); padding:14px 14px 10px; overflow:auto; box-shadow:2px 0 12px rgba(0,0,0,.35); z-index:5; display:flex; flex-direction:column; gap:8px; }
-  #panel h1 { margin:0; font-size:24px; letter-spacing:.04em; }
-  #panel .sub { color:var(--ink2); font-size:12px; margin:0 0 4px; }
-  label { display:block; font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:var(--ink2); margin:10px 0 3px; }
+  #app { display:flex; flex-direction:column; height:100%; position:relative; }
+  #topbar { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:10px 18px; background:var(--panel); border-bottom:1px solid var(--line); z-index:5; box-shadow:0 2px 12px #0003; }
+  .brand h1 { margin:0; font-size:23px; letter-spacing:.04em; }
+  .brand span { font-size:12px; color:var(--ink2); }
+  .topbar-actions { display:flex; align-items:center; gap:8px; }
+  dialog { color:var(--ink); background:var(--panel); border:1px solid var(--line); border-radius:16px; box-shadow:0 20px 70px #0006; }
+  dialog::backdrop { background:#17130db3; }
+  #panel { width:min(900px, calc(100vw - 36px)); height:min(850px, calc(100dvh - 48px)); max-height:none; padding:0; overflow:hidden; }
+  #panel[open] { display:flex; flex-direction:column; }
+  .settings-header { display:flex; align-items:flex-start; gap:20px; justify-content:space-between; padding:22px 26px 16px; }
+  .settings-header h2 { margin:0; font-size:25px; }
+  .settings-header .hint { margin-top:4px; font-size:13px; }
+  .settings-tabs { display:flex; gap:6px; padding:0 26px 14px; border-bottom:1px solid var(--line); }
+  .settings-tabs button { background:transparent; color:var(--ink2); border-color:transparent; padding:9px 14px; }
+  .settings-tabs button[aria-selected=true] { background:var(--accent); color:var(--field); }
+  .settings-content { padding:20px 26px; overflow:auto; flex:1; min-height:0; }
+  .settings-content [role=tabpanel] { max-width:720px; margin:auto; }
+  .settings-footer { display:flex; align-items:center; justify-content:space-between; gap:14px; border-top:1px solid var(--line); padding:16px 26px; }
+  .settings-footer .hint { margin:0; }
+  #settingsFeedback { flex:1; min-width:0; }
+  #panel #mapMessages { position:static; max-width:none; pointer-events:auto; }
+  #panel #mapMessages > div:not(:empty) { padding:2px 0; }
+  #panel #generationIdentity { display:none; }
+  .settings-footer button { padding:10px 18px; }
+  .seed-controls { margin-bottom:18px; }
+  .toolbar-menu { position:relative; }
+  .toolbar-menu > summary { list-style:none; cursor:pointer; border:1px solid var(--line); border-radius:5px; padding:7px 10px; color:var(--accent); }
+  .toolbar-menu > summary::-webkit-details-marker { display:none; }
+  .toolbar-menu[open] > summary { background:var(--field); }
+  .toolbar-menu > .body { position:absolute; right:0; top:calc(100% + 12px); width:min(350px, calc(100vw - 24px)); padding:16px; background:var(--panel); border:1px solid var(--line); border-radius:10px; box-shadow:0 10px 35px #0005; max-height:70dvh; overflow:auto; }
+  #shareControls h3 { margin:8px 0; font-size:17px; }
+  #mapMessages { position:absolute; left:16px; bottom:12px; max-width:min(600px, calc(100vw - 185px)); z-index:4; pointer-events:none; color:var(--ink); font-size:12px; }
+  #mapMessages > div:not(:empty) { background:var(--panel); padding:3px 10px; }
+  #mapMessages button { pointer-events:auto; }
+  #draftState:empty, #status:empty, #gentime:empty, #generationIdentity:empty, #settlWarn:empty { display:none; }
+  #generationIdentity { font:10px/1.5 ui-monospace,Consolas,monospace; overflow-wrap:anywhere; opacity:.8; }
+  #addSettlementDialog { width:min(560px, calc(100vw - 28px)); max-height:calc(100dvh - 28px); padding:0; overflow:auto; }
+  #addSettlementForm { padding:0 26px 24px; }
+  #addSettlementForm .row > div { flex:1; }
+  fieldset { margin:16px 0; border:1px solid var(--line); border-radius:6px; }
+  legend { color:var(--ink2); padding:0 5px; }
+  :focus-visible { outline:3px solid #375d7d; outline-offset:3px; }
+  [hidden] { display:none !important; }
+  label { display:block; font-size:12px; letter-spacing:.03em; color:var(--ink2); margin:10px 0 3px; }
   select, input[type=text], input[type=number] { width:100%; padding:6px 8px; border:1px solid var(--line); border-radius:4px; background:var(--field); color:var(--ink); font:inherit; }
   select:disabled, input:disabled { opacity:.5; }
   .row { display:flex; gap:6px; align-items:stretch; }
@@ -29,15 +68,19 @@
   .btns { flex-wrap:wrap; }
   #panel [hidden] { display:none; }
   .btns button { flex:1 1 auto; padding-left:6px; padding-right:6px; font-size:13px; }
-  .workflow-step { border:1px solid var(--line); border-radius:10px; padding:12px; background:var(--field); }
+  .workflow-step { border:1px solid var(--line); border-radius:10px; padding:20px; background:var(--field); }
   .workflow-step h2 { font:600 18px/1.3 Georgia,serif; margin:0 0 5px; }
   .step-number { display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; margin-right:7px; border-radius:50%; background:var(--accent); color:white; font:12px sans-serif; }
   .workflow-step > .hint { margin:0 0 12px; }
   .generate { width:100%; padding:10px; margin-top:12px; }
-  #draftState { min-height:1.4em; }
+
   .settlement-choice { width:100%; text-align:left; display:flex; justify-content:space-between; white-space:normal; margin-bottom:6px; padding:9px; }
   .settlement-choice[aria-pressed=true] { background:var(--accent); color:var(--field); }
   .settlement-choice small { display:block; font-size:11px; opacity:.8; }
+  #settlementChoices { display:grid; grid-template-columns:repeat(auto-fit, minmax(210px, 1fr)); gap:6px; }
+  #planExtra { display:grid; grid-template-columns:minmax(160px, 1fr) minmax(140px, 1fr); gap:6px 16px; align-items:center; }
+  #planExtra label { margin:0; }
+  #cultureOverrides h4 { margin:20px 0 4px; font-size:15px; color:var(--ink); }
   #settlementEditor { border-top:1px solid var(--line); margin-top:12px; padding-top:8px; }
   #settlementEditor h3 { margin:2px 0 8px; font-size:15px; }
   #settlementEditor details { margin-top:10px; }
@@ -58,19 +101,20 @@
   #progress > i { display:block; height:100%; width:38%; background:var(--accent); animation:slide 1s infinite ease-in-out; }
   @keyframes slide { 0% { transform:translateX(-110%); } 100% { transform:translateX(290%); } }
   #gentime { font-size:12px; color:var(--ink); }
-  #map { position:relative; flex:1; overflow:hidden; cursor:grab; touch-action:none; }
+  #map { position:relative; flex:1; min-height:0; overflow:hidden; cursor:grab; touch-action:none; }
+  #map > button { background:var(--panel); color:var(--accent); }
   #map.drag { cursor:grabbing; }
   #map.picking { cursor:crosshair; }
   .hint.warn { color:#9a3b1b; }
   /* CANVAS-VIEWER styles */
   #view { position:absolute; left:0; top:0; display:block; will-change:transform; transform-origin:50% 50%; }
   #minimap { position:absolute; right:12px; bottom:12px; width:140px; height:140px; border:1px solid var(--line); box-shadow:0 2px 10px rgba(0,0,0,.5); background:#eee2c3; cursor:pointer; }
-  #hud { position:absolute; left:12px; bottom:10px; color:#f3ead2; font-size:11px; opacity:.75; pointer-events:none; }
+  #hud { position:absolute; right:12px; top:124px; color:#f3ead2; font-size:11px; opacity:.75; pointer-events:none; }
   #fit { position:absolute; right:12px; top:36px; padding:4px 8px; font-size:12px; }
   #pinMode { position:absolute; right:12px; top:70px; padding:4px 8px; font-size:12px; }
   #pinMode.on { background:#2b2118; color:#f3ead2; border-color:#2b2118; }
   #map.pinning { cursor:crosshair; }
-  #coords { position:absolute; left:12px; bottom:28px; display:flex; gap:6px; align-items:center; padding:2px 4px 2px 8px; border-radius:4px; background:rgba(30,22,14,.55); color:#f3ead2; font:11px ui-monospace,Consolas,monospace; z-index:3; }
+  #coords { position:absolute; right:12px; top:148px; max-width:calc(100% - 24px); height:24px; display:flex; gap:6px; align-items:center; padding:2px 4px 2px 8px; border-radius:4px; background:rgba(30,22,14,.55); color:#f3ead2; font:11px ui-monospace,Consolas,monospace; z-index:3; }
   #coords button { padding:1px 6px; font-size:11px; }
   #pins { position:absolute; inset:0; overflow:hidden; pointer-events:none; z-index:2; }
   .pin { position:absolute; left:-10px; top:-10px; width:20px; height:20px; padding:0; border-radius:50%; background:#2b2118; color:#f3ead2; border:2px solid #f3ead2; box-shadow:0 1px 4px rgba(0,0,0,.6); font:bold 11px/16px sans-serif; text-align:center; cursor:pointer; pointer-events:auto; }
@@ -88,36 +132,62 @@
   #loadbar { position:absolute; left:0; right:0; top:0; height:3px; z-index:4; pointer-events:none; opacity:0; transition:opacity .3s; background:rgba(0,0,0,.12); }
   #loadbar.on { opacity:1; }
   #loadbar > i { display:block; height:100%; width:0; background:var(--accent); box-shadow:0 0 6px var(--accent); transition:width .35s ease-out; }
-  #menuBtn { display:none; position:absolute; left:10px; top:10px; z-index:6; padding:5px 10px; font-size:18px; line-height:1; }
-  @media (max-width: 800px) {
-    #panel { position:absolute; left:0; top:0; bottom:0; width:min(90vw, 360px); transform:translateX(-102%); transition:transform .2s; }
-    #app.open #panel { transform:none; }
-    #menuBtn { display:block; }
-    #panel { padding-top:52px; }
-    #minimap { width:96px; height:96px; }
-    #fit { top:12px; right:12px; }
-    #busy { top:48px; }
+  @media (max-width: 640px) {
+    #topbar { padding:8px 10px; gap:8px; align-items:flex-start; }
+    .brand h1 { font-size:19px; }
+    .brand span { display:none; }
+    .topbar-actions { flex-wrap:wrap; justify-content:flex-end; gap:5px; }
+    .topbar-actions > button, .toolbar-menu > summary { padding:6px 8px; font-size:12px; }
+    #panel { width:calc(100vw - 12px); height:calc(100dvh - 12px); border-radius:10px; }
+    .settings-header { padding:16px 14px 12px; gap:10px; }
+    .settings-header h2 { font-size:22px; }
+    .settings-tabs { padding:0 10px 10px; gap:2px; overflow-x:auto; flex:none; }
+    .settings-tabs button { font-size:12px; padding:8px; }
+    .settings-content { padding:14px; }
+    .settings-footer { padding:12px 14px; flex-wrap:wrap; }
+    .settings-footer button { width:100%; }
+    .workflow-step { padding:14px; }
+    #planExtra { grid-template-columns:1fr; gap:4px; }
+    #planExtra label { margin-top:10px; }
+    .settlement-choice { flex-direction:column; gap:3px; }
+    #minimap { width:88px; height:88px; }
+    #mapMessages { left:8px; bottom:8px; max-width:calc(100vw - 110px); font-size:11px; }
+    #addSettlementForm { padding:0 16px 18px; }
   }
+  @media (prefers-reduced-motion: reduce) { * { animation:none !important; transition:none !important; } }
 </style>
 </head>
 <body>
 <div id="app">
-  <button id="menuBtn" class="secondary" title="Options" aria-label="Options">&#9776;</button>
-  <aside id="panel">
-    <div>
-      <h1>Burgmap</h1>
-      <div class="sub">Medieval settlement in its landscape</div>
-    </div>
-    <div>
-      <label for="seed" style="margin-top:0">Seed</label>
-      <div class="row"><input id="seed" type="text" spellcheck="false"><button id="dice" class="secondary" title="Random seed (R)">&#127922; Random</button></div>
-      <div class="btns"><button id="copyLink" class="secondary" title="Copy a link to this exact map, with the pins and the current view">Copy link</button><button id="copyBug" class="secondary" title="Copy a Markdown bug report: link, options, pins, view and the command to reproduce it">Copy bug report</button></div>
-      <div id="shareState" class="hint"></div>
-    </div>
+  <header id="topbar">
+    <div class="brand"><h1>Burgmap</h1><span>Settlements &amp; landscapes</span></div>
+    <div class="topbar-actions">
+      <button id="newMap" type="button" title="Generate a new seed with the applied settings">New map</button>
+      <button id="menuBtn" type="button" class="secondary" aria-controls="panel" aria-expanded="false" aria-haspopup="dialog">Customize</button>
+    <details class="toolbar-menu" id="sec-pins"><summary>Pins</summary><div class="body">
+      <div class="btns"><button id="pinModeBtn" class="secondary" title="Click the map to drop pins (or Alt-click)">Pin mode</button><button id="pinsClear" class="secondary" title="Remove all pins">Clear all</button></div>
+      <div id="pinList"></div>
+      <div class="hint">Pins and the view are saved in the link only; they never change the map.</div>
+    </div></details>
 
+      <details class="toolbar-menu" id="quickShare"><summary>Share &amp; export</summary><div class="body" id="quickShareBody"><div id="shareControls"><h3>Share this map</h3><p class="hint">Links and exports use the applied map. Your unfinished settings stay in Customize.</p><div class="btns"><button id="copyLink" class="secondary" title="Copy this map, pins and current view">Copy link</button><button id="copyBug" class="secondary" title="Copy a bug report with reproduction options and pins">Copy bug report</button></div><div id="shareState" class="hint"></div><h3>Download</h3>    <div class="btns"><button id="exportSvg">Export SVG</button><button id="exportPng">Export PNG</button><button id="exportJson" class="secondary" title="World data (options + vector layers, no rasters) for other tools">Export JSON</button><button id="exportSvgFull" class="secondary" hidden title="Megacity: generate the detail of every quarter, then export the SVG (slow)">SVG, all quarters (slow)</button></div>
+</div></div></details>
+    </div>
+  </header>
+  <dialog id="panel" aria-labelledby="settingsTitle" aria-describedby="settingsHint">
+    <div class="settings-header"><div><h2 id="settingsTitle">Make it your world</h2><p id="settingsHint" class="hint">Choose a few essentials or tune every detail. Generate when you're ready.</p></div><button id="closeSettings" type="button" class="secondary" aria-label="Close settings">Close</button></div>
+    <div class="settings-tabs" role="tablist" aria-label="Map settings">
+      <button id="environmentTab" type="button" role="tab" data-tab="environmentPane" aria-controls="environmentPane" aria-selected="false" tabindex="-1">Environment</button>
+      <button id="settlementsTab" type="button" role="tab" data-tab="settlementsPane" aria-controls="settlementsPane" aria-selected="true">Settlements</button>
+      <button id="appearanceTab" type="button" role="tab" data-tab="appearancePane" aria-controls="appearancePane" aria-selected="false" tabindex="-1">Appearance</button>
+      <button id="shareTab" type="button" role="tab" data-tab="sharePane" aria-controls="sharePane" aria-selected="false" tabindex="-1">Share &amp; export</button>
+    </div>
+    <div class="settings-content">
+      <div id="environmentPane" role="tabpanel" aria-labelledby="environmentTab" hidden>
+        <div class="seed-controls"><label for="seed">Seed</label><div class="row"><input id="seed" type="text" spellcheck="false"><button id="dice" type="button" class="secondary" title="Choose a random seed (R)">Random</button></div><p class="hint">The same seed and settings reproduce the same map.</p></div>
     <section class="workflow-step" id="sec-terrain" aria-labelledby="environmentHeading">
-      <h2 id="environmentHeading"><span class="step-number">1</span>Environment</h2>
-      <p class="hint">Create the landscape first, then populate it.</p>
+      <h2 id="environmentHeading">Environment</h2>
+      <p class="hint">Shape your landscape, or generate it on its own before adding settlements.</p>
       <div id="extentControls"><label for="mapSize">Map extent (m)</label><input id="mapSize" type="number" min="600" max="40000" step="100"></div>
       <label for="biome">Climate &amp; biome</label><select id="biome"></select>
       <label for="relief">Relief</label><select id="relief"></select>
@@ -132,16 +202,18 @@
       <button id="generateEnvironment" class="generate" type="button">Generate environment</button>
     </section>
 
+      </div>
+      <div id="settlementsPane" role="tabpanel" aria-labelledby="settlementsTab">
     <section class="workflow-step" id="sec-settlement" aria-labelledby="settlementsHeading">
-      <h2 id="settlementsHeading"><span class="step-number">2</span>Settlements</h2>
+      <h2 id="settlementsHeading">Settlements</h2>
       <p class="hint">Build an automatic region or configure each settlement yourself.</p>
       <label for="settlMode">Composition</label><select id="settlMode"><option value="automatic">Automatic region</option><option value="list">Individual settlements</option></select>
       <div id="settlementChoices"></div>
-      <div class="btns" id="compositionActions"><button id="settlAdd" type="button" class="secondary">+ Add settlement</button><button id="settlRemove" type="button" class="secondary">Remove selected</button></div>
+      <div class="btns" id="compositionActions"><button id="settlAdd" type="button" class="secondary">+ Add settlement</button><button id="settlRemove" type="button" class="secondary small">Remove selected</button></div>
       <div id="settlementEditor">
         <h3 id="settlementEditorHeading">Main settlement</h3>
-        <div class="row"><div style="flex:1"><label for="size">Type</label><select id="size"></select></div><div style="flex:1"><label for="population">Population</label><input id="population" type="number" min="0" max="5000000" step="10"></div></div>
-        <label for="culture">Culture &amp; town plan</label><select id="culture"></select>
+        <div class="row"><div style="flex:1"><label for="size">Type</label><select id="size"></select></div><div style="flex:1"><label for="population">Population</label><input id="population" type="number" min="0" max="5000000" step="1"></div></div>
+        <label for="culture">Culture of this settlement</label><select id="culture"></select>
         <label for="language">Place-name language</label><select id="language"></select>
         <label for="siteType">Site</label><select id="siteType"></select>
         <div id="positionControls"></div>
@@ -150,31 +222,35 @@
           <div id="planExtra"></div><div id="cultureOverrides"></div>
         </div></details>
       </div>
-      <div id="settlWarn" class="hint"></div>
-      <button id="generateSettlements" class="generate" type="button">Generate settlements</button>
+
+
     </section>
-    <div id="draftState" class="hint" role="status" aria-live="polite"></div>
-    <div id="generationIdentity" class="hint"></div>
-
-    <details class="sec" open id="sec-map"><summary>Map</summary><div class="body">
+      </div>
+      <div id="appearancePane" role="tabpanel" aria-labelledby="appearanceTab" hidden>
+    <section class="workflow-step" id="sec-map"><h2>Appearance</h2><p class="hint">Style and layers update the displayed map immediately.</p>
       <label for="style">Style</label><select id="style"></select>
-      <div class="check"><input id="contours" type="checkbox"><span>Contour lines</span></div>
-      <div class="check"><input id="landuse" type="checkbox"><span>Land use (fields, woods...)</span></div>
-      <div class="check"><input id="labels" type="checkbox"><span>Names (labels)</span></div>
-      <div class="check"><input id="legend" type="checkbox"><span>Legend</span></div>
-    </div></details>
+      <label class="check"><input id="contours" type="checkbox"><span>Contour lines</span></label>
+      <label class="check"><input id="landuse" type="checkbox"><span>Land use (fields, woods...)</span></label>
+      <label class="check"><input id="labels" type="checkbox"><span>Names (labels)</span></label>
+      <label class="check"><input id="legend" type="checkbox"><span>Legend</span></label>
+    </section>
 
-    <details class="sec" id="sec-pins"><summary>Pins</summary><div class="body">
-      <div class="btns"><button id="pinModeBtn" class="secondary" title="Click the map to drop pins (or Alt-click)">Pin mode</button><button id="pinsClear" class="secondary" title="Remove all pins">Clear all</button></div>
-      <div id="pinList"></div>
-      <div class="hint">Pins and the view are saved in the link only; they never change the map.</div>
-    </div></details>
-
-    <div class="btns"><button id="exportSvg">Export SVG</button><button id="exportPng">Export PNG</button><button id="exportJson" class="secondary" title="World data (options + vector layers, no rasters) for other tools">Export JSON</button><button id="exportSvgFull" class="secondary" hidden title="Megacity: generate the detail of every quarter, then export the SVG (slow)">SVG, all quarters (slow)</button></div>
-    <div id="progress"><i></i></div>
-    <div id="gentime"></div>
-    <div id="status"></div>
-  </aside>
+      </div>
+      <div id="sharePane" role="tabpanel" aria-labelledby="shareTab" hidden></div>
+    </div>
+    <div class="settings-footer"><div id="settingsFeedback"><p class="hint">Environment and settlement changes apply when you generate.</p></div><button id="generateSettlements" type="button">Apply &amp; generate map</button></div>
+  </dialog>
+  <dialog id="addSettlementDialog" aria-labelledby="addSettlementTitle">
+    <div class="settings-header"><div><h2 id="addSettlementTitle">Add a settlement</h2><p class="hint">Choose its own culture and location. The general theme stays the same.</p></div><button id="cancelAddSettlement" type="button" class="secondary">Cancel</button></div>
+    <form id="addSettlementForm">
+      <div class="row"><div><label for="addSettlementType">Type</label><select id="addSettlementType"></select></div><div><label for="addSettlementPopulation">Population</label><input id="addSettlementPopulation" type="number" min="10" max="5000000" step="1" value="300" required></div></div>
+      <label for="addSettlementCulture">Culture</label><select id="addSettlementCulture"></select>
+      <p class="hint">This culture belongs only to the new settlement. To mix cultures within one settlement, use Historical mix in its layout settings.</p>
+      <fieldset><legend>Position</legend><label class="check"><input type="radio" name="addPlacement" value="automatic" checked>Find a suitable place automatically</label><label class="check"><input type="radio" name="addPlacement" value="manual">Choose a place on the map</label></fieldset>
+      <div class="btns"><button id="confirmAddSettlement" type="submit">Add settlement</button></div>
+    </form>
+  </dialog>
+  <div id="mapMessages"><div id="placementPrompt" hidden>Click the map to place the selected settlement. <button id="cancelPlacement" type="button" class="secondary small">Cancel</button></div><div id="draftState" role="status" aria-live="polite"></div><div id="settlWarn" class="hint"></div><div id="status" role="status" aria-live="polite"></div><div id="progress" aria-label="Working"><i></i></div><div id="gentime"></div><div id="generationIdentity"></div></div>
   <main id="map"><div id="loadbar"><i></i></div><canvas id="view"></canvas><canvas id="minimap"></canvas><div id="pins"></div><div id="pinpop" hidden></div><div id="coords"><span id="coordText">x -, y - m</span><button id="coordCopy" class="secondary small" title="Copy x,y of the last click (or the cursor)">Copy</button></div><div id="hud"></div><button id="pinMode" class="secondary" title="Pin mode: click to drop a pin (or Alt-click)">Pin</button><button id="fit" class="secondary" title="Fit map (0)">Fit</button><div id="busy">generating...</div></main>
 </div>
 <script type="module" src="./main.ts"></script>

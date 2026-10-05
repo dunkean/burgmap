@@ -2,6 +2,74 @@
 
 Measured 2026-10-04. Bug fixes take priority; this study does not introduce a renderer rewrite or Rust dependency.
 
+## Major slowdown investigation, 2026-10-05
+
+The generation-only baseline at `ea100e5` confirms the regression. Weighted V8
+CPU samples attribute approximately 88% of the seed1 valley/20k time to
+`finishEdgeRoofs`, including repeated polygon Boolean proofs. Inclusive child
+times overlap; they must not be added. This is a generation bottleneck, so a
+renderer rewrite would leave the dominant work in place.
+
+Reviewed urban V7 (`ad4e15bf`, now local) indexes repeated polygon queries and
+uses conservative geometric bounds to reject impossible candidates before exact
+Boolean proofs. It retains the original geometry, acceptance thresholds and RNG.
+It also reuses exact roof-proof results and bounded access states. All six
+complete World hashes excluding `stats` are identical to their baselines.
+
+| Case | Baseline generation | V7 generation | Speedup |
+| --- | ---: | ---: | ---: |
+| Exact user open-town/20k/10km URL | 108.52 s | 31.78 s | 3.42× |
+| Seed1 valley/city/20k | 159.80 s | 35.15 s | 4.55× |
+| p4uefz region/10km | 53.21 s | 22.39 s | 2.38× |
+| Seed1 region/40km/5000 | 53.11 s | 21.18 s | 2.51× |
+
+These are single local Node samples with generation-only 1ms CPU profiling;
+hashing, serialization, startup and rendering are excluded. Our other generation
+and test jobs were paused, but unrelated machine activity was not controlled.
+Terrain-quality changes deliberately alter output and are validated separately;
+the table measures only exact-output urban optimization on the original terrain.
+Sources, binary Worlds, options and CPU profiles remain in
+`web/out/acceleration-2026-10-04/baseline/` and the archived worktree evidence.
+
+V7 passes 18 focused regressions and strict typecheck. An additional paired
+Russian seed42/town/6000/single-wall case falls from 329.30s on V4 to 219.23s
+on V7 (1.50×), with an identical World; V6 measured 249.51s. It remains too slow:
+weighted profiles attribute 208.70s to density repair, including 86.60s in access
+and 75.37s in obstacle clearance. These inclusive costs overlap. V7 records
+proven physical refusals but retries failed Boolean computations, and avoids
+searches whose original caps leave no candidate. Successive Roman20k/Germanic
+growth measures 15.98s on V4 and 15.77s on V7; this small difference does not
+establish a material improvement. European V6/V7 differences are similarly
+small and mixed. Do not present the table as the final combined terrain/UI
+application timings, or infer cache-hit counts from a CPU profile.
+
+Native V4 checks also separate generation from display: the three-castle town
+took 27.29s to generate, 460ms to build its scene, and about 556ms for its first
+frame. The open variant took 10.53s to generate and 370ms to build its scene.
+These are browser functional samples, not the same runtime/fixture as the Node
+baseline, and do not establish a cross-runtime speedup. The current evidence
+supports reducing repeated geometry work before considering Rust/WASM kernels.
+
+Terrain quality has a separate measured cost. Three alternating warm pairs per
+fixture put forest valley terrain at 1.17→1.40s for 3.6km and 2.23→2.74s for
+10km; tundra valley adds 17–18%. Desert plains measure 0.50→0.48s at 2.4km
+(overlapping ranges) and 1.27→1.10s at 10km. The better erosion is therefore
+not an overall terrain acceleration. These terrain-only calls exclude site,
+urban generation, rendering and serialization. Within-source determinism and
+raw imported-height byte equality pass; evidence is in the preserved
+`erosion-quality/web/out/erosion-quality/quiet-bench-v4/` report.
+
+Final assembled source `001c320c` additionally contains the functional roof
+repairs, new terrain, names, workflow and title sizing. Its 52 focused plus 13
+existing M5a checks, typecheck/build and local/offline native World parity pass.
+Those functional checks do not remeasure the six quiet urban cases above;
+the speed table remains evidence for exact-output V7 alone. Whole-generation
+roof captures preserve the previous 85 accepted repairs and add three whole
+roofs without introduced owner overlap. The inherited owner seam still fails
+the absolute audit and the remaining 18 cuts stay open. Full-suite testing was
+deferred for the user's manual trial. Verified worktree archives are retained in
+`E:/CodexArtifacts/city-generator-2026-10-04/archive/acceleration-final-20261005/`.
+
 ## Method and limits
 
 Two local Chromium headless passes, 1100 × 900 OffscreenCanvas, DPR 1, European organic culture, no secondary settlements. Imports came exclusively from the frozen, previously reviewed source at `6969dd5`, before the current primitive-city and parallel bug changes. Scratch probe and second-pass JSON: `web/scratch/perf_preliminary.mjs` and `.json` (ignored).
