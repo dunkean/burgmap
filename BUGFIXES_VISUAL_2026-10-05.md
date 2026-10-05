@@ -5,6 +5,11 @@ correctif de transfert des Workers dans `f842f9b`. Elles complètent le checkpoi
 de performance protégé par `optimization-2026-10-05` et ne changent pas les
 parcelles, les toits ou les options de génération.
 
+Le checkpoint classique est publié et protégé par `pre-brushes-2026-10-05`
+(`fe9ffa2`, Pages `9505299`). Les deux cas natifs ont aussi passé leurs huit
+modes sur le site réellement servi, dont le HTML est identique au build contrôlé.
+Voir `pre-brushes-publication-proof.json` dans le répertoire des preuves.
+
 ## Comportement
 
 - Suppression de la bordure administrative des quartiers et des segments du

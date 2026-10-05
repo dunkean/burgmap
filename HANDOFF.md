@@ -27,7 +27,12 @@ bugs and their evidence are recorded in [ROADMAP.md](ROADMAP.md).
   maps pass all eight modes on the rebuilt guarded HTML.
   Optimization tag `optimization-2026-10-05` is published at `01e162f`, Pages
   `3a4836d`; the served HTML hash matches the checked build and native four-mode
-  verification passes on the actual site. The visual fixes await publication.
+  verification passes on the actual site. The subsequent classic checkpoint is
+  protected by `pre-brushes-2026-10-05` at `fe9ffa2`, published on Pages `9505299`.
+  Its served SHA256 is `a5038ae6bc93109b1f59d6c55d316213ea4f2a679d88fb4066dee417a5fcd0c9`;
+  both native fixtures pass all eight modes on the actual publication. Optional
+  image-generated biome brushes are being implemented in a separate worktree;
+  classic rendering remains the default.
 - Roof/render optimization (2026-10-05): integrated source checkpoint `12d8c225`,
   reviewed before execution. See
   [OPTIMIZATION_IMPLEMENTATION_2026-10-05.md](OPTIMIZATION_IMPLEMENTATION_2026-10-05.md)

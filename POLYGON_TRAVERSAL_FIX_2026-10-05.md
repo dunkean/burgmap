@@ -26,6 +26,10 @@ existants de géométrie et de preuves de toits passent aussi. Après intégrati
 Sahel/tempéré passent leurs huit modes, exports, styles, déplacements et
 supersessions de génération sur le nouveau HTML construit.
 
+Le checkpoint `pre-brushes-2026-10-05` (`fe9ffa2`) est publié sur Pages `9505299`.
+Le HTML distant est identique au build local contrôlé ; les huit contrôles natifs
+réussissent aussi sur cette publication réelle.
+
 La génération japonaise termine avec le garde. Les tests existants, sans changer
 leurs attentes, donnent **5 réussites et 2 échecs de disposition** : aire de la
 zone libérée 3 196,9609 m² attendue sous 500, et plus grand lot intermédiaire
