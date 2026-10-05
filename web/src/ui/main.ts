@@ -1,4 +1,5 @@
-import { Options, SIZE_PRESETS, DEFAULT_ROADS, fromQuery, toQuery, wantsCustomHeight, DEFAULTS, withCulture, generationUid, SITE_ARCHETYPES } from '../gen/options';
+import { expandMapQuery } from '../gen/mapId';
+import { Options, SIZE_PRESETS, DEFAULT_ROADS, fromQuery, toQuery, wantsCustomHeight, DEFAULTS, withCulture, generationUid, SITE_ARCHETYPES, mapId } from '../gen/options';
 import { generate } from '../gen/pipeline';
 import { BRUSH_SOURCES } from '../render/assets/brushAssets';
 import { decodeBrushes, type BrushImages } from '../render/brushes';
@@ -69,7 +70,7 @@ mapInfoDialog.addEventListener('close', () => mapInfoButton.setAttribute('aria-e
 /** The URL style can be any MapStyle; gen/options.ts only whitelists the first two, so read it here. */
 function parseOptions(q: string): Options {
   const o = fromQuery(q);
-  const v = new URLSearchParams(q.startsWith('?') ? q.slice(1) : q).get('style');
+  const v = expandMapQuery(q).get('style');
   return isMapStyle(v) ? { ...o, style: v as Options['style'] } : o;
 }
 const mapStyle = (): MapStyle => opts.style as MapStyle;
@@ -670,6 +671,7 @@ function wireCopy(btn: HTMLButtonElement, text: () => string, done: string): voi
   });
 }
 wireCopy($<HTMLButtonElement>('copyLink'), () => location.origin + location.pathname + '?' + curQuery(), 'Link copied');
+wireCopy($<HTMLButtonElement>('copyId'), () => mapId(opts), 'ID copied');
 wireCopy($<HTMLButtonElement>('copyBug'), () => bugReport(opts, pinsUI.pins, viewer.getView(), location.origin + location.pathname, map.clientWidth, paintedTextures ? appearanceQuery(fullQuery(opts, pinsUI.pins, viewer.getView()), true) : undefined), 'Report copied');
 
 // ---------- viewer (canvas, LOD) ----------

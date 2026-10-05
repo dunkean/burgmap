@@ -25,7 +25,8 @@ describe('share state (pins, view)', () => {
     const withUi = fromQuery(base + '&' + new URLSearchParams(fullQuery(o, pins, view)).toString().split('&').filter((kv) => /^(pins|view)=/.test(kv)).join('&'));
     expect(withUi).toEqual(o);
     expect(toQuery(withUi)).toBe(toQuery(o));
-    expect(fullQuery(o, [], null)).toBe(toQuery(o));
+    expect(fromQuery(fullQuery(o, [], null))).toEqual(o);
+    expect(fullQuery(o, [], null)).toMatch(/^id=1[rz][A-Za-z0-9_-]+$/);
     const a = generate(withUi), b = generate(o);
     expect(JSON.stringify(a.urban)).toBe(JSON.stringify(b.urban));
     // The vertex count of the slowest measured block follows wall-clock timing too.
@@ -54,7 +55,7 @@ describe('bug report', () => {
     expect(cropAround(10, 3000, 200, 1000)).toBe('0,800,200');
     const o = makeOptions({ seed: 'abc' });
     const r = bugReport(o, pins.slice(0, 2), view, 'http://x/', 1000);
-    expect(r).toContain('http://x/?seed=abc');
+    expect(r).toContain('http://x/?id=');
     expect(r).toContain('npm run preview:png -- --seed abc --size ' + DEFAULTS.size);
     expect(r).toMatch(/--crop \d+,\d+,\d+ --out out\/bug-1\.png/);
     expect(r).toContain('2. 10, 20');

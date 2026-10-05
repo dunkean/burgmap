@@ -85,6 +85,16 @@ walls and water ribbons remain protected after contour extraction.
 
 ## Coordinates & units
 
+Share URLs encode options and the seed as `?id=<mapId>` (`gen/mapId.ts`). The frozen
+v1 binary field/value tables omit default options and the redundant generation hash;
+long payloads use raw DEFLATE with a frozen shared plan vocabulary dictionary.
+The shorter of raw/compressed forms is encoded in unpadded base64url. Parsing still
+accepts legacy query parameters, including explicit overrides on compact links.
+Pins, view and painted brushes remain separate UI parameters. Copy ID contains the
+configuration and seed; Copy link also includes the UI state. Imported heightmap
+pixels remain outside links. The existing `generationUid` hash remains unchanged.
+Wire tables/dictionary must stay frozen; incompatible changes require a new version.
+
 - World units are **meters**. Map is a square `[0, mapSize]²` with origin top-left, y down (SVG convention).
 - Size presets (options.size): `hamlet` (~50–150 inhabitants, map 1200 m), `village` (~300–800, 1600 m), `town` (~2k–5k, 2400 m), `city` (~10k–25k, 3600 m), `capital` (~40k+, 5000 m). Terrain grid resolution: ~ mapSize / 4 m… choose so the grid is ≤ 512² (e.g. 256–512 cells per side).
 - Realistic dimensions (medieval): main street 6–10 m, secondary 4–6 m, alleys 2–3 m; burgage plots 5–10 m frontage × 20–60 m depth; houses 5–9 m wide × 8–14 m deep; parish church 30–60 m long; cathedral 80–140 m; market square 1500–6000 m²; town wall 2–3 m thick with towers every 40–80 m; strip fields 10–25 m × 150–250 m.

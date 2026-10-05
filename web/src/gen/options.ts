@@ -1,4 +1,5 @@
 import type { NameFamily } from './names/types';
+import { expandMapQuery, encodeMapId } from './mapId';
 import { NAME_FAMILIES } from './names/types';
 import { BIOME_NAMES, biomeName, type BiomeName } from './biomes';
 import type { ImportedHeight } from './terrain/import';
@@ -500,12 +501,15 @@ function queryForOptions(o: Options, includeUid: boolean): string {
 
 export function toQuery(o: Options): string { return queryForOptions(o, true); }
 
+/** Reversible configuration + seed for compact share links; the old hash stays an internal identity. */
+export function mapId(o: Options): string { return encodeMapId(queryForOptions(o, false)); }
+
 function oneOf<T extends string>(v: string | null, list: readonly T[], def: T): T {
   return v !== null && (list as readonly string[]).includes(v) ? (v as T) : def;
 }
 
 export function fromQuery(q: string | URLSearchParams): Options {
-  const p = typeof q === 'string' ? new URLSearchParams(q.startsWith('?') ? q.slice(1) : q) : q;
+  const p = expandMapQuery(q);
   const o = makeOptions({ seed: p.get('seed') ?? DEFAULTS.seed });
   const mode = p.get('mode');
   if (mode === 'e') o.workflow = 'environment';
@@ -571,7 +575,7 @@ export function fromQuery(q: string | URLSearchParams): Options {
 
 /** True when the URL asks for a custom heightmap that the page cannot rebuild from the link alone. */
 export const wantsCustomHeight = (q: string | URLSearchParams): boolean =>
-  (typeof q === 'string' ? new URLSearchParams(q.startsWith('?') ? q.slice(1) : q) : q).get('hm') === 'custom';
+  expandMapQuery(q).get('hm') === 'custom';
 
 /** Parse "k=v" overrides (used by the preview script). */
 export function applyOverride(o: Options, k: string, v: string): void {

@@ -4,7 +4,7 @@
  * keys, so the options (and therefore the world) are exactly the same with or without them.
  * Also builds the bug-report snippet (link, options, pins, view and the `preview:png` command to reproduce it).
  */
-import { Options, toQuery } from '../gen/options';
+import { Options, toQuery, mapId } from '../gen/options';
 import { generationMapSize } from '../gen/pipeline';
 
 export interface Pin { x: number; y: number; note: string }
@@ -41,7 +41,7 @@ export function viewFromString(s: string | null): ViewState | null {
 
 /** The query of a link: the generation options, then the UI state (pins, view) when present. */
 export function fullQuery(o: Options, pins: Pin[], view?: ViewState | null): string {
-  const p = new URLSearchParams(toQuery(o));
+  const p = new URLSearchParams({ id: mapId(o) });
   if (pins.length) p.set('pins', pinsToString(pins));
   if (view) p.set('view', viewToString(view));
   return p.toString();
