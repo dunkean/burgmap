@@ -18,6 +18,7 @@ import { createQuarterExecutor } from './quarterPool';
 import { exportMeasure } from './exportMeasure';
 import { worldMeta } from './worldMeta';
 import { worldForRender } from './renderWorld';
+import { refreshCavernMask } from '../gen/terrain/caverns';
 
 export interface WorkerRequest { id: number; options: Options }
 export interface WorkerResponse {
@@ -70,6 +71,12 @@ function quarterQueue(id: number): QuarterQueue | null {
   if (!quarters) {
     const port = lastPort;
     quarters = new QuarterQueue(lastWorld, (layers, drop, st) => {
+      if (lastWorld?.options.biome === 'underdark-caverns' && lastId === id && (Object.keys(layers).length || drop.length)) {
+        const det = { ...(lastWorld.megaDetail ?? {}), ...layers };
+        for (const key of drop) delete det[key];
+        lastWorld = { ...lastWorld, megaDetail: det };
+        refreshCavernMask(lastWorld);
+      }
       if (port) {
         if (Object.keys(layers).length || drop.length) port.postMessage({ type: 'quarters', gen: id, layers, drop } satisfies QuarterMsg);
         ctx.postMessage({ type: 'quartersDone', id, done: st.done, queued: st.queued, total: st.total, ms: st.ms, failed: st.failed } satisfies GResponse);
@@ -93,6 +100,7 @@ function doExport(m: GExport): void {
     if (q && q.total > 0) {
       const det: Record<number, NonNullable<World['urban']>> = m.full ? q.all((d, n) => post({ type: 'quartersDone', id: lastId, done: d, queued: n - d, total: n, ms: 0 })) : Object.fromEntries(q.cache);
       lastWorld = { ...lastWorld, megaDetail: det };
+      refreshCavernMask(lastWorld);
     }
     let blob: Blob;
     if (m.kind === 'json') blob = new Blob([worldToJson(lastWorld)], { type: 'application/json' });
@@ -124,6 +132,7 @@ function doDetail(m: GDetail): void {
     if (!res) return;
     s.urban = res.urban;
     if (res.bridges.length) lastWorld.bridges = [...(lastWorld.bridges ?? []), ...res.bridges];
+    refreshCavernMask(lastWorld);
     if (res.urban.macro) quarters?.setWorld(lastWorld);
     if (lastPort) {
       lastPort.postMessage({ type: 'settlement', gen: m.id, index: m.index, urban: res.urban, bridges: res.bridges } satisfies SettlementMsg);

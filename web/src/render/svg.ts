@@ -1,3 +1,4 @@
+import { cavernPathD, cavernWallsSvg } from './caverns';
 import type { World } from '../gen/types';
 import { renderView } from '../gen/settlements/merge';
 import { Vec2, chaikin, simplify, offsetRibbon } from '../gen/core/geom';
@@ -96,6 +97,7 @@ export function renderSvg(world0: World, opts: RenderOptions = {}): string {
     const r = renderTerrainRaster(world, pal);
     parts.push(`<g class="layer-terrain"><image id="terrain-ground" x="0" y="0" width="${S}" height="${S}" preserveAspectRatio="none" xlink:href="${pngDataUrl(r.png)}"/></g>`);
   }
+  if (t.caverns) parts.push(`<defs><clipPath id="cavern-floor"><path d="${cavernPathD(t.caverns.floor)}" clip-rule="evenodd"/></clipPath></defs><g clip-path="url(#cavern-floor)">`);
   if (pal.grid) parts.push(gridSvg(world, pal, u));
   if (opts.contours ?? world.options.contours) parts.push(contourLayer(world, pal, u, scale));
 
@@ -144,6 +146,7 @@ export function renderSvg(world0: World, opts: RenderOptions = {}): string {
     if (!opts.debug) { parts.push(shadowSvg(world, pal, u)); parts.push(litSvg(world, pal, u)); }
   } else parts.push(siteLayer(world, pal, u, !!opts.debug));
 
+  if (t.caverns) { parts.push('</g>'); parts.push(cavernWallsSvg(world, pal, opts.raster !== false)); }
   parts.push('</g>');
   if (opts.labels ?? world.options.labels !== false) parts.push(labelsSvg(world, pal, opts.measure, !!(opts.legend ?? world.options.legend)));
   parts.push(decor(world, pal, u));

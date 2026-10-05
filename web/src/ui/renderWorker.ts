@@ -14,6 +14,7 @@ import type { World } from '../gen/types';
 import type { RRequest, RResponse, RView, DisplayOpts, WorldMsg, RAttach, PortMsg, SettlementMsg, QuarterMsg } from './protocol';
 import { decodeBrushes, type BrushImages } from '../render/brushes';
 import { worldMeta } from './worldMeta';
+import { refreshCavernMask } from '../gen/terrain/caverns';
 
 const ctx = self as unknown as Worker;
 const post = (r: RResponse, transfer: Transferable[] = []): void => ctx.postMessage(r, transfer);
@@ -100,6 +101,7 @@ function onSettlement(m: SettlementMsg): void {
   if (!list[m.index]) return;
   list[m.index] = { ...list[m.index], urban: m.urban };
   world = { ...world, settlements: list, bridges: [...(world.bridges ?? []), ...m.bridges] };
+  refreshCavernMask(world);
   sceneCache = null;
   announce(rebuild());
 }
@@ -119,6 +121,7 @@ function onQuarters(m: QuarterMsg): void {
   const wait = Math.max(0, 400 - (performance.now() - megaLast));
   megaTimer = setTimeout(() => {
     megaTimer = null; megaLast = performance.now();
+    if (world) refreshCavernMask(world);
     sceneCache = null;
     announce(rebuild());
   }, wait);

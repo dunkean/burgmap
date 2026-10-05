@@ -1,3 +1,4 @@
+import { isUnderdarkBiome } from '../gen/biomes';
 /** SVG rendering of the urban layer (streets as space, blocks, plots, building masses, walls). */
 import { countryKind, countryPatternSvg, fringeStreetWidth, fringePath, FRINGE_ORDER, FRINGE_PAINT, type CountryFringe } from './countryside';
 import { naturalLanduseLayer } from './landuse';
@@ -62,8 +63,8 @@ export function urbanDebugLayer(world: World, u: number): string {
 function patterns(pal: Palette, biome?: string): string {
   const U = pal.urban;
   const W = 6;
-  return `<defs><pattern id="p-ugarden" patternUnits="userSpaceOnUse" width="${W}" height="${W}"${biome === 'underdark' ? '' : ' patternTransform="rotate(28)"'}>` +
-    (biome === 'underdark' ? underdarkMarkSvg('garden', 2, 2, 1.1, pal) + underdarkMarkSvg('garden', 4.5, 4.5, 1.1, pal) : `<path d="M0.6 1.5H3.4M3.2 4.5H5.6" stroke="${U.gardenInk}" stroke-width="0.35" stroke-linecap="round" opacity="0.7"/>`) + '</pattern>' +
+  return `<defs><pattern id="p-ugarden" patternUnits="userSpaceOnUse" width="${W}" height="${W}"${isUnderdarkBiome(biome) ? '' : ' patternTransform="rotate(28)"'}>` +
+    (isUnderdarkBiome(biome) ? underdarkMarkSvg('garden', 2, 2, 1.1, pal) + underdarkMarkSvg('garden', 4.5, 4.5, 1.1, pal) : `<path d="M0.6 1.5H3.4M3.2 4.5H5.6" stroke="${U.gardenInk}" stroke-width="0.35" stroke-linecap="round" opacity="0.7"/>`) + '</pattern>' +
     `<pattern id="p-ugrave" patternUnits="userSpaceOnUse" width="5" height="4"><path d="M1.2 1.2V2.8M0.6 1.8H1.8M3.7 3.1V3.9M3.3 3.4H4.1" stroke="${U.gardenInk}" stroke-width="0.25" opacity="0.8"/></pattern>` +
     `<pattern id="p-upave" patternUnits="userSpaceOnUse" width="3" height="3"><circle cx="1.5" cy="1.5" r="0.28" fill="${U.placeInk}" opacity="0.55"/></pattern></defs>`;
 }
@@ -299,7 +300,7 @@ export const terraceTone = (pal: Palette): string => mixHex(pal.land.meadow, pal
 function openGroundSvg(ub: NonNullable<World['urban']>, pal: Palette, lw: (m: number, px: number) => string, biome?: string): string {
   const U = pal.urban;
   const mul = pal.landBlend === 'multiply' ? ' style="mix-blend-mode:multiply"' : '';
-  let s = `<defs><pattern id="p-utuft" patternUnits="userSpaceOnUse" width="11" height="9">` + (biome === 'underdark' ? underdarkMarkSvg('meadow', 2.5, 3.5, 1.4, pal) + underdarkMarkSvg('meadow', 8, 7, 1.4, pal) : `<path d="M2.5 4.5l-0.8-1.9M2.5 4.5v-2.1M2.5 4.5l0.8-1.9M8 8.4l-0.8-1.9M8 8.4l0.8-1.9" stroke="${pal.grass}" stroke-width="0.35" fill="none" stroke-linecap="round" opacity="0.75"/>`) + '</pattern></defs>';
+  let s = `<defs><pattern id="p-utuft" patternUnits="userSpaceOnUse" width="11" height="9">` + (isUnderdarkBiome(biome) ? underdarkMarkSvg('meadow', 2.5, 3.5, 1.4, pal) + underdarkMarkSvg('meadow', 8, 7, 1.4, pal) : `<path d="M2.5 4.5l-0.8-1.9M2.5 4.5v-2.1M2.5 4.5l0.8-1.9M8 8.4l-0.8-1.9M8 8.4l0.8-1.9" stroke="${pal.grass}" stroke-width="0.35" fill="none" stroke-linecap="round" opacity="0.75"/>`) + '</pattern></defs>';
   const of = (uses: string[]) => ub.parcels.filter((p) => uses.includes(p.use)).map((p) => pathD(p.poly, true)).join('');
   // the settlement's ground (the footprint and the land use's margin round it, off the water): grass, opaque where
   // it must hide the roads under it
@@ -314,7 +315,7 @@ function openGroundSvg(ub: NonNullable<World['urban']>, pal: Palette, lw: (m: nu
   const gard = of(['garden']) + ub.backLand.filter(() => false).map(phD).join('');
   if (gard) s += `<g class="u-gardens"><path d="${gard}" fill="${pal.land.garden}" fill-opacity="${f1(pal.landOpacity)}"${mul}/><path d="${gard}" fill="url(#p-ugarden)" opacity="0.7"/></g>`;
   const fields = of(['field']);
-  if (fields) s += biome === 'underdark' ? `<g class="u-fields"><path d="${fields}" fill="${pal.land.field}" fill-opacity="${f1(pal.landOpacity)}"${mul}/><path d="${fields}" fill="url(#p-ugarden)"/></g>` : `<defs><pattern id="p-ufurrow" patternUnits="userSpaceOnUse" width="40" height="3" patternTransform="rotate(24)"><path d="M0 1.5H40" stroke="${pal.furrow}" stroke-width="0.35" opacity="${pal.furrowAlpha}"/></pattern></defs><g class="u-fields"><path d="${fields}" fill="${pal.land.field}" fill-opacity="${f1(pal.landOpacity)}"${mul}/><path d="${fields}" fill="url(#p-ufurrow)" stroke="${pal.furrow}" stroke-opacity="0.4" stroke-width="${lw(0.4, 0.15)}"/></g>`;
+  if (fields) s += isUnderdarkBiome(biome) ? `<g class="u-fields"><path d="${fields}" fill="${pal.land.field}" fill-opacity="${f1(pal.landOpacity)}"${mul}/><path d="${fields}" fill="url(#p-ugarden)"/></g>` : `<defs><pattern id="p-ufurrow" patternUnits="userSpaceOnUse" width="40" height="3" patternTransform="rotate(24)"><path d="M0 1.5H40" stroke="${pal.furrow}" stroke-width="0.35" opacity="${pal.furrowAlpha}"/></pattern></defs><g class="u-fields"><path d="${fields}" fill="${pal.land.field}" fill-opacity="${f1(pal.landOpacity)}"${mul}/><path d="${fields}" fill="url(#p-ufurrow)" stroke="${pal.furrow}" stroke-opacity="0.4" stroke-width="${lw(0.4, 0.15)}"/></g>`;
   const commons = of(['commons']);
   if (commons) s += `<path class="u-commons" d="${commons}" fill="${pal.land.pasture}" fill-opacity="${f1(pal.landOpacity * 0.8)}"${mul}/>`;
   const paved = of(['place', 'plaza', 'market']);

@@ -50,7 +50,7 @@ web/
 
 ## Biomes
 
-`gen/biomes.ts` defines `temperate`, `forest`, `desert`, `steppe`, `tropical`, `tundra` and `underdark` landscapes. `Options.biome` is optional: existing links and the default temperate generator retain their output. The biome selector is a generation control and round-trips through `biome=` in links and exports.
+`gen/biomes.ts` defines `temperate`, `forest`, `desert`, `steppe`, `tropical`, `tundra`, `underdark` and `underdark-caverns` landscapes. `Options.biome` is optional: existing links and the default temperate generator retain their output. The biome selector is a generation control and round-trips through `biome=` in links and exports.
 
 Rural classification combines the selected biome with water distance, height above water, slope, soil variation and settlement access. Desert fields and oasis groves require nearby water; woodland/tropical clearings shrink around settlements; steppe keeps riverine groves; tundra is treeless. Farm lots in deserts require water access. `render/biomes.ts` supplies a shared, immutable palette to both renderers and their terrain/legend layers. `scripts/biome_previews.ts` renders each landscape for visual checks.
 
@@ -60,6 +60,15 @@ and cultivated fungal beds remain near settlements. Its cultures are `drow-encla
 Shared vector patterns depict the underground cover even in painted mode. On compact
 interactive viewports the title and legend move into a Map info dialog; the scale stays
 on the map. Exports retain their full decorative panels.
+
+`underdark-caverns` is a separate opt-in rock mask over a normally generated
+Underdark map. Towns, roads, rivers and secondary settlements define its network;
+noise deforms the surrounding boundary into irregular cave walls. The open
+`underdark` variant remains available. The mask protects the existing geometry
+and updates when lazy settlement or quarter detail arrives. It adds no population
+cap or restriction on cultures. Rock remains distinct from water. Worker snapshots
+and JSON exports retain its vectors; SVG and Canvas share the dark rock texture
+and boundary, while the exposed floor keeps the original Underdark palette.
 
 ## Wet moats
 

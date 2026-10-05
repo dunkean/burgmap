@@ -1,3 +1,4 @@
+import { isUnderdarkBiome } from '../gen/biomes';
 /** Rural ground restored under the fabric at exposed countryside edges, without changing urban geometry. */
 import type { World, UrbanLayer, PolyH, Polygon, TerrainLayer } from '../gen/types';
 import polygonClipping from 'polygon-clipping';
@@ -215,10 +216,10 @@ export function countrysideFringe(world: World): CountryFringe {
   catch { return { bands: FRINGE_ALPHA.map(() => []), ground: [], streets: [] }; }
 }
 
-export const countryKind = (biome?: string): 'pasture' | 'commons' => biome === 'desert' || biome === 'tundra' || biome === 'underdark' ? 'commons' : 'pasture';
+export const countryKind = (biome?: string): 'pasture' | 'commons' => biome === 'desert' || biome === 'tundra' || isUnderdarkBiome(biome) ? 'commons' : 'pasture';
 /** The same small, world-sized marks in SVG and Canvas; no trees that could obscure an urban plan. */
 export function countryPatternSvg(pal: Palette, biome?: string): string {
-  if (biome === 'underdark') return `<pattern id="p-country-ground" patternUnits="userSpaceOnUse" width="26" height="20">${underdarkMarkSvg('commons', 5, 8, 2.5, pal)}${underdarkMarkSvg('commons', 18, 17, 2, pal)}</pattern>`;
+  if (isUnderdarkBiome(biome)) return `<pattern id="p-country-ground" patternUnits="userSpaceOnUse" width="26" height="20">${underdarkMarkSvg('commons', 5, 8, 2.5, pal)}${underdarkMarkSvg('commons', 18, 17, 2, pal)}</pattern>`;
   return `<pattern id="p-country-ground" patternUnits="userSpaceOnUse" width="26" height="20"><path d="M5 8l-1.2-2.4M5 8l1.2-2.4M18 17l-1.2-2.4M18 17l1.2-2.4" stroke="${pal.grass}" stroke-width="0.4" fill="none" stroke-linecap="round" opacity="0.6"/><circle cx="15" cy="5" r="0.55" fill="${pal.grass}" opacity="0.5"/></pattern>`;
 }
 export const fringePath = (pieces: PolyH[]): string => pieces.map((p) => pathD(p.outer, true) + p.holes.map((h) => pathD(h, true)).join('')).join('');

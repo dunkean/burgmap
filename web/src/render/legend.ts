@@ -1,3 +1,5 @@
+import { cavernWallFill } from './caverns';
+import { isUnderdarkBiome } from '../gen/biomes';
 /**
  * Cartouche (town name, population, scale bar) and legend (land use + urban symbology per style),
  * described once as drawing primitives in a pixel-like coordinate system. `drawPanelCanvas` paints
@@ -129,13 +131,14 @@ function lineSwatch(edge: string, fill: string | null, w: number, dash?: number[
 }
 
 export function legendModel(world: World, pal: Palette): Panel {
-  const underground = world.options.biome === 'underdark';
+  const underground = isUnderdarkBiome(world.options.biome);
   const U = pal.urban;
   const items: Item[] = [];
   const add = (label: string, draw: Item['draw']): void => { items.push({ label, draw }); };
   const kinds = new Set(world.landuse?.areas.map((a) => a.kind) ?? []);
   const lu = world.options.landuse;
   const t = world.terrain;
+  if (t.caverns) add('Cavern walls', fillSwatch(cavernWallFill(pal), pal.treeInk, 1));
   if (t.coastline.length) add(underground ? 'Underground basin' : 'Sea', fillSwatch(pal.seaFill, pal.waterEdge, 1, pal.waterLines?.color));
   if (t.lakes.length) add(underground ? 'Underground lake' : 'Lake', fillSwatch(pal.lakeFill, pal.waterEdge, 1, pal.waterLines?.color));
   if (t.rivers.length) add('River', (x, y) => [{ t: 'line', pts: [[x, y + 9], [x + 8, y + 3], [x + 16, y + 9], [x + SW, y + 3]], stroke: pal.riverEdge, sw: 4.6 }, { t: 'line', pts: [[x, y + 9], [x + 8, y + 3], [x + 16, y + 9], [x + SW, y + 3]], stroke: pal.riverFill, sw: 3 }]);

@@ -1,4 +1,4 @@
-import { biomeName, type BiomeName } from '../gen/biomes';
+import { isUnderdarkBiome, biomeName, type BiomeName } from '../gen/biomes';
 import { PALETTES, type MapStyle, type Palette } from './styles';
 
 const GROUND: Record<Exclude<BiomeName, 'temperate'>, [string, string, string]> = {
@@ -6,6 +6,7 @@ const GROUND: Record<Exclude<BiomeName, 'temperate'>, [string, string, string]> 
   steppe: ['#e7d9ad', '#c9bc8b', '#a7a184'], tropical: ['#d1dfb2', '#a5bd8c', '#929e7b'],
   tundra: ['#dce1d9', '#c6cdbd', '#a9b0a7'],
   underdark: ['#c0b9c6', '#8e8999', '#655e73'],
+  'underdark-caverns': ['#c0b9c6', '#8e8999', '#655e73'],
 };
 const CACHE = new Map<string, Palette>();
 
@@ -18,7 +19,7 @@ export function biomePalette(style: MapStyle | Palette, value?: string): Palette
   const key = base === PALETTES[base.name] ? `${base.name}:${biome}` : '';
   const cached = key && CACHE.get(key);
   if (cached) return cached;
-  if (biome === 'underdark') {
+  if (isUnderdarkBiome(biome)) {
     const mono = ['engraving', 'blueprint'].includes(base.name), night = base.name === 'night';
     const stone = night ? '#353344' : '#aaa3b1', damp = night ? '#425259' : '#8dabae';
     const fungal = night ? '#9f93b6' : '#b4a4c9', ink = night ? '#d1c8df' : '#514763';

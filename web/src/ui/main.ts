@@ -15,6 +15,7 @@ import { ControlRegistry, fillSelect, selectControl, checkControl, numberControl
 import { readHeightmap } from './heightmap';
 import { NAME_FAMILIES } from '../gen/names/types';
 import { BIOME_LABELS, biomeName } from '../gen/biomes';
+import { refreshCavernMask } from '../gen/terrain/caverns';
 import { FONT_STACKS, fontString } from '../render/labelStyles';
 import { STYLE_LIST, isMapStyle, MapStyle } from '../render/styles';
 import type { Scene } from '../render/scene';
@@ -753,6 +754,7 @@ function applyDetail(index: number, urban: NonNullable<World['urban']>, bridges:
   const list = currentWorld.settlements.slice();
   list[index] = { ...list[index], urban };
   currentWorld = { ...currentWorld, settlements: list, bridges: [...(currentWorld.bridges ?? []), ...bridges] };
+  refreshCavernMask(currentWorld);
   if (urban.macro) { megaLocal?.setWorld(currentWorld); megaRect = null; maybeQuarters(viewer.getView()); }
   sceneCache = null;
   rerender(true);
@@ -796,7 +798,11 @@ function applyQuarters(layers: Record<number, NonNullable<World['urban']>>, drop
   for (const id of drop) delete det[id];
   currentWorld = { ...currentWorld, megaDetail: det };
   if (megaRedraw !== undefined) return;
-  megaRedraw = window.setTimeout(() => { megaRedraw = undefined; sceneCache = null; rerender(true); }, 400);
+  megaRedraw = window.setTimeout(() => {
+    megaRedraw = undefined;
+    if (currentWorld) refreshCavernMask(currentWorld);
+    sceneCache = null; rerender(true);
+  }, 400);
 }
 function maybeQuarters(v: { cx: number; cy: number; scale: number }): void {
   if (v.scale < MEGA_SCALE || !isMega()) return;
@@ -902,6 +908,7 @@ async function buildExport(snapshot: ExportSnapshot, kind: 'svg' | 'json', full 
       // megacity: every quarter's detail first (tile by tile; slow)
       const q = megaLocal ?? new QuarterQueue(world, () => {});
       world = { ...world, megaDetail: q.all() };
+      refreshCavernMask(world);
     }
     await new Promise((r) => setTimeout(r, 30)); // let the progress message paint before the synchronous build
     const d = snapshot.display;

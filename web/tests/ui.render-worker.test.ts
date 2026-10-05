@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { World } from '../src/gen/types';
 import type { PortMsg, RRequest, RResponse } from '../src/ui/protocol';
 
-const recorded = vi.hoisted(() => ({ builds: [] as string[], draws: [] as string[] }));
+const recorded = vi.hoisted(() => ({ builds: [] as string[], draws: [] as string[], refreshed: [] as World[] }));
+vi.mock('../src/gen/terrain/caverns', () => ({ refreshCavernMask: (world: World) => { recorded.refreshed.push(world); } }));
 vi.mock('../src/render/sceneCache', () => ({ SceneBuilder: class { update(): object { return {}; } } }));
 vi.mock('../src/render/canvas', () => ({ createCanvasRenderer: (_canvas: unknown, world: World) => {
   const seed = world.options.seed; recorded.builds.push(seed);
@@ -14,9 +15,38 @@ vi.mock('../src/render/canvas', () => ({ createCanvasRenderer: (_canvas: unknown
   };
 } }));
 
-afterEach(() => { vi.unstubAllGlobals(); vi.resetModules(); recorded.builds.length = 0; recorded.draws.length = 0; });
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.resetModules(); recorded.builds.length = 0; recorded.draws.length = 0; recorded.refreshed.length = 0; });
 
 describe('final-world-only render worker handoff', () => {
+  it('refreshes the rock mask after lazy settlements and coalesced quarter arrivals before announcing the scene', async () => {
+    vi.useFakeTimers();
+    const responses: RResponse[] = [];
+    const scope = { onmessage: null as ((event: MessageEvent<RRequest>) => void) | null, postMessage: (r: RResponse) => responses.push(r) };
+    vi.stubGlobal('self', scope);
+    await import('../src/ui/renderWorker');
+    const port = { onmessage: null as ((e: MessageEvent<PortMsg>) => void) | null, close: vi.fn() };
+    const send = (m: PortMsg) => port.onmessage!({ data: m } as MessageEvent<PortMsg>);
+    scope.onmessage!({ data: { type: 'attach', gen: 1, port: port as unknown as MessagePort } } as MessageEvent<RRequest>);
+    const world = { mapSize: 1600, options: { seed: 'cave', biome: 'underdark-caverns' }, site: { center: { x: 800, y: 800 } }, settlements: [{ index: 0 }] } as World;
+    send({ type: 'world', gen: 1, world, final: true, stage: 'done' });
+    const urban = { buildings: [] } as unknown as NonNullable<World['urban']>;
+    send({ type: 'settlement', gen: 1, index: 0, urban, bridges: [] });
+    expect(recorded.refreshed).toHaveLength(1);
+    expect(recorded.refreshed[0].settlements![0].urban).toBe(urban);
+    expect(responses.filter((r) => r.type === 'content')).toHaveLength(2);
+    send({ type: 'quarters', gen: 1, layers: { 1: urban }, drop: [] });
+    send({ type: 'quarters', gen: 1, layers: { 2: urban }, drop: [1] });
+    expect(recorded.refreshed).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(400);
+    expect(recorded.refreshed).toHaveLength(2);
+    expect(recorded.refreshed[1].megaDetail).toEqual({ 2: urban });
+    expect(responses.filter((r) => r.type === 'content')).toHaveLength(3);
+    send({ type: 'quarters', gen: 0, layers: { 3: urban }, drop: [] });
+    await vi.advanceTimersByTimeAsync(400);
+    expect(recorded.refreshed).toHaveLength(2);
+    scope.onmessage!({ data: { type: 'dispose' } } as MessageEvent<RRequest>);
+  });
+
   it('retains the preceding renderer through stage snapshots and tags every bitmap with its actual generation', async () => {
     const responses: RResponse[] = [];
     const scope = { onmessage: null as ((event: MessageEvent<RRequest>) => void) | null, postMessage: (r: RResponse) => responses.push(r) };

@@ -5,6 +5,18 @@ bugs and their evidence are recorded in [ROADMAP.md](ROADMAP.md).
 
 ## Current status
 
+- Underdark cavern redesign (2026-10-05): the cavern variant
+  generates the normal Underdark layout first, then adds an irregular dark rock
+  mask around occupied towns, paths and waterways. It preserves the open variant,
+  normal camp/macro behavior and original floor palette. Late settlement and
+  quarter details refresh the display mask. Shared SVG/Canvas rock texture uses
+  deterministic multiscale noise and fractures. See [CAVERNS_2026-10-05.md](CAVERNS_2026-10-05.md).
+  The preceding published checkpoint is tagged `pre-caverns-2026-10-05` (`1879b03`).
+  The rejected radial-room candidate was not published. The replacement passes
+  the coherent source review, 62 distinct focused tests, typecheck and build.
+  Seven native cases pass across both backends, including classic SVG byte parity,
+  a fortified town and a placed secondary village. Actual PNGs were inspected.
+  This does not certify a green full suite. Publication provenance follows below.
 - Underdark and small-screen information panels (2026-10-05): seventh biome,
   independent drow-enclave/duergar-hold/myconid-colony cultures, rock and fungal
   land use with shared SVG/Canvas motifs. Surface atlas assets are unchanged;

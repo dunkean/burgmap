@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { BIOME_NAMES } from '../src/gen/biomes';
 import { makeOptions } from '../src/gen/options';
-import { brushCell, brushMotif, brushColorMatrix, decodeBrushes, BRUSH_ATLAS, BRUSH_CELL } from '../src/render/brushes';
+import { brushCell, brushMotif, brushColorMatrix, decodeBrushes, supportsPaintedBiome, BRUSH_ATLAS, BRUSH_CELL } from '../src/render/brushes';
 import { svgBrushes } from '../src/render/brushSvg';
 import { renderSvg } from '../src/render/svg';
 import { CanvasBrushes } from '../src/render/brushCanvas';
@@ -46,7 +46,7 @@ describe('optional painted natural textures', () => {
   it('varies species by map while preserving reproducible biome and fruit mixes', () => {
     const world = fakeWorld({ mapSize: 1600, buildings: 0, streets: 0, clusters: 1, landAreas: 0 });
     const fruits = [[1], [1], [12, 13], [20], [24, 26], [20]];
-    BIOME_NAMES.filter(biome => biome !== 'underdark').forEach((biome, row) => {
+    BIOME_NAMES.filter(supportsPaintedBiome).forEach((biome, row) => {
       world.options.biome = biome;
       const a = brushMotif(world, 'forest'), b = brushMotif(world, 'forest');
       expect(a).toEqual(b); expect(new Set(a.stamps.map(s => s.cell)).size).toBeGreaterThan(1);
@@ -58,11 +58,18 @@ describe('optional painted natural textures', () => {
       }
     });
     expect(brushCell(world, 10.125, 30.25)).toBe(brushCell(world, 10.125, 30.25));
+    expect(BIOME_NAMES.filter(supportsPaintedBiome)).toEqual(['temperate', 'forest', 'desert', 'steppe', 'tropical', 'tundra']);
+    for (const biome of ['underdark', 'underdark-caverns'] as const) {
+      world.options.biome = biome;
+      expect(supportsPaintedBiome(biome)).toBe(false);
+      for (const kind of ['forest', 'garden', 'marsh'] as const) expect(brushMotif(world, kind).stamps).toEqual([]);
+      expect(renderSvg(world, { raster: false, brushes: BRUSH_SOURCES })).toBe(renderSvg(world, { raster: false }));
+    }
   });
   it('shares admissible low vegetation per biome without introducing trees into meadows', () => {
     const world = fakeWorld({ mapSize: 1600, buildings: 0, streets: 0, clusters: 1, landAreas: 0 });
     const allowed = [[4, 5], [10], [16, 17], [21, 22, 23], [27, 28], [30, 31, 33, 34, 35]];
-    BIOME_NAMES.filter(biome => biome !== 'underdark').forEach((biome, row) => {
+    BIOME_NAMES.filter(supportsPaintedBiome).forEach((biome, row) => {
       world.options.biome = biome;
       for (const kind of ['meadow', 'pasture'] as const) {
         const a = brushMotif(world, kind); expect(a).toEqual(brushMotif(world, kind));

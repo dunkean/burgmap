@@ -1,14 +1,16 @@
 import type { LandKind } from './types';
 
-export const BIOME_NAMES = ['temperate', 'forest', 'desert', 'steppe', 'tropical', 'tundra', 'underdark'] as const;
+export const BIOME_NAMES = ['temperate', 'forest', 'desert', 'steppe', 'tropical', 'tundra', 'underdark', 'underdark-caverns'] as const;
 export type BiomeName = typeof BIOME_NAMES[number];
 export const BIOME_LABELS: [BiomeName, string][] = [
   ['temperate', 'Temperate countryside'], ['forest', 'Woodland'], ['desert', 'Desert and oases'],
   ['steppe', 'Steppe'], ['tropical', 'Tropical forest'], ['tundra', 'Tundra'],
-  ['underdark', 'Underdark'],
+  ['underdark', 'Underdark'], ['underdark-caverns', 'Underdark with caverns'],
 ];
 export const biomeName = (value?: string): BiomeName =>
   BIOME_NAMES.includes(value as BiomeName) ? value as BiomeName : 'temperate';
+
+export const isUnderdarkBiome = (name?: string): boolean => name === 'underdark' || name === 'underdark-caverns';
 
 export interface BiomeGround {
   water: number; hab: number; slope: number; soil: number; settlement: number; arableRadius: number;
@@ -17,7 +19,7 @@ export interface BiomeGround {
 /** Vegetation and cultivation follow climate, access and water; urban geometry is independent of the biome. */
 export function biomeLandKind(kind: LandKind, biome: BiomeName, g: BiomeGround): LandKind {
   if (biome === 'temperate') return kind;
-  if (biome === 'underdark') {
+  if (isUnderdarkBiome(biome)) {
     // Cultivation is supplied by nearby inhabitants, not sunlight. Wild wet fungi remain uncultivated marsh.
     if (kind === 'marsh') return 'marsh';
     const cultivated = kind === 'field' || kind === 'garden' || kind === 'orchard';

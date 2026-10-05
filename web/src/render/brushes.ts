@@ -1,5 +1,5 @@
 /** Display-only, shared placement for the optional ImageGen botanical stamps. */
-import { biomeName } from '../gen/biomes';
+import { isUnderdarkBiome, biomeName } from '../gen/biomes';
 import type { World, LandKind } from '../gen/types';
 import type { Palette } from './styles';
 
@@ -12,7 +12,7 @@ export const BRUSH_CELL = 209;
 export const BRUSH_ATLAS = 1254;
 const BIOMES = ['temperate', 'forest', 'desert', 'steppe', 'tropical', 'tundra'] as const;
 /** The selected atlases describe surface biomes. Underground cover keeps its vector symbols. */
-export const supportsPaintedBiome = (biome?: string): boolean => biomeName(biome) !== 'underdark';
+export const supportsPaintedBiome = (biome?: string): boolean => !isUnderdarkBiome(biome);
 const SPECIES: number[][] = [[0, 0, 1, 2, 3, 3, 4, 5], [0, 0, 1, 1, 2, 3, 3, 4, 5], [0, 1, 2, 2, 3, 4, 4, 5], [0, 1, 2, 3, 3, 4, 5], [0, 1, 1, 2, 3, 4, 5, 5], [0, 1, 2, 3, 4, 5]];
 const LOW_FLORA = [
   { cells: [4, 5], chance: 0.18 }, { cells: [10], chance: 0.5 },

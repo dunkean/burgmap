@@ -4,10 +4,13 @@ import type { Palette } from './styles';
 import { panelSvg, type Prim } from './legend';
 
 export function underdarkMark(kind: LandKind, x: number, y: number, r: number, pal: Palette, strokeScale = 1): Prim[] {
-  if (kind === 'commons') return [
-    { t: 'poly', pts: [[x - r, y - r * .2], [x - r * .55, y - r * .85], [x + r * .7, y - r * .65], [x + r, y + r * .5], [x - r * .25, y + r * .85]], stroke: pal.grass, sw: .5 * strokeScale },
-    { t: 'line', pts: [[x - r * .55, y - r * .85], [x, y], [x + r, y + r * .5]], stroke: pal.grass, sw: .4 * strokeScale },
-  ];
+  if (kind === 'commons') return [{
+    // A small closed pebble seen from above; no forked interior resembling a broken plant.
+    t: 'poly', pts: [[x - r, y - r * .1], [x - r * .8, y - r * .6],
+      [x - r * .15, y - r * .8], [x + r * .6, y - r * .55], [x + r, y],
+      [x + r * .65, y + r * .6], [x - r * .1, y + r * .8], [x - r * .8, y + r * .5]],
+    stroke: pal.grass, sw: .5 * strokeScale,
+  }];
   if (kind === 'meadow' || kind === 'pasture') return [[-.4, -.3, .48], [.38, -.1, .4], [0, .4, .42]].map(([dx, dy, rr]) =>
     ({ t: 'circle', x: x + dx * r, y: y + dy * r, r: rr * r, stroke: pal.grass, sw: .5 * strokeScale }));
   // Scalloped caps and spores, without a side-view trunk or an outdoor canopy.
@@ -33,10 +36,18 @@ export function appendUnderdarkMark(path: Path2D, kind: LandKind, x: number, y: 
 export const underdarkMarkSvg = (kind: LandKind, x: number, y: number, r: number, pal: Palette, strokeScale = 1): string =>
   panelSvg({ w: 0, h: 0, prims: underdarkMark(kind, x, y, r, pal, strokeScale) }, 0, 0, 1, pal.fontFamily, `underdark-${kind}`);
 
-export function underdarkPatterns(pal: Palette, s: number): string {
+/** Sizes are metres, independent of the extent of the map or its export width. */
+export function underdarkTextureSpec(kind: LandKind): { spacing: number; radius: number } {
+  const specs: Partial<Record<LandKind, [number, number]>> = {
+    commons: [28, 2.5], garden: [8, 1.7], field: [14, 2.7], forest: [9, 3.1],
+    orchard: [11, 2.3], meadow: [16, 3], pasture: [24, 2.4], marsh: [15, 3.2],
+  };
+  const [spacing, radius] = specs[kind] ?? [16, 2.7];
+  return { spacing, radius };
+}
+export function underdarkPatterns(pal: Palette, _s = 1): string {
   return (['commons', 'meadow', 'pasture', 'forest', 'orchard', 'marsh', 'garden', 'field'] as LandKind[]).map(kind => {
-    const size = kind === 'commons' ? 18 : kind === 'garden' ? 8 : kind === 'orchard' ? 11 : kind === 'marsh' ? 15 : 16;
-    const r = kind === 'commons' ? 2.5 : kind === 'garden' ? 1.7 : 2.7;
-    return `<pattern id="p-${kind}" patternUnits="userSpaceOnUse" width="${size * s}" height="${size * s}">${underdarkMarkSvg(kind, size * s / 2, size * s / 2, r * s, pal, s)}</pattern>`;
+    const { spacing: size, radius: r } = underdarkTextureSpec(kind);
+    return `<pattern id="p-${kind}" patternUnits="userSpaceOnUse" width="${size}" height="${size}">${underdarkMarkSvg(kind, size / 2, size / 2, r, pal)}</pattern>`;
   }).join('');
 }

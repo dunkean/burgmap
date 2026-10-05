@@ -1,3 +1,4 @@
+import { refreshCavernMask } from './terrain/caverns';
 import { Rng } from './core/rng';
 import { Options, mapSizeOf, effectiveSize, MAP_SIZE_MAX, optionsForMainSettlement, generationUid } from './options';
 import type { World, Settlement } from './types';
@@ -49,6 +50,15 @@ export interface GenerateOptions {
 
 /** `onStage` (optional) is told which stage is about to run, for progress display. */
 export function generate(options: Options, onStage?: (stage: string, partial?: World) => void, gopts: GenerateOptions = {}): World {
+  if (options.biome === 'underdark-caverns') {
+    const world = generate({ ...options, biome: 'underdark' }, (stage, partial) => onStage?.(stage, partial ? { ...partial, options: { ...partial.options, biome: 'underdark-caverns' } } : undefined), gopts);
+    world.options = { ...world.options, biome: 'underdark-caverns' };
+    if (world.uid) world.uid = generationUid(options);
+    onStage?.('cavern walls', world);
+    refreshCavernMask(world);
+    world.stats['ms.total'] = Number(world.stats['ms.total'] ?? 0) + Number(world.stats['ms.caverns'] ?? 0);
+    return world;
+  }
   const requestedOptions = options;
   const mainInput = optionsForMainSettlement(options);
   const t0 = performance.now();
@@ -230,5 +240,6 @@ export function generate(options: Options, onStage?: (stage: string, partial?: W
 export function generateSettlementDetail(world: World, index: number): ReturnType<typeof generateSettlementUrban> {
   const s = world.settlements?.[index];
   if (!s) return null;
-  return generateSettlementUrban(world, s);
+  const base = world.options.biome === 'underdark-caverns' ? { ...world, options: { ...world.options, biome: 'underdark' as const } } : world;
+  return generateSettlementUrban(base, s);
 }

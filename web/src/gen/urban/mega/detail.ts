@@ -119,6 +119,7 @@ const LOT_SITE: Record<string, UrbanSite['role']> = { 'm4-palace': 'power', 'm4-
  * layer). Null when the World has no macro plan or no such quarter.
  */
 export function megaQuarterDetail(world: World, key: number): UrbanLayer | null {
+  if (world.options.biome === 'underdark-caverns') world = { ...world, options: { ...world.options, biome: 'underdark' } };
   const si = Math.floor(key / MEGA_KEY), id = key - si * MEGA_KEY;
   const host = si === 0 ? world.urban : world.settlements?.[si]?.urban;
   const M = host?.macro;

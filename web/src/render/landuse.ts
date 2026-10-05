@@ -1,3 +1,4 @@
+import { isUnderdarkBiome } from '../gen/biomes';
 import type { SvgBrushes } from './brushSvg';
 import { brushTextureOn, isBrushKind } from './brushes';
 import { bboxOf } from '../gen/geo/poly';
@@ -25,7 +26,7 @@ const ringsD = (a: LandArea): string => {
 
 /** SVG <pattern> definitions for land-use textures. `s` scales symbols with map size. */
 function patterns(world: World, pal: Palette, s: number, scale: number): string {
-  if (world.options.biome === 'underdark') return `<defs>${underdarkPatterns(pal, s)}</defs>`;
+  if (isUnderdarkBiome(world.options.biome)) return `<defs>${underdarkPatterns(pal, s)}</defs>`;
   const out: string[] = [];
   const pat = (id: string, w: number, h: number, body: string, extra = '') =>
     out.push(`<pattern id="${id}" patternUnits="userSpaceOnUse" width="${f1(w)}" height="${f1(h)}"${extra}>${body}</pattern>`);
@@ -106,7 +107,7 @@ export function landuseLayer(world: World, pal: Palette, u: number, scale = 1600
     const list = lu.areas.filter((a) => a.kind === kind);
     if (!list.length) continue;
     out += `<g class="lu-${kind}">`;
-    if (kind === 'field' && world.options.biome !== 'underdark') {
+    if (kind === 'field' && !isUnderdarkBiome(world.options.biome)) {
       out += `<g fill="${pal.land.field}" fill-opacity="${pal.landOpacity}" fill-rule="evenodd"${mul(pal)}>${list.map((a) => `<path d="${ringsD(a)}"/>`).join('')}</g>`;
       // strips: each holder's strip has its own tone; one furrow-textured path per furlong (its own direction)
       const tone: string[] = ['', '', '', ''];
@@ -237,7 +238,7 @@ export function roadsLayer(world: World, pal: Palette, u: number, brushes?: SvgB
   // farm drives + farmsteads first (below roads)
   const farms = world.landuse?.farmsteads ?? [];
   if (farms.length) {
-    if (world.options.biome === 'underdark' || farms.some(f => f.cultivation === 'fungal')) out += `<defs><pattern id="p-fungal-farm" patternUnits="userSpaceOnUse" width="8" height="8">${underdarkMarkSvg('garden', 4, 4, 1.7, pal)}</pattern></defs>`;
+    if (isUnderdarkBiome(world.options.biome) || farms.some(f => f.cultivation === 'fungal')) out += `<defs><pattern id="p-fungal-farm" patternUnits="userSpaceOnUse" width="8" height="8">${underdarkMarkSvg('garden', 4, 4, 1.7, pal)}</pattern></defs>`;
     out += `<g class="farmsteads">`;
     for (const f of farms) {
       const dl = f.drive.length > 1 ? Math.hypot(f.drive[f.drive.length - 1].x - f.drive[0].x, f.drive[f.drive.length - 1].y - f.drive[0].y) : 0;
@@ -247,7 +248,7 @@ export function roadsLayer(world: World, pal: Palette, u: number, brushes?: SvgB
         out += `<g fill="${pal.farmRoof}" stroke="${pal.farmInk}" stroke-width="${f1(0.7 * s)}">${f.buildings.map((b) => `<path d="${pathD(b, true)}"/>`).join('')}</g>`;
         continue;
       }
-      out += farmSvg(f, pal, brushes, f.cultivation === 'fungal' || world.options.biome === 'underdark');
+      out += farmSvg(f, pal, brushes, f.cultivation === 'fungal' || isUnderdarkBiome(world.options.biome));
     }
     out += '</g>';
   }

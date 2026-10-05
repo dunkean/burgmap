@@ -1,3 +1,5 @@
+import { cavernWallFill, cavernRockPixels, CAVERN_RIM } from './caverns';
+import { isUnderdarkBiome } from '../gen/biomes';
 /**
  * Interactive Canvas 2D renderer with level of detail (SVG stays for export).
  *
@@ -32,7 +34,7 @@ import { Label, placeLabels } from './labels';
 import { buildMapLabels, placeMapLabels, MapLabel, PlacedMapLabel, estimateWidth } from './mapLabels';
 import { fontString, FONT_STACKS, KindStyle } from './labelStyles';
 import { cartoucheModel, legendModel, compactMapPanels, compactScaleModel, drawPanelCanvas, Panel, type MapInformation } from './legend';
-import { appendUnderdarkMark, underdarkMark } from './underdark';
+import { appendUnderdarkMark, underdarkMark, underdarkTextureSpec } from './underdark';
 import { frameModel, panelMargin } from './frame';
 import { litDots } from './extras';
 
@@ -207,6 +209,7 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
   let legendPanel: Panel | null = null;
   let infoPanel: Panel | null = null;
   let terrainImg: CanvasImageSource | null | undefined;
+  let cavernRockImg: CanvasImageSource | null | undefined;
   let densityImg: CanvasImageSource | null | undefined;
   const patterns = new Map<string, CanvasPattern | null>();
   let litCache: Float32Array | undefined;
@@ -281,8 +284,9 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
     const nextWorld = nextScene.renderedWorld ? { ...nextScene.renderedWorld, options: nextSource.options } : renderView(nextSource);
     const nextLabels = buildMapLabels(nextWorld, pal.name, pal);
     const terrainChanged = nextSource.terrain !== sourceWorld.terrain;
+    if (nextSource.seed !== sourceWorld.seed) cavernRockImg = undefined;
     if (terrainChanged || nextScene.poly.get('sea') !== scene.poly.get('sea') || nextScene.poly.get('lakes') !== scene.poly.get('lakes')) landPath = undefined;
-    if (terrainChanged) terrainImg = undefined;
+    if (terrainChanged) { terrainImg = undefined; cache.clear(); rasterCache.clear(); }
     if (nextScene.density?.cov !== scene.density?.cov) densityImg = undefined;
     if (nextScene.furrows !== scene.furrows) furrowCache.clear();
     if (nextScene !== scene && !nextScene.dirty) cache.clear();
@@ -320,6 +324,13 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
     if (!c || !cx || typeof ImageData === 'undefined') return null;
     cx.putImageData(new ImageData(new Uint8ClampedArray(rgba.buffer as ArrayBuffer), w, h), 0, 0);
     return c as unknown as CanvasImageSource;
+  }
+  function getCavernRock(): CanvasImageSource | null {
+    if (cavernRockImg !== undefined) return cavernRockImg;
+    cavernRockImg = null;
+    if (typeof ImageData === 'undefined') return null;
+    const r = cavernRockPixels(world.seed, S, pal);
+    return (cavernRockImg = toBitmap(r.rgba, r.width, r.width));
   }
   function getTerrain(): CanvasImageSource | null {
     if (terrainImg !== undefined) return terrainImg;
@@ -449,6 +460,18 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
     }
   }
 
+  function exactCavernPath(which: 'floor' | 'solid'): Path2D | null {
+    if (!world.terrain.caverns) return null;
+    return cached(`cavern-${which}-exact`, () => {
+      const p = new P();
+      for (const f of world.terrain.caverns![which]) {
+        addRing(p, orientPos(f.outer));
+        for (const h of f.holes) addRing(p, orientPos(h).slice().reverse());
+      }
+      return p;
+    });
+  }
+
   function drawVector(view: View, target: CanvasLike = canvas, mode: 'all' | 'map' | 'overlays' = 'all', fullRect?: Rect4): FrameStats {
     const t0 = now();
     const ctx = target.getContext('2d');
@@ -555,6 +578,12 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
       ctx.drawImage(tex, 0, 0, S, S);
     }
 
+    const cavernFloor = world.terrain.caverns && polyL('cavern-floor');
+    if (cavernFloor) {
+      const floorClip = exactCavernPath('floor');
+      ctx.save(); if (floorClip) ctx.clip(floorClip, 'nonzero');
+    }
+
     const brushFill = (name: string, kind: BrushKind, scale: number): void => {
       const l = polyL(name); if (!l?.polys.length) return;
       const pattern = brushes?.pattern(ctx, kind, scale, dpr);
@@ -596,7 +625,7 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
       fillPolys(name, pal.land[kind], kind === 'forest' ? 0.7 : luAlpha);
       multiply(false);
       // Actual parallel plough lines, anchored like the SVG pattern. Suppress subpixel moire at far zoom.
-      if (kind === 'field' && world.options.biome !== 'underdark' && lod.strips && pal.furrowAlpha > 0 && scene.furrows && furrowSpacing(S) * sc >= 1.5) {
+      if (kind === 'field' && !isUnderdarkBiome(world.options.biome) && lod.strips && pal.furrowAlpha > 0 && scene.furrows && furrowSpacing(S) * sc >= 1.5) {
         const fade = Math.min(1, (furrowSpacing(S) * sc - 1.5) / 1.5);
         const visible: number[] = [], boxes = scene.furrows.index.boxes;
         // TileIndex.query returns sorted unique ids. Cull by precomputed projected bbox before allocating paths.
@@ -616,17 +645,17 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
           fs.furrowsDrawn = (fs.furrowsDrawn ?? 0) + 1;
         }
       }
-      if (kind === 'field' && lod.strips && world.options.biome !== 'underdark') {
+      if (kind === 'field' && lod.strips && !isUnderdarkBiome(world.options.biome)) {
         // SVG tints the ploughed strips after their furrow texture; retain that compositing order.
         multiply(true);
         const mk = [0.5, 0.75, 0.3, 0.9];
         for (let k = 0; k < 4; k++) if (pal.stripAlpha[k & 1] > 0) fillPolys('stripT' + k, k & 1 ? pal.stripB : pal.stripA, Math.min(1, pal.stripAlpha[k & 1] * mk[k]));
         multiply(false);
       }
-      if (kind === 'field' && world.options.biome !== 'underdark' && lod.strips && lod.band >= 2) {
+      if (kind === 'field' && !isUnderdarkBiome(world.options.biome) && lod.strips && lod.band >= 2) {
         for (let k = 0; k < 4; k++) strokePolys('stripT' + k, pal.furrow, mapStrokeWidth(MAP_STROKES.strip, sc), pal.furrowAlpha * 0.85);
       }
-      if (kind === 'field' && world.options.biome !== 'underdark' && lod.strips) strokePolys('furlong-edges', pal.furrow, mapStrokeWidth(MAP_STROKES.furlong, sc), 0.55);
+      if (kind === 'field' && !isUnderdarkBiome(world.options.biome) && lod.strips) strokePolys('furlong-edges', pal.furrow, mapStrokeWidth(MAP_STROKES.furlong, sc), 0.55);
       if (kind === 'forest' && lod.strips) strokePolys(name, pal.treeInk, lw(0.7, 0.8), pal.tex.forest ? 0.5 : 0.35);
       if (brushes && lod.textures && (kind === 'field' || (kind === 'garden' && brushTextureOn(kind, pal, world.options.biome)))) brushFill(name, kind, sc);
       if ((kind === 'orchard' || kind === 'garden') && lod.strips) strokePolys(name, pal.hedge, lw(0.8, 0.8), 0.7);
@@ -760,7 +789,7 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
       const near = lod.band >= 2;
       if (open) {
         const tuft = near ? getPattern(ctx, 'tuft', 11, 9, 0, (c, k) => {
-          if (world.options.biome === 'underdark') {
+          if (isUnderdarkBiome(world.options.biome)) {
             drawPanelCanvas(c, { w: 0, h: 0, prims: [...underdarkMark('meadow', 2.5 * k, 3.5 * k, 1.4 * k, pal, k), ...underdarkMark('meadow', 8 * k, 7 * k, 1.4 * k, pal, k)] }, 0, 0, family);
             return;
           }
@@ -768,7 +797,7 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
           for (const [x, y] of [[2.5, 4.5], [8, 8.4]]) { c.moveTo(x * k, y * k); c.lineTo((x - 0.8) * k, (y - 1.9) * k); c.moveTo(x * k, y * k); c.lineTo((x + 0.8) * k, (y - 1.9) * k); }
           c.stroke();
         }) : null;
-        const fungal = near && world.options.biome === 'underdark' ? getPattern(ctx, 'fungal-open', 6, 6, 0, (c, k) => drawPanelCanvas(c, { w: 0, h: 0, prims: [...underdarkMark('garden', 2 * k, 2 * k, 1.1 * k, pal, k), ...underdarkMark('garden', 4.5 * k, 4.5 * k, 1.1 * k, pal, k)] }, 0, 0, family)) : null;
+        const fungal = near && isUnderdarkBiome(world.options.biome) ? getPattern(ctx, 'fungal-open', 6, 6, 0, (c, k) => drawPanelCanvas(c, { w: 0, h: 0, prims: [...underdarkMark('garden', 2 * k, 2 * k, 1.1 * k, pal, k), ...underdarkMark('garden', 4.5 * k, 4.5 * k, 1.1 * k, pal, k)] }, 0, 0, family)) : null;
         const tint = (name: string, color: string, alpha: number, pat: CanvasPattern | null): void => {
           const l = polyL(name);
           if (!l) return;
@@ -784,7 +813,7 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
         tint('u-open-green', pal.land.meadow, pal.landOpacity, tuft);
         tint('u-open-garden', pal.land.garden, pal.landOpacity, fungal);
         tint('u-open-field', pal.land.field, pal.landOpacity, fungal);
-        if (world.options.biome !== 'underdark' && polyL('u-open-field')) strokePolys('u-open-field', pal.furrow, lw(0.4, 0.4), 0.4);
+        if (!isUnderdarkBiome(world.options.biome) && polyL('u-open-field')) strokePolys('u-open-field', pal.furrow, lw(0.4, 0.4), 0.4);
         tint('u-open-commons', pal.land.pasture, pal.landOpacity * 0.8, null);
         // churned mud (a war camp), puddles
         if (polyL('u-mud')) {
@@ -817,8 +846,8 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
         }
       };
       const pave = near ? getPattern(ctx, 'pave', 3, 3, 0, (c, k) => { c.globalAlpha = 0.55; c.fillStyle = U.placeInk; c.beginPath(); c.arc(1.5 * k, 1.5 * k, 0.28 * k, 0, TAU); c.fill(); }) : null;
-      const gardenPat = near && brushes ? brushes.pattern(ctx, 'garden', sc, dpr) : near ? getPattern(ctx, 'garden', 6, 6, world.options.biome === 'underdark' ? 0 : 28, (c, k) => {
-        if (world.options.biome === 'underdark') {
+      const gardenPat = near && brushes ? brushes.pattern(ctx, 'garden', sc, dpr) : near ? getPattern(ctx, 'garden', 6, 6, isUnderdarkBiome(world.options.biome) ? 0 : 28, (c, k) => {
+        if (isUnderdarkBiome(world.options.biome)) {
           drawPanelCanvas(c, { w: 0, h: 0, prims: [...underdarkMark('garden', 2 * k, 2 * k, 1.1 * k, pal, k), ...underdarkMark('garden', 4.5 * k, 4.5 * k, 1.1 * k, pal, k)] }, 0, 0, family);
           return;
         }
@@ -841,7 +870,7 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
       {
         const kind = countryKind(world.options.biome);
         const ruralPattern = near && luOn && pal.tex[kind] ? getPattern(ctx, 'country-ground', 26, 20, 0, (c, k) => {
-          if (world.options.biome === 'underdark') {
+          if (isUnderdarkBiome(world.options.biome)) {
             drawPanelCanvas(c, { w: 0, h: 0, prims: [...underdarkMark('commons', 5 * k, 8 * k, 2.5 * k, pal, k), ...underdarkMark('commons', 18 * k, 17 * k, 2 * k, pal, k)] }, 0, 0, family);
             return;
           }
@@ -1128,6 +1157,20 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
     if (world.bridges?.length) drawBridges(ctx, world, pal, rect, sc);
     // site marker (placeholder until an urban layer exists)
     if (!world.urban && world.site) drawSiteMarker(ctx, world, pal, u, sc);
+    if (cavernFloor) {
+      ctx.restore();
+      ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
+      const solid = exactCavernPath('solid'), floor = exactCavernPath('floor');
+      ctx.fillStyle = cavernWallFill(pal); if (solid) ctx.fill(solid, 'nonzero');
+      if (solid) {
+        ctx.save(); ctx.clip(solid, 'nonzero');
+        const rock = getCavernRock(); if (rock) ctx.drawImage(rock, 0, 0, S, S);
+        if (floor) for (const rim of CAVERN_RIM) {
+          ctx.globalAlpha = rim.alpha; ctx.strokeStyle = rim.color; ctx.lineWidth = rim.width; ctx.stroke(floor);
+        }
+        ctx.restore(); ctx.globalAlpha = 1;
+      }
+    }
 
     ctx.restore();
     }
@@ -1241,11 +1284,12 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
         return tl.index.tilesInRect(rect).length;
       }
     }
-    const underground = world.options.biome === 'underdark';
+    const underground = isUnderdarkBiome(world.options.biome);
     const base = TEX[tl.kind];
     if (!base) return 0;
     const crown = !underground && pal.treeShape === 'crown' && (tl.kind === 'forest' || tl.kind === 'orchard');
-    const spec: TexSpec = underground ? { ...base, r: tl.kind === 'commons' ? 2.5 : base.r, fill: ['forest', 'orchard', 'marsh', 'garden', 'field'].includes(tl.kind) ? 'treeFill' : undefined, stroke: ['forest', 'orchard', 'marsh', 'garden', 'field'].includes(tl.kind) ? 'treeInk' : 'grass' } : pal.treeShape === 'dot' && (tl.kind === 'forest' || tl.kind === 'orchard') ? { ...base, r: base.r * 0.5 } : base;
+    const metric = underdarkTextureSpec(tl.kind);
+    const spec: TexSpec = underground ? { ...base, sp: metric.spacing, r: metric.radius, fill: ['forest', 'orchard', 'marsh', 'garden', 'field'].includes(tl.kind) ? 'treeFill' : undefined, stroke: ['forest', 'orchard', 'marsh', 'garden', 'field'].includes(tl.kind) ? 'treeInk' : 'grass' } : pal.treeShape === 'dot' && (tl.kind === 'forest' || tl.kind === 'orchard') ? { ...base, r: base.r * 0.5 } : base;
     const tiles = tl.index.tilesInRect(rect);
     if (tl.index.tilesInRect(budgetRect).length > 500) return 0;
     if (underground) {
@@ -1329,6 +1373,15 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
     water('sea', pal.seaFill, 'evenodd'); water('lakes', pal.lakeFill); water('rivers', pal.riverFill);
     const d = getDensity();
     if (d) ctx.drawImage(d, 0, 0, S, S);
+    if (world.terrain.caverns) {
+      const solid = exactCavernPath('solid');
+      ctx.fillStyle = cavernWallFill(pal); if (solid) ctx.fill(solid, 'nonzero');
+      if (solid) {
+        ctx.save(); ctx.clip(solid, 'nonzero');
+        const rock = getCavernRock(); if (rock) ctx.drawImage(rock, 0, 0, S, S);
+        ctx.restore();
+      }
+    }
     if (withRect) {
       const r = viewRect(view, viewW, viewH, 0);
       ctx.strokeStyle = pal.marker; ctx.lineWidth = 1.5 / k;
@@ -1346,7 +1399,7 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
     drawMinimap,
     lastStats: () => stats,
     getMapInfo: () => ({ cartouche: infoPanel ??= cartoucheModel(world, pal, 1, false), legend: legendPanel ??= legendModel(world, pal), fontFamily: family }),
-    dispose() { brushes?.dispose(); patterns.clear(); cache.clear(); furrowCache.clear(); rasterCache.clear(); terrainImg = densityImg = undefined; },
+    dispose() { brushes?.dispose(); patterns.clear(); cache.clear(); furrowCache.clear(); rasterCache.clear(); terrainImg = densityImg = cavernRockImg = undefined; },
   };
 }
 

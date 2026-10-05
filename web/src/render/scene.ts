@@ -1,3 +1,4 @@
+import { isUnderdarkBiome } from '../gen/biomes';
 /**
  * Renderer-independent scene: the World flattened into spatially indexed layers.
  * Pure (no DOM, no Path2D) so it can be built and tested in Node.
@@ -202,6 +203,10 @@ export function buildScene(world0: World, tileSize = TILE_SIZE, build: SceneBuil
   const furrowAreas: FurrowArea[] = [];
   if (build.scope !== 'urban') {
   const t = world.terrain;
+  if (t.caverns) {
+    addPoly('cavern-floor', t.caverns.floor.map(p => p.outer), t.caverns.floor.map(p => p.holes));
+    addPoly('cavern-solid', t.caverns.solid.map(p => p.outer), t.caverns.solid.map(p => p.holes));
+  }
   const swi = seaWithIslands(t.coastline, t.islands);
   addPoly('sea', swi.sea, swi.holes.map((h) => (h.length ? h : undefined)));
   addPoly('lakes', t.lakes);
@@ -251,7 +256,7 @@ export function buildScene(world0: World, tileSize = TILE_SIZE, build: SceneBuil
       const l = byKind.get(kind);
       if (!l) continue;
       addPoly('lu-' + kind, l.map((x) => x.poly), l.map((x) => x.holes));
-      if (TEXTURE_KINDS.includes(kind) || (world.options.biome === 'underdark' && (kind === 'garden' || kind === 'field'))) {
+      if (TEXTURE_KINDS.includes(kind) || (isUnderdarkBiome(world.options.biome) && (kind === 'garden' || kind === 'field'))) {
         const areas: TextureArea[] = l.map((x) => ({ kind, poly: x.poly, holes: x.holes }));
         textures.push({ kind, areas, index: new TileIndex(S, tileSize, boxesOf(areas.map((a) => a.poly)), 'overlap') });
       }
@@ -263,7 +268,7 @@ export function buildScene(world0: World, tileSize = TILE_SIZE, build: SceneBuil
     addLines('hedges', 'field', 'hedge', 1, hedges.lines);
     // farmsteads: lot pieces, hedged lot, yard, pens and ponds, walls, trees, buildings and their roof ridges
     const fms = lu.farmsteads;
-    const fungalFarm = (f: typeof fms[number]): boolean => f.cultivation === 'fungal' || world.options.biome === 'underdark';
+    const fungalFarm = (f: typeof fms[number]): boolean => f.cultivation === 'fungal' || isUnderdarkBiome(world.options.biome);
     addPoly('farm-gardens', farmPlots(fms.filter(f => !fungalFarm(f)), 'garden'));
     addPoly('farm-fungal-gardens', farmPlots(fms.filter(fungalFarm), 'garden'));
     addPoly('farm-orchards', farmPlots(fms, 'orchard'));

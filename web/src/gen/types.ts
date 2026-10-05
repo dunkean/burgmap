@@ -23,7 +23,20 @@ export interface River {
   lakeId?: number; endLake?: number;
 }
 
+export interface CavernLayer {
+  /** Display-only cavern envelope around the unchanged normal Underdark layout. */
+  floor: PolyH[];
+  /** Map rectangle minus floor: impermeable rock, not water. */
+  solid: PolyH[];
+  mask: Uint8Array;
+  /** Approximate distance to the displayed solid rock in meters. */
+  clearance: Float32Array;
+  /** Kept empty: rooms follow real settlement footprints rather than a radial room template. */
+  chambers: { center: Vec2; radius: number }[];
+}
+
 export interface TerrainLayer {
+  caverns?: CavernLayer;
   height: Grid;
   slope: Grid;
   /** 0 land, 1 sea, 2 lake, 3 river */
