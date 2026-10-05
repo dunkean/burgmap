@@ -9,6 +9,8 @@
  * - Palettes come from styles.ts (read-only).
  * Everything DOM-ish is injectable (`CanvasRendererDeps`) so a mock 2D context can drive it in Node.
  */
+import { CanvasBrushes } from './brushCanvas';
+import { brushTextureOn, isBrushKind, type BrushImages, type BrushKind } from './brushes';
 import { bridgeShapes, isKinded, type BridgeShapes } from './townbridges';
 import type { World, LandKind, Vec2 } from '../gen/types';
 import { Palette, MapStyle, ruralInk } from './styles';
@@ -50,6 +52,8 @@ export interface CanvasRendererDeps {
   /** Disable the raster tile path for diagnostics or constrained hosts. */
   raster?: boolean;
   rasterBytes?: number;
+  /** Decoded display-only atlases; undefined is the unchanged classic renderer. */
+  brushes?: BrushImages;
 }
 
 export interface FrameStats {
@@ -58,6 +62,7 @@ export interface FrameStats {
   buildingsCandidate: number; buildingsDrawn: boolean; textureTiles: number;
   /** Dedicated furrow records (three paths each); separate from the shared tile path cache. */
   furrowCache?: number; furrowsDrawn?: number;
+  brushBytes?: number;
   rasterHits?: number; rasterBuilt?: number; rasterBytes?: number;
 }
 
@@ -179,6 +184,10 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
   const now = deps.now ?? (() => (typeof performance !== 'undefined' ? performance.now() : Date.now()));
   const P: new () => Path2D = deps.Path2D ?? (globalThis as unknown as { Path2D: new () => Path2D }).Path2D;
   const makeCanvas = deps.createCanvas ?? defaultCreateCanvas;
+  let brushes: CanvasBrushes | undefined;
+  if (deps.brushes) { try { brushes = new CanvasBrushes(world, pal, deps.brushes, makeCanvas); } catch { /* Keep classic when allocations/tinting are unavailable. */ } }
+  const brushIds = new WeakMap<TextureLayer, number>();
+  let brushId = 0;
   const u = S / 1600; // same unit as svg.ts, used for a few decorative widths
 
   const cache: PathMap = new Map();
@@ -260,6 +269,7 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
   }
 
   function update(nextSource: World, nextScene: Scene, nextStyle: MapStyle | Palette = style): boolean {
+    if (brushes && nextSource.seed !== sourceWorld.seed) return false;
     if (nextSource.mapSize !== S || biomePalette(nextStyle, nextSource.options.biome) !== pal) return false;
     // Prepare potentially fallible metadata before committing the replacement.
     const nextWorld = nextScene.renderedWorld ? { ...nextScene.renderedWorld, options: nextSource.options } : renderView(nextSource);
@@ -539,6 +549,21 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
       ctx.drawImage(tex, 0, 0, S, S);
     }
 
+    const brushFill = (name: string, kind: BrushKind, scale: number): void => {
+      const l = polyL(name); if (!l?.polys.length) return;
+      const pattern = brushes?.pattern(ctx, kind, scale, dpr);
+      if (!pattern) return;
+      ctx.fillStyle = pattern; for (const p of polyPaths(l)) ctx.fill(p, 'evenodd');
+    };
+    const brushTrees = (name: string, orchard = false): void => {
+      const l = polyL(name); if (!l || !brushes) return;
+      for (const i of l.index.query(rect)) {
+        const p = l.polys[i]; if (!p.length) continue;
+        const x0 = Math.min(...p.map(v => v.x)), x1 = Math.max(...p.map(v => v.x));
+        const y0 = Math.min(...p.map(v => v.y)), y1 = Math.max(...p.map(v => v.y));
+        brushes.tree(ctx, (x0 + x1) / 2, (y0 + y1) / 2, Math.min(x1 - x0, y1 - y0) / 2, orchard);
+      }
+    };
     // 2. land use (tints multiply over the hillshade so relief reads through them); contours under it
     const luOn = world.options.landuse;
     const luAlpha = pal.landOpacity;
@@ -597,6 +622,7 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
       }
       if (kind === 'field' && lod.strips) strokePolys('furlong-edges', pal.furrow, mapStrokeWidth(MAP_STROKES.furlong, sc), 0.55);
       if (kind === 'forest' && lod.strips) strokePolys(name, pal.treeInk, lw(0.7, 0.8), pal.tex.forest ? 0.5 : 0.35);
+      if (brushes && lod.textures && (kind === 'field' || (kind === 'garden' && brushTextureOn(kind, pal, world.options.biome)))) brushFill(name, kind, sc);
       if ((kind === 'orchard' || kind === 'garden') && lod.strips) strokePolys(name, pal.hedge, lw(0.8, 0.8), 0.7);
     }
     const fu = Math.max(1, u);
@@ -613,14 +639,16 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
         const hedge = fieldHedgeStyle(pal, u);
         strokeLines(linesOf((l) => l.name === 'hedges'), hedge.color, () => lw(hedge.width, 0.35), hedge.alpha * Math.min(1, sc / 0.3));
         if (lod.band >= 2 && polyL('hedge-trees')) {
+          if (brushes) brushTrees('hedge-trees'); else {
           fillPolys('hedge-trees', pal.treeFill, 0.75);
           strokePolys('hedge-trees', pal.treeInk, lw(0.3 * fu, 0.35), 0.5);
+          }
         }
       }
     }
     // textures (procedural marks, visible tiles only, cached per tile)
     if (lod.textures && luOn) {
-      for (const tl of scene.textures) if (pal.tex[tl.kind]) fs.textureTiles += drawTexture(ctx, tl, rect, band, lw, budgetRect);
+      for (const tl of scene.textures) if (pal.tex[tl.kind] || (brushes && isBrushKind(tl.kind) && brushTextureOn(tl.kind, pal, world.options.biome))) fs.textureTiles += drawTexture(ctx, tl, rect, band, lw, budgetRect);
     }
 
     // 3. rivers + water
@@ -657,6 +685,7 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
       strokePolys('farm-gardens', pal.hedge, lw(0.4, 0.3), 0.8);
       fillPolys('farm-orchards', pal.land.orchard);
       fillPolys('farm-paddocks', pal.land.pasture);
+      if (brushes && lod.textures) { brushFill('farm-gardens', 'garden', sc); brushFill('farm-orchards', 'orchard', sc); }
       strokePolys('farm-platforms', pal.farmInk, lw(0.5, 0.4), 0.7, [px(3), px(2)]);
       strokePolys('farm-lots', pal.hedge, lw(0.9, 0.6), 0.85);
       fillPolys('farm-yards', pal.farmYard, 0.9);
@@ -666,8 +695,10 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
       strokePolys('farm-ponds', pal.waterEdge, lw(0.5, 0.4));
       strokeLines(linesOf((l) => l.name === 'farm-walls'), pal.farmInk, () => lw(0.9, 0.7), 1, [], 'butt');
       if (lod.band >= 2 && polyL('farm-trees')) {
+        if (brushes) brushTrees('farm-trees', true); else {
         fillPolys('farm-trees', pal.treeFill);
         strokePolys('farm-trees', pal.treeInk, lw(0.3, 0.3), 0.8);
+        }
       }
       fillPolys('farm-buildings', pal.farmRoof);
       strokePolys('farm-buildings', pal.farmInk, lw(0.5, 0.6));
@@ -768,7 +799,7 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
         }
       };
       const pave = near ? getPattern(ctx, 'pave', 3, 3, 0, (c, k) => { c.globalAlpha = 0.55; c.fillStyle = U.placeInk; c.beginPath(); c.arc(1.5 * k, 1.5 * k, 0.28 * k, 0, TAU); c.fill(); }) : null;
-      const gardenPat = near ? getPattern(ctx, 'garden', 6, 6, 28, (c, k) => {
+      const gardenPat = near && brushes ? brushes.pattern(ctx, 'garden', sc, dpr) : near ? getPattern(ctx, 'garden', 6, 6, 28, (c, k) => {
         c.globalAlpha = 0.7; c.strokeStyle = U.gardenInk; c.lineWidth = 0.35 * k;
         c.beginPath(); c.moveTo(0.6 * k, 1.5 * k); c.lineTo(3.4 * k, 1.5 * k); c.moveTo(3.2 * k, 4.5 * k); c.lineTo(5.6 * k, 4.5 * k); c.stroke();
       }) : null;
@@ -842,7 +873,7 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
               if (kind === 'forest' && lod.strips) strokePolys(name, pal.treeInk, lw(0.7, 0.8), pal.tex.forest ? 0.5 : 0.35);
             }
             if (lod.textures) for (const tl of scene.textures) {
-              if ((NATURAL_LAND_KINDS as readonly string[]).includes(tl.kind) && pal.tex[tl.kind]) fs.textureTiles += drawTexture(ctx, tl, rect, band, lw, budgetRect);
+              if ((NATURAL_LAND_KINDS as readonly string[]).includes(tl.kind) && (pal.tex[tl.kind] || (brushes && isBrushKind(tl.kind) && brushTextureOn(tl.kind, pal, world.options.biome)))) fs.textureTiles += drawTexture(ctx, tl, rect, band, lw, budgetRect);
             }
           }
           // Keep the original cased/dashed regional-road rendering within the restored ground.
@@ -1014,10 +1045,12 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
         // tree canopies (elven towns)
         const trees = polyL('u-trees');
         if (trees && lod.individual) {
+          if (brushes) brushTrees('u-trees'); else {
           ctx.globalAlpha = 0.78; ctx.fillStyle = pal.treeFill ?? '#7f9a5a';
           for (const p of polyPaths(trees)) ctx.fill(p, 'evenodd');
           ctx.globalAlpha = 1;
           strokePolys('u-trees', treeInk, lw(0.35, 0.4));
+          }
         }
       }
       // churches: distinct outlined mass with a cross
@@ -1137,6 +1170,7 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
     fs.pathsBuilt = built - built0;
     fs.pathCache = cache.size;
     fs.furrowCache = furrowCache.size; fs.furrowsDrawn ??= 0;
+    if (brushes) fs.brushBytes = brushes.cachedBytes;
     fs.ms = now() - t0;
     stats = fs;
     return fs;
@@ -1162,6 +1196,22 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
   }
 
   function drawTexture(ctx: CanvasRenderingContext2D, tl: TextureLayer, rect: Rect4, band: number, lw: (w: number, m: number) => number, budgetRect: Rect4 = rect): number {
+    if (brushes && isBrushKind(tl.kind) && tl.index.tilesInRect(budgetRect).length <= 500) {
+      const k = tl.kind, sc = ctx.getTransform().a / (deps.dpr ?? 1);
+      const pattern = brushes.pattern(ctx, k, sc, deps.dpr ?? 1);
+      if (pattern) {
+        let id = brushIds.get(tl); if (id === undefined) { id = ++brushId; brushIds.set(tl, id); }
+        ctx.fillStyle = pattern;
+        for (const i of tl.index.query(rect)) {
+          const path = cached(`brush-clip:${id}:${i}`, () => {
+            const a = tl.areas[i], p = new P(); addRing(p, orientPos(a.poly));
+            for (const h of a.holes ?? []) addRing(p, orientPos(h).slice().reverse()); return p;
+          });
+          if (path) ctx.fill(path, 'nonzero');
+        }
+        return tl.index.tilesInRect(rect).length;
+      }
+    }
     const base = TEX[tl.kind];
     if (!base) return 0;
     const crown = pal.treeShape === 'crown' && (tl.kind === 'forest' || tl.kind === 'orchard');
@@ -1253,7 +1303,7 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
     lastPlaced: () => placedLast,
     drawMinimap,
     lastStats: () => stats,
-    dispose() { cache.clear(); furrowCache.clear(); rasterCache.clear(); terrainImg = densityImg = undefined; },
+    dispose() { brushes?.dispose(); patterns.clear(); cache.clear(); furrowCache.clear(); rasterCache.clear(); terrainImg = densityImg = undefined; },
   };
 }
 

@@ -11,6 +11,7 @@ import { f1, pathD } from './util';
 import { area, orientPos } from '../gen/geo/poly';
 import { FENCE_STYLE, solidGround } from './scene';
 import { groundAppearance, earthCourt, type GroundAppearance } from '../gen/landuse/groundAppearance';
+import type { SvgBrushes } from './brushSvg';
 import { plotLines } from './plotLines';
 
 const phD = (p: PolyH): string => pathD(p.outer, true) + p.holes.map((h) => pathD(h, true)).join('');
@@ -208,7 +209,7 @@ function cultureUnderlay(ub: NonNullable<World['urban']>, pal: Palette, lw: (m: 
 }
 
 /** Plan lines (enclosure walls, ward walls, prakaras, hedges, steps) and tree canopies (drawn over the buildings). */
-function cultureOverlay(ub: NonNullable<World['urban']>, pal: Palette, lw: (m: number, px: number) => string): string {
+function cultureOverlay(ub: NonNullable<World['urban']>, pal: Palette, lw: (m: number, px: number) => string, brushes?: SvgBrushes): string {
   const U = pal.urban;
   const open = !!ub.renderHints?.openGround;
   let s = '';
@@ -273,7 +274,7 @@ function cultureOverlay(ub: NonNullable<World['urban']>, pal: Palette, lw: (m: n
   const trees = ub.trees ?? [];
   if (trees.length) {
     const fill = pal.treeFill ?? '#7f9a5a', ink = pal.treeInk ?? '#4a6a3a';
-    s += `<g class="u-canopy" fill="${fill}" fill-opacity="0.78" stroke="${ink}" stroke-width="${lw(0.35, 0.15)}">` + trees.map((t) => `<circle cx="${f1(t.x)}" cy="${f1(t.y)}" r="${f1(t.r)}"/>`).join('') + '</g>';
+    s += `<g class="u-canopy" fill="${fill}" fill-opacity="0.78" stroke="${ink}" stroke-width="${lw(0.35, 0.15)}">` + trees.map((t) => brushes ? brushes.tree(t.x, t.y, t.r) : `<circle cx="${f1(t.x)}" cy="${f1(t.y)}" r="${f1(t.r)}"/>`).join('') + '</g>';
   }
   return s;
 }
@@ -351,7 +352,7 @@ function openGroundPathsSvg(ub: NonNullable<World['urban']>, pal: Palette, sand 
   return s;
 }
 
-export function urbanLayer(world: World, pal: Palette, u: number, debug: boolean, fringe: CountryFringe = { bands: [], ground: [], streets: [] }, raster = true, landuse = world.options.landuse, naturalGround: PolyH[] = [], contours = world.options.contours, landscapeGround: PolyH[] = [], appearance?: GroundAppearance, cover: LandArea[] = []): string {
+export function urbanLayer(world: World, pal: Palette, u: number, debug: boolean, fringe: CountryFringe = { bands: [], ground: [], streets: [] }, raster = true, landuse = world.options.landuse, naturalGround: PolyH[] = [], contours = world.options.contours, landscapeGround: PolyH[] = [], appearance?: GroundAppearance, cover: LandArea[] = [], brushes?: SvgBrushes): string {
   if (debug) return urbanDebugLayer(world, u);
   const ub = world.urban;
   if (!ub) return '';
@@ -428,7 +429,7 @@ export function urbanLayer(world: World, pal: Palette, u: number, debug: boolean
     s += `<defs><clipPath id="urban-${name}"><path d="${d}" clip-rule="nonzero"/></clipPath></defs><g class="u-${name}" clip-path="url(#urban-${name})">`;
     s += raster ? '<use href="#terrain-ground" xlink:href="#terrain-ground"/>' : `<path d="${d}" fill="${pal.paper}" fill-rule="nonzero"/>`;
     if (contours) s += '<use href="#terrain-contour-ground" xlink:href="#terrain-contour-ground"/>';
-    if (landuse) s += naturalLanduseLayer(world, pal, u, restoredGround, cover);
+    if (landuse) s += naturalLanduseLayer(world, pal, u, restoredGround, cover, brushes);
     // Regional roads retain their exact style/export width where it exceeds the physical occupation guard.
     s += '<use href="#regional-road-ground" xlink:href="#regional-road-ground"/>';
     // Native paths were painted before the opaque landscape. Replay only their overwritten pixels under this
@@ -450,7 +451,7 @@ export function urbanLayer(world: World, pal: Palette, u: number, debug: boolean
     const d = courts.map((c) => pathD(c, true)).join('');
     s += `<g class="u-patios"><path d="${d}" fill="${U.place}" stroke="${U.massEdge}" stroke-width="${lw(0.45, 0.35)}"/><path d="${d}" fill="url(#p-upave)"/></g>`;
   }
-  s += cultureOverlay(ub, pal, lw);
+  s += cultureOverlay(ub, pal, lw, brushes);
   // main streets keep a legible minimum width at small scales (drawn over the street space only where wider)
   // (not the village and hamlet streets: widened to the town's minimum they become long white strokes on the map)
   const secondary = new Set<unknown>();
@@ -468,5 +469,6 @@ export function urbanLayer(world: World, pal: Palette, u: number, debug: boolean
   s += townBridgesSvg(world.bridges ?? [], pal);
   for (const w of ub.walls ?? []) s += wallSvg(w, U.wall, U.wallFill, U.wallScale, U.towerScale);
   s += '</g>';
+  if (brushes) s = s.replaceAll('url(#p-ugarden)', 'url(#' + brushes.pattern('garden') + ')');
   return s;
 }

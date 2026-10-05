@@ -1,5 +1,8 @@
 import { Options, SIZE_PRESETS, DEFAULT_ROADS, fromQuery, toQuery, wantsCustomHeight, DEFAULTS, withCulture, generationUid, SITE_ARCHETYPES } from '../gen/options';
 import { generate } from '../gen/pipeline';
+import { BRUSH_SOURCES } from '../render/assets/brushAssets';
+import { decodeBrushes, type BrushImages } from '../render/brushes';
+import { paintedFromQuery, appearanceQuery } from './renderAppearance';
 import { renderSvg } from '../render/svg';
 // CANVAS-VIEWER (begin imports)
 import { createCanvasRenderer, CanvasRenderer } from '../render/canvas';
@@ -51,6 +54,9 @@ function parseOptions(q: string): Options {
 const mapStyle = (): MapStyle => opts.style as MapStyle;
 
 let opts: Options = location.search ? parseOptions(location.search) : initialMapOptions();
+let paintedTextures = paintedFromQuery(location.search);
+let brushStatus: 'idle' | 'loading' | 'ready' | 'failed' = 'idle';
+let brushImages: BrushImages | null = null;
 let draft: Options = structuredClone(opts);
 let pendingSettings = false;
 /** The imported image of this session (kept out of the URL; the link only carries a `hm=custom` marker). */
@@ -81,6 +87,8 @@ const roadsEl = $<HTMLSelectElement>('roads');
 const cultureEl = $<HTMLSelectElement>('culture');
 const languageEl = $<HTMLSelectElement>('language');
 const styleEl = $<HTMLSelectElement>('style');
+const paintedEl = $<HTMLInputElement>('paintedTextures');
+paintedEl.checked = paintedTextures;
 const seedEl = $<HTMLInputElement>('seed');
 
 fillSelect(sizeEl, Object.entries(SIZE_PRESETS).map(([k, v]) => [k, v.label]), opts.size);
@@ -254,11 +262,20 @@ let pendingMain: { id: number; stats: Record<string, number | string>; ms: numbe
 let exportId = 0;
 const legacyExports = new Map<number, { resolve(blob: Blob): void; reject(error: Error): void }>();
 
-const display = (): DisplayOpts => ({ style: mapStyle(), contours: opts.contours, landuse: opts.landuse, labels: opts.labels, legend: opts.legend });
+const display = (): DisplayOpts => ({ ...(paintedTextures && brushStatus !== 'failed' ? { painted: true } : {}), style: mapStyle(), contours: opts.contours, landuse: opts.landuse, labels: opts.labels, legend: opts.legend });
 const measureCtx = document.createElement('canvas').getContext('2d');
 
 /** (Re)build the renderer from the current world and the display options. */
 function rerender(keepView = true): void {
+  if (!backendSettled) return;
+  if (paintedTextures && brushStatus === 'idle') {
+    brushStatus = 'loading';
+    if (backend) backend.setBrushSources(BRUSH_SOURCES);
+    else void decodeBrushes(BRUSH_SOURCES).then(images => {
+      brushImages = images; brushStatus = images ? 'ready' : 'failed';
+      if (paintedTextures && currentWorld) rerender(true);
+    });
+  }
   if (backend) { backend.setDisplay(display()); return; }
   if (!currentWorld) return;
   const w: World = { ...currentWorld, options: { ...currentWorld.options, style: opts.style, contours: opts.contours, landuse: opts.landuse, labels: opts.labels, legend: opts.legend } };
@@ -269,7 +286,7 @@ function rerender(keepView = true): void {
     rec('buildScene', pnow() - t);
   }
   const t1 = pnow();
-  currentRenderer = createCanvasRenderer(canvasEl, w, mapStyle(), { scene: sceneCache.scene });
+  currentRenderer = createCanvasRenderer(canvasEl, w, mapStyle(), { scene: sceneCache.scene, brushes: paintedTextures ? brushImages ?? undefined : undefined });
   rec('createRenderer', pnow() - t1);
   viewer.setRenderer(currentRenderer, w.mapSize, keepView);
   applyPendingView();
@@ -358,6 +375,7 @@ function finishOffscreen(): void {
   rec('startToFrame', pnow() - genStart); perf.extra.doneAt = pnow();
 }
 const backendEvents: BackendEvents = {
+  onBrushStatus(ready) { brushStatus = ready ? 'ready' : 'failed'; },
   onStage(id, stage) { if (id === reqId && renderFailedGen !== id) setBusy(true, stage); },
   onDone(d) {
     if (d.id !== reqId) return;
@@ -556,12 +574,20 @@ function applyGeneration(environment: boolean): void {
 $('generateEnvironment').addEventListener('click', () => applyGeneration(true));
 $('generateSettlements').addEventListener('click', () => applyGeneration(false));
 
+paintedEl.addEventListener('change', () => {
+  paintedTextures = paintedEl.checked;
+  const q = '?' + curQuery(); if (q !== location.search) history.pushState(null, '', q);
+  rerender(true);
+});
+
 window.addEventListener('popstate', () => {
+  paintedTextures = paintedFromQuery(location.search); paintedEl.checked = paintedTextures;
   const parsed = parseOptions(location.search);
   missingCustom = wantsCustomHeight(location.search) && !importedMem;
   opts = { ...parsed, importedHeight: wantsCustomHeight(location.search) ? importedMem ?? undefined : undefined };
   heightId = opts.importedHeight ? heightDraftId : 0;
   commit('none');
+  rerender(true);
 });
 
 function randomSeed(): string { return Math.random().toString(36).slice(2, 8); }
@@ -591,7 +617,7 @@ window.addEventListener('keydown', (e) => {
 
 /** The query of the current state: options + pins + view (the latter two only in the link, see share.ts). */
 const urlView = (): ViewState | null => (viewReady ? viewer.getView() : pendingView);
-const curQuery = (): string => fullQuery(opts, pinsUI.pins, urlView());
+const curQuery = (): string => appearanceQuery(fullQuery(opts, pinsUI.pins, urlView()), paintedTextures);
 let urlTimer: number | undefined;
 /** Keep the address bar in step with the pins and the view (debounced, replaceState: no history entries). */
 function syncUrl(): void {
@@ -622,7 +648,7 @@ function wireCopy(btn: HTMLButtonElement, text: () => string, done: string): voi
   });
 }
 wireCopy($<HTMLButtonElement>('copyLink'), () => location.origin + location.pathname + '?' + curQuery(), 'Link copied');
-wireCopy($<HTMLButtonElement>('copyBug'), () => bugReport(opts, pinsUI.pins, viewer.getView(), location.origin + location.pathname, map.clientWidth), 'Report copied');
+wireCopy($<HTMLButtonElement>('copyBug'), () => bugReport(opts, pinsUI.pins, viewer.getView(), location.origin + location.pathname, map.clientWidth, paintedTextures ? appearanceQuery(fullQuery(opts, pinsUI.pins, viewer.getView()), true) : undefined), 'Report copied');
 
 // ---------- viewer (canvas, LOD) ----------
 // CANVAS-VIEWER (begin viewer)
@@ -829,18 +855,21 @@ async function exportFile(name: string, data: Blob | string, mime: string): Prom
 function captureExport(): ExportSnapshot {
   if (busyEl.classList.contains('on') || genKey() !== lastGenKey) throw new Error('the map is still being generated');
   if (renderFailedGen === reqId || (backend && !finalFrame.ready)) throw new Error('the requested map has not been presented');
-  return exportSnapshot(opts, backend ? null : presentedWorld, reqId, backend ? handoff.displayedGen : mainPresentedGen);
+  if (paintedTextures && brushStatus === 'loading') throw new Error('painted textures are still loading');
+  const snapshot = exportSnapshot(opts, backend ? null : presentedWorld, reqId, backend ? handoff.displayedGen : mainPresentedGen);
+  if (paintedTextures && brushStatus === 'ready') { snapshot.brushes = BRUSH_SOURCES; snapshot.display.painted = true; }
+  return snapshot;
 }
 /** SVG / JSON in the retained generation worker, including the main-render fallback when its worker is available. */
 async function buildExport(snapshot: ExportSnapshot, kind: 'svg' | 'json', full = false, width?: number): Promise<Blob> {
   const t = pnow();
   let blob: Blob;
-  if (backend) blob = await backend.export(snapshot.gen, kind, snapshot.display, full, width);
+  if (backend) blob = await backend.export(snapshot.gen, kind, snapshot.display, full, width, snapshot.brushes);
   else if (worker && canWorkerExport(kind, workerTextMeasure)) {
     blob = await new Promise<Blob>((resolve, reject) => {
       const id = ++exportId;
       legacyExports.set(id, { resolve, reject });
-      try { worker!.postMessage({ type: 'export', id, gen: snapshot.gen, kind, display: snapshot.display, full, width }); }
+      try { worker!.postMessage({ type: 'export', id, gen: snapshot.gen, kind, display: snapshot.display, full, width, brushes: snapshot.brushes }); }
       catch (error) { legacyExports.delete(id); reject(error); }
     });
   }
@@ -860,7 +889,7 @@ async function buildExport(snapshot: ExportSnapshot, kind: 'svg' | 'json', full 
       return measureCtx.measureText(text).width;
     };
     blob = kind === 'svg'
-      ? new Blob([renderSvg(world, { width, style: d.style, contours: d.contours, landuse: d.landuse, labels: d.labels !== false, legend: !!d.legend, measure })], { type: 'image/svg+xml' })
+      ? new Blob([renderSvg(world, { width, style: d.style, contours: d.contours, landuse: d.landuse, labels: d.labels !== false, legend: !!d.legend, measure, brushes: d.painted ? snapshot.brushes : undefined })], { type: 'image/svg+xml' })
       : new Blob([worldToJson(world)], { type: 'application/json' });
   }
   rec(kind === 'svg' ? 'exportSvg' : 'exportJson', pnow() - t);
@@ -920,7 +949,7 @@ updateHeightmapUI();
 const backendReady: Promise<OffscreenBackend | null> = forceMain ? Promise.resolve(null) : OffscreenBackend.create(backendEvents, window.devicePixelRatio || 1);
 void backendReady.then((b) => {
   backend = b;
-  if (b) { viewer.setSource({ request: (r) => b.request(r) }); b.setDisplay(display()); }
+  if (b) { viewer.setSource({ request: (r) => b.request(r) }); if (paintedTextures) { brushStatus = 'loading'; b.setBrushSources(BRUSH_SOURCES); } b.setDisplay(display()); }
   backendSettled = true;
   run();
 });

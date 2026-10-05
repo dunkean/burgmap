@@ -1,3 +1,5 @@
+import type { SvgBrushes } from './brushSvg';
+import { brushTextureOn, isBrushKind } from './brushes';
 import { bboxOf } from '../gen/geo/poly';
 import { NATURAL_LAND_KINDS } from './countryside';
 import { isKinded } from './townbridges';
@@ -91,7 +93,7 @@ function patterns(world: World, pal: Palette, s: number, scale: number): string 
   return `<defs>${out.join('')}</defs>`;
 }
 
-export function landuseLayer(world: World, pal: Palette, u: number, scale = 1600 / world.mapSize): string {
+export function landuseLayer(world: World, pal: Palette, u: number, scale = 1600 / world.mapSize, brushes?: SvgBrushes): string {
   const lu = world.landuse;
   if (!lu) return '';
   const s = Math.max(1, u);
@@ -120,28 +122,30 @@ export function landuseLayer(world: World, pal: Palette, u: number, scale = 1600
       // furlong edges: a faint line where the strips end (open fields carry no hedges)
       out += `<g fill="none" stroke="${pal.furrow}" ${svgMapStroke(MAP_STROKES.furlong, scale)} stroke-opacity="0.55" stroke-linejoin="round">${list.filter((a) => !(a as Enc).enclosed).map((a) => `<path d="${ringsD(a)}"/>`).join('')}</g>`;
     } else {
-      out += coverAreasSvg(kind, list, pal, s);
+      out += coverAreasSvg(kind, list, pal, s, true, brushes, world.options.biome);
     }
+    if (brushes && kind === 'field') out += `<path d="${list.map(ringsD).join('')}" fill="url(#${brushes.pattern('field')})" fill-rule="evenodd"/>`;
     out += '</g>';
   }
-  out += fieldNetwork(world, pal, s, scale);
+  out += fieldNetwork(world, pal, s, scale, brushes);
   out += '</g>';
   return out;
 }
 
 /** Identical cover marks in the base landscape and in restored urban ground; pattern defs live in landuseLayer. */
-function coverAreasSvg(kind: LandKind, list: LandArea[], pal: Palette, s: number, edges = true): string {
+function coverAreasSvg(kind: LandKind, list: LandArea[], pal: Palette, s: number, edges = true, brushes?: SvgBrushes, biome?: string): string {
   const d = list.map(ringsD).join('');
   const alpha = kind === 'forest' ? 0.7 : pal.landOpacity;
   let out = `<path d="${d}" fill="${pal.land[kind]}" fill-opacity="${alpha}" fill-rule="evenodd" stroke="${pal.land[kind]}" stroke-width="${f1(0.6 * s)}"${mul(pal)}/>`;
-  if (pal.tex[kind]) out += `<path d="${d}" fill="url(#p-${kind})" fill-rule="evenodd"/>`;
+  if (brushes && isBrushKind(kind) && brushTextureOn(kind, pal, biome)) out += `<path d="${d}" fill="url(#${brushes.pattern(kind)})" fill-rule="evenodd"/>`;
+  else if (pal.tex[kind]) out += `<path d="${d}" fill="url(#p-${kind})" fill-rule="evenodd"/>`;
   if (edges && kind === 'forest') out += `<path d="${d}" fill="none" stroke="${pal.treeInk}" stroke-width="${f1(0.7 * s)}" stroke-opacity="0.55" stroke-linejoin="round"/>`;
   else if (kind === 'orchard' || kind === 'garden') out += `<path d="${d}" fill="none" stroke="${pal.hedge}" stroke-width="${f1(0.8 * s)}" stroke-opacity="0.7"/>`;
   return out;
 }
 
 /** Replays actual natural areas under a caller's occupation clip; it never invents forest or draws agriculture. */
-export function naturalLanduseLayer(world: World, pal: Palette, u: number, ground?: PolyH[], cover: LandArea[] = []): string {
+export function naturalLanduseLayer(world: World, pal: Palette, u: number, ground?: PolyH[], cover: LandArea[] = [], brushes?: SvgBrushes): string {
   const s = Math.max(1, u), boxes = ground?.map((p) => bboxOf(p.outer));
   const relevant = (a: LandArea): boolean => {
     if (!boxes) return true;
@@ -151,9 +155,9 @@ export function naturalLanduseLayer(world: World, pal: Palette, u: number, groun
   let out = '<g class="u-natural-cover" stroke-linejoin="round">';
   for (const kind of NATURAL_LAND_KINDS) {
     const areas = (world.landuse?.areas ?? []).filter((a) => a.kind === kind && relevant(a));
-    if (areas.length) out += `<g class="lu-${kind}">${coverAreasSvg(kind, areas, pal, s)}</g>`;
+    if (areas.length) out += `<g class="lu-${kind}">${coverAreasSvg(kind, areas, pal, s, true, brushes, world.options.biome)}</g>`;
     const added = cover.filter((a) => a.kind === kind && relevant(a));
-    if (added.length) out += `<g class="u-cover-${kind}">${coverAreasSvg(kind, added, pal, s, false)}</g>`;
+    if (added.length) out += `<g class="u-cover-${kind}">${coverAreasSvg(kind, added, pal, s, false, brushes, world.options.biome)}</g>`;
   }
   return out + '</g>';
 }
@@ -162,7 +166,7 @@ type Enc = LandArea & { enclosed?: boolean };
 type Net = { ways?: Vec2[][]; headlands?: Vec2[][] };
 
 /** Field ways (cart tracks), narrow headlands and the hedgerows of the closes, with an occasional tree. */
-function fieldNetwork(world: World, pal: Palette, s: number, scale: number): string {
+function fieldNetwork(world: World, pal: Palette, s: number, scale: number, brushes?: SvgBrushes): string {
   const lu = world.landuse as (World['landuse'] & Net) | undefined;
   if (!lu) return '';
   let out = '';
@@ -180,7 +184,7 @@ function fieldNetwork(world: World, pal: Palette, s: number, scale: number): str
   if (pal.hedgeOn) {
     const hedges = fieldHedges(lu.areas, s), style = fieldHedgeStyle(pal, s);
     const d = hedges.lines.map((line) => pathD(line, false)).join('');
-    const trees = hedges.trees.map(({ center: p, radius }) => `<circle cx="${f1(p.x)}" cy="${f1(p.y)}" r="${f1(radius)}"/>`).join('');
+    const trees = hedges.trees.map(({ center: p, radius }) => brushes ? brushes.tree(p.x, p.y, radius) : `<circle cx="${f1(p.x)}" cy="${f1(p.y)}" r="${f1(radius)}"/>`).join('');
     out += `<g class="lu-hedges"><path d="${d}" fill="none" stroke="${style.color}" stroke-width="${f1(style.width)}" stroke-opacity="${style.alpha}" stroke-linecap="round"/>` +
       `<g fill="${pal.treeFill}" fill-opacity="0.75" stroke="${pal.treeInk}" stroke-width="${f1(0.3 * s)}" stroke-opacity="0.5">${trees}</g></g>`;
   }
@@ -188,18 +192,19 @@ function fieldNetwork(world: World, pal: Palette, s: number, scale: number): str
 }
 
 /** One farmstead at true size: lot pieces (garden, orchard, paddock, pond), hedged lot, yard, walls, trees, buildings with ridges. */
-function farmSvg(f: Farmstead, pal: Palette): string {
+function farmSvg(f: Farmstead, pal: Palette, brushes?: SvgBrushes): string {
   const plots = (k: string) => (f.plots ?? []).filter((p) => p.kind === k).map((p) => pathD(p.poly, true)).join('');
   const fill = (k: string, c: string, extra = '') => { const d = plots(k); return d ? `<path d="${d}" fill="${c}"${extra}/>` : ''; };
   let o = `<g class="farm" data-type="${f.type ?? ''}" data-size="${f.size ?? ''}">`;
   o += fill('garden', pal.land.garden, ` stroke="${pal.hedge}" stroke-width="0.4"`) + fill('orchard', pal.land.orchard) + fill('paddock', pal.land.pasture);
+  if (brushes) o += fill('garden', `url(#${brushes.pattern('garden')})`) + fill('orchard', `url(#${brushes.pattern('orchard')})`);
   o += fill('platform', 'none', ` stroke="${pal.farmInk}" stroke-width="0.5" stroke-dasharray="1.6 1.2" stroke-opacity="0.7"`);
   o += `<path d="${pathD(f.lot!, true)}" fill="none" stroke="${pal.hedge}" stroke-width="0.9" stroke-opacity="0.85"/>`;
   o += `<path d="${pathD(f.yard, true)}" fill="${pal.farmYard}" fill-opacity="0.9"/>`;
   o += fill('pen', pal.farmYard, ` stroke="${pal.farmInk}" stroke-width="0.3"`) + fill('threshing-floor', pal.farmYard, ` stroke="${pal.farmInk}" stroke-width="0.4"`);
   o += fill('pond', pal.lakeFill, ` stroke="${pal.waterEdge}" stroke-width="0.5"`);
   if (f.walls?.length) o += `<path d="${f.walls.map((w) => pathD(w, false)).join('')}" fill="none" stroke="${pal.farmInk}" stroke-width="0.9" stroke-linecap="butt"/>`;
-  if (f.trees?.length) o += `<g fill="${pal.treeFill}" stroke="${pal.treeInk}" stroke-width="0.3">${f.trees.map((t) => `<circle cx="${f1(t.x)}" cy="${f1(t.y)}" r="2.2"/>`).join('')}</g>`;
+  if (f.trees?.length) o += `<g fill="${pal.treeFill}" stroke="${pal.treeInk}" stroke-width="0.3">${f.trees.map((t) => brushes ? brushes.tree(t.x, t.y, 2.2, true) : `<circle cx="${f1(t.x)}" cy="${f1(t.y)}" r="2.2"/>`).join('')}</g>`;
   o += `<g fill="${pal.farmRoof}" stroke="${pal.farmInk}" stroke-width="0.5">${f.buildings.map((b) => `<path d="${pathD(b, true)}"/>`).join('')}</g>`;
   const rg = farmRidges(f);
   if (rg.length) o += `<path d="${rg.map((r) => pathD(r, false)).join('')}" fill="none" stroke="${pal.farmInk}" stroke-width="0.35" stroke-opacity="0.8"/>`;
@@ -219,7 +224,7 @@ function bridgeShape(a: Vec2, b: Vec2, w: number, pad: number): { deck: string; 
   return { deck, rails, ends };
 }
 
-export function roadsLayer(world: World, pal: Palette, u: number): string {
+export function roadsLayer(world: World, pal: Palette, u: number, brushes?: SvgBrushes): string {
   const roads = world.roads;
   if (!roads || !roads.length) return '';
   const s = Math.max(1, u * 0.85);
@@ -238,7 +243,7 @@ export function roadsLayer(world: World, pal: Palette, u: number): string {
         out += `<g fill="${pal.farmRoof}" stroke="${pal.farmInk}" stroke-width="${f1(0.7 * s)}">${f.buildings.map((b) => `<path d="${pathD(b, true)}"/>`).join('')}</g>`;
         continue;
       }
-      out += farmSvg(f, pal);
+      out += farmSvg(f, pal, brushes);
     }
     out += '</g>';
   }

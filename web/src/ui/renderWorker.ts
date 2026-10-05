@@ -12,11 +12,18 @@ import { SceneBuilder } from '../render/sceneCache';
 import { biomePalette } from '../render/biomes';
 import type { World } from '../gen/types';
 import type { RRequest, RResponse, RView, DisplayOpts, WorldMsg, RAttach, PortMsg, SettlementMsg, QuarterMsg } from './protocol';
+import { decodeBrushes, type BrushImages } from '../render/brushes';
 import { worldMeta } from './worldMeta';
 
 const ctx = self as unknown as Worker;
 const post = (r: RResponse, transfer: Transferable[] = []): void => ctx.postMessage(r, transfer);
 
+let brushImages: BrushImages | null = null;
+let rendererBrushes: BrushImages | null = null;
+let brushLoad = 0;
+let brushVersion = '';
+const closeBrushes = (images: BrushImages | null): void => { for (const key of ['vegetation', 'terrain'] as const) if (images && 'close' in images[key]) (images[key] as ImageBitmap).close(); };
+let disposed = false;
 let canvas: OffscreenCanvas | null = null;
 let miniCanvas: OffscreenCanvas | null = null;
 let display: DisplayOpts = { style: 'parchment' };
@@ -57,9 +64,10 @@ function rebuild(): number {
     sceneCache = { world, contours: !!display.contours, scene: sceneBuilder.update(w) };
   }
   // `dpr` stays a live getter: the page's devicePixelRatio can change between frames
-  if (!renderer?.update?.(w, sceneCache.scene, display.style)) {
-    const next = createCanvasRenderer(canvas as unknown as CanvasLike, w, display.style, { scene: sceneCache.scene, get dpr(): number { return curDpr; } });
-    renderer?.dispose(); renderer = next;
+  const activeBrushes = display.painted ? brushImages : null;
+  if (rendererBrushes !== activeBrushes || !renderer?.update?.(w, sceneCache.scene, display.style)) {
+    const next = createCanvasRenderer(canvas as unknown as CanvasLike, w, display.style, { scene: sceneCache.scene, brushes: activeBrushes ?? undefined, get dpr(): number { return curDpr; } });
+    renderer?.dispose(); renderer = next; rendererBrushes = activeBrushes;
   }
   renderer.setOverlays({ cartouche: final });
   miniDirty = true; ver++;
@@ -160,6 +168,25 @@ ctx.onmessage = (e: MessageEvent<RRequest>): void => {
         post({ type: 'ready', ok: p.ok, reason: p.reason });
         break;
       }
+      case 'brushes': {
+        if (brushVersion === m.sources.version) break;
+        brushVersion = m.sources.version;
+        const load = ++brushLoad;
+        void decodeBrushes(m.sources).then(images => {
+          if (disposed || load !== brushLoad) {
+            closeBrushes(images);
+            return;
+          }
+          const oldImages = brushImages; brushImages = images;
+          if (world && display.painted) {
+            try { announce(rebuild()); } catch (error) { post({ type: 'error', gen: worldGen, error: String(error) }); }
+          }
+          // A disabled display already disposed its painted renderer. A successful rebuild replaced the active one.
+          if (rendererBrushes !== oldImages) closeBrushes(oldImages);
+          post({ type: 'brushStatus', ready: !!images });
+        });
+        break;
+      }
       case 'attach': onAttach(m); break;
       case 'display': {
         display = m.display;
@@ -167,7 +194,7 @@ ctx.onmessage = (e: MessageEvent<RRequest>): void => {
         break;
       }
       case 'view': onView(m); break;
-      case 'dispose': port?.close(); renderer?.dispose(); world = null; metaCache = null; renderer = null; sceneBuilder = null; sceneCache = null; break;
+      case 'dispose': disposed = true; ++brushLoad; port?.close(); renderer?.dispose(); closeBrushes(brushImages); brushImages = null; world = null; metaCache = null; renderer = null; sceneBuilder = null; sceneCache = null; break;
     }
   } catch (err) {
     post({ type: 'error', gen: worldGen, error: String((err as Error)?.stack ?? err) });
