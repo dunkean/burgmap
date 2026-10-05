@@ -13,4 +13,12 @@ Agents: fix the open reports; parallel work is allowed. Remove a report after it
 
 ## List (written by the user)
 
-- Le problème de démarcation ville environnement vient de la ligne noire autour de la ville. Elle sert à rien vire là. Idem por les hameaux et extensions et le fait que les maison qui devraient être carrés soient coupés à la frontiere de la ville. Il faut garder le carré de la maison et qu'il déborde sur l'extérieur. En fait la fille avec enceinte coupe les maisons, celle sans, ne les coupe pas. Et tu remplis systématiquement les quatrier de gardens/yards et de fait le background est tout vert et ca peut choquer. Il serait bien que quelques quartier de la périphérique soit avec un background équivalent à lenvironnement. Regarde ce que tu peux faire pour améliorer ce visuel.
+- Le problème de démarcation ville environnement vient de la ligne noire autour de la ville. Elle sert à rien vire là. Idem por les hameaux et extensions et le fait que les maison qui devraient être carrés soient coupés à la frontiere de la ville. Il faut garder le carré de la maison et qu'il déborde sur l'extérieur. En fait la fille avec enceinte coupe les maisons, celle sans, ne les coupe pas. Et tu remplis systématiquement les quatrier de gardens/yards et de fait le background est tout vert et ca peut choquer. Il serait bien que quelques quartier de la périphérique soit avec un background équivalent à lenvironnement. Regarde ce que tu peux faire pour améliorer ce visuel. Les background de jardins dans les villes doivent vraiment globalement être dans le style du biome. Par exemple une ville desertique comme tombouctou semble être construite à meme le desert. Vue de dessus, la ville ne se découpe pas, on ne voit que les maisons. J'aimerai qu'on puisse retrouver ca selon le biome et le type de ville. (Un citadelle est marquée parce que pavée ou autre, une tribu indienne dans la plain non, etc. etc.)
+
+État partiel du 2026-10-05 : bordures administratives supprimées et sols adaptés
+au biome/type d'implantation (`ad6e32a`, projection des Workers corrigée dans
+`f842f9b`). Revues, tests ciblés, captures SVG/Canvas DPR 1/2 et contrôles natifs
+offscreen/main/offline réussis. Les murs physiques et jardins irrigués restent
+préservés. Les maisons coupées restent ouvertes : huit dans la génération
+actuelle du cas muré seed 42 ; les essais locaux ne donnent aucun gain
+et ne sont pas intégrés. Voir [les résultats et limites](BUGFIXES_VISUAL_2026-10-05.md).

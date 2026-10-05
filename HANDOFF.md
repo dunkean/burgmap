@@ -5,6 +5,29 @@ bugs and their evidence are recorded in [ROADMAP.md](ROADMAP.md).
 
 ## Current status
 
+- Biome ground/administrative border fixes (2026-10-05): integrated source
+  `ad6e32a`, render-worker input repair `f842f9b`. See
+  [BUGFIXES_VISUAL_2026-10-05.md](BUGFIXES_VISUAL_2026-10-05.md).
+  The visual block passes 104 focused tests; the projection repair passes 31
+  tests, including the existing eleven landscape/occupied-shanty controls.
+  Typecheck and single-file build pass. Sahel desert and temperate native maps
+  pass all eight HTTP/offscreen/main/offline/refused-Worker checks with identical
+  SVG/JSON exports. Five Worlds have 300 DPR 1/2 comparison PNGs; their model
+  hashes stay unchanged during rendering. A current 60k native diagnostic also
+  completes all 103 quarters/42,802 buildings with the original World hash.
+  Its timings are excluded because extended tests run concurrently.
+  The original user's BUGS paragraph remains with a partial status: eight fresh
+  walled seed42 roofs are still cut; the local roof experiments have zero
+  current-generation gain and are excluded. The Japanese Boolean-loop repair
+  is integrated at `0db97c8`, with a mechanical vendor proof, full World parity
+  against baseline + the same guard, and 40 integrated focused tests. See
+  [POLYGON_TRAVERSAL_FIX_2026-10-05.md](POLYGON_TRAVERSAL_FIX_2026-10-05.md).
+  Two Japanese layout assertions and two inherited zero-area roof hairpins remain
+  open; this does not certify a green full suite. Final native Sahel/temperate
+  maps pass all eight modes on the rebuilt guarded HTML.
+  Optimization tag `optimization-2026-10-05` is published at `01e162f`, Pages
+  `3a4836d`; the served HTML hash matches the checked build and native four-mode
+  verification passes on the actual site. The visual fixes await publication.
 - Roof/render optimization (2026-10-05): integrated source checkpoint `12d8c225`,
   reviewed before execution. See
   [OPTIMIZATION_IMPLEMENTATION_2026-10-05.md](OPTIMIZATION_IMPLEMENTATION_2026-10-05.md)
