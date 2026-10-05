@@ -1,3 +1,4 @@
+import { cavernDisplayWorld } from './cavernDisplay';
 import { cavernWallFill, cavernRockPixels, CAVERN_RIM } from './caverns';
 import { isUnderdarkBiome } from '../gen/biomes';
 /**
@@ -184,7 +185,7 @@ function defaultCreateCanvas(w: number, h: number): CanvasLike | null {
 
 export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: MapStyle | Palette, deps: CanvasRendererDeps = {}): CanvasRenderer {
   let sourceWorld = world0;
-  let world = deps.scene?.renderedWorld ? { ...deps.scene.renderedWorld, options: world0.options } : renderView(world0);
+  let world = cavernDisplayWorld(deps.scene?.renderedWorld ? { ...deps.scene.renderedWorld, options: world0.options } : renderView(cavernDisplayWorld(world0)));
   const pal = biomePalette(style, world.options.biome);
   let scene = deps.scene ?? buildScene(world0, deps.tileSize);
   const S = world.mapSize;
@@ -281,7 +282,7 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
     if (brushes && nextSource.seed !== sourceWorld.seed) return false;
     if (nextSource.mapSize !== S || biomePalette(nextStyle, nextSource.options.biome) !== pal) return false;
     // Prepare potentially fallible metadata before committing the replacement.
-    const nextWorld = nextScene.renderedWorld ? { ...nextScene.renderedWorld, options: nextSource.options } : renderView(nextSource);
+    const nextWorld = cavernDisplayWorld(nextScene.renderedWorld ? { ...nextScene.renderedWorld, options: nextSource.options } : renderView(cavernDisplayWorld(nextSource)));
     const nextLabels = buildMapLabels(nextWorld, pal.name, pal);
     const terrainChanged = nextSource.terrain !== sourceWorld.terrain;
     if (nextSource.seed !== sourceWorld.seed) cavernRockImg = undefined;
@@ -460,11 +461,11 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
     }
   }
 
-  function exactCavernPath(which: 'floor' | 'solid'): Path2D | null {
+  function exactCavernPath(which: 'floor' | 'solid' | 'fungalRooms'): Path2D | null {
     if (!world.terrain.caverns) return null;
     return cached(`cavern-${which}-exact`, () => {
       const p = new P();
-      for (const f of world.terrain.caverns![which]) {
+      for (const f of world.terrain.caverns![which] ?? []) {
         addRing(p, orientPos(f.outer));
         for (const h of f.holes) addRing(p, orientPos(h).slice().reverse());
       }
@@ -1158,6 +1159,15 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
     // site marker (placeholder until an urban layer exists)
     if (!world.urban && world.site) drawSiteMarker(ctx, world, pal, u, sc);
     if (cavernFloor) {
+      if (luOn && world.options.biome === 'underdark-caverns' && world.terrain.caverns?.fungalRooms?.length) {
+        const rooms = exactCavernPath('fungalRooms');
+        if (rooms) {
+          ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = pal.landOpacity;
+          ctx.fillStyle = pal.land.garden; ctx.fill(rooms, 'nonzero'); ctx.globalAlpha = 1;
+          const pattern = getPattern(ctx, 'cavern-fungi', 8, 8, 0, (c, k) => drawPanelCanvas(c, { w: 0, h: 0, prims: underdarkMark('garden', 4 * k, 4 * k, 1.7 * k, pal, k) }, 0, 0, family));
+          if (pattern) { ctx.fillStyle = pattern; ctx.fill(rooms, 'nonzero'); }
+        }
+      }
       ctx.restore();
       ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
       const solid = exactCavernPath('solid'), floor = exactCavernPath('floor');
@@ -1373,6 +1383,10 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
     water('sea', pal.seaFill, 'evenodd'); water('lakes', pal.lakeFill); water('rivers', pal.riverFill);
     const d = getDensity();
     if (d) ctx.drawImage(d, 0, 0, S, S);
+    if (world.options.landuse && world.options.biome === 'underdark-caverns' && world.terrain.caverns?.fungalRooms?.length) {
+      const rooms = exactCavernPath('fungalRooms');
+      if (rooms) { ctx.globalAlpha = pal.landOpacity; ctx.fillStyle = pal.land.garden; ctx.fill(rooms, 'nonzero'); ctx.globalAlpha = 1; }
+    }
     if (world.terrain.caverns) {
       const solid = exactCavernPath('solid');
       ctx.fillStyle = cavernWallFill(pal); if (solid) ctx.fill(solid, 'nonzero');

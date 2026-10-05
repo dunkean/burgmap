@@ -28,6 +28,8 @@ export interface CavernLayer {
   floor: PolyH[];
   /** Map rectangle minus floor: impermeable rock, not water. */
   solid: PolyH[];
+  /** Small cultivated fungal cavities, connected to the gallery network. Cave mode only. */
+  fungalRooms?: PolyH[];
   mask: Uint8Array;
   /** Approximate distance to the displayed solid rock in meters. */
   clearance: Float32Array;

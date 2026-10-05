@@ -1,3 +1,4 @@
+import { cavernDisplayWorld } from './cavernDisplay';
 import { isUnderdarkBiome } from '../gen/biomes';
 /**
  * Renderer-independent scene: the World flattened into spatially indexed layers.
@@ -177,7 +178,8 @@ export interface SceneBuildOptions {
 }
 
 export function buildScene(world0: World, tileSize = TILE_SIZE, build: SceneBuildOptions = {}): Scene {
-  const world = build.rendered ?? renderView(world0);
+  world0 = cavernDisplayWorld(world0);
+  const world = cavernDisplayWorld(build.rendered ?? renderView(world0));
   const appearance = build.appearance ?? worldGroundAppearance(world0);
   const cover = build.scope === 'static' ? [] : build.cover ?? worldCampCover(world0);
   const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
@@ -206,6 +208,7 @@ export function buildScene(world0: World, tileSize = TILE_SIZE, build: SceneBuil
   if (t.caverns) {
     addPoly('cavern-floor', t.caverns.floor.map(p => p.outer), t.caverns.floor.map(p => p.holes));
     addPoly('cavern-solid', t.caverns.solid.map(p => p.outer), t.caverns.solid.map(p => p.holes));
+    addPoly('cavern-fungal-rooms', (t.caverns.fungalRooms ?? []).map(p => p.outer), (t.caverns.fungalRooms ?? []).map(p => p.holes));
   }
   const swi = seaWithIslands(t.coastline, t.islands);
   addPoly('sea', swi.sea, swi.holes.map((h) => (h.length ? h : undefined)));

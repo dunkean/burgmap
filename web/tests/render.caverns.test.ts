@@ -5,9 +5,11 @@ import { renderSvg } from '../src/render/svg';
 import { createCanvasRenderer, type CanvasLike } from '../src/render/canvas';
 import { biomePalette } from '../src/render/biomes';
 import { underdarkMark, underdarkPatterns, underdarkTextureSpec } from '../src/render/underdark';
-import { cavernWallFill, cavernRockPixels } from '../src/render/caverns';
+import { cavernWallFill, cavernRockPixels, cavernFungalRoomsSvg } from '../src/render/caverns';
 import { supportsPaintedBiome } from '../src/render/brushes';
 import { fmtPop, legendModel, townTitle } from '../src/render/legend';
+import { cavernDisplayWorld } from '../src/render/cavernDisplay';
+import { SceneBuilder } from '../src/render/sceneCache';
 import { buildScene } from '../src/render/scene';
 import type { Polygon } from '../src/gen/types';
 
@@ -91,6 +93,52 @@ describe('cavern walls and underground pebble correction', () => {
     expect(opaque).toBe(true); expect(max - min).toBeGreaterThan(12); expect(max).toBeLessThanOrEqual(48);
     expect(sum / (512 * 512)).toBeLessThan(30);
     expect(cavernWallFill(pal)).toBe('#111116');
+    const colourOffsets = new Set<number>();
+    for (let i = 0; i < a.rgba.length; i += 4) colourOffsets.add(a.rgba[i + 2] - a.rgba[i]);
+    expect(colourOffsets.size).toBeGreaterThan(4);
+    const mono = cavernRockPixels('rock-proof', 1600, biomePalette('engraving', 'underdark-caverns'));
+    let grey = true;
+    for (let i = 0; i < mono.rgba.length; i += 4) grey &&= mono.rgba[i] === mono.rgba[i + 1] && mono.rgba[i] === mono.rgba[i + 2];
+    expect(grey).toBe(true);
+  });
+  it('replaces broad cultivation with exact generated rooms before both scene paths and labels, without changing the World', () => {
+    const w = cavernWorld(), broad = rect(300, 300, 700), room = { outer: rect(450, 450, 30), holes: [rect(460, 460, 3)] };
+    w.terrain.caverns!.fungalRooms = [room];
+    w.landuse!.areas = [{ kind: 'garden', poly: broad, cultivation: 'fungal' }, { kind: 'commons', poly: rect(250, 250, 100) }];
+    w.landuse!.landscapeGround = [];
+    w.landuse!.farmsteads = [{ buildings: [rect(500, 500, 10)], yard: rect(490, 490, 30), pos: { x: 500, y: 500 }, angle: 0, drive: [{ x: 500, y: 500 }, { x: 550, y: 500 }],
+      lot: broad, plots: [{ kind: 'garden', poly: broad }], walls: [[{ x: 300, y: 300 }, { x: 1000, y: 300 }]], trees: [{ x: 600, y: 600 }] }];
+    Object.assign(w.landuse!, { ways: [[{ x: 200, y: 200 }, { x: 900, y: 900 }]], headlands: [[{ x: 200, y: 200 }, { x: 900, y: 900 }]] });
+    w.urban = fakeWorld({ mapSize: 1600, buildings: 0, streets: 0, clusters: 1, landAreas: 0 }).urban;
+    w.urban!.parcels = [{ poly: broad, use: 'garden', block: 0 }]; w.urban!.backLand = [{ outer: broad, holes: [] }];
+    w.names = { family: 'english', town: 'Colony', entries: [{ id: 'old-farm', kind: 'farm', text: 'Old Orchard', rank: 6, anchor: { x: 500, y: 500 } }] };
+    const before = JSON.stringify(w), projected = cavernDisplayWorld(w);
+    expect(projected.landuse!.areas.map(a => a.kind)).toEqual(['commons']);
+    expect(projected.landuse!.farmsteads[0].buildings).toBe(w.landuse!.farmsteads[0].buildings);
+    expect(projected.landuse!.farmsteads[0].yard).toBe(w.landuse!.farmsteads[0].yard);
+    expect(projected.landuse!.farmsteads[0].lot).toBeUndefined(); expect(projected.landuse!.farmsteads[0].plots).toEqual([]);
+    expect(projected.urban!.parcels[0].use).toBe('commons'); expect(projected.urban!.backLand).toEqual([]);
+    expect(projected.names!.entries).toEqual([]); expect(cavernDisplayWorld(w)).toBe(projected);
+    const scene = new SceneBuilder().update(w);
+    for (const name of ['lu-garden', 'farm-lots', 'farm-fungal-gardens', 'u-open-garden', 'u-backland']) expect(scene.poly.get(name)).toBeUndefined();
+    expect(scene.lines.some(l => ['field-ways', 'headlands', 'farm-walls'].includes(l.name))).toBe(false);
+    expect(scene.poly.get('cavern-fungal-rooms')?.polys).toEqual([room.outer]);
+    expect(scene.renderedWorld?.names?.entries).toEqual([]);
+    const svg = renderSvg(w, { raster: false });
+    expect(svg).toContain('class="layer-cavern-cultivation"'); expect(svg).toContain('p-cavern-fungi'); expect(svg).not.toContain('Old Orchard');
+    expect(svg).not.toContain('class="u-gardens"'); expect(svg).not.toContain('class="u-fields"');
+    expect(cavernFungalRoomsSvg(projected, biomePalette('parchment', w.options.biome))).toContain('fill-rule="evenodd"');
+    for (const deps of [{}, { scene }]) {
+      const m = mockCanvas(900, 700), r = createCanvasRenderer(m.canvas as unknown as CanvasLike, w, 'parchment', { ...deps, raster: false, terrain: () => null, Path2D: ExactPath as never });
+      r.draw({ cx: 600, cy: 600, scale: 2 });
+      const fills = m.log.fills.filter(f => f.style === r.palette.land.garden && f.path instanceof ExactPath);
+      expect(fills).toHaveLength(1); expect((fills[0].path as ExactPath).points).toContainEqual([463, 463]);
+      expect(r.getMapInfo().legend.prims).toContainEqual(expect.objectContaining({ s: 'Fungal cultivation' })); r.dispose();
+    }
+    expect(JSON.stringify(w)).toBe(before);
+    const ordinary = { ...w, options: { ...w.options, biome: 'underdark' as const } };
+    expect(cavernDisplayWorld(ordinary)).toBe(ordinary); expect(ordinary.landuse!.areas[0].poly).toBe(broad);
+    expect(cavernFungalRoomsSvg(ordinary, biomePalette('parchment', 'underdark'))).toBe('');
   });
   it('preserves Unicode in existing population and environment titles', () => {
     expect(fmtPop(1234)).toBe('1\u202f234');

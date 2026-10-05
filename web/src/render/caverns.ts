@@ -5,6 +5,7 @@ import { Rng } from '../gen/core/rng';
 import { hexToRgb, type Palette } from './styles';
 import { encodePng, pngDataUrl } from './raster';
 import { pathD } from './util';
+import { underdarkMarkSvg } from './underdark';
 
 export const cavernPathD = (polys: PolyH[]): string => polys.map(p =>
   pathD(p.outer, true) + p.holes.map(h => pathD(h, true)).join('')).join('');
@@ -26,7 +27,12 @@ export function cavernRockPixels(seed: string, mapSize: number, pal: Palette): {
     const grain = noise.noise(px / 3.7, py / 3.7);
     const brightness = low * 5 + rock * 12 + light * 22 + grain * 3;
     const j = (y * width + x) * 4;
-    for (let c = 0; c < 3; c++) rgba[j + c] = Math.max(7, Math.min(48, base[c] + brightness));
+    // Subtle cool mineral and warmer sediment patches, not coloured lighting.
+    const tint = pal.name === 'engraving' ? 0 : noise.fbm(px / 310 + 41, py / 310 - 23, 2);
+    const mineral = pal.name === 'engraving' ? 0 : noise.noise(px / 120 + 29, py / 120 + 17);
+    const variation = pal.name === 'blueprint' ? [-tint, tint, tint * 3]
+      : [tint * 5 - mineral, mineral * 2, -tint * 4 + mineral * 2];
+    for (let c = 0; c < 3; c++) rgba[j + c] = Math.max(7, Math.min(48, base[c] + brightness + variation[c]));
     rgba[j + 3] = 255;
   }
   return { width, rgba };
@@ -52,4 +58,14 @@ export function cavernWallsSvg(world: World, pal: Palette, texture = true): stri
     + `<g clip-path="url(#cavern-solid)">${image}`
     + CAVERN_RIM.map(r => `<path d="${floor}" fill="none" stroke="${r.color}" stroke-width="${r.width}" stroke-opacity="${r.alpha}" stroke-linejoin="round"/>`).join('')
     + '</g></g>';
+}
+
+/** The only cave cultivation: compact generated cavities with clipped top-down fungal beds. */
+export function cavernFungalRoomsSvg(world: World, pal: Palette): string {
+  const rooms = world.options.biome === 'underdark-caverns' ? world.terrain.caverns?.fungalRooms : undefined;
+  if (!rooms?.length) return '';
+  const d = cavernPathD(rooms);
+  return `<g class="layer-cavern-cultivation"><defs><pattern id="p-cavern-fungi" patternUnits="userSpaceOnUse" width="8" height="8">${underdarkMarkSvg('garden', 4, 4, 1.7, pal)}</pattern></defs>`
+    + `<path d="${d}" fill="${pal.land.garden}" fill-opacity="${pal.landOpacity}" fill-rule="evenodd"/>`
+    + `<path d="${d}" fill="url(#p-cavern-fungi)" fill-rule="evenodd"/></g>`;
 }

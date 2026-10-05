@@ -69,6 +69,13 @@ and updates when lazy settlement or quarter detail arrives. It adds no populatio
 cap or restriction on cultures. Rock remains distinct from water. Worker snapshots
 and JSON exports retain its vectors; SVG and Canvas share the dark rock texture
 and boundary, while the exposed floor keeps the original Underdark palette.
+The cave variant's rural display replaces broad cultivation polygons with bounded
+`fungalRooms` cavities; this projection does not modify the ordinary World.
+Empty footprints and rural reserves do not force an opening. River-bank galleries
+are tight along 75% of each course, with seeded unequal widening lengths and gaps
+across the remaining 25%, variable amplitudes and asymmetric shoulders. Road
+galleries scale with the actual road width. Original roofs, streets,
+walls and water ribbons remain protected after contour extraction.
 
 ## Wet moats
 

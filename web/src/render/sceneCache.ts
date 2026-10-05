@@ -1,4 +1,5 @@
 /** Persistent scene preparation for immutable worker snapshots. Painter order stays layer-major. */
+import { cavernDisplayWorld } from './cavernDisplay';
 import type { World, UrbanLayer, PolyH } from '../gen/types';
 import { LandscapeGroundCache } from '../gen/landuse/landscapeGround';
 import { groundAppearance } from '../gen/landuse/groundAppearance';
@@ -91,6 +92,7 @@ export class SceneBuilder {
   constructor(readonly tileSize = TILE_SIZE) {}
 
   update(world: World): Scene {
+    world = cavernDisplayWorld(world);
     const t0 = typeof performance === 'undefined' ? Date.now() : performance.now();
     // Legacy/hand-authored Worlds have different fringe semantics. Retain their original complete path.
     if (!world.urban || world.landuse?.landscapeGround === undefined) {

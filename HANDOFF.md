@@ -5,6 +5,19 @@ bugs and their evidence are recorded in [ROADMAP.md](ROADMAP.md).
 
 ## Current status
 
+- Cavern tailoring (2026-10-05, publication in progress): empty
+  footprints and surface cultivation no longer force large cave rooms. Around
+  75% of each river course has tight banks; seeded widening lengths, gaps and
+  amplitudes vary without a periodic cycle. Road galleries follow physical
+  width. Separate small fungal rooms replace fields, with shared SVG/Canvas pure
+  display projection and subtle mineral tints. Ordinary World geometry and open
+  Underdark stay unchanged. Coherent source review, 40 distinct focused tests,
+  typecheck/build and eight native cases pass, including the reported myconid seed.
+  See [CAVERNS_2026-10-05.md](CAVERNS_2026-10-05.md). Revised board:
+  `web/out/optimization-implementation-2026-10-05/presentation-boards/final/06-underdark-cavernes-final.png`.
+  Build SHA `7605043ea6e25e3e0d28f9c8b9ba8c960c26a0ac23dc373d5072a4ba8a60c9c0`.
+  User explicitly authorized publication after preparation of this revised board.
+  BUGS.md remains outside this work. No full-suite certification is claimed.
 - Underdark cavern redesign (2026-10-05): the cavern variant
   generates the normal Underdark layout first, then adds an irregular dark rock
   mask around occupied towns, paths and waterways. It preserves the open variant,

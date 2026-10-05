@@ -136,6 +136,7 @@ export function legendModel(world: World, pal: Palette): Panel {
   const items: Item[] = [];
   const add = (label: string, draw: Item['draw']): void => { items.push({ label, draw }); };
   const kinds = new Set(world.landuse?.areas.map((a) => a.kind) ?? []);
+  if (world.options.biome === 'underdark-caverns' && world.terrain.caverns?.fungalRooms?.length) kinds.add('garden');
   const lu = world.options.landuse;
   const t = world.terrain;
   if (t.caverns) add('Cavern walls', fillSwatch(cavernWallFill(pal), pal.treeInk, 1));

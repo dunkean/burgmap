@@ -1,4 +1,5 @@
-import { cavernPathD, cavernWallsSvg } from './caverns';
+import { cavernDisplayWorld } from './cavernDisplay';
+import { cavernPathD, cavernWallsSvg, cavernFungalRoomsSvg } from './caverns';
 import type { World } from '../gen/types';
 import { renderView } from '../gen/settlements/merge';
 import { Vec2, chaikin, simplify, offsetRibbon } from '../gen/core/geom';
@@ -77,6 +78,7 @@ function decor(world: World, pal: Palette, u: number): string {
 }
 
 export function renderSvg(world0: World, opts: RenderOptions = {}): string {
+  world0 = cavernDisplayWorld(world0);
   const world = renderView(world0);
   const style = opts.style ?? world.options.style;
   const pal = biomePalette(style, world.options.biome);
@@ -146,6 +148,7 @@ export function renderSvg(world0: World, opts: RenderOptions = {}): string {
     if (!opts.debug) { parts.push(shadowSvg(world, pal, u)); parts.push(litSvg(world, pal, u)); }
   } else parts.push(siteLayer(world, pal, u, !!opts.debug));
 
+  if (t.caverns && (opts.landuse ?? world.options.landuse)) parts.push(cavernFungalRoomsSvg(world, pal));
   if (t.caverns) { parts.push('</g>'); parts.push(cavernWallsSvg(world, pal, opts.raster !== false)); }
   parts.push('</g>');
   if (opts.labels ?? world.options.labels !== false) parts.push(labelsSvg(world, pal, opts.measure, !!(opts.legend ?? world.options.legend)));
