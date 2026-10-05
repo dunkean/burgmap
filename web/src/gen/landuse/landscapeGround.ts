@@ -1,9 +1,11 @@
 /** Ordinary settlement ground keeps the same opaque landscape as the surrounding land. */
-import type { World, UrbanLayer, PolyH, Polygon } from '../types';
+import type { World, UrbanLayer, PolyH, Polygon, TerrainLayer } from '../types';
 import { offsetRibbon, polygonContains } from '../core/geom';
 import { differenceSafeS, unionMany } from '../geo/bool';
 import { area, orientPos } from '../geo/poly';
 import { MEGA_KEY } from '../urban/mega/types';
+import type { MacroQuarter } from '../urban/mega/types';
+import { bboxOf } from '../geo/poly';
 
 const piece = (outer: Polygon): PolyH => ({ outer: orientPos(outer), holes: [] });
 const finite = (shapes: PolyH[]): boolean => shapes.every((p) => [p.outer, ...p.holes]
@@ -116,4 +118,69 @@ export function landscapeCoverGround(world: World, ground: PolyH[]): PolyH[] {
   const roofs = layers.flatMap((u) => u.masses.length ? u.masses : u.buildings.map((b) => piece(b.poly)));
   if (!finite(roofs)) return [];
   return differenceSafeS(ground, unionMany(roofs, 24, true));
+}
+
+/**
+ * Interactive snapshots have immutable layer objects. This cache is owned by one displayed generation;
+ * unlike the export helper it never hashes/re-unions all previous quarters after a detail batch.
+ * A caller editing an object in place must explicitly bump its version.
+ */
+export class LandscapeGroundCache {
+  private terrain: TerrainLayer | undefined;
+  private mapSize = 0;
+  private terrainVersion = -1;
+  private water: PolyH[] = [];
+  private waterSafe = false;
+  private layers = new WeakMap<UrbanLayer, { version: number; ground: PolyH[] }>();
+  private quarters = new WeakMap<MacroQuarter, { owner: UrbanLayer; version: number; ground: PolyH[] }>();
+  private protections = new WeakMap<UrbanLayer, { version: number; pieces: PolyH[] }>();
+
+  prepare(world: World, terrainVersion = 0): void {
+    if (this.terrain === world.terrain && this.mapSize === world.mapSize && this.terrainVersion === terrainVersion) return;
+    this.terrain = world.terrain; this.mapSize = world.mapSize; this.terrainVersion = terrainVersion;
+    const t = world.terrain;
+    const rings = [...t.coastline, ...(t.islands ?? []), ...t.lakes, ...t.rivers.map((r) => r.path)];
+    this.waterSafe = rings.every((ring) => ring.every((p) => Number.isFinite(p.x) && Number.isFinite(p.y)))
+      && t.rivers.every((r) => r.width.every(Number.isFinite));
+    this.water = [];
+    try { if (this.waterSafe) this.water = waterGround(world); } catch { this.waterSafe = false; }
+    // Terrain changes invalidate every dry-land permission, including cached macro pieces.
+    this.layers = new WeakMap(); this.quarters = new WeakMap(); this.protections = new WeakMap();
+  }
+
+  private dry(source: PolyH[], protection: PolyH[]): PolyH[] {
+    if (!this.waterSafe || !source.length || !finite(source) || !finite(protection) || !finite(this.water)) return [];
+    const boxes = source.map((p) => bboxOf(p.outer));
+    const near = (pieces: PolyH[]): PolyH[] => pieces.filter((p) => {
+      const b = bboxOf(p.outer);
+      return boxes.some((a) => a.x0 <= b.x1 && a.x1 >= b.x0 && a.y0 <= b.y1 && a.y1 >= b.y0);
+    });
+    try {
+      const protectedLand = unionMany(near(protection), 24, true);
+      const ground = differenceSafeS(unionMany(source, 24, true), protectedLand);
+      return differenceSafeS(ground, unionMany(near(this.water), 24, true));
+    } catch { return []; }
+  }
+
+  layer(u: UrbanLayer, version = 0): PolyH[] {
+    const cached = this.layers.get(u);
+    if (cached?.version === version) return cached.ground;
+    const ground = this.dry(layerGround(u), []);
+    this.layers.set(u, { version, ground });
+    return ground;
+  }
+
+  quarter(owner: UrbanLayer, q: MacroQuarter, version = 0): PolyH[] {
+    const cached = this.quarters.get(q);
+    if (cached?.owner === owner && cached.version === version) return cached.ground;
+    let protectedLand = this.protections.get(owner);
+    if (protectedLand?.version !== version) {
+      protectedLand = { version, pieces: protectedGround(owner) };
+      this.protections.set(owner, protectedLand);
+    }
+    const source = !owner.renderHints?.stilts && q.kind === 'quarter' && q.district !== 'gardens' ? [piece(q.pts)] : [];
+    const ground = this.dry(source, protectedLand.pieces);
+    this.quarters.set(q, { owner, version, ground });
+    return ground;
+  }
 }

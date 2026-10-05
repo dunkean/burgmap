@@ -80,9 +80,10 @@ function hash2(x: number, y: number): number {
 }
 
 export interface RasterResult { png: Uint8Array; w: number; h: number; /** Raw 8-bit RGB pixels (w*h*3), used by the canvas renderer. */ rgb?: Uint8Array }
+export interface TerrainPixels { w: number; h: number; rgb: Uint8Array }
 
 /** Hillshaded, hypsometric-tinted land image covering the whole map. */
-export function renderTerrainRaster(world: World, pal: Palette): RasterResult {
+export function renderTerrainPixels(world: World, pal: Palette): TerrainPixels {
   const hg = world.terrain.height;
   const n = hg.w;
   const up = pal.hatch > 0 ? Math.min(4, 1700 / n) : n >= 400 ? 1.5 : 2;
@@ -176,5 +177,11 @@ export function renderTerrainRaster(world: World, pal: Palette): RasterResult {
       out[o + 2] = Math.max(0, Math.min(255, (c[2] * k) * (1 - a) + inkRgb[2] * a));
     }
   }
-  return { png: encodePng(out, W, H, 3), w: W, h: H, rgb: out };
+  return { w: W, h: H, rgb: out };
+}
+
+/** Export encoding is deliberately separate from the interactive pixel path. */
+export function renderTerrainRaster(world: World, pal: Palette): RasterResult {
+  const pixels = renderTerrainPixels(world, pal);
+  return { ...pixels, png: encodePng(pixels.rgb, pixels.w, pixels.h, 3) };
 }

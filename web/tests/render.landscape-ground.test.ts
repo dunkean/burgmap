@@ -87,7 +87,14 @@ function landscapeCanvas(w: World) {
 function expectCanvasGround(w: World, ground: PolyH[], cx: number, cy: number): void {
   const canvas = landscapeCanvas(w); canvas.draw(cx, cy);
   const rings = ground.flatMap((p) => [orientPos(p.outer), ...p.holes.map((h) => orientPos(h).slice().reverse())]);
-  expect(canvas.bases.some((p) => JSON.stringify(p.rings) === JSON.stringify(rings))).toBe(true);
+  // The clip now contains only viewport candidates. Every retained ring must still be exact,
+  // and its nonzero membership must match the complete ground throughout the displayed view.
+  const exactRings = new Set(rings.map((p) => JSON.stringify(p)));
+  expect(canvas.bases.some((p) => p.rings.length > 0 && p.rings.every((r) => exactRings.has(JSON.stringify(r))))).toBe(true);
+  for (let y = cy - 700 / 1.2; y < cy + 700 / 1.2; y += 20) for (let x = cx - 900 / 1.2; x < cx + 900 / 1.2; x += 20) {
+    const inside = ground.some((p) => polygonContains(p.outer, { x, y }) && !p.holes.some((h) => polygonContains(h, { x, y })));
+    expect(canvas.bases.some((p) => p.contains(x, y)), `ground at ${x},${y}`).toBe(inside);
+  }
 }
 
 describe('opaque landscape ground across settlement models', () => {

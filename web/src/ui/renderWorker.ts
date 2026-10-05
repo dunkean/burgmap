@@ -7,7 +7,8 @@
  * worker never accumulates a backlog: the latest view always wins.
  */
 import { createCanvasRenderer, CanvasRenderer, CanvasLike } from '../render/canvas';
-import { buildScene, Scene } from '../render/scene';
+import { Scene } from '../render/scene';
+import { SceneBuilder } from '../render/sceneCache';
 import { biomePalette } from '../render/biomes';
 import type { World } from '../gen/types';
 import type { RRequest, RResponse, RView, DisplayOpts, WorldMsg, RAttach, PortMsg, SettlementMsg, QuarterMsg } from './protocol';
@@ -27,6 +28,7 @@ let world: World | null = null;
 let metaCache: { world: World; meta: ReturnType<typeof worldMeta> } | null = null;
 let final = false;
 let sceneCache: { world: World; contours: boolean; scene: Scene } | null = null;
+let sceneBuilder: SceneBuilder | null = null;
 let renderer: CanvasRenderer | null = null;
 let curDpr = 1;
 let ver = 0;
@@ -51,12 +53,15 @@ function rebuild(): number {
   const t0 = performance.now();
   const w: World = { ...world, options: { ...world.options, style: display.style as never, contours: !!display.contours, landuse: !!display.landuse, labels: display.labels, legend: display.legend } };
   if (!sceneCache || sceneCache.world !== world || sceneCache.contours !== !!display.contours) {
-    sceneCache = { world, contours: !!display.contours, scene: buildScene(w) };
+    sceneBuilder ??= new SceneBuilder();
+    sceneCache = { world, contours: !!display.contours, scene: sceneBuilder.update(w) };
   }
   // `dpr` stays a live getter: the page's devicePixelRatio can change between frames
-  const next = createCanvasRenderer(canvas as unknown as CanvasLike, w, display.style, { scene: sceneCache.scene, get dpr(): number { return curDpr; } });
-  next.setOverlays({ cartouche: final });
-  renderer?.dispose(); renderer = next;
+  if (!renderer?.update?.(w, sceneCache.scene, display.style)) {
+    const next = createCanvasRenderer(canvas as unknown as CanvasLike, w, display.style, { scene: sceneCache.scene, get dpr(): number { return curDpr; } });
+    renderer?.dispose(); renderer = next;
+  }
+  renderer.setOverlays({ cartouche: final });
   miniDirty = true; ver++;
   return performance.now() - t0;
 }
@@ -70,12 +75,13 @@ function announce(sceneMs: number): void {
 
 function onWorld(m: WorldMsg): void {
   if (m.gen !== gen || !m.final) return;
-  const previous = { world, worldGen, final, sceneCache };
+  const previous = { world, worldGen, final, sceneCache, sceneBuilder };
   world = m.world; worldGen = m.gen; final = true;
   sceneCache = null;
+  sceneBuilder = new SceneBuilder();
   let sceneMs: number;
   try { sceneMs = rebuild(); }
-  catch (error) { ({ world, worldGen, final, sceneCache } = previous); throw error; }
+  catch (error) { ({ world, worldGen, final, sceneCache, sceneBuilder } = previous); throw error; }
   announce(sceneMs);
 }
 
@@ -126,6 +132,7 @@ function onView(v: RView): void {
   if (!renderer || !canvas) { post({ type: 'frame', gen: worldGen, seq: v.seq, ver, view: v.view, w: v.w, h: v.h, dpr: v.dpr, ms: 0, band: 0, scale: v.view.scale, labels: [] }); return; }
   const pw = Math.max(1, Math.round(v.w * v.dpr)), ph = Math.max(1, Math.round(v.h * v.dpr));
   if (canvas.width !== pw || canvas.height !== ph) { canvas.width = pw; canvas.height = ph; }
+  const frameStart = performance.now();
   const st = renderer.draw(v.view);
   const bitmap = canvas.transferToImageBitmap();
   const out: Transferable[] = [bitmap];
@@ -138,7 +145,8 @@ function onView(v: RView): void {
     miniDirty = false; miniSize = v.mini;
   }
   const labels = renderer.lastPlaced().map((p) => ({ kind: p.label.kind, text: p.label.text, size: p.size }));
-  post({ type: 'frame', gen: worldGen, seq: v.seq, ver, view: v.view, w: v.w, h: v.h, dpr: v.dpr, bitmap, mini, ms: st.ms, band: st.band, scale: st.scale, labels }, out);
+  post({ type: 'frame', gen: worldGen, seq: v.seq, ver, view: v.view, w: v.w, h: v.h, dpr: v.dpr, bitmap, mini,
+    ms: performance.now() - frameStart, band: st.band, scale: st.scale, labels, stats: st }, out);
 }
 
 ctx.onmessage = (e: MessageEvent<RRequest>): void => {
@@ -159,7 +167,7 @@ ctx.onmessage = (e: MessageEvent<RRequest>): void => {
         break;
       }
       case 'view': onView(m); break;
-      case 'dispose': port?.close(); renderer?.dispose(); world = null; metaCache = null; renderer = null; break;
+      case 'dispose': port?.close(); renderer?.dispose(); world = null; metaCache = null; renderer = null; sceneBuilder = null; sceneCache = null; break;
     }
   } catch (err) {
     post({ type: 'error', gen: worldGen, error: String((err as Error)?.stack ?? err) });
