@@ -16,6 +16,10 @@ bugs and their evidence are recorded in [ROADMAP.md](ROADMAP.md).
   Five native cases pass, including both rendering backends, rotation and
   byte-identical classic SVG exports. This does not certify a green full suite.
   The previous release is tagged `pre-underdark-2026-10-05`.
+  Runtime source `79d5f0f` is pushed/tagged `underdark-2026-10-05`, Pages
+  `7ffc673`; the actual served HTML matches the tested final build SHA256
+  `5c48b790d8d6a5f627ac3ef35e58d73eb501ecc4f1d9f8994f6dfa996d84fa60`.
+  The temporary publishing worktree is removed; only the main worktree remains.
 - Local cleanup (2026-10-05, requested by user): all seven satellite worktrees
   are removed and Git worktree metadata is pruned; only this main worktree
   remains. Uncommitted roof experiments are preserved as a binary patch and

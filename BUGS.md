@@ -13,6 +13,8 @@ Agents: fix the open reports; parallel work is allowed. Remove a report after it
 
 ## List (written by the user)
 
+- les cadres sur petit ecran empietent sur la carte. Essaye de trouver une solution. → fixed in `79d5f0f`
+
 - Le problème de démarcation ville environnement vient de la ligne noire autour de la ville. Elle sert à rien vire là. Idem por les hameaux et extensions et le fait que les maison qui devraient être carrés soient coupés à la frontiere de la ville. Il faut garder le carré de la maison et qu'il déborde sur l'extérieur. En fait la fille avec enceinte coupe les maisons, celle sans, ne les coupe pas. Et tu remplis systématiquement les quatrier de gardens/yards et de fait le background est tout vert et ca peut choquer. Il serait bien que quelques quartier de la périphérique soit avec un background équivalent à lenvironnement. Regarde ce que tu peux faire pour améliorer ce visuel. Les background de jardins dans les villes doivent vraiment globalement être dans le style du biome. Par exemple une ville desertique comme tombouctou semble être construite à meme le desert. Vue de dessus, la ville ne se découpe pas, on ne voit que les maisons. J'aimerai qu'on puisse retrouver ca selon le biome et le type de ville. (Un citadelle est marquée parce que pavée ou autre, une tribu indienne dans la plain non, etc. etc.)
 
 État partiel du 2026-10-05 : bordures administratives supprimées et sols adaptés

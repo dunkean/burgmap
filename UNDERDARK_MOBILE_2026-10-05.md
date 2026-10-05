@@ -60,3 +60,10 @@ Le harnais attend une nouvelle frame présentée et ses dimensions CSS après
 rotation. Les attributs width/height du canvas bitmaprenderer restent ceux
 du canvas initial dans Chromium et ne constituent pas un oracle de resize.
 L'attente de fermeture du dialogue inclut également son événement close.
+
+Source intégrée `79d5f0f`, tag `underdark-2026-10-05` ; checkpoint précédent
+`pre-underdark-2026-10-05`. Publication Pages `7ffc673` : le HTML servi à
+https://dunkean.github.io/burgmap/ est identique au build contrôlé, 8 212 168
+octets, SHA256
+`5c48b790d8d6a5f627ac3ef35e58d73eb501ecc4f1d9f8994f6dfa996d84fa60`.
+Le worktree temporaire de publication a été supprimé ; seul le principal reste.
