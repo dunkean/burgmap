@@ -25,6 +25,9 @@ export interface PolyLayer {
   /** Optional holes per polygon (same indexing as polys). */
   holes?: (Polygon[] | undefined)[];
   index: TileIndex;
+  /** Stable contributing-part identities per tile, supplied by the incremental builder. */
+  tileKeys?: string[];
+  bigKeys?: string[];
 }
 export interface LineLayer {
   name: string;
@@ -35,6 +38,8 @@ export interface LineLayer {
   width: number;
   lines: Polyline[];
   index: TileIndex;
+  tileKeys?: string[];
+  bigKeys?: string[];
 }
 export interface DensityMap { w: number; h: number; cell: number; /** built-up fraction 0..1 */ cov: Float32Array; max: number }
 export interface TextureArea { kind: LandKind; poly: Polygon; holes?: Polygon[] }
@@ -52,6 +57,10 @@ export interface Scene {
   /** Number of source geometries indexed (for stats). */
   counts: Record<string, number>;
   buildMs: number;
+  /** Changed source bounds; absent means a complete scene replacement. */
+  dirty?: { minX: number; minY: number; maxX: number; maxY: number }[];
+  /** Exact merged renderer view assembled from retained immutable parts, avoiding repeated stand-in generation. */
+  renderedWorld?: World;
 }
 
 /**
@@ -148,8 +157,19 @@ export function buildDensity(world: World, cell = 60): DensityMap | null {
   return { w, h: w, cell, cov, max };
 }
 
-export function buildScene(world0: World, tileSize = TILE_SIZE): Scene {
-  const world = renderView(world0);
+export interface SceneBuildOptions {
+  /** Already merged input, used for stable independently prepared urban parts. */
+  rendered?: World;
+  scope?: 'static' | 'urban';
+  ground?: PolyH[];
+  skipGround?: boolean;
+  strokeSpace?: PolyH[];
+  /** Geometry-only parts use one compact index; polyline chunk lengths remain unchanged. */
+  indexTileSize?: number;
+}
+
+export function buildScene(world0: World, tileSize = TILE_SIZE, build: SceneBuildOptions = {}): Scene {
+  const world = build.rendered ?? renderView(world0);
   const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
   const S = world.mapSize;
   const poly = new Map<string, PolyLayer>();
@@ -157,7 +177,7 @@ export function buildScene(world0: World, tileSize = TILE_SIZE): Scene {
   const counts: Record<string, number> = {};
   const addPoly = (name: string, polys: Polygon[], holes?: (Polygon[] | undefined)[]) => {
     if (!polys.length) return;
-    poly.set(name, polyLayer(name, polys, S, tileSize, holes));
+    poly.set(name, polyLayer(name, polys, S, build.indexTileSize ?? tileSize, holes));
     counts[name] = polys.length;
   };
   const chunkDim = tileSize * 0.5;
@@ -165,10 +185,13 @@ export function buildScene(world0: World, tileSize = TILE_SIZE): Scene {
     const chunks: Polyline[] = [];
     for (const pl of src) for (const c of chunkPolyline(pl, chunkDim)) chunks.push(c);
     if (!chunks.length) return;
-    lines.push(lineLayer(name, role, kind, width, chunks, S, tileSize));
+    lines.push(lineLayer(name, role, kind, width, chunks, S, build.indexTileSize ?? tileSize));
     counts[name] = chunks.length;
   };
 
+  const textures: TextureLayer[] = [];
+  const furrowAreas: FurrowArea[] = [];
+  if (build.scope !== 'urban') {
   const t = world.terrain;
   const swi = seaWithIslands(t.coastline, t.islands);
   addPoly('sea', swi.sea, swi.holes.map((h) => (h.length ? h : undefined)));
@@ -196,8 +219,6 @@ export function buildScene(world0: World, tileSize = TILE_SIZE): Scene {
   }
 
   // land use
-  const textures: TextureLayer[] = [];
-  const furrowAreas: FurrowArea[] = [];
   const lu = world.landuse;
   if (lu) {
     const tones: Polygon[][] = [[], [], [], []];
@@ -255,17 +276,18 @@ export function buildScene(world0: World, tileSize = TILE_SIZE): Scene {
   for (const kind of ['track', 'minor', 'major'] as const) {
     addLines('road-' + kind, 'road', kind, roadW[kind], (world.roads ?? []).filter((r) => r.kind === kind).map((r) => r.path));
   }
+  }
 
   // urban (same layering as render/urban.ts)
   const ur = world.urban;
-  if (ur) {
+  if (ur && build.scope !== 'static') {
     const addH = (name: string, l: PolyH[]): void => addPoly(name, l.map((p) => p.outer), l.map((p) => (p.holes.length ? p.holes : undefined)));
-    const fringe = world0.landuse?.landscapeGround === undefined ? countrysideFringe(world0) : { bands: [], ground: [], streets: [] };
+    const fringe = !build.skipGround && world0.landuse?.landscapeGround === undefined ? countrysideFringe(world0) : { bands: [], ground: [], streets: [] };
     fringe.bands.forEach((pieces, i) => addH('u-country-fringe-' + i, pieces));
     addH('u-country-fringe', fringe.ground);
-    addH('u-natural-ground', (world0.landuse?.landscapeGround === undefined ? world0.landuse?.naturalGround ?? [] : []).map((p) => ({ outer: orientPos(p.outer),
+    addH('u-natural-ground', (!build.skipGround && world0.landuse?.landscapeGround === undefined ? world0.landuse?.naturalGround ?? [] : []).map((p) => ({ outer: orientPos(p.outer),
       holes: p.holes.map((h) => orientPos(h).slice().reverse()) })));
-    addH('u-landscape-ground', currentLandscapeGround(world0).map((p) => ({ outer: orientPos(p.outer),
+    addH('u-landscape-ground', (build.ground ?? (build.skipGround ? [] : currentLandscapeGround(world0))).map((p) => ({ outer: orientPos(p.outer),
       holes: p.holes.map((h) => orientPos(h).slice().reverse()) })));
     const fringeStreets = new Map<number, Polyline[]>();
     for (const st of fringe.streets) {
@@ -276,7 +298,7 @@ export function buildScene(world0: World, tileSize = TILE_SIZE): Scene {
     for (const [width, paths] of fringeStreets) addLines('country-street-' + width, 'fringe-street', 'street', width, paths);
     addPoly('footprint', ur.footprint);
     addH('u-streets', ur.quarters.map((q) => ({ outer: orientPos(q.poly.outer), holes: q.poly.holes.map((h) => orientPos(h).slice().reverse()) })));
-    addH('u-stroke-space', urbanStrokeSpace(ur));
+    addH('u-stroke-space', build.strokeSpace ?? urbanStrokeSpace(ur));
     const parcelsOf = (use: string[]): Polygon[] => ur.parcels.filter((p) => use.includes(p.use)).map((p) => p.poly);
     const PU = URBAN_PARCEL_USES;
     addPoly('u-places', parcelsOf([...PU.places]));
@@ -390,7 +412,7 @@ export function buildScene(world0: World, tileSize = TILE_SIZE): Scene {
     }
   }
 
-  const density = buildDensity(world);
+  const density = build.scope ? null : buildDensity(world);
   const t1 = typeof performance !== 'undefined' ? performance.now() : Date.now();
   const furrows = furrowAreas.length ? { areas: furrowAreas, index: new TileIndex(S, tileSize, boxesOf(furrowAreas.map((a) => a.poly)), 'overlap') } : undefined;
   return { mapSize: S, tileSize, poly, lines, textures, furrows, density, counts, buildMs: t1 - t0 };

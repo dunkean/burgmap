@@ -3,7 +3,7 @@ import type { World } from '../src/gen/types';
 import type { PortMsg, RRequest, RResponse } from '../src/ui/protocol';
 
 const recorded = vi.hoisted(() => ({ builds: [] as string[], draws: [] as string[] }));
-vi.mock('../src/render/scene', () => ({ buildScene: () => ({}) }));
+vi.mock('../src/render/sceneCache', () => ({ SceneBuilder: class { update(): object { return {}; } } }));
 vi.mock('../src/render/canvas', () => ({ createCanvasRenderer: (_canvas: unknown, world: World) => {
   const seed = world.options.seed; recorded.builds.push(seed);
   if (seed === 'broken') throw new Error('scene construction failed');

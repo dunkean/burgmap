@@ -20,7 +20,8 @@ import { CANVAS_MAP_STROKES as MAP_STROKES, mapStrokeWidth } from './strokes';
 import { NATURAL_LAND_KINDS, countryKind, FRINGE_ORDER, FRINGE_PAINT } from './countryside';
 import { TERRACE_STROKES as TS, terraceDetailAlpha } from './terraces';
 import { regionalBridgeSurface, regionalRoadSurface } from './roadSurfaces';
-import { renderTerrainRaster } from './raster';
+import { renderTerrainPixels } from './raster';
+import { RasterTileCache } from './rasterTiles';
 import { buildScene, Scene, PolyLayer, LineLayer, TextureLayer, textureMarks, LAND_ORDER, WALL_LINE_W, CAMP_FENCE_W, FENCE_STYLE } from './scene';
 import { renderView } from '../gen/settlements/merge';
 import { selectLod, lineWidth, Lod, BAND_MIN_EDGE, WAY_SCALE, FURROW_MIN_PX, FURROW_HOLDER_BUDGET } from './lod';
@@ -46,6 +47,9 @@ export interface CanvasRendererDeps {
   tileSize?: number;
   /** Pre-built scene (avoids rebuilding when only the style changes). */
   scene?: Scene;
+  /** Disable the raster tile path for diagnostics or constrained hosts. */
+  raster?: boolean;
+  rasterBytes?: number;
 }
 
 export interface FrameStats {
@@ -54,6 +58,7 @@ export interface FrameStats {
   buildingsCandidate: number; buildingsDrawn: boolean; textureTiles: number;
   /** Dedicated furrow records (three paths each); separate from the shared tile path cache. */
   furrowCache?: number; furrowsDrawn?: number;
+  rasterHits?: number; rasterBuilt?: number; rasterBytes?: number;
 }
 
 export interface Overlays { labels: boolean; legend: boolean; cartouche: boolean }
@@ -62,6 +67,8 @@ export interface CanvasRenderer {
   scene: Scene;
   palette: Palette;
   draw(view: View): FrameStats;
+  /** Reuse immutable scene tiles and resources after detail arrival. False requires a new renderer. */
+  update(world: World, scene: Scene, style?: MapStyle | Palette): boolean;
   setLabels(labels: Label[]): void;
   /** Toggle the name labels, the legend and the cartouche (defaults: labels per world.options.labels, legend per world.options.legend, cartouche on). */
   setOverlays(o: Partial<Overlays>): void;
@@ -102,6 +109,7 @@ const TEX_SALT: Record<string, number> = { forest: 11, orchard: 23, meadow: 37, 
 type PathMap = Map<string, Path2D | null>;
 type FurrowPaths = { holder: Path2D; strips: Path2D; lines: Path2D };
 const FURROW_CACHE_MAX = FURROW_HOLDER_BUDGET * 2;
+const TERRAIN_IMAGES = new WeakMap<World['terrain'], WeakMap<Palette, { mapSize: number; image: CanvasImageSource }>>();
 
 function addRing(path: Path2D, ring: Vec2[]): void {
   if (ring.length < 3) return;
@@ -163,9 +171,10 @@ function defaultCreateCanvas(w: number, h: number): CanvasLike | null {
 }
 
 export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: MapStyle | Palette, deps: CanvasRendererDeps = {}): CanvasRenderer {
-  const world = renderView(world0);
+  let sourceWorld = world0;
+  let world = deps.scene?.renderedWorld ? { ...deps.scene.renderedWorld, options: world0.options } : renderView(world0);
   const pal = biomePalette(style, world.options.biome);
-  const scene = deps.scene ?? buildScene(world0, deps.tileSize);
+  let scene = deps.scene ?? buildScene(world0, deps.tileSize);
   const S = world.mapSize;
   const now = deps.now ?? (() => (typeof performance !== 'undefined' ? performance.now() : Date.now()));
   const P: new () => Path2D = deps.Path2D ?? (globalThis as unknown as { Path2D: new () => Path2D }).Path2D;
@@ -177,7 +186,7 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
   let built = 0;
   let labels: Label[] = [];
   const overlays: Overlays = { labels: world.options.labels !== false, legend: !!world.options.legend, cartouche: true };
-  const mapLabels: MapLabel[] = buildMapLabels(world, pal.name, pal);
+  let mapLabels: MapLabel[] = buildMapLabels(world, pal.name, pal);
   const family = FONT_STACKS[pal.name] ?? pal.fontFamily;
   const widthCache = new Map<string, number>();
   let placedLast: PlacedMapLabel[] = [];
@@ -187,6 +196,8 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
   const patterns = new Map<string, CanvasPattern | null>();
   let litCache: Float32Array | undefined;
   let stats: FrameStats = { band: 0, scale: 0, ms: 0, tilesDrawn: 0, bigDrawn: 0, pathsBuilt: 0, pathCache: 0, buildingsCandidate: 0, buildingsDrawn: false, textureTiles: 0 };
+  const rasterCache = new RasterTileCache<CanvasImageSource>(deps.rasterBytes);
+  let rasterFailed = false;
 
   const polyL = (n: string): PolyLayer | undefined => scene.poly.get(n);
   const linesOf = (pred: (l: LineLayer) => boolean): LineLayer[] => scene.lines.filter(pred);
@@ -224,7 +235,48 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
         for (const k of cache.keys()) { cache.delete(k); if (--drop <= 0) break; }
       }
     }
+    cache.delete(key); cache.set(key, p);
     return p;
+  }
+
+  /** A clip contains only candidate tiles in this view, and remains exact (no LOD decimation). */
+  function visibleClip(l: PolyLayer, rect: Rect4): Path2D | null {
+    const tiles = l.index.tilesInRect(rect), big = l.index.bigInRect(rect);
+    const stamp = tiles.map((t) => `${t}:${l.tileKeys?.[t] ?? ''}`).join(';') + '|' + big.map((i) =>
+      `${i}:${l.bigKeys?.[Array.prototype.indexOf.call(l.index.big, i)] ?? ''}`).join(';');
+    return cached(`${l.name}|clip|${stamp}`, () => {
+      const ids: number[] = [];
+      for (const t of tiles) for (const i of l.index.itemsOf(t)) ids.push(i);
+      ids.push(...big);
+      return polyPath(P, l, ids, 0);
+    });
+  }
+
+  function paintMargin(scale: number, input: Scene = scene): number {
+    let width = 10 * u;
+    for (const l of input.lines) width = Math.max(width, l.width * (l.role === 'wall' ? pal.urban.wallScale : 1));
+    const sh = pal.urban.shadow;
+    return width + (sh ? Math.max(Math.abs(sh.dx), Math.abs(sh.dy)) : 2) + 32 / scale;
+  }
+
+  function update(nextSource: World, nextScene: Scene, nextStyle: MapStyle | Palette = style): boolean {
+    if (nextSource.mapSize !== S || biomePalette(nextStyle, nextSource.options.biome) !== pal) return false;
+    // Prepare potentially fallible metadata before committing the replacement.
+    const nextWorld = nextScene.renderedWorld ? { ...nextScene.renderedWorld, options: nextSource.options } : renderView(nextSource);
+    const nextLabels = buildMapLabels(nextWorld, pal.name, pal);
+    const terrainChanged = nextSource.terrain !== sourceWorld.terrain;
+    if (terrainChanged || nextScene.poly.get('sea') !== scene.poly.get('sea') || nextScene.poly.get('lakes') !== scene.poly.get('lakes')) landPath = undefined;
+    if (terrainChanged) terrainImg = undefined;
+    if (nextScene.density?.cov !== scene.density?.cov) densityImg = undefined;
+    if (nextScene.furrows !== scene.furrows) furrowCache.clear();
+    if (nextScene !== scene && !nextScene.dirty) cache.clear();
+    if (world.options.landuse !== nextSource.options.landuse || world.options.contours !== nextSource.options.contours) rasterCache.clear();
+    // Entries can predate several scene updates; expand by the new absolute paint radius, not a last-update delta.
+    else if (nextScene !== scene) rasterCache.invalidate(nextScene.dirty, paintMargin(1, nextScene));
+    scene = nextScene; sourceWorld = nextSource; world = nextWorld; mapLabels = nextLabels;
+    overlays.labels = world.options.labels !== false; overlays.legend = !!world.options.legend;
+    legendPanel = null; litCache = undefined;
+    return true;
   }
 
   /** One bounded LRU record per holder, so plough textures never evict paths used by other map layers. */
@@ -258,11 +310,17 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
     try {
       if (deps.terrain) terrainImg = deps.terrain(world, pal);
       else {
-        const r = renderTerrainRaster(world, pal);
+        const shared = !deps.createCanvas && TERRAIN_IMAGES.get(world.terrain)?.get(pal);
+        if (shared && shared.mapSize === world.mapSize) return (terrainImg = shared.image);
+        const r = renderTerrainPixels(world, pal);
         if (r.rgb) {
           const rgba = new Uint8ClampedArray(r.w * r.h * 4);
           for (let i = 0, j = 0; i < r.w * r.h; i++, j += 4) { rgba[j] = r.rgb[i * 3]; rgba[j + 1] = r.rgb[i * 3 + 1]; rgba[j + 2] = r.rgb[i * 3 + 2]; rgba[j + 3] = 255; }
           terrainImg = toBitmap(rgba, r.w, r.h);
+          if (terrainImg && !deps.createCanvas) {
+            const palettes = TERRAIN_IMAGES.get(world.terrain) ?? new WeakMap<Palette, { mapSize: number; image: CanvasImageSource }>();
+            palettes.set(pal, { mapSize: world.mapSize, image: terrainImg }); TERRAIN_IMAGES.set(world.terrain, palettes);
+          }
         } else terrainImg = null;
       }
     } catch { terrainImg = null; }
@@ -305,25 +363,97 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
   }
 
   // ---- frame ---------------------------------------------------------------------------
+  function rasterBudget(rect: Rect4, scale: number): string {
+    const count = (l?: PolyLayer): number => l ? l.index.tilesInRect(rect).reduce((n, t) => n + l.index.itemsOf(t).length, l.index.bigInRect(rect).length) : 0;
+    const masses = count(polyL('u-masses')), buildings = count(polyL('u-bldg'));
+    let furrows = 0;
+    if (scene.furrows) for (const i of scene.furrows.index.query(rect)) {
+      const b = i * 4, boxes = scene.furrows.index.boxes;
+      if (Math.min(boxes[b + 2] - boxes[b], boxes[b + 3] - boxes[b + 1]) * scale >= FURROW_MIN_PX) furrows++;
+      if (furrows > FURROW_HOLDER_BUDGET) break;
+    }
+    return `${masses <= BUILDING_BUDGET_FULL},${masses <= BUILDING_BUDGET_MAX},${buildings <= BUILDING_BUDGET_INDIV},${furrows <= FURROW_HOLDER_BUDGET}|` +
+      scene.textures.map((tl) => `${tl.kind}:${tl.index.tilesInRect(rect).length <= 500}`).join(',');
+  }
+
+  /** Rasterize map geometry once per exact scale/DPR tile; labels and panels stay crisp and viewport-aware. */
   function draw(view: View): FrameStats {
-    const t0 = now();
+    if (deps.raster === false || rasterFailed) return drawVector(view);
+    const start = now(), dpr = deps.dpr ?? (globalThis as { devicePixelRatio?: number }).devicePixelRatio ?? 1;
     const ctx = canvas.getContext('2d');
+    if (!ctx) return stats;
+    const cssW = canvas.width / dpr, cssH = canvas.height / dpr, rect = viewRect(view, cssW, cssH);
+    const k = view.scale * dpr, tilePx = 512, gutter = 32, tileSize = tilePx / k;
+    const x0 = Math.floor(rect.minX / tileSize), y0 = Math.floor(rect.minY / tileSize);
+    const x1 = Math.floor(rect.maxX / tileSize), y1 = Math.floor(rect.maxY / tileSize);
+    const budget = rasterBudget(rect, view.scale);
+    const requests: { key: string; x: number; y: number }[] = [];
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) requests.push({ key: `${view.scale}|${dpr}|${budget}|${x},${y}`, x, y });
+    if (requests.length * (tilePx + 2 * gutter) ** 2 * 4 > rasterCache.maxBytes) return drawVector(view);
+    // Resolve every missing resource before painting the target, so allocation refusal retains the vector fallback.
+    const tiles: { image: CanvasImageSource; x: number; y: number }[] = [];
+    let rasterBuilt = 0, rasterHits = 0, pathsBuilt = 0;
+    let mapStats: FrameStats | undefined;
+    try {
+      for (const request of requests) {
+        let image = rasterCache.get(request.key);
+        if (image) rasterHits++;
+        else {
+          const target = makeCanvas(tilePx + 2 * gutter, tilePx + 2 * gutter);
+          if (!target?.getContext('2d')) { rasterFailed = true; rasterCache.clear(); return drawVector(view); }
+          const tileView = { cx: (request.x + 0.5) * tileSize, cy: (request.y + 0.5) * tileSize, scale: view.scale };
+          const st = drawVector(tileView, target, 'map', rect); pathsBuilt += st.pathsBuilt; mapStats = st;
+          const offscreen = target as CanvasLike & { transferToImageBitmap?: () => ImageBitmap };
+          const bytes = target.width * target.height * 4;
+          image = offscreen.transferToImageBitmap ? offscreen.transferToImageBitmap() : target as unknown as CanvasImageSource;
+          if (offscreen.transferToImageBitmap) { target.width = 0; target.height = 0; }
+          const resource = image;
+          const margin = paintMargin(view.scale) + gutter / k;
+          rasterCache.put(request.key, { value: resource, bytes,
+            bounds: { minX: request.x * tileSize - margin, minY: request.y * tileSize - margin,
+              maxX: (request.x + 1) * tileSize + margin, maxY: (request.y + 1) * tileSize + margin },
+            release: () => { if ('close' in resource && typeof resource.close === 'function') resource.close(); else { target.width = 0; target.height = 0; } } });
+          rasterBuilt++;
+        }
+        tiles.push({ image, x: request.x, y: request.y });
+      }
+      ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+      ctx.imageSmoothingEnabled = true;
+      for (const tile of tiles) {
+        const x = (tile.x * tileSize - rect.minX) * k - gutter, y = (tile.y * tileSize - rect.minY) * k - gutter;
+        // Overlapping identical gutters avoid antialias seams at fractional camera positions.
+        ctx.drawImage(tile.image, x, y);
+      }
+      const overlay = drawVector(view, canvas, 'overlays');
+      stats = { ...(mapStats ?? overlay), ms: now() - start, band: selectLod(view.scale).band, scale: view.scale,
+        pathsBuilt, pathCache: cache.size, rasterHits, rasterBuilt, rasterBytes: rasterCache.bytes };
+      return stats;
+    } catch {
+      rasterFailed = true; rasterCache.clear(); return drawVector(view);
+    }
+  }
+
+  function drawVector(view: View, target: CanvasLike = canvas, mode: 'all' | 'map' | 'overlays' = 'all', fullRect?: Rect4): FrameStats {
+    const t0 = now();
+    const ctx = target.getContext('2d');
     if (!ctx) return stats;
     const built0 = built;
     const dpr = deps.dpr ?? (globalThis as unknown as { devicePixelRatio?: number }).devicePixelRatio ?? 1;
-    const cssW = canvas.width / dpr, cssH = canvas.height / dpr;
+    const cssW = target.width / dpr, cssH = target.height / dpr;
     const sc = view.scale;
     const lod: Lod = selectLod(sc);
     const band = lod.band;
-    const rect: Rect4 = viewRect(view, cssW, cssH, 0);
+    const rect: Rect4 = viewRect(view, cssW, cssH, fullRect ? paintMargin(view.scale) : 0);
+    const budgetRect = fullRect ?? rect;
     const fs: FrameStats = { band, scale: sc, ms: 0, tilesDrawn: 0, bigDrawn: 0, pathsBuilt: 0, pathCache: 0, buildingsCandidate: 0, buildingsDrawn: false, textureTiles: 0 };
     const minEdge = BAND_MIN_EDGE[band];
 
+    if (mode !== 'overlays') {
     // background (device pixels)
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.globalAlpha = 1;
     ctx.fillStyle = pal.paper;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillRect(0, 0, target.width, target.height);
     // world -> device
     ctx.setTransform(dpr * sc, 0, 0, dpr * sc, dpr * (cssW / 2 - view.cx * sc), dpr * (cssH / 2 - view.cy * sc));
     ctx.lineJoin = 'round'; ctx.lineCap = 'round';
@@ -339,11 +469,11 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
     const polyPaths = (l: PolyLayer): Path2D[] => {
       const out: Path2D[] = [];
       for (const t of l.index.tilesInRect(rect)) {
-        const p = cached(`${l.name}|${band}|t${t}`, () => polyPath(P, l, l.index.itemsOf(t), minEdge));
+        const p = cached(`${l.name}|${band}|t${t}|${l.tileKeys?.[t] ?? ""}`, () => polyPath(P, l, l.index.itemsOf(t), minEdge));
         if (p) { out.push(p); fs.tilesDrawn++; }
       }
       for (const i of l.index.bigInRect(rect)) {
-        const p = cached(`${l.name}|${band}|b${i}`, () => polyPath(P, l, [i], minEdge));
+        const p = cached(`${l.name}|${band}|b${i}|${l.bigKeys?.[Array.prototype.indexOf.call(l.index.big, i)] ?? ""}`, () => polyPath(P, l, [i], minEdge));
         if (p) { out.push(p); fs.bigDrawn++; }
       }
       return out;
@@ -351,11 +481,11 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
     const linePaths = (l: LineLayer): Path2D[] => {
       const out: Path2D[] = [];
       for (const t of l.index.tilesInRect(rect)) {
-        const p = cached(`${l.name}|${band}|t${t}`, () => linePath(P, l, l.index.itemsOf(t), minEdge));
+        const p = cached(`${l.name}|${band}|t${t}|${l.tileKeys?.[t] ?? ""}`, () => linePath(P, l, l.index.itemsOf(t), minEdge));
         if (p) { out.push(p); fs.tilesDrawn++; }
       }
       for (const i of l.index.bigInRect(rect)) {
-        const p = cached(`${l.name}|${band}|b${i}`, () => linePath(P, l, [i], minEdge));
+        const p = cached(`${l.name}|${band}|b${i}|${l.bigKeys?.[Array.prototype.indexOf.call(l.index.big, i)] ?? ""}`, () => linePath(P, l, [i], minEdge));
         if (p) { out.push(p); fs.bigDrawn++; }
       }
       return out;
@@ -439,7 +569,7 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
         const fade = Math.min(1, (furrowSpacing(S) * sc - 1.5) / 1.5);
         const visible: number[] = [], boxes = scene.furrows.index.boxes;
         // TileIndex.query returns sorted unique ids. Cull by precomputed projected bbox before allocating paths.
-        for (const i of scene.furrows.index.query(rect)) {
+        for (const i of scene.furrows.index.query(budgetRect)) {
           const b = i * 4;
           if (Math.min(boxes[b + 2] - boxes[b], boxes[b + 3] - boxes[b + 1]) * sc < FURROW_MIN_PX) continue;
           visible.push(i);
@@ -447,6 +577,7 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
         }
         // Skip the entire plough texture over budget rather than rendering an arbitrary subset of fields.
         if (visible.length <= FURROW_HOLDER_BUDGET) for (const i of visible) {
+          if (!scene.furrows.index.boxHits(i, rect)) continue;
           const { holder, strips, lines } = furrowPaths(i);
           ctx.save(); ctx.clip(holder); ctx.clip(strips);
           ctx.strokeStyle = pal.furrow; ctx.lineWidth = mapStrokeWidth(MAP_STROKES.furrow, sc);
@@ -489,7 +620,7 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
     }
     // textures (procedural marks, visible tiles only, cached per tile)
     if (lod.textures && luOn) {
-      for (const tl of scene.textures) if (pal.tex[tl.kind]) fs.textureTiles += drawTexture(ctx, tl, rect, band, lw);
+      for (const tl of scene.textures) if (pal.tex[tl.kind]) fs.textureTiles += drawTexture(ctx, tl, rect, band, lw, budgetRect);
     }
 
     // 3. rivers + water
@@ -697,7 +828,7 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
 
       const natural = polyL('u-landscape-ground') ?? polyL('u-natural-ground');
       if (natural && natural.index.query(rect).length) {
-        const clip = cached(natural.name + '|clip', () => polyPath(P, natural, natural.polys.map((_, id) => id), 0));
+        const clip = visibleClip(natural, rect);
         if (clip) {
           ctx.save(); ctx.clip(clip, 'nonzero'); ctx.globalAlpha = 1;
           if (tex) drawVisibleTerrain();
@@ -713,7 +844,7 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
               if (kind === 'forest' && lod.strips) strokePolys(name, pal.treeInk, lw(0.7, 0.8), pal.tex.forest ? 0.5 : 0.35);
             }
             if (lod.textures) for (const tl of scene.textures) {
-              if ((NATURAL_LAND_KINDS as readonly string[]).includes(tl.kind) && pal.tex[tl.kind]) fs.textureTiles += drawTexture(ctx, tl, rect, band, lw);
+              if ((NATURAL_LAND_KINDS as readonly string[]).includes(tl.kind) && pal.tex[tl.kind]) fs.textureTiles += drawTexture(ctx, tl, rect, band, lw, budgetRect);
             }
           }
           // Keep the original cased/dashed regional-road rendering within the restored ground.
@@ -751,8 +882,8 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
       const masses = polyL('u-masses');
       if (lod.buildings && masses) {
         let cand = 0;
-        for (const t of masses.index.tilesInRect(rect)) cand += masses.index.tileStart[t + 1] - masses.index.tileStart[t];
-        cand += masses.index.bigInRect(rect).length;
+        for (const t of masses.index.tilesInRect(budgetRect)) cand += masses.index.tileStart[t + 1] - masses.index.tileStart[t];
+        cand += masses.index.bigInRect(budgetRect).length;
         fs.buildingsCandidate = cand;
         if (cand <= BUILDING_BUDGET_MAX) {
           fs.buildingsDrawn = true;
@@ -777,8 +908,8 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
           const bl = polyL('u-bldg');
           let indiv = 0;
           if (lod.individual && bl) {
-            for (const t of bl.index.tilesInRect(rect)) indiv += bl.index.tileStart[t + 1] - bl.index.tileStart[t];
-            indiv += bl.index.bigInRect(rect).length;
+            for (const t of bl.index.tilesInRect(budgetRect)) indiv += bl.index.tileStart[t + 1] - bl.index.tileStart[t];
+            indiv += bl.index.bigInRect(budgetRect).length;
           }
           if (lod.individual && bl && indiv <= BUILDING_BUDGET_INDIV) {
             // one building at a time (as in the SVG): roof fill, then a thin outline so party walls show as lines
@@ -909,7 +1040,7 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
       if (land && !stilts) ctx.clip(land, 'evenodd');
       if (thin.length && !stilts && !open) {
         const space = polyL('u-stroke-space');
-        const clip = space && cached('urban-stroke-clip', () => polyPath(P, space, Array.from({ length: space.polys.length }, (_, i) => i), 0));
+        const clip = space && visibleClip(space, rect);
         if (clip) ctx.clip(clip, 'nonzero');
         else thin.length = 0;
       }
@@ -938,7 +1069,9 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
     if (!world.urban && world.site) drawSiteMarker(ctx, world, pal, u, sc);
 
     ctx.restore();
+    }
     ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+    if (mode !== 'map') {
     // 7. map frame (screen space, around the map rectangle)
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.setLineDash([]);
@@ -997,6 +1130,7 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
       drawPanelCanvas(ctx, legendPanel, inside ? Math.max(12, mx0 + pm) : 12, inside ? Math.max(12, Math.min(home, mapBottom - pm - legendPanel.h)) : home, family);
     }
     ctx.setTransform(1, 0, 0, 1, 0, 0);
+    }
 
     fs.pathsBuilt = built - built0;
     fs.pathCache = cache.size;
@@ -1025,13 +1159,13 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
     ctx.globalAlpha = 1; ctx.lineWidth = w; ctx.stroke(path);
   }
 
-  function drawTexture(ctx: CanvasRenderingContext2D, tl: TextureLayer, rect: Rect4, band: number, lw: (w: number, m: number) => number): number {
+  function drawTexture(ctx: CanvasRenderingContext2D, tl: TextureLayer, rect: Rect4, band: number, lw: (w: number, m: number) => number, budgetRect: Rect4 = rect): number {
     const base = TEX[tl.kind];
     if (!base) return 0;
     const crown = pal.treeShape === 'crown' && (tl.kind === 'forest' || tl.kind === 'orchard');
     const spec: TexSpec = pal.treeShape === 'dot' && (tl.kind === 'forest' || tl.kind === 'orchard') ? { ...base, r: base.r * 0.5 } : base;
     const tiles = tl.index.tilesInRect(rect);
-    if (tiles.length > 500) return 0;
+    if (tl.index.tilesInRect(budgetRect).length > 500) return 0;
     const fillP: Path2D[] = [], strokeP: Path2D[] = [];
     for (const t of tiles) {
       const key = `tex-${tl.kind}|${band}|t${t}`;
@@ -1110,14 +1244,14 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
   }
 
   return {
-    scene, palette: pal,
-    draw,
+    get scene() { return scene; }, palette: pal,
+    draw, update,
     setLabels(l: Label[]) { labels = l; },
     setOverlays(o: Partial<Overlays>) { Object.assign(overlays, o); },
     lastPlaced: () => placedLast,
     drawMinimap,
     lastStats: () => stats,
-    dispose() { cache.clear(); furrowCache.clear(); terrainImg = densityImg = undefined; },
+    dispose() { cache.clear(); furrowCache.clear(); rasterCache.clear(); terrainImg = densityImg = undefined; },
   };
 }
 

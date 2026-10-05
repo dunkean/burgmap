@@ -11,6 +11,7 @@ import type { Options } from '../gen/options';
 import type { World, Vec2 } from '../gen/types';
 import type { View } from '../render/view';
 import type { MapStyle } from '../render/styles';
+import type { FrameStats } from '../render/canvas';
 
 /** Display-only options (changing them never regenerates the world). */
 export interface DisplayOpts { style: MapStyle; contours?: boolean; landuse?: boolean; labels?: boolean; legend?: boolean }
@@ -70,5 +71,6 @@ export interface RFrame {
   bitmap?: ImageBitmap; mini?: ImageBitmap;
   ms: number; band: number; scale: number;
   labels: { kind: string; text: string; size: number }[];
+  stats?: FrameStats;
 }
 export type RResponse = RReady | RContent | RFrame | { type: 'error'; gen: number; error: string };
