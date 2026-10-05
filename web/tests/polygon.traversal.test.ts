@@ -4,7 +4,9 @@ import { createHash } from 'node:crypto';
 import upstream from 'polygon-clipping';
 import vendored from '../src/vendor/polygonClipping';
 import fixture from './fixtures/polygon-traversal-p4uefz.json';
+import waterFixture from './fixtures/polygon-traversal-water-seed2.json';
 import { differenceS, differenceSafeS, tryDifferenceS, fromGeom, mpArea } from '../src/gen/geo/bool';
+import type { MultiPoly } from '../src/gen/geo/bool';
 import { area, bboxOf } from '../src/gen/geo/poly';
 import type { Polygon } from '../src/gen/types';
 
@@ -84,5 +86,46 @@ describe('bounded consumed-neighbour traversal in polygon clipping', () => {
       expect(differenceSafeS(a, b)).toEqual([]);
       expect(failure).toHaveBeenCalledTimes(3);
     } finally { failure.mockRestore(); }
+  });
+
+  it('bounds the captured natural-road water difference without changing its exact kernel inputs', () => {
+    const before = JSON.stringify(waterFixture);
+    expect(waterFixture.kernel.type).toBe('difference');
+    expect(createHash('sha256').update(JSON.stringify([waterFixture.kernel.geom, waterFixture.kernel.moreGeoms])).digest('hex'))
+      .toBe(waterFixture.kernelGeometrySha256);
+    const operands = [waterFixture.kernel.geom, ...waterFixture.kernel.moreGeoms] as unknown as Parameters<typeof upstream.difference>;
+    expect(() => clipping.difference(...operands))
+      .toThrow('SweepLine consumed predecessor traversal violated tree-size invariant.');
+    expect(JSON.stringify(waterFixture)).toBe(before);
+  });
+
+  it('keeps the water-safe policy and deterministically resolves that natural-road difference through its existing retry', () => {
+    const capture = waterFixture.wrapper, before = JSON.stringify(waterFixture);
+    expect({ op: capture.op, snapped: capture.snapped, failClosed: capture.failClosed,
+      retryCoarse: capture.retryCoarse, preserveEdges: capture.preserveEdges })
+      .toEqual({ op: 'difference', snapped: true, failClosed: true, retryCoarse: true, preserveEdges: false });
+    const a = capture.a as MultiPoly, rest = capture.rest as MultiPoly[];
+    const attempts: Parameters<typeof upstream.difference>[] = [];
+    const outcomes: { returned?: ReturnType<typeof upstream.difference>; error?: unknown }[] = [];
+    const original = clipping.difference;
+    const observation = vi.spyOn(clipping, 'difference').mockImplementation((...operands) => {
+      attempts.push(operands);
+      try { const returned = original(...operands); outcomes.push({ returned }); return returned; }
+      catch (error) { outcomes.push({ error }); throw error; }
+    });
+    let result: ReturnType<typeof differenceSafeS>;
+    try { result = differenceSafeS(a, ...rest); } finally { observation.mockRestore(); }
+    expect(attempts).toHaveLength(2);
+    expect(createHash('sha256').update(JSON.stringify([attempts[0][0], attempts[0].slice(1)])).digest('hex'))
+      .toBe(waterFixture.kernelGeometrySha256);
+    expect(String(outcomes[0].error)).toContain('consumed predecessor traversal violated tree-size invariant');
+    expect(outcomes[1].error).toBeUndefined(); expect(outcomes[1].returned).toBeDefined();
+    expect(result).toHaveLength(waterFixture.expected.pieces);
+    expect(mpArea(result)).toBeCloseTo(waterFixture.expected.area, 8);
+    expect(createHash('sha256').update(JSON.stringify(result)).digest('hex')).toBe(waterFixture.expected.resultSha256);
+    // The unguarded module only receives the known successful coarse operands, never the captured hanging input.
+    expect(result).toEqual(fromGeom(upstream.difference(...attempts[1]), 0.01, true));
+    expect(differenceSafeS(a, ...rest)).toEqual(result);
+    expect(JSON.stringify(waterFixture)).toBe(before);
   });
 });
