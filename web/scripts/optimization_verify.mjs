@@ -47,7 +47,10 @@ try {
     const base = mode === 'offline' ? pathToFileURL(htmlPath).href : local;
     await page.goto(base + '?seed=7&size=village&legend=1&style=illuminated' + (mode === 'main' ? '&render=main' : ''));
     await ready(page); await paint(page);
-    assert(await page.evaluate(() => window.__burgmap.mode()) === (['main', 'refused'].includes(mode) ? 'main' : 'offscreen'), `${mode}: unexpected renderer`);
+    const actualMode = await page.evaluate(() => window.__burgmap.mode());
+    // file:// can refuse module workers; the native main fallback remains an offline-supported backend.
+    assert(mode === 'offline' ? ['main', 'offscreen'].includes(actualMode)
+      : actualMode === (['main', 'refused'].includes(mode) ? 'main' : 'offscreen'), `${mode}: unexpected renderer ${actualMode}`);
     const initial = await page.evaluate(() => ({ options: window.__burgmap.options(), rendering: window.__burgmap.rendering() }));
     await page.screenshot({ path: resolve(out, `${mode}-fit.png`) });
     await page.click('#quickShare > summary');
@@ -107,9 +110,9 @@ try {
     // Two real generation requests; require the latest requested generation to be presented.
     // The synchronous refused-Worker path cannot overlap its calculations.
     await page.click('#newMap');
-    await page.waitForFunction(({ gen, synchronous }) => window.__burgmap.rendering().gen > gen
-      && (synchronous || !window.__burgmap.rendering().ready),
-      { gen: initial.rendering.gen, synchronous: mode === 'refused' }, { timeout: 60000 });
+    await page.waitForFunction(({ gen, allowCompleted }) => window.__burgmap.rendering().gen > gen
+      && (allowCompleted || !window.__burgmap.rendering().ready),
+      { gen: initial.rendering.gen, allowCompleted: ['refused', 'offline'].includes(mode) }, { timeout: 60000 });
     const firstRun = await page.evaluate(() => window.__burgmap.rendering().gen);
     await page.click('#newMap');
     await page.waitForFunction(gen => window.__burgmap.rendering().gen > gen, firstRun, { timeout: 60000 });
@@ -119,7 +122,7 @@ try {
     assert(final.gen === target && final.displayedGen === target && target > initial.rendering.gen, `${mode}: stale generation presented`);
     assert(errors.length === 0, `${mode}: ${errors.join('; ')}`);
     if (mode === 'offline') assert(!requests.some(url => /^https?:/.test(url)), 'Offline app requested the network');
-    checks.push({ mode, initial, final, ...exports, errors, networkRequests: requests.filter(url => /^https?:/.test(url)).length });
+    checks.push({ mode, actualMode, initial, final, ...exports, errors, networkRequests: requests.filter(url => /^https?:/.test(url)).length });
     writeFileSync(resolve(out, 'results.json'), JSON.stringify(checks, null, 2));
     console.log(`PASS ${mode}: ${exports.buildings} buildings; SVG/JSON/PNG; style; pan; generation supersession`);
     await context.close();
