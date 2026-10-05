@@ -170,6 +170,23 @@ de `ee202a3`. Les preuves restent dans `full-suite-interruption.json`,
 complète verte. La correction du noyau et le travail de `BUGS.md` sont isolés
 du checkpoint d'optimisation, avec leurs propres revues et validations.
 
+Cette exécution complémentaire est maintenant clôturée : 29 des 30 fichiers
+ont des résultats complets, **446 réussites et 5 échecs d'assertion**. Au total,
+les deux exécutions rapportent **85/88 fichiers et 1 261 cas : 1 212 réussites,
+45 échecs hérités et 4 ignorés**. Les 45 titres et valeurs observés concordent
+avec la baseline ; 17 comparaisons incluent les messages et stacks complets
+(12 cas culturequality et les cinq échecs du run complémentaire).
+
+Le fichier water a rencontré un second appel bloqué du noyau ancien. Son Worker
+a été arrêté seul, après capture et replays supervisés ; les autres Workers ont
+terminé naturellement. Le footer complémentaire contient une erreur de Worker
+et six assertions water en attente, malgré le statut superficiel du fichier.
+Les deux fichiers japonais et water ne constituent donc pas des exécutions
+complètes sur ce checkpoint figé. `baseline-attribution/final-certification-summary.json`
+conserve ces limites. Les reprises sur le garde actuel sont documentées dans
+[POLYGON_TRAVERSAL_FIX_2026-10-05.md](POLYGON_TRAVERSAL_FIX_2026-10-05.md), sans
+transformer ce résultat en certificat de suite verte.
+
 ## Reproduction et preuves
 
 - [Harnais navigateur](web/scripts/optimization_display.mjs) : chargement réel,
@@ -202,3 +219,7 @@ et le contrôle offline local.
 Le feedback utilisateur sur les jardins/biomes et les frontières dans `BUGS.md`
 reste ouvert et son texte local est préservé. Les deux scripts de reproduction
 utilisateur sont inchangés.
+
+L'option de [brosses naturelles](BIOME_BRUSHES_2026-10-05.md) est une étape
+d'apparence distincte. Le rendu classique reste celui par défaut ; son SVG
+reste vectoriel. L'option peint les éléments naturels avec des atlas embarqués.

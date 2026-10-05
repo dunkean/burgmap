@@ -30,6 +30,23 @@ Le checkpoint `pre-brushes-2026-10-05` (`fe9ffa2`) est publié sur Pages `950529
 Le HTML distant est identique au build local contrôlé ; les huit contrôles natifs
 réussissent aussi sur cette publication réelle.
 
+Une seconde entrée bloquée a été capturée dans le checkout figé, sur
+`seed=2&map=10000&coast=W`, pendant une différence de terrain rural. Les replays
+raw et wrapper de la baseline dépassent tous deux leur surveillance de dix
+secondes ; le même garde lève son invariant puis le wrapper termine grâce au
+retry existant, avec deux morceaux et 14 854,9347 m². Aucun nouveau changement
+du moteur n'a été nécessaire. La fixture et deux tests supplémentaires sont
+intégrés dans `cdd1bd3` ; les six tests passent, dont les 96 opérations normales
+comparées au moteur d'origine.
+
+Les six contrôles water existants ont été repris séparément sur le garde actuel :
+**5 réussites et 1 échec hérité**, reproduit avec le message et la stack exacts
+sur la baseline (village seed6, street-main traversant river à 1465/693).
+La carte complète seed2 est identique entre baseline + seul même garde et source
+actuelle : hash hors stats `33cd3cff1d6fe370fcfae5ae4bea78d27b481510e5f76c0bbf2e7d2699266d58`,
+1 493 bâtiments, aucune violation des contrôles d'eau. Cette comparaison inclut
+les rasters typés et n'est pas une mesure de performance.
+
 La génération japonaise termine avec le garde. Les tests existants, sans changer
 leurs attentes, donnent **5 réussites et 2 échecs de disposition** : aire de la
 zone libérée 3 196,9609 m² attendue sous 500, et plus grand lot intermédiaire

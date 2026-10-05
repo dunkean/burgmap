@@ -30,9 +30,20 @@ bugs and their evidence are recorded in [ROADMAP.md](ROADMAP.md).
   verification passes on the actual site. The subsequent classic checkpoint is
   protected by `pre-brushes-2026-10-05` at `fe9ffa2`, published on Pages `9505299`.
   Its served SHA256 is `a5038ae6bc93109b1f59d6c55d316213ea4f2a679d88fb4066dee417a5fcd0c9`;
-  both native fixtures pass all eight modes on the actual publication. Optional
-  image-generated biome brushes are being implemented in a separate worktree;
-  classic rendering remains the default.
+  both native fixtures pass all eight modes on the actual publication.
+- Optional painted biome brushes (2026-10-05): reviewed candidate `65187de`, integrated at `b232251`,
+  classic remains the default. See [BIOME_BRUSHES_2026-10-05.md](BIOME_BRUSHES_2026-10-05.md).
+  ImageGen RGBA assets are selected unchanged; six biome mixes, fruit orchards,
+  dunes/rocks/grass/reeds/gardens/crops are deterministic per map. Display-only
+  `brushes=painted` survives links/bug reports and reload. Candidate checks pass
+  20 tests/typecheck/build, 72 classic exact/World unchanged cases and 216 PNGs
+  across DPR1/2. Two actual native fixtures pass four backends and four decode
+  failure/delay cases each, with exact classic restoration and SVG/PNG/JSON.
+  The offline HTML adds 4.68MB; originals decode only on activation, motifs have
+  a 16MiB cache, monochrome tint memory is additional. No new timing claim.
+  Integration passes 61 tests in ten files, typecheck and build; its HTML is
+  byte-identical to the tested candidate. Publication and five presentation
+  boards of eight maps are next.
 - Roof/render optimization (2026-10-05): integrated source checkpoint `12d8c225`,
   reviewed before execution. See
   [OPTIMIZATION_IMPLEMENTATION_2026-10-05.md](OPTIMIZATION_IMPLEMENTATION_2026-10-05.md)
@@ -49,7 +60,13 @@ bugs and their evidence are recorded in [ROADMAP.md](ROADMAP.md).
   with 40 assertion failures reproduced on the protected baseline. Both workers
   were stuck on the same Japanese `p4uefz` Boolean operation; captured arguments
   also time out in a supervised baseline replay. The full suite is incomplete,
-  not green. Thirty remaining files run separately in a frozen `ee202a3` checkout.
+  not green. The thirty remaining files have finished in a frozen `ee202a3`
+  checkout: 29 reported fully, 446 passes/5 inherited failures; water was stopped
+  after another confirmed old-kernel loop. Combined: 85/88 files, 1212 passes,
+  45 inherited failures and four skips. Six pending water assertions plus a
+  Worker error keep the run incomplete. The current guard also unblocks the
+  captured rural call; `cdd1bd3` adds regression tests, full seed2 World parity
+  against baseline+only guard, and existing water controls (5 pass/1 inherited fail).
   A bounded traversal repair and the visual/roof BUGS fixes are separate stages.
   All 211 production source files match the reviewed checkpoint, and both user
   reproduction scripts are unchanged. The user's local `BUGS.md` feedback is
