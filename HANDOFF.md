@@ -5,6 +5,14 @@ bugs and their evidence are recorded in [ROADMAP.md](ROADMAP.md).
 
 ## Current status
 
+- Local cleanup (2026-10-05, requested by user): all seven satellite worktrees
+  are removed and Git worktree metadata is pruned; only this main worktree
+  remains. Uncommitted roof experiments are preserved as a binary patch and
+  five source files in ignored `web/out/optimization-implementation-2026-10-05/cleanup-archive/`.
+  Python/pytest caches are removed. Direct removal of `.vite` and `.vite-temp`
+  was rejected by automatic tool policy (`blocked by policy`); they remain.
+  Main dependencies, published build, assets, evidence and presentation images
+  are retained. No application changes or new testing accompany this cleanup.
 - Biome ground/administrative border fixes (2026-10-05): integrated source
   `ad6e32a`, render-worker input repair `f842f9b`. See
   [BUGFIXES_VISUAL_2026-10-05.md](BUGFIXES_VISUAL_2026-10-05.md).
@@ -45,7 +53,12 @@ bugs and their evidence are recorded in [ROADMAP.md](ROADMAP.md).
   byte-identical to the tested candidate. Published source `ea6223a` is tagged
   `biome-brushes-2026-10-05`, Pages `734770c`; served SHA256 matches the checked
   HTML and both native fixtures pass all sixteen backend/decode scenarios.
-  Five presentation boards of eight maps are being captured from this build.
+  Five presentation boards of eight real maps are complete from this build:
+  temperate, forest, desert, steppe/tundra and tropical; six biomes and 32
+  cultures. PNGs are 6400×3040 in ignored
+  `web/out/optimization-implementation-2026-10-05/presentation-boards/final/`.
+  Each capture retains its World, SVG, reproducible URL and water/camera metadata.
+  The user requested direct delivery without further visual review; none was run.
 - Roof/render optimization (2026-10-05): integrated source checkpoint `12d8c225`,
   reviewed before execution. See
   [OPTIMIZATION_IMPLEMENTATION_2026-10-05.md](OPTIMIZATION_IMPLEMENTATION_2026-10-05.md)

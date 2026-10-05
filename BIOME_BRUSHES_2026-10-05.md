@@ -17,6 +17,17 @@ réseau. Preuves : `brushes/publication-proof.json`,
 `brushes/native-published-default/results.json` et
 `brushes/native-published-sahel/results.json` dans le dossier de vérification.
 
+## Planches de présentation
+
+Cinq PNG de **6400×3040**, chacun avec huit vraies cartes : tempéré, forêt,
+désert, steppe/toundra et tropical. Ils couvrent six biomes et 32 cultures,
+avec des conditions de rivière et de littoral variées. Les brosses sont activées.
+Les captures utilisent le HTML publié ci-dessus et conservent les liens,
+Worlds, SVG et métadonnées de cadrage/eau dans
+`web/out/optimization-implementation-2026-10-05/presentation-boards/final/`.
+Les cinq compositions sont livrées directement, sans nouvelle revue visuelle,
+selon la dernière demande de l'utilisateur.
+
 ## Rendu et variété
 
 Les six biomes ont leurs plantes et mélanges déterministes par graine : arbres,
