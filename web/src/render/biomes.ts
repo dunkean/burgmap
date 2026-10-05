@@ -28,6 +28,9 @@ export function biomePalette(style: MapStyle | Palette, value?: string): Palette
       land: { ...base.land, commons: tones[1], pasture: dry ? '#d5c79d' : cold ? '#c4cbb0' : base.land.pasture,
         forest: biome === 'tropical' ? '#799b65' : biome === 'forest' ? '#879e6e' : base.land.forest },
       grass: dry ? '#a18e64' : cold ? '#89927b' : base.grass,
+      // Dedicated gardens still read as cultivation; dry rear yards use terrain instead of these tokens.
+      urban: { ...base.urban, garden: dry ? '#c4c098' : biome === 'steppe' ? '#cbc994' : cold ? '#c2cbb6' : base.urban.garden,
+        gardenInk: dry ? '#8b855b' : cold ? '#879276' : base.urban.gardenInk },
     } : {}),
   };
   if (key) CACHE.set(key, pal);

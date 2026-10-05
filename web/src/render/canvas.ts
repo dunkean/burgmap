@@ -690,6 +690,7 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
     const uStreets = linesOf((l) => l.role === 'street');
     // (village and hamlet streets, layers 'vstreet-*', never get the far-zoom arterial strokes)
     const isVillage = (l: LineLayer): boolean => l.name.startsWith('vstreet-');
+    const isEarth = (l: LineLayer): boolean => /e(?:c)?$/.test(l.kind);
     const mainsOf = (maxRank: number): LineLayer[] => uStreets.filter((l) => Number(l.kind.slice(1, 2)) <= maxRank && !l.kind.endsWith('c'));
     if (lod.densityAlpha > 0) {
       const dimg = getDensity();
@@ -698,9 +699,6 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
         ctx.imageSmoothingEnabled = true;
         ctx.drawImage(dimg, 0, 0, S, S);
         ctx.globalAlpha = 1;
-      }
-      if (polyL('footprint')) {
-        fillPolys('footprint', pal.ink, 0.07 * lod.densityAlpha);
       }
     }
     if (!lod.blocks) {
@@ -761,7 +759,6 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
         strokeLines(uStreets, pal.bridgeDeck, (l) => Math.max(1, l.width - 0.7, 0.9 / sc), 1, [], 'butt');
       } else {
         fillPolys('u-streets', U.street, 1, 'nonzero');
-        strokePolys('u-streets', U.street, 0.4);
       }
       const paved = (name: string, base: string, pat: CanvasPattern | null, patAlpha = 1): void => {
         fillPolys(name, base);
@@ -841,6 +838,7 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
             for (const kind of NATURAL_LAND_KINDS) {
               const name = 'lu-' + kind;
               multiply(true); fillPolys(name, pal.land[kind], kind === 'forest' ? 0.7 : luAlpha); multiply(false);
+              multiply(true); fillPolys('u-cover-' + kind, pal.land[kind], kind === 'forest' ? 0.7 : luAlpha); multiply(false);
               if (kind === 'forest' && lod.strips) strokePolys(name, pal.treeInk, lw(0.7, 0.8), pal.tex.forest ? 0.5 : 0.35);
             }
             if (lod.textures) for (const tl of scene.textures) {
@@ -853,10 +851,12 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
           strokeLines(roads, pal.roadFill, (l) => regionalRoadSurface(l.kind === 'major' ? 'major' : 'minor', sc, l.width).fill);
           strokeLines(tracks, ruralInk(pal), () => lw(1.6, 0.9), pal.rural.track, [px(lod.band >= 2 ? 7 : 5), px(lod.band >= 2 ? 4 : 3)], 'butt');
           // Restore native paths only where this opaque replay covered their earlier earth/causeway strokes.
-          if (open && natural.name === 'u-landscape-ground') {
+          if (open && !scene.earthStreets && natural.name === 'u-landscape-ground') {
             strokeLines(uStreets.filter((l) => !(l.width >= 6.5 && Number(l.kind.slice(1, 2)) <= 1)), earth, (l) => Math.max(1.2, l.width * 0.92, 0.8 / sc), 0.8);
             strokeLines(uStreets.filter((l) => l.width >= 6.5 && Number(l.kind.slice(1, 2)) <= 1), U.street, (l) => Math.max(1.2, l.width * 0.92, 0.8 / sc));
           }
+          if (scene.earthStreets && natural.name === 'u-landscape-ground') strokeLines(uStreets.filter(isEarth), mixHex(pal.farmYard, pal.trackFill, 0.12),
+            (l) => Math.max(1.2, l.width * 0.92, 0.8 / sc), 0.8);
           ctx.restore();
         }
       }
@@ -1030,8 +1030,9 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
       }
       // plot hairlines: a dark pass (reads on yards) and a light pass (reads on roofs)
       if (lod.parcels) {
-        strokePolys('u-plots', U.plotLine, lw(U.plotW, 0.4), U.plotAlpha * 0.7);
-        if (U.plotLightAlpha > 0) strokePolys('u-plots', U.massEdge, lw(U.plotW, 0.4), U.plotLightAlpha * 0.7);
+        const plots = linesOf((l) => l.role === 'plot');
+        strokeLines(plots, U.plotLine, () => lw(U.plotW, 0.4), U.plotAlpha * 0.7, [], 'butt');
+        if (U.plotLightAlpha > 0) strokeLines(plots, U.massEdge, () => lw(U.plotW, 0.4), U.plotLightAlpha * 0.7, [], 'butt');
       }
       // hierarchy: arterial / primary streets keep a legible minimum width in street colour
       const minPx = (l: LineLayer): number => (isVillage(l) ? (lod.band >= 2 ? 1.2 : 0.8) : l.kind.startsWith('r0') ? 2.6 : l.kind.startsWith('r1') ? 1.8 : 1.0);
@@ -1044,7 +1045,8 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
         if (clip) ctx.clip(clip, 'nonzero');
         else thin.length = 0;
       }
-      strokeLines(thin, open ? earth : U.street, (l) => minPx(l) / sc, open ? 0.8 : 1);
+      strokeLines(thin.filter((l) => !isEarth(l)), open ? earth : U.street, (l) => minPx(l) / sc, open ? 0.8 : 1);
+      strokeLines(thin.filter(isEarth), mixHex(pal.farmYard, pal.trackFill, 0.12), (l) => minPx(l) / sc, 0.8);
       ctx.restore();
       if (polyL('landmarks') && near) strokePolys('landmarks', U.landmark, lw(0.6, 0.6), 0.5, [px(5), px(3)]);
       // zoomed out: the landmark sites (wells, crosses, markets, compounds' named buildings) as a solid outline of at
