@@ -25,24 +25,24 @@ et ne sont pas intégrés. Voir [les résultats et limites](BUGFIXES_VISUAL_2026
 
 - LEs gros batiment en espace bizarre. Ne pas hésiter à prendre tout le bat, à faire un trou au mileu et à couper un bout sur le coté.
 
-- Bugs: ville coupée vizarre dans la foret: https://dunkean.github.io/burgmap/?seed=owrcg3&relief=mountains&walls=none&culture=russian-kremlin&population=3000&port=yes&activities=yes&suburbs=many&shanty=many&seaLevel=0&mix=wizard-city%3A0.5%3Ablend&plan=eyJudWNsZXVzIjp7ImtpbmQiOiJtYXJrZXQifSwicGhhc2VzIjpbeyJtb3JwaG9sb2d5IjoicG9zYWQiLCJlbmNsb3N1cmUiOnsic2hhcGUiOiJvcmdhbmljIiwid2FsbCI6InBhbGlzYWRlIiwiZm9zc2lsIjoic3RyZWV0IiwidG93ZXJzIjoic3F1YXJlIn19LHsibW9ycGhvbG9neSI6ImNlbHRpYy1vcHBpZHVtLXRvd24iLCJlbmNsb3N1cmUiOnsic2hhcGUiOiJvdmFsIiwid2FsbCI6IndhbGwiLCJmb3NzaWwiOiJzdHJlZXQiLCJ0b3dlcnMiOiJzcXVhcmUifX0seyJtb3JwaG9sb2d5Ijoib3BwaWR1bSIsImVuY2xvc3VyZSI6eyJzaGFwZSI6ImNpcmNsZSIsIndhbGwiOiJ3YWxsIiwiZm9zc2lsIjoic3RyZWV0IiwidG93ZXJzIjoic3F1YXJlIn19XX0&map=2500&mode=a&uid=asg9qspnhnjy041hb7nqd3mko&pins=1031.4%2C1709.5%2C%3B1026.3%2C1955%2C&view=433.2%2C1761%2C0.7257
-
 - le mix avec elven forest en 2 ne marche pas.
 
 - il faut refondre une partie de la création de batimetns à la frontieres entre quartier. Y a des choix incohérents à pleins d'endroit. A détailler avec des pins pour l'agent (en particuliers dans wizard city)
 
+- Les quais semblent avoir disparu. Il faut un travail important sur les ports et le fait qu'une ville favorise ca.
+
+- Fixer les rues qui sortent vers nulle part dans les villes sans enceintes.
+
 ##FEATURES (a planifier - 1 prioritaire - 5 non prioritaire):
-3 - ruines: chaque style mais en ruine pour certains villages
-3 - 3d
-5 - Street view (3D + qwenImage)
-2 - accélerer encore et toujours
-2 - Répartition population et identification batiment + click pour propriétés
-4 - Edition des textes
-4 - Edition des formes de quartiers avec rendu interactif. Idem rivieres.
-1 - Revoir l'ui avec une barre de tools simples → fixed in `fa7459f`
 1 - revoir le contour des villes non fortifiées médiévale et le nombre de route qui finissent dans le vide
-2 - url en une seule chaine de caractères et ajout copier id → fixed in `d341f2e`
+2 - Répartition population et identification batiment + click pour propriétés
 2 - revoir les brush: ajouter des patterns, densités, des variations dans les biomes (pins, feuillus, etc.), améliorer la qualité des brushs, etc.
-1 - random customization (random settlement + biome) → fixed in `fa7459f`
 2 - hybrid culture par quartier
+2 - décomposer la génération jusqu'à pouvoir juste génrer un quartier ou paté de maison
+3 - accélerer encore et toujours
+3 - Edition des formes de quartiers avec rendu interactif. Idem rivieres.
+3 - Edition des textes hors nom de ville
 4 - travailler le cultural mix
+4 - ruines: chaque style mais en ruine pour certains villages
+4 - 3d
+5 - Street view (3D + qwenImage)
