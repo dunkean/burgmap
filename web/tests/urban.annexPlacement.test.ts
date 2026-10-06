@@ -46,3 +46,28 @@ it('places the pinned thin back house on vacant land of the same served owner', 
   expect(backLand.some((land) => Math.abs(area(land.outer) - area(roofs[2])) < 1e-6)).toBe(true);
   expect(result.changed).toContain(0);
 });
+
+it('reserves every new split room before a later annex relocation search', () => {
+  const rect = (x0: number, y0: number, x1: number, y1: number): Polygon =>
+    [p(x0, y0), p(x1, y0), p(x1, y1), p(x0, y1)];
+  const buildings = [
+    { poly: rect(0, 0, 25, 5), parcel: 0, kind: 'house' as const },
+    { poly: rect(20, 7, 23, 17), parcel: 0, kind: 'back' as const },
+  ];
+  let testedExtra = false;
+  const result = finalizeFootprints({ buildings,
+    parcels: [{ poly: rect(-1, -1, 26, 26), block: 0, use: 'plot', front: [p(0, -1), p(25, -1)] }],
+    backLand: [], validateParts: () => true,
+    placementClear: (candidate) => {
+      const extra = buildings[2]?.poly;
+      if (!extra) return false;
+      const hit = tryIntersection(candidate, extra);
+      if (!hit.failed && mpArea(hit.pieces) > 1) { testedExtra = true; return true; }
+      return false;
+    },
+  });
+  expect(buildings).toHaveLength(3);
+  expect(testedExtra).toBe(true);
+  expect(result.invalid).toContain(1);
+  expect(buildings[1].poly).toEqual(rect(20, 7, 23, 17));
+});
