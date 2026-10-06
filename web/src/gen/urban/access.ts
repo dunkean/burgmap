@@ -374,16 +374,18 @@ export function splitLong<T extends { poly: Polygon; kind: string }>(list: T[], 
     if (b.kind === 'landmark' || asp <= maxAsp || o.hv * 2 < 1) { out.push(b); continue; }
     const k = Math.ceil(asp / (maxAsp * 0.95));
     const conv = isConvex(b.poly, 1e-3);
-    let okAll = true;
     const parts: T[] = [];
     for (let j = 0; j < k; j++) {
       const s0 = -o.hu + (2 * o.hu * j) / k, s1 = -o.hu + (2 * o.hu * (j + 1)) / k;
       const hps: HalfPlane[] = [];
       if (j > 0) hps.push({ p: { x: o.c.x + o.u.x * s0, y: o.c.y + o.u.y * s0 }, n: o.u });
       if (j < k - 1) hps.push({ p: { x: o.c.x + o.u.x * s1, y: o.c.y + o.u.y * s1 }, n: { x: -o.u.x, y: -o.u.y } });
-      for (const r of clipPlot(b.poly, hps, conv)) { if (area(r) >= 4 && shapeOkObb(r)) parts.push({ ...b, poly: r }); else okAll = false; }
+      for (const r of clipPlot(b.poly, hps, conv)) if (area(r) >= 4 && shapeOkObb(r)) parts.push({ ...b, poly: r });
     }
-    if (okAll && parts.length) out.push(...parts); else out.push(b);
+    // A thin failed remainder must not bring the original matchstick back. Keep useful
+    // ranges if they retain most of the footprint; the small remainder becomes open land.
+    if (parts.length && parts.reduce((sum, p) => sum + area(p.poly), 0) >= 0.7 * area(b.poly)) out.push(...parts);
+    else out.push(b);
   }
   return out;
 }

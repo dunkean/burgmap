@@ -17,7 +17,7 @@ import type { Rng } from '../core/rng';
 import type { MorphologyParams, Zone } from './morphology';
 import type { Streets } from './streets';
 import { MultiPoly, PolyH, intersectionS, differenceS, difference, unionS, tryIntersection, mpArea } from '../geo/bool';
-import { area, interiorAngle, pointInRing, distToSeg, inscribed, cleanRing, orientPos, bboxOf, snapPt, isSimple, convexWidth, obb, convexHull } from '../geo/poly';
+import { area, interiorAngle, pointInRing, distToSeg, distToRing, inscribed, cleanRing, orientPos, bboxOf, snapPt, isSimple, convexWidth, obb, convexHull } from '../geo/poly';
 import { clipPlot } from './buildings';
 import { truncateAcute } from './blocks';
 import { sweepLeft } from '../geo/offset';
@@ -49,6 +49,8 @@ export interface Plot {
   wealth?: number;
   /** The building operator left a way in to the back (gateway or carriage passage). */
   gated?: boolean;
+  /** Last served plot on an open street: its frontage is kept at the edge. */
+  terminal?: boolean;
 }
 /** Wealth of a frontage at p on a street of the given rank (0 poor … 1 rich). */
 export type WealthAt = (p: Vec2, rank: number) => number;
@@ -64,6 +66,54 @@ function turnAt(a: Vec2, b: Vec2, c: Vec2): number {
 
 const unit = (a: Vec2, b: Vec2): Vec2 => { const l = dist(a, b) || 1; return { x: (b.x - a.x) / l, y: (b.y - a.y) / l }; };
 const leftN = (d: Vec2): Vec2 => ({ x: -d.y, y: d.x });
+
+/** Rebuild a merged plot's geometric frame from its actual boundary. No random draw or plot reordering. */
+export function refreshPlotFrame(pl: Plot): void {
+  const poly = pl.poly;
+  if (poly.length < 3) return;
+  const old = pl.front;
+  const badEnd = old.some((p) => distToRing(poly, p) > 0.02)
+    || distToRing(poly, { x: (old[0].x + old[1].x) / 2, y: (old[0].y + old[1].y) / 2 }) > 0.25;
+  const badSide = [pl.sideA, pl.sideB].some((s) => {
+    const q = { x: s.p.x + s.d.x * 0.5, y: s.p.y + s.d.y * 0.5 };
+    return !pointInRing(poly, q) && distToRing(poly, q) > 0.02;
+  });
+  if (!badEnd && !badSide) return;
+  const oldT = unit(old[0], old[1]);
+  const oldM = { x: (old[0].x + old[1].x) / 2, y: (old[0].y + old[1].y) / 2 };
+  let best = -1, score = -Infinity;
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i], b = poly[(i + 1) % poly.length], t = unit(a, b);
+    const align = t.x * oldT.x + t.y * oldT.y;
+    if (align < 0.7) continue;
+    const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    const s = dist(a, b) * align - 3 * distToSeg(mid, old[0], old[1]) - distToSeg(oldM, a, b);
+    if (s > score) { score = s; best = i; }
+  }
+  if (best < 0) return;
+  const a = poly[best], b = poly[(best + 1) % poly.length];
+  // A frontage on the merged boundary may span several collinear edges. Keep the existing
+  // served segment if both its endpoints still lie on the boundary; otherwise use the edge.
+  const front: [Vec2, Vec2] = distToSeg(old[0], a, b) < 0.02 && distToSeg(old[1], a, b) < 0.02 ? old : [a, b];
+  pl.front = front;
+  const t = unit(front[0], front[1]);
+  const n = leftN(t);
+  pl.nrm = n.x * pl.nrm.x + n.y * pl.nrm.y >= 0 ? n : { x: -n.x, y: -n.y };
+  const side = (p: Vec2, fallback: Vec2): { p: Vec2; d: Vec2 } => {
+    let direction = fallback, bestScore = -Infinity;
+    for (let i = 0; i < poly.length; i++) {
+      const v = poly[i], w = poly[(i + 1) % poly.length];
+      if (dist(v, p) > 0.02 && dist(w, p) > 0.02) continue;
+      const other = dist(v, p) <= dist(w, p) ? w : v;
+      const d = unit(p, other), inward = d.x * pl.nrm.x + d.y * pl.nrm.y;
+      if (inward > bestScore) { bestScore = inward; direction = d; }
+    }
+    return { p, d: direction };
+  };
+  pl.sideA = side(front[0], pl.sideA.d);
+  pl.sideB = side(front[1], pl.sideB.d);
+  pl.depth = Math.max(0, ...poly.map((q) => (q.x - front[0].x) * pl.nrm.x + (q.y - front[0].y) * pl.nrm.y));
+}
 
 /** Point and inward normal at arclength s along an open polyline (normal averaged over ±win). */
 function pointAt(pl: Vec2[], cum: number[], s: number): { p: Vec2; seg: number } {
@@ -472,7 +522,7 @@ export function cutPlots(
     if (!c) continue;
     const poly = cleanRing(c.poly, 0.005, 0.5, 0.002, false);
     const pp = poly.length >= 3 && isSimple(poly) ? poly : c.poly;
-    if (c.plot) { c.plot.poly = pp; merged.push(c.plot); } else keepBack.push(pp);
+    if (c.plot) { c.plot.poly = pp; if (c.grown) refreshPlotFrame(c.plot); merged.push(c.plot); } else keepBack.push(pp);
   }
   // side fronts: plot edges lying on a frontage edge of the block, not parallel to the main frontage
   const frontEdges: [Vec2, Vec2][] = [];
