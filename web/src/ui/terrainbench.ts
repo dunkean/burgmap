@@ -1,6 +1,6 @@
 import './terrainbench.css';
 import TerrainWorker from './terrainWorker?worker&inline';
-import { sampleRustTerrain, RELIEFS, type TerrainData, type TerrainSettings, type TerrainRequest, type TerrainResponse, type TerrainRelief, type TerrainRegion } from '../../../rust/bridge/terrain';
+import { sampleRustTerrain, RELIEFS, GEOLOGICAL_RELIEFS, ENVIRONMENT_RELIEFS, COMPUTE_MODES, type TerrainEnvironment, type TerrainCompute, type TerrainData, type TerrainSettings, type TerrainRequest, type TerrainResponse, type TerrainRelief, type TerrainRegion } from '../../../rust/bridge/terrain';
 import { renderRustTerrain, type TerrainStyle, type TerrainScene } from '../../../rust/bridge/terrainRender';
 import { createPins } from './pins';
 import { pinsFromString, pinsToString, viewFromString, viewToString } from './share';
@@ -14,16 +14,21 @@ const query = new URLSearchParams(location.search);
 const finite = (value: string | null, fallback: number): number => value !== null && value.trim() !== '' && Number.isFinite(Number(value)) ? Number(value) : fallback;
 const bounded = (value: number, min: number, max: number): number => Math.max(min, Math.min(max, value));
 const initialRelief = query.get('relief') as TerrainRelief;
+const geological = (relief: string): boolean => (GEOLOGICAL_RELIEFS as readonly string[]).includes(relief);
+const initialEnvironment = query.get('environment') as TerrainEnvironment;
 let settings: TerrainSettings = {
   seed: query.get('seed')?.slice(0, 120) || '42',
   width: bounded(finite(query.get('width'), 2400), 500, 100000),
   // Version 1 links had no independent physical motif scale.
   motifSize: bounded(finite(query.get('motif'), 3000), 250, 50000),
   relief: RELIEFS.includes(initialRelief) ? initialRelief : 'flat',
+  environment: ENVIRONMENT_RELIEFS.includes(initialEnvironment) ? initialEnvironment : 'mixed',
   mountainMix: bounded(finite(query.get('mix'), 0.5), 0, 1),
-  erosion: bounded(finite(query.get('erosion'), 0.5), 0, 1), resolution: 512,
+  erosion: bounded(finite(query.get('erosion'), 1), 0, 2), resolution: 512,
+  compute: COMPUTE_MODES.includes(query.get('compute') as TerrainCompute) ? query.get('compute') as TerrainCompute : 'gpu-f32',
+  generationCompute: query.get('generation') === 'cpu' ? 'cpu' : query.get('generation') === 'gpu-all' ? 'gpu-all' : query.get('generation') === 'gpu' ? 'gpu' : 'gpu-erosion',
 };
-let style: TerrainStyle = ['parchment', 'atlas', 'topographic'].includes(query.get('style') || '') ? query.get('style') as TerrainStyle : 'parchment';
+let style: TerrainStyle = ['parchment', 'atlas', 'topographic', 'copernicus'].includes(query.get('style') || '') ? query.get('style') as TerrainStyle : 'parchment';
 let view: View = viewFromString(query.get('view')) || fitView(settings.width, viewport.clientWidth, viewport.clientHeight);
 let terrain: TerrainData | undefined;
 let pinMode = false, generation = 0, requestId = 0, terrainGeneration = 0;
@@ -32,7 +37,7 @@ let generationTimer: ReturnType<typeof setTimeout> | undefined, detailTimer: Ret
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
 let renderingMs = 0, contourStep = 0, detailSamplingMs = 0;
 interface DetailTile {
-  terrain: Pick<TerrainData, 'x' | 'y' | 'width' | 'resolution' | 'generationMs'>;
+  terrain: Pick<TerrainData, 'x' | 'y' | 'width' | 'resolution' | 'generationMs' | 'backend' | 'backendReason' | 'prepareMs' | 'samplingMs' | 'gpuSetupMs'>;
   style: TerrainStyle; scene: TerrainScene; key: string;
   image: HTMLImageElement; ready: Promise<void>;
 }
@@ -43,8 +48,12 @@ input('width').value = String(settings.width); input('motifSize').value = String
 input('mountainMix').value = String(settings.mountainMix);
 input('seed').value = settings.seed; input('erosion').value = String(settings.erosion);
 el<HTMLSelectElement>('relief').value = settings.relief; el<HTMLSelectElement>('style').value = style;
+el<HTMLSelectElement>('environment').value = settings.environment!;
+el<HTMLSelectElement>('compute').value = settings.compute!;
+el<HTMLSelectElement>('generationCompute').value = settings.generationCompute!;
 input('auto').checked = query.get('auto') !== '0'; input('showPins').checked = query.get('showPins') !== '0';
 function updateErosionControl(): void {
+  el('environmentControl').hidden = !geological(el<HTMLSelectElement>('relief').value);
   el('mountainMixControl').hidden = el<HTMLSelectElement>('relief').value !== 'mixed';
   el('mountainMixValue').textContent = `${Math.round(Number(input('mountainMix').value) * 100)} %`;
   const cavern = el<HTMLSelectElement>('relief').value === 'cavern';
@@ -60,6 +69,9 @@ function status(message: string, error = false): void {
 function shareQuery(): string {
   const params = new URLSearchParams({ engine: 'rust', v: '2', seed: settings.seed, width: String(settings.width), motif: String(settings.motifSize), relief: settings.relief, erosion: String(settings.erosion), style, auto: input('auto').checked ? '1' : '0' });
   if (settings.relief === 'mixed') params.set('mix', String(settings.mountainMix));
+  if (geological(settings.relief)) params.set('environment', settings.environment ?? 'mixed');
+  params.set('compute', settings.compute ?? 'gpu-f32');
+  params.set('generation', settings.generationCompute ?? 'gpu-erosion');
   if (pins.pins.length) params.set('pins', pinsToString(pins.pins));
   if (!input('showPins').checked) params.set('showPins', '0');
   params.set('view', viewToString(view)); return params.toString();
@@ -106,8 +118,14 @@ showPins();
 function renderedStatus(): void {
   if (!terrain || terrainGeneration !== generation) return;
   const name = el<HTMLSelectElement>('relief').querySelector<HTMLOptionElement>(`option[value="${settings.relief}"]`)!.textContent;
+  const environment = geological(settings.relief) ? ` · alentours ${el<HTMLSelectElement>('environment').querySelector<HTMLOptionElement>(`option[value="${settings.environment ?? 'mixed'}"]`)!.textContent}` : '';
   const detail = displayedDetail ? ` · détail ${displayedDetail.terrain.resolution}² (${(displayedDetail.terrain.width / displayedDetail.terrain.resolution).toFixed(2)} m) · échantillonnage ${detailSamplingMs.toFixed(0)} ms` : '';
-  status(`${name} · carte ${settings.width.toLocaleString('fr-FR')} m · relief ${settings.motifSize.toLocaleString('fr-FR')} m · aperçu ${terrain.resolution}² · ${contourStep ? `courbes ${contourStep} m` : 'sans courbes'} · génération ${terrain.generationMs.toFixed(0)} ms${detail} · rendu ${renderingMs.toFixed(0)} ms`);
+  const data = displayedDetail?.terrain ?? terrain;
+  const backend = data.backend === 'wasm' ? `CPU Rust${data.backendReason ? ` (${data.backendReason})` : ''}` : 'GPU FP32';
+  const generationBackend = terrain.generationBackend === 'gpu-erosion-f32' ? 'érosion GPU FP32' : terrain.generationBackend === 'gpu-noise-all-f32' ? 'tous bruits GPU FP32 + érosion CPU' : terrain.generationBackend === 'gpu-noise-f32' ? 'bruits fins GPU FP32 + érosion CPU' : 'génération CPU';
+  const preparation = terrain.prepareMs === undefined ? '' : ` · préparation ${terrain.prepareMs.toFixed(0)} ms (${generationBackend}${terrain.gpuSimulationMs ? `, simulation GPU ${terrain.gpuSimulationMs.toFixed(0)} ms` : ''}${terrain.nativeEnvironmentMs ? `, alentours CPU ${terrain.nativeEnvironmentMs.toFixed(0)} ms` : ''}${terrain.noiseMs ? `, bruits ${terrain.noiseMs.toFixed(0)} ms, suite Rust ${terrain.erosionMs!.toFixed(0)} ms` : ''})${terrain.generationReason ? ` · ${terrain.generationReason}` : ''}`;
+  const setup = terrain.gpuSetupMs ? ` · initialisation GPU ${terrain.gpuSetupMs.toFixed(0)} ms` : '';
+  status(`${name}${environment} · ${backend} · carte ${settings.width.toLocaleString('fr-FR')} m · relief ${settings.motifSize.toLocaleString('fr-FR')} m · aperçu ${terrain.resolution}² · ${contourStep ? `courbes ${contourStep} m` : 'sans courbes'}${preparation}${setup} · génération + aperçu ${terrain.generationMs.toFixed(0)} ms${detail} · rendu ${renderingMs.toFixed(0)} ms`);
 }
 function render(): void {
   if (!terrain) return;
@@ -196,7 +214,7 @@ function receive(response: TerrainResponse): void {
       const scene = renderRustTerrain(data, style, false), image = new Image();
       image.src = scene.imageUrl;
       const tile: DetailTile = {
-        terrain: { x: data.x, y: data.y, width: data.width, resolution: data.resolution, generationMs: data.generationMs },
+        terrain: { x: data.x, y: data.y, width: data.width, resolution: data.resolution, generationMs: data.generationMs, backend: data.backend, backendReason: data.backendReason, prepareMs: data.prepareMs, samplingMs: data.samplingMs, gpuSetupMs: data.gpuSetupMs },
         style, scene, image, ready: image.decode(), key: detailKey(request.region),
       };
       renderingMs = performance.now() - start; cacheDetail(tile); void applyDetail(tile);
@@ -235,7 +253,11 @@ function readSettings(): TerrainSettings | undefined {
   if (!Number.isFinite(motifSize) || motifSize < 250 || motifSize > 50000) {
     status('Saisissez une échelle du relief entre 250 et 50 000 m.', true); return;
   }
-  return { seed, width, motifSize, relief: el<HTMLSelectElement>('relief').value as TerrainRelief, erosion: Number(input('erosion').value), mountainMix: Number(input('mountainMix').value), resolution: 512 };
+  const relief = el<HTMLSelectElement>('relief').value as TerrainRelief;
+  if (!RELIEFS.includes(relief)) { status('Choisissez un relief dans le menu.', true); return; }
+  const environment = el<HTMLSelectElement>('environment').value as TerrainEnvironment;
+  if (!ENVIRONMENT_RELIEFS.includes(environment)) { status('Choisissez un relief environnant dans le menu.', true); return; }
+  return { seed, width, motifSize, relief, environment, erosion: Number(input('erosion').value), mountainMix: Number(input('mountainMix').value), resolution: 512, compute: el<HTMLSelectElement>('compute').value as TerrainCompute, generationCompute: el<HTMLSelectElement>('generationCompute').value as TerrainSettings['generationCompute'] };
 }
 function generate(): void {
   clearTimeout(generationTimer);
@@ -249,8 +271,10 @@ function parameterChanged(): void {
   if (input('auto').checked) generationTimer = setTimeout(generate, 220);
   else status('Paramètres modifiés · cliquez sur Générer pour les appliquer.');
 }
-for (const id of ['width', 'motifSize', 'relief', 'mountainMix', 'erosion', 'seed']) el(id).addEventListener('input', parameterChanged);
+for (const id of ['width', 'motifSize', 'relief', 'environment', 'mountainMix', 'erosion', 'seed']) el(id).addEventListener('input', parameterChanged);
 el('generate').onclick = generate;
+el<HTMLSelectElement>('compute').onchange = generate;
+el<HTMLSelectElement>('generationCompute').onchange = generate;
 input('auto').onchange = () => { clearTimeout(generationTimer); save(); if (input('auto').checked) generate(); };
 el('randomSeed').onclick = () => { input('seed').value = crypto.getRandomValues(new Uint32Array(1))[0].toString(36); generate(); };
 el<HTMLSelectElement>('style').onchange = () => {
@@ -270,7 +294,8 @@ el('copy').onclick = () => void copy(link());
 el('copyReport').onclick = () => {
   const erosion = settings.relief === 'cavern' ? 'sans objet (caverne)' : `${Math.round(settings.erosion * 100)} %`;
   const lines = ['Burgmap · prototype terrain Rust/WASM v2', link(), '', `Graine : ${settings.seed}`, `Largeur carte : ${settings.width} m · échelle relief : ${settings.motifSize} m · relief : ${settings.relief} · érosion : ${erosion}`, `Rendu : ${style} · vue : ${viewToString(view)}`, '', ...pins.pins.map((pin, i) => `Pin ${i + 1} : ${pin.x.toFixed(1)}, ${pin.y.toFixed(1)} m — ${pin.note || '(sans note)'}`)];
-  if (terrain) lines.push('', `Source physique : 512² · aperçu : ${terrain.resolution}² · génération : ${terrain.generationMs.toFixed(1)} ms · rendu : ${renderingMs.toFixed(1)} ms`);
+  if (geological(settings.relief)) lines.splice(5, 0, `Relief environnant : ${settings.environment ?? 'mixed'}`);
+  if (terrain) lines.push('', `Source physique : 1024² · aperçu : ${terrain.resolution}² · génération : ${terrain.generationMs.toFixed(1)} ms · rendu : ${renderingMs.toFixed(1)} ms`);
   if (displayedDetail) lines.push(`Région détaillée : ${displayedDetail.terrain.x}, ${displayedDetail.terrain.y}, ${displayedDetail.terrain.width} m · ${displayedDetail.terrain.resolution}² · échantillonnage : ${detailSamplingMs.toFixed(1)} ms`);
   void copy(lines.join('\n'));
 };

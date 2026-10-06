@@ -4,11 +4,36 @@ import { encodePng, pngDataUrl, renderTerrainPixels } from '../../web/src/render
 import { PALETTES } from '../../web/src/render/styles';
 import type { TerrainData } from './terrain';
 
-export type TerrainStyle = 'parchment' | 'atlas' | 'topographic';
+export type TerrainStyle = 'parchment' | 'atlas' | 'topographic' | 'copernicus';
 export interface TerrainScene { svg: string; imageUrl: string; contourStep: number }
+
+// Low to high elevation; interpolate RGB directly, without lighting or contours.
+const elevationColors = [
+  [0, 32, 96], [0, 160, 70], [255, 230, 0], [235, 35, 20],
+  [128, 128, 128], [255, 255, 255],
+] as const;
+
+function renderElevation(terrain: TerrainData, frame: boolean): TerrainScene {
+  const n = terrain.resolution, width = terrain.width;
+  const rgb = new Uint8Array(n * n * 3);
+  const range = Math.max(1e-6, terrain.globalMaxHeight - terrain.globalMinHeight);
+  for (let i = 0; i < terrain.height.length; i++) {
+    // Use the engine's global range so camera regions retain the same colors.
+    const t = Math.max(0, Math.min(1, (terrain.height[i] - terrain.globalMinHeight) / range));
+    const position = t * (elevationColors.length - 1);
+    const index = Math.min(elevationColors.length - 2, Math.floor(position));
+    const a = elevationColors[index], b = elevationColors[index + 1], u = position - index;
+    for (let channel = 0; channel < 3; channel++) rgb[i * 3 + channel] = Math.round(a[channel] + (b[channel] - a[channel]) * u);
+  }
+  const imageUrl = pngDataUrl(encodePng(rgb, n, n));
+  let svg = `<image width="${width}" height="${width}" href="${imageUrl}"/>`;
+  if (frame) svg += `<rect width="${width}" height="${width}" fill="none" stroke="#333333" stroke-width="1.2" vector-effect="non-scaling-stroke"/>`;
+  return { svg, imageUrl, contourStep: 0 };
+}
 
 /** Transitional renderer adapter. Rust never depends on the legacy World schema. */
 export function renderRustTerrain(terrain: TerrainData, style: TerrainStyle, frame = true): TerrainScene {
+  if (style === 'copernicus') return renderElevation(terrain, frame);
   const n = terrain.resolution, width = terrain.width, cell = width / n;
   const cavern = terrain.caveMask.length > 0;
   // Stable continuous shading, without engraved bands or high-frequency paper grain.

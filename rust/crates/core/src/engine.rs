@@ -2,8 +2,8 @@
 //! Regional erosion is prepared in geographic coordinates across the map;
 //! analytic world noise and finite features are evaluated at fixed physical scales.
 use crate::{
-    CavernShape, FiniteShape, Noise, PreparedTerrain, Relief, Rng, Terrain, canyon::Canyon,
-    channels::Channels, erosion::erode_walls, generate_motif, smooth,
+    CavernShape, FiniteShape, Noise, PreparedTerrain, Relief, Rng, Terrain, channels::Channels,
+    generate_motif, smooth,
 };
 
 const SOURCE_N: usize = 1024;
@@ -17,7 +17,7 @@ pub struct TerrainGenerator {
     delta: Surface,
     background: Surface,
     feature: Option<FiniteShape>,
-    canyon: Option<Canyon>,
+    feature_origin: (f64, f64),
     noise: Noise,
     noise2: Noise,
     down: (f64, f64),
@@ -47,6 +47,89 @@ impl TerrainGenerator {
         motif: f64,
         mountain_mix: f64,
     ) -> Result<Self, String> {
+        Self::new_with_environment(seed, map_width, relief, erosion, motif, mountain_mix, None)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_environment(
+        seed: &str,
+        map_width: f64,
+        relief: &str,
+        erosion: f64,
+        motif: f64,
+        mountain_mix: f64,
+        environment: Option<&str>,
+    ) -> Result<Self, String> {
+        Self::new_mixed_with_noise(
+            seed,
+            map_width,
+            relief,
+            erosion,
+            motif,
+            mountain_mix,
+            None,
+            environment,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_mixed_with_noise(
+        seed: &str,
+        map_width: f64,
+        relief: &str,
+        erosion: f64,
+        motif: f64,
+        mountain_mix: f64,
+        generation_noise: Option<&crate::GenerationNoise<'_>>,
+        environment: Option<&str>,
+    ) -> Result<Self, String> {
+        Self::new_prepared(
+            seed,
+            map_width,
+            relief,
+            erosion,
+            motif,
+            mountain_mix,
+            generation_noise,
+            None,
+            environment,
+        )
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_mixed_with_source(
+        seed: &str,
+        map_width: f64,
+        relief: &str,
+        erosion: f64,
+        motif: f64,
+        mountain_mix: f64,
+        source: &[f32],
+        environment: Option<&str>,
+    ) -> Result<Self, String> {
+        Self::new_prepared(
+            seed,
+            map_width,
+            relief,
+            erosion,
+            motif,
+            mountain_mix,
+            None,
+            Some(source),
+            environment,
+        )
+    }
+    #[allow(clippy::too_many_arguments)] // Temporary prepared numeric interchange.
+    fn new_prepared(
+        seed: &str,
+        map_width: f64,
+        relief: &str,
+        erosion: f64,
+        motif: f64,
+        mountain_mix: f64,
+        generation_noise: Option<&crate::GenerationNoise<'_>>,
+        external_source: Option<&[f32]>,
+        environment: Option<&str>,
+    ) -> Result<Self, String> {
         if seed.len() > 4096 {
             return Err("La graine ne doit pas dépasser 4 096 octets.".into());
         }
@@ -59,10 +142,12 @@ impl TerrainGenerator {
         if !motif.is_finite() || !(250.0..=50000.0).contains(&motif) {
             return Err("La taille du motif doit être comprise entre 250 et 50 000 mètres.".into());
         }
-        if !erosion.is_finite() || !(0.0..=1.0).contains(&erosion) {
-            return Err("Le niveau d’érosion doit être compris entre 0 et 1.".into());
+        if !erosion.is_finite() || !(0.0..=2.0).contains(&erosion) {
+            return Err("Le niveau d’érosion doit être compris entre 0 et 2.".into());
         }
         let kind = Relief::parse(relief)?;
+        let environment = environment.unwrap_or("mixed");
+        Relief::environment(environment)?;
         let mountain_mix = if kind == Relief::Mixed {
             mountain_mix
         } else {
@@ -71,9 +156,9 @@ impl TerrainGenerator {
         let erosion = if kind == Relief::Cavern { 0.0 } else { erosion };
         let finite = matches!(
             kind,
-            Relief::Plateau | Relief::Volcano | Relief::Caldera | Relief::Cavern
+            Relief::Plateau | Relief::Volcano | Relief::Caldera | Relief::Canyon | Relief::Cavern
         );
-        let source_relief = if matches!(kind, Relief::Valley | Relief::Canyon) {
+        let source_relief = if kind == Relief::Valley {
             "mixed"
         } else {
             relief
@@ -83,41 +168,97 @@ impl TerrainGenerator {
         } else {
             map_width
         };
-        let source_erosion = if kind == Relief::Flat {
-            erosion * erosion
+        let source_motif = if kind == Relief::Valley {
+            motif * kind.environment_scale()
         } else {
-            erosion
+            motif
         };
-        let prepared = if kind == Relief::Cavern {
+        let source_erosion = erosion;
+        let flat_base = if kind == Relief::Flat && erosion > 0.0 {
+            Some(
+                crate::generate_motif_base(
+                    seed,
+                    source_width,
+                    source_relief,
+                    0.0,
+                    SOURCE_N,
+                    source_motif,
+                    mountain_mix,
+                )?
+                .height,
+            )
+        } else {
+            None
+        };
+        let prepared = if let Some(source) = external_source {
+            if !matches!(
+                kind,
+                Relief::Hills
+                    | Relief::Mountains
+                    | Relief::Mixed
+                    | Relief::HighMountains
+                    | Relief::Valley
+                    | Relief::Canyon
+                    | Relief::Volcano
+                    | Relief::Caldera
+                    | Relief::Plateau
+            ) || source.len() != SOURCE_N * SOURCE_N * if kind.is_geological() { 2 } else { 1 }
+                || !source.iter().all(|h| h.is_finite() && *h >= 0.3)
+            {
+                return Err("Champ de relief externe invalide.".into());
+            }
+            PreparedTerrain {
+                height: source[..SOURCE_N * SOURCE_N].to_vec(),
+            }
+        } else if let Some(base) = &flat_base {
+            let mut height = base.clone();
+            crate::erosion::erode_shape(
+                &mut height,
+                SOURCE_N,
+                source_width / SOURCE_N as f64,
+                source_erosion,
+                0.03,
+            );
+            crate::normalize(height)?
+        } else if kind == Relief::Cavern {
             // Cave geometry is continuous and sampled analytically, without an unused raster.
             PreparedTerrain::default()
         } else {
-            generate_motif(
-                seed,
-                source_width,
-                source_relief,
-                source_erosion,
-                SOURCE_N,
-                motif,
-                mountain_mix,
+            crate::normalize(
+                crate::generate_motif_base_with_noise(
+                    seed,
+                    source_width,
+                    source_relief,
+                    source_erosion,
+                    SOURCE_N,
+                    source_motif,
+                    mountain_mix,
+                    generation_noise,
+                )?
+                .height,
             )?
         };
         let amp = kind.mixed_amplitude(motif, mountain_mix);
-        let background = if finite && kind != Relief::Cavern {
-            generate_motif(seed, map_width, "mixed", erosion, SOURCE_N, motif, 0.5)?
+        let background = if let Some(source) = external_source.filter(|_| kind.is_geological()) {
+            PreparedTerrain {
+                height: source[SOURCE_N * SOURCE_N..].to_vec(),
+            }
+        } else if finite && kind != Relief::Cavern {
+            let environment_motif = motif * kind.environment_scale();
+            generate_motif(
+                seed,
+                map_width,
+                environment,
+                erosion,
+                SOURCE_N,
+                environment_motif,
+                0.5,
+            )?
         } else {
             PreparedTerrain::default()
         };
         let delta = if kind == Relief::Flat && erosion > 0.0 {
-            let initial = generate_motif(
-                seed,
-                motif,
-                source_relief,
-                0.0,
-                SOURCE_N,
-                motif,
-                mountain_mix,
-            )?;
+            let initial = crate::normalize(flat_base.unwrap())?;
             prepared
                 .height
                 .iter()
@@ -142,13 +283,13 @@ impl TerrainGenerator {
         let _valley_floor = params.range(180.0, 320.0) * motif / 2400.0;
         let valley_offset = params.range(-0.08, 0.08) * motif;
         let source_max = prepared.height.iter().copied().fold(0.0_f32, f32::max) as f64;
-        let limit = match kind {
+        let limit: f64 = match kind {
             Relief::Flat => 80.0,
             Relief::Hills => 500.0,
             Relief::Valley => 1500.0,
             Relief::Canyon => 2500.0,
             Relief::Mountains | Relief::Mixed => 3500.0,
-            Relief::Plateau => 2400.0,
+            Relief::Plateau => 3500.0,
             Relief::HighMountains => 7000.0,
             Relief::Volcano | Relief::Caldera => 5000.0,
             Relief::Cavern => 240.0,
@@ -164,9 +305,13 @@ impl TerrainGenerator {
         let cave = (kind == Relief::Cavern).then(|| CavernShape::new(root.fork("cavern")));
         let channels = Channels::new(motif, phase, valley_offset, map_width, &noise, &noise2);
         let feature = FiniteShape::new(kind, motif, &root);
-        let canyon =
-            (kind == Relief::Canyon).then(|| Canyon::new(motif, phase, map_width, &noise, &noise2));
-        let mut result = Self {
+        let slack = (map_width - motif).max(0.0);
+        let mut placement = root.fork("geological-placement");
+        let feature_origin = (
+            (map_width - motif) * 0.5 + placement.range(-0.42, 0.42) * slack,
+            (map_width - motif) * 0.5 + placement.range(-0.42, 0.42) * slack,
+        );
+        let result = Self {
             map_width,
             motif,
             relief: kind,
@@ -175,50 +320,136 @@ impl TerrainGenerator {
             delta: Surface::new(delta),
             background: Surface::new(background.height),
             feature,
-            canyon,
+            feature_origin,
             noise,
             noise2,
             down,
             channels,
             phase,
             amp,
-            max_height: estimated.min(limit),
+            max_height: estimated.min(if kind.is_geological() {
+                limit.max(source_max + background_max + amp * 0.18)
+            } else {
+                limit
+            }),
             cave,
         };
-        if kind == Relief::Canyon && erosion > 0.0 {
-            // Evolve the actual tortuous canyon, not an unrelated projected erosion raster.
-            let mut initial = vec![0.0; SOURCE_N * SOURCE_N];
-            let cell = map_width / SOURCE_N as f64;
-            for y in 0..SOURCE_N {
-                for x in 0..SOURCE_N {
-                    initial[y * SOURCE_N + x] =
-                        result.height_at((x as f64 + 0.5) * cell, (y as f64 + 0.5) * cell, cell)
-                            as f32;
-                }
-            }
-            let mut worn = initial.clone();
-            erode_walls(&mut worn, SOURCE_N, cell, erosion, 0.40);
-            for y in 0..SOURCE_N {
-                for x in 0..SOURCE_N {
-                    let wx = (x as f64 + 0.5) * cell;
-                    let wy = (y as f64 + 0.5) * cell;
-                    let (a, c) = result.channel_coordinates(wx, wy);
-                    let wall = result
-                        .canyon
-                        .as_ref()
-                        .unwrap()
-                        .section(a, c, cell, &result.noise, &result.noise2)
-                        .wall;
-                    let weight = 1.0 - smooth((wall - 0.88) / 0.12);
-                    let i = y * SOURCE_N + x;
-                    worn[i] = (worn[i] - initial[i]) * weight as f32;
-                }
-            }
-            result.delta = Surface::new(worn);
-        }
         Ok(result)
     }
 
+    /// Retained mip levels, largest first. Empty correction means no field for plains.
+    pub fn sampling_field(&self) -> Vec<f32> {
+        let mut values: Vec<f32> = self
+            .sampling_surface()
+            .levels
+            .iter()
+            .flatten()
+            .copied()
+            .collect();
+        if self.relief.is_geological() {
+            values.extend(self.background.levels.iter().flatten());
+        }
+        values
+    }
+    /// Retained physical field, including its filtered pyramid.
+    fn sampling_surface(&self) -> &Surface {
+        if self.relief == Relief::Flat {
+            &self.delta
+        } else {
+            &self.source
+        }
+    }
+    /// Temporary sampler parameters: map/motif meters, phase, amplitude, clamp,
+    /// family (0 plain, 1 regional, 2 valley, 3 finite), then the geographic channel direction.
+    pub fn sampling_parameters(&self) -> Vec<f64> {
+        let mut values = vec![
+            self.map_width,
+            self.motif,
+            self.phase,
+            self.amp,
+            self.max_height,
+            if self.relief == Relief::Flat {
+                0.0
+            } else if self.relief == Relief::Valley {
+                2.0
+            } else if self.relief.is_geological() {
+                3.0
+            } else {
+                1.0
+            },
+            self.down.0,
+            self.down.1,
+        ];
+        match &self.feature {
+            Some(FiniteShape::Volcano(shape)) => {
+                values.extend(shape.parameters(self.amp).iter().map(|&v| v as f64))
+            }
+            Some(FiniteShape::Plateau(shape)) => values.extend(
+                shape
+                    .parameters(self.amp, self.erosion)
+                    .iter()
+                    .map(|&v| v as f64),
+            ),
+            Some(FiniteShape::Canyon { width, phase }) => values.extend([
+                width * 0.5,
+                width * 0.5,
+                width * 0.48,
+                1.0,
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                *phase,
+                width / 2400.0,
+                3.0,
+                self.amp,
+                0.0,
+                0.0,
+                0.0,
+                self.relief.environment_scale(),
+            ]),
+            None => {}
+        }
+        if self.relief.is_geological() {
+            // Reserved sampler slots: local field origin in map meters.
+            values[21] = self.feature_origin.0;
+            values[22] = self.feature_origin.1;
+        }
+        values
+    }
+
+    pub fn prepare_environment(
+        seed: &str,
+        width: f64,
+        relief: &str,
+        erosion: f64,
+        motif: f64,
+    ) -> Result<Vec<f32>, String> {
+        Relief::environment(relief)?;
+        if !motif.is_finite() || !(250.0..=150000.0).contains(&motif) {
+            return Err("Taille du motif environnant invalide.".into());
+        }
+        Ok(generate_motif(seed, width, relief, erosion, SOURCE_N, motif, 0.5)?.height)
+    }
+    pub fn sampling_permutations(&self) -> Vec<u32> {
+        self.noise
+            .perm
+            .iter()
+            .chain(self.noise2.perm.iter())
+            .map(|&v| v as u32)
+            .collect()
+    }
+    pub fn sampling_gradients(&self) -> Vec<f32> {
+        self.noise
+            .gradients
+            .iter()
+            .chain(self.noise2.gradients.iter())
+            .flat_map(|&(x, y)| [x as f32, y as f32])
+            .collect()
+    }
+    pub fn sampling_branches(&self) -> Vec<f32> {
+        self.channels.sampling_branches()
+    }
     pub fn width(&self) -> f64 {
         self.map_width
     }
@@ -267,8 +498,10 @@ impl TerrainGenerator {
         let epsilon = (self.motif / 65536.0).max(cell * 0.5);
         let mut min = f32::INFINITY;
         let mut max = f32::NEG_INFINITY;
+        let mut vertical = vec![(f64::NAN, 0.0_f64); resolution];
         for row in 0..resolution {
-            for col in 0..resolution {
+            let mut horizontal = (f64::NAN, 0.0_f64);
+            for (col, vertical_sample) in vertical.iter_mut().enumerate() {
                 let wx = x + (col as f64 + 0.5) * cell;
                 let wy = y + (row as f64 + 0.5) * cell;
                 let i = row * resolution + col;
@@ -279,12 +512,26 @@ impl TerrainGenerator {
                     cave_mask[i] = rock;
                 }
                 // Shade the same filtered surface as the contours, not subpixel gullies.
-                let gx = (self.height_at(wx + epsilon, wy, cell)
-                    - self.height_at(wx - epsilon, wy, cell))
-                    / (2.0 * epsilon);
-                let gy = (self.height_at(wx, wy + epsilon, cell)
-                    - self.height_at(wx, wy - epsilon, cell))
-                    / (2.0 * epsilon);
+                let left_x = wx - epsilon;
+                let right_x = wx + epsilon;
+                let upper_y = wy - epsilon;
+                let lower_y = wy + epsilon;
+                let left = if horizontal.0.to_bits() == left_x.to_bits() {
+                    horizontal.1
+                } else {
+                    self.height_at(left_x, wy, cell)
+                };
+                let upper = if vertical_sample.0.to_bits() == upper_y.to_bits() {
+                    vertical_sample.1
+                } else {
+                    self.height_at(wx, upper_y, cell)
+                };
+                let right = self.height_at(right_x, wy, cell);
+                let lower = self.height_at(wx, lower_y, cell);
+                horizontal = (right_x, right);
+                *vertical_sample = (lower_y, lower);
+                let gx = (right - left) / (2.0 * epsilon);
+                let gy = (lower - upper) / (2.0 * epsilon);
                 let norm = (1.0 + gx * gx + gy * gy).sqrt();
                 normal_x[i] = (-gx / norm) as f32;
                 normal_y[i] = (-gy / norm) as f32;
@@ -328,7 +575,7 @@ impl TerrainGenerator {
             )
         };
         let scale = self.motif / 2400.0;
-        let rough = fbm(&self.noise, x + self.phase, y, 720.0 * scale, 4);
+        let rough = || fbm(&self.noise, x + self.phase, y, 720.0 * scale, 4);
         let height = match self.relief {
             Relief::Cavern => {
                 let px = (x - self.map_width * 0.5) / self.motif + 0.5;
@@ -337,16 +584,52 @@ impl TerrainGenerator {
                 let floor = self.amp * (0.08 + 0.035 * fbm(&self.noise2, x, y, 480.0 * scale, 3));
                 floor + self.amp * smooth(distance / 0.035)
             }
-            Relief::Plateau | Relief::Volcano | Relief::Caldera => {
-                let px = (x - self.map_width * 0.5) / self.motif + 0.5;
-                let py = (y - self.map_width * 0.5) / self.motif + 0.5;
+            Relief::Plateau | Relief::Volcano | Relief::Caldera | Relief::Canyon => {
+                let px = (x - self.feature_origin.0) / self.motif;
+                let py = (y - self.feature_origin.1) / self.motif;
                 let edge = px.min(1.0 - px).min(py).min(1.0 - py);
-                let weight = smoother(edge / 0.055);
+                let weight = match self.feature.as_ref().unwrap() {
+                    FiniteShape::Plateau(shape) => {
+                        smoother(edge / 0.045)
+                            * shape.influence(
+                                px * self.motif,
+                                py * self.motif,
+                                &self.noise,
+                                &self.noise2,
+                            )
+                    }
+                    FiniteShape::Volcano(shape) => {
+                        shape.influence(px * self.motif, py * self.motif, &self.noise, &self.noise2)
+                    }
+                    FiniteShape::Canyon { width, phase } => FiniteShape::canyon_influence(
+                        *width,
+                        *phase,
+                        px * self.motif,
+                        py * self.motif,
+                        &self.noise,
+                    ),
+                };
                 let surroundings = self.regional(&self.background, x, y, footprint);
                 if weight == 0.0 {
                     surroundings
                 } else {
-                    let local = self.source.sample(px, py, footprint / self.motif) * weight;
+                    let local = self.source.sample(px, py, footprint / self.motif);
+                    // A low-frequency foundation lifts the complete crater with its
+                    // surroundings; smooth union blends gradients over a physical apron.
+                    let foundation = if matches!(
+                        self.relief,
+                        Relief::Volcano | Relief::Caldera | Relief::Plateau | Relief::Canyon
+                    ) {
+                        self.regional(
+                            &self.background,
+                            self.feature_origin.0 + self.motif * 0.5,
+                            self.feature_origin.1 + self.motif * 0.5,
+                            self.motif * 0.35,
+                        )
+                    } else {
+                        0.0
+                    };
+                    let local = local + foundation;
                     let protection = self.feature.as_ref().unwrap().protection(
                         px * self.motif,
                         py * self.motif,
@@ -354,7 +637,11 @@ impl TerrainGenerator {
                         &self.noise,
                         &self.noise2,
                     );
-                    local * protection + local.max(surroundings) * (1.0 - protection)
+                    let k = self.amp * 0.18;
+                    let overlap = (1.0 - (local - surroundings).abs() / k).max(0.0);
+                    let union = local.max(surroundings) + k * overlap * overlap * 0.25;
+                    let joined = local * protection + union * (1.0 - protection);
+                    surroundings * (1.0 - weight) + joined * weight
                 }
             }
             Relief::Flat => {
@@ -365,7 +652,7 @@ impl TerrainGenerator {
                     0.42,
                     footprint / (1200.0 * scale),
                 );
-                self.amp * (0.45 + 0.275 * swell + 0.065 * rough)
+                self.amp * (0.45 + 0.275 * swell + 0.065 * rough())
                     + self.delta.sample(
                         0.5 + 0.44 * self.noise2.fbm(x / self.motif + 11.3, y / self.motif, 2),
                         0.5 + 0.44
@@ -379,24 +666,9 @@ impl TerrainGenerator {
             | Relief::Mountains
             | Relief::Mixed
             | Relief::HighMountains
-            | Relief::Valley
-            | Relief::Canyon => {
+            | Relief::Valley => {
                 let terrain = self.regional(&self.source, x, y, footprint);
-                if self.relief == Relief::Canyon {
-                    let (along, across) = self.channel_coordinates(x, y);
-                    let section = self.canyon.as_ref().unwrap().section(
-                        along,
-                        across,
-                        footprint,
-                        &self.noise,
-                        &self.noise2,
-                    );
-                    let floor = self.amp * (0.06 + 0.012 * rough);
-                    floor
-                        + (terrain + self.amp * 0.9) * section.wall
-                        + self.amp * section.debris
-                        + self.regional(&self.delta, x, y, footprint)
-                } else if self.relief == Relief::Valley {
+                if self.relief == Relief::Valley {
                     let (along, across) = self.channel_coordinates(x, y);
                     let wall = self.channels.wall(
                         along,
@@ -406,7 +678,7 @@ impl TerrainGenerator {
                         &self.noise,
                         &self.noise2,
                     );
-                    self.amp * (0.06 + 0.012 * rough) + terrain * wall.powf(1.2)
+                    self.amp * (0.06 + 0.012 * rough()) + terrain * wall.powf(1.2)
                 } else {
                     terrain
                 }
@@ -516,6 +788,10 @@ impl Surface {
             )
         };
         let t = lod - lower as f64;
-        at(lower) * (1.0 - t) + at(upper) * t
+        if t == 0.0 {
+            at(lower)
+        } else {
+            at(lower) * (1.0 - t) + at(upper) * t
+        }
     }
 }

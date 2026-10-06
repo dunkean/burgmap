@@ -40,29 +40,71 @@ vérification de compilation pour `wasm32-unknown-unknown`.
 
 ## Contrôles
 
+- **Échantillonnage** compare CPU Rust et GPU FP32 (`compute=wasm|gpu-f32`).
+  **Génération** compare la référence CPU (`generation=cpu`), les bruits fins GPU
+  (`gpu`), tous les bruits GPU (`gpu-all`) et l'érosion GPU complète
+  (`gpu-erosion`, par défaut). À graine, résolution et nombre d'itérations identiques, ce
+  dernier mode déplace sur WebGPU les bruits, le drainage, l'accumulation,
+  l'incision, le traitement des cuvettes, la relaxation thermique, la diffusion
+  et la reconstruction/normalisation du champ de 1024². Seul le champ final
+  revient à Rust pour préparer le terrain et ses mips ; le rendu reste inchangé.
+  Le mode fin conserve les entrées CPU du drainage. Les champs préparés sont
+  réutilisés lors des déplacements de caméra.
+  Ces modes GPU sont actifs pour collines, montagnes, mixte, hautes montagnes,
+  vallée, canyon, plateau, volcan et caldeira. Pour ces quatre derniers reliefs,
+  les choix GPU utilisent la génération et l’érosion complètes ; les modes
+  bruits seuls restent des comparaisons des reliefs régionaux. L'échantillonnage GPU couvre aussi la plaine. Les autres familles
+  et les navigateurs sans WebGPU utilisent Rust avec un diagnostic explicite.
+  Le FP16 a été retiré après les artefacts observés par l'utilisateur.
+  L'érosion GPU est une variante à comparer visuellement avec la référence CPU :
+  la propagation parallèle et les arrondis FP32 peuvent modifier les tracés. Les flats utilisent une distance pondérée par les creux du terrain et
+  une priorité reproductible issue de la graine, pour éviter les longs canaux
+  alignés sur les huit directions de la grille. Cette priorité n'ajoute aucune
+  perturbation aux altitudes physiques.
+  Si le drainage ne converge pas, le GPU réessaie avec davantage de passes ;
+  une erreur persistante déclenche le repli CPU avec sa raison dans le diagnostic.
+  Le rendu, les palettes, les normales et les courbes conservent leur méthode.
+
 - Largeur du terrain carré : **500 à 100 000 mètres**.
 - Taille du motif : **250 à 50 000 mètres**, par défaut **3 000 m**, indépendante
   de la largeur de la carte. Elle règle les dimensions des formes et leur détail.
 - Graine : chaîne reproductible ; bouton pour tirer une nouvelle graine.
 - Relief : **plaine, colline, vallée, montagne, collines et montagnes, plateau, haute montagne,
   volcan, caldeira ouverte, caverne**.
-  Le canyon est retiré des choix du banc ; les anciens liens `relief=canyon`
-  ouvrent une plaine. Son implémentation reste interne au moteur.
+  Le canyon est de nouveau disponible : il naît d’une érosion massive sur un
+  haut pays, avec des branches déterminées par les bassins versants.
+- **Alentours**, pour plateau, volcan, caldeira et canyon : plaine, collines,
+  collines et montagnes, montagnes ou hautes montagnes. Le choix est conservé
+  dans le lien (`environment=`), avec le mélange collines/montagnes par défaut.
+  La forme locale et ses tirages restent indépendants du choix des alentours.
+  Sa position varie de façon reproductible avec la graine ; une marge garde
+  son champ local dans la carte lorsqu’elle est plus grande que le motif.
 - **Collines et montagnes** possède son propre curseur de proportion de montagnes,
   de 0 à 100 %. Le mélange forme des régions continues et reste inclus dans le lien (`mix=`).
-- Érosion : **0 à 100 %**. À 0 %, le relief initial est conservé ; la dose augmente
-  progressivement avec le carré du curseur pour les montagnes. La plaine utilise
-  une dose à la puissance quatre, plus douce au départ, avec une échelle de rendu
-  indépendante de la dose. Les volcans et caldeiras utilisent une érosion dédiée
-  à dose normale sur 12 passes, avec une grille fine pour les ravines des parois.
-  L'amplification et les 24 passes du canyon interne ne leur sont plus appliquées.
-  Le passage de 0 à 1 % ne déclenche plus une incision complète des cuvettes. Ce réglage agit sur
-  l'évolution du terrain, sans ajouter de rivières rendues à cette étape.
-  La caverne ignore l'érosion, aussi bien pour le sol que pour ses parois.
+- Érosion : **0 à 200 %**, par défaut **100 %** (dose normale). **200 %** double
+  les coefficients de la simulation, sans promettre un doublement de la profondeur
+  finale. À 0 %, aucune passe d’érosion n’est appliquée. Les liens existants
+  conservent leur valeur numérique. La dose est linéaire, avec une réponse à la
+  pente en mètres et une accumulation exprimée en surface physique rapportée
+  au motif, puis plafonnée pour éviter les incisions démesurées. L’érosion de
+  surface intervient après le détail fin des montagnes et utilise le même
+  drainage D-infinity que les formes finies. La grille de cette passe passe
+  de 640 à 1024 cellules selon le rapport carte/motif, avec une marge extrapolée.
+  Les cuvettes peuvent recevoir des dépôts, sans creusement forcé de leur
+  exutoire suivant une chaîne D8. Les flats et pentes montantes ne sont pas
+  incisés sur la seule base du potentiel de drainage. Le canyon possède une
+  incision spécifique des grandes rivières : son drainage traverse les cuvettes,
+  l’accumulation sélectionne les axes majeurs et règle leur profondeur et largeur.
+  Des profils de berges en distance euclidienne élargissent ces entailles, puis
+  12 passes de surface érodent leurs parois. Aucun tracé analytique prédessiné.
+  La caverne ignore toujours l’érosion.
 - Générer et Autogénérer : la case active une génération après modification
   des paramètres, avec une courte temporisation pour les curseurs.
 - Parchemin, Atlas et Topographique : changement de rendu du même terrain,
   avec un ombrage continu sans les anciennes hachures noires ni grain haute fréquence.
+- **MNE · Copernicus** : altitudes du terrain généré en dégradé bleu foncé, vert,
+  jaune, rouge, gris puis blanc, sans ombrage ni courbes. L'échelle globale
+  reste fixe au zoom ; ce rendu n'importe pas de données Copernicus.
 - Molette, glisser, zoom tactile, recentrer ; coordonnées sous la souris.
 - Pins : Alt-clic ou mode de pose, notes, suppression, visibilité, copie du
   lien et du rapport. Le lien conserve le terrain affiché, les pins et la vue.
@@ -74,21 +116,39 @@ carte révèle leurs alentours. Les amplitudes suivent l'échelle du relief avec
 des bornes physiques et ne grossissent pas avec la seule taille de la carte.
 Les vallées suivent un tronc courbe à plusieurs échelles, avec des affluents
 raccordés aux deux versants. Leurs confluences sont fusionnées progressivement,
-sans coupe à angle droit à l'entrée des affluents. Le canyon possède un réseau
-distinct de lacets et retours en arrière, des affluents et leurs branches,
-des corniches irrégulières et des chaos rocheux. Son tracé ne dépend pas du
-curseur d'érosion, qui use et creuse ses véritables parois. Les alentours mêlent collines et
-montagnes, comme autour du plateau, du volcan et de la caldeira. La haute montagne
-varie aussi entre massifs élevés et régions plus basses, avec des vallées érodées.
-Le plateau a un sommet plus calme et un contour moins bruité. Les parois et les
-bords volcaniques ont des irrégularités légères. Le raccord du plateau, du volcan
-et de la caldeira prend le maximum de leur hauteur et des montagnes environnantes.
-Le dessus du plateau et les parties intactes des cratères conservent leur
-propre hauteur, avec des masques tirés de la même géométrie que leur relief.
-La partie effondrée de la caldeira reçoit aussi le maximum avec les montagnes
-environnantes, pour éviter une ouverture plate. Les cratères ont une lèvre arrondie
-et un léger bruit géographique continu ; les variations angulaires qui dessinaient
-des traits en étoile sont supprimées.
+sans coupe à angle droit à l'entrée des affluents. Le canyon tire son réseau du relief et de l’accumulation du drainage. Le curseur
+contrôle la dose qui le creuse ; à zéro, il reste un haut pays non incisé.
+Les alentours des formes géologiques suivent le relief choisi dans **Alentours**.
+Autour du plateau, leur taille de motif vaut 2,5 fois celle du plateau,
+sur CPU comme sur GPU. Autour des vallées, volcans et caldeiras, ce facteur
+vaut 2 ; autour du canyon, il vaut 1. La taille de la vallée et du cône reste indépendante. Le plateau
+garde une emprise initiale fixe quand la dose change. Son contour combine trois
+à sept lobes déformés, avec des baies concaves et parfois des mesas détachées.
+Son dessus conserve les anciens paliers, lobes secondaires, buttes et petits
+reliefs ridged, limités à cette nouvelle emprise. Le raccord utilise
+ce même contour et cesse d’agir avant le bord du raster : aucune fondation carrée.
+Le raccord du volcan et de la caldeira suit également leur contour volcanique,
+avec un support circulaire qui s’annule avant les bords du champ local ; la
+fondation ne relève plus les coins du raster. CPU et GPU partagent ce masque.
+Le canyon occupe maintenant un haut pays local à l’échelle du motif : ses
+incisions restent calculées par drainage/érosion. Son raccord suit un contour
+irrégulier et préserve les creux du réseau au lieu de les remplir avec les
+montagnes environnantes. La fondation est échantillonnée à la position réelle
+de chaque forme. Les alentours en plaine utilisent le calcul Rust existant ;
+les autres alentours et l’érosion locale utilisent le GPU en mode GPU. Le
+diagnostic de préparation distingue le temps de la plaine CPU du calcul GPU.
+Les collines ont une amplitude relevée de 10 % ; leur seuil d’incision suit
+leur propre pente caractéristique pour garder des ravines lisibles.
+Les montagnes et hautes montagnes ont une charpente de crêtes ridged dans le
+champ de soulèvement principal, avant l’érosion. Elle suit la taille du motif ;
+les collines et le haut pays du canyon gardent des formes initiales plus douces.
+Le raccord des formes finies utilise une union lissée sur 18 % de leur amplitude
+et un fondu spatial à dérivées continues dans une large bande extérieure.
+Les formes finies reposent sur une fondation filtrée de leur environnement,
+qui élève le motif entier sans remplir sa dépression. Le bassin intact et
+le sommet du plateau restent protégés par leurs masques géométriques ; la brèche
+reçoit le raccord lissé aux alentours. Les irrégularités du cratère sont
+cartésiennes, avec une lèvre arrondie et un fond doucement bruité.
 La caldeira ouverte reste un type distinct avec un bassin bas et un anneau
 effondré muni d'une brèche.
 
@@ -141,8 +201,10 @@ rust/crates/render/        réservé, technologie future non choisie
 La façade expose un appel complet :
 
 ```ts
-const engine = new TerrainEngine(seed, mapWidth, relief, erosion, motifSize, mountainMix);
+const engine = new TerrainEngine(seed, mapWidth, relief, erosion, motifSize, mountainMix, environment);
 // mountainMix : 0 à 1, facultatif (0.5 par défaut), utilisé pour relief="mixed".
+// environment : "flat" | "hills" | "mixed" | "mountains" | "high-mountains",
+// facultatif ("mixed" par défaut), utilisé pour les quatre formes géologiques.
 const region = engine.sample_region(x, y, extent, resolution);
 // getters : x, y, width (= extent), resolution, min_height, max_height,
 //           height: Float32Array, cave_mask: Uint8Array,
@@ -192,3 +254,9 @@ normalement `rust/target/` et `rust/out/`.
 
 Voir aussi [le parcours d'intégration](docs/INTEGRATION.md) pour les étapes
 futures et les décisions qui restent à concevoir avec l'utilisateur.
+
+[L'audit de performances](docs/PERFORMANCE_AUDIT.md) détaille le parcours de
+calcul, les mesures par relief et les optimisations vérifiées en copies isolées,
+avec leurs outils de reproduction. Les mesures initiales proviennent de copies
+isolées ; la suite autorisée intègre désormais le sampler GPU et six
+optimisations CPU exactes. Le FP16 est désactivé ; les bruits de génération disposent d'un chemin GPU FP32.

@@ -1,18 +1,19 @@
 //! First isolated Rust generation stage. World coordinates and elevations are meters.
 //! The square raster uses cell centers and has its origin at the upper left.
-mod canyon;
 mod channels;
 mod engine;
 mod erosion;
+mod generation_noise;
 mod noise;
 mod rng;
 
-use erosion::{MountainCfg, erode_shape, erode_volcanic, mountain};
+use erosion::{MountainCfg, erode_shape, erode_surface, mountain};
 use noise::Noise;
 use rng::Rng;
 use std::f64::consts::{PI, TAU};
 
 pub use engine::TerrainGenerator;
+pub use generation_noise::{GenerationNoise, GenerationNoisePlan};
 
 pub struct Terrain {
     pub x: f64,
@@ -45,6 +46,32 @@ enum Relief {
 }
 
 impl Relief {
+    fn is_geological(self) -> bool {
+        matches!(
+            self,
+            Self::Plateau | Self::Volcano | Self::Caldera | Self::Canyon
+        )
+    }
+
+    fn environment(value: &str) -> Result<Self, String> {
+        let kind = Self::parse(value)?;
+        if !matches!(
+            kind,
+            Self::Flat | Self::Hills | Self::Mixed | Self::Mountains | Self::HighMountains
+        ) {
+            return Err("Relief environnant invalide.".into());
+        }
+        Ok(kind)
+    }
+
+    fn environment_scale(self) -> f64 {
+        match self {
+            Self::Plateau => 2.5,
+            Self::Valley | Self::Volcano | Self::Caldera => 2.0,
+            _ => 1.0,
+        }
+    }
+
     fn mixed_amplitude(self, motif: f64, mountain_mix: f64) -> f64 {
         if self == Self::Mixed {
             Self::Hills.amplitude(motif) * (1.0 - mountain_mix)
@@ -75,7 +102,7 @@ impl Relief {
         let extent = width / 2400.0;
         match self {
             Self::Flat => (20.0 * extent.powf(0.6)).min(60.0),
-            Self::Hills => (80.0 * extent.powf(0.85)).min(380.0),
+            Self::Hills => (88.0 * extent.powf(0.85)).min(380.0),
             Self::Valley => (110.0 * extent.powf(0.85)).min(1100.0),
             Self::Canyon => (260.0 * extent.powf(0.78)).min(1800.0),
             Self::Mountains | Self::Mixed => (400.0 * extent.powf(0.78)).min(2600.0),
@@ -104,7 +131,7 @@ struct PreparedTerrain {
     height: Vec<f32>,
 }
 
-fn generate_motif(
+fn generate_motif_base(
     seed: &str,
     width: f64,
     relief: &str,
@@ -113,11 +140,34 @@ fn generate_motif(
     motif: f64,
     mountain_mix: f64,
 ) -> Result<PreparedTerrain, String> {
+    generate_motif_base_with_noise(
+        seed,
+        width,
+        relief,
+        erosion,
+        resolution,
+        motif,
+        mountain_mix,
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)] // Temporary numeric interchange, matching the existing motif API.
+fn generate_motif_base_with_noise(
+    seed: &str,
+    width: f64,
+    relief: &str,
+    erosion: f64,
+    resolution: usize,
+    motif: f64,
+    mountain_mix: f64,
+    generation_noise: Option<&GenerationNoise<'_>>,
+) -> Result<PreparedTerrain, String> {
     if !width.is_finite() || !(250.0..=100000.0).contains(&width) {
         return Err("La surface préparée doit être comprise entre 250 et 100 000 mètres.".into());
     }
-    if !erosion.is_finite() || !(0.0..=1.0).contains(&erosion) {
-        return Err("Le niveau d’érosion doit être compris entre 0 et 1.".into());
+    if !erosion.is_finite() || !(0.0..=2.0).contains(&erosion) {
+        return Err("Le niveau d’érosion doit être compris entre 0 et 2.".into());
     }
     if !(64..=1024).contains(&resolution) {
         return Err("La résolution doit être comprise entre 64 et 1 024.".into());
@@ -154,61 +204,43 @@ fn generate_motif(
     let amp = relief.mixed_amplitude(motif, mountain_mix);
     let mut height = if matches!(
         relief,
-        Relief::Hills | Relief::Valley | Relief::Mountains | Relief::Mixed | Relief::HighMountains
+        Relief::Hills
+            | Relief::Valley
+            | Relief::Canyon
+            | Relief::Mountains
+            | Relief::Mixed
+            | Relief::HighMountains
     ) {
-        let gentle = matches!(relief, Relief::Hills | Relief::Valley);
-        let high = relief == Relief::HighMountains;
+        if let Some(values) = generation_noise {
+            let nc = if width > motif * 3.0 { 640 } else { 320 };
+            if (!values.coarse.is_empty() && values.coarse.len() != nc * nc * 4)
+                || values.fine.len() != n * n * 4
+                || !values
+                    .coarse
+                    .iter()
+                    .chain(values.fine)
+                    .all(|v| v.is_finite())
+            {
+                return Err("Champs de bruit de génération invalides.".into());
+            }
+        }
+        let settings = mountain_parameters(relief, width, motif, mountain_mix);
         mountain(&MountainCfg {
+            generation_noise,
             n,
             width,
-            amp: amp
-                * if relief == Relief::Valley {
-                    0.65
-                } else if gentle {
-                    1.05
-                } else {
-                    1.2
-                },
+            amp: settings.amp,
             noise: &noise,
             noise2: &noise2,
             down,
             k,
-            iterations: if gentle { 18 } else { 22 },
-            coarse: if width > motif * 3.0 { 640 } else { 320 },
-            mountain_mix: if relief == Relief::Mixed {
-                mountain_mix
-            } else if gentle {
-                0.0
-            } else {
-                0.72
-            },
-            talus: if relief == Relief::Mixed {
-                0.2 + 0.65 * mountain_mix
-            } else if gentle {
-                0.2
-            } else if high {
-                1.4
-            } else {
-                0.85
-            },
-            detail: if relief == Relief::Mixed {
-                0.025 + 0.025 * mountain_mix
-            } else if gentle {
-                0.025
-            } else if high {
-                0.085
-            } else {
-                0.05
-            },
-            diffusion: if relief == Relief::Mixed {
-                0.7 - 0.4 * mountain_mix
-            } else if gentle {
-                0.7
-            } else if high {
-                0.12
-            } else {
-                0.3
-            },
+            iterations: settings.iterations,
+            coarse: settings.coarse,
+            mountain_mix: settings.mountain_mix,
+            talus: settings.talus,
+            detail: settings.detail,
+            diffusion: settings.diffusion,
+            crest: settings.crest,
             valley: (relief == Relief::Valley).then_some((valley_width, valley_offset, offset)),
             erosion,
         })
@@ -226,9 +258,8 @@ fn generate_motif(
             let px = (x as f64 + 0.5) * cell;
             let py = (y as f64 + 0.5) * cell;
             let along = (px - width * 0.5) * down.0 + (py - width * 0.5) * down.1;
-            let across = -(px - width * 0.5) * down.1 + (py - width * 0.5) * down.0;
             let q = along / width + 0.5;
-            let rough = noise.fbm((px + offset) / (720.0 * k), py / (720.0 * k), 4);
+            let rough = || noise.fbm((px + offset) / (720.0 * k), py / (720.0 * k), 4);
             let h = match relief {
                 Relief::Flat => {
                     9.0 + 5.5
@@ -244,23 +275,11 @@ fn generate_motif(
                         + 6.0 * (width / 2400.0).powf(0.6) * (0.5 - q)
                 }
                 Relief::Valley => height[i] as f64 + 44.0 * (amp / 110.0) * (0.5 - q),
-                Relief::Canyon => {
-                    let meander = 180.0 * k * noise.fbm((along + offset) / (1680.0 * k), 0.37, 3)
-                        + 43.2 * k * noise2.fbm(along / (528.0 * k), 4.1, 2);
-                    let distance = (across + meander - valley_offset).abs();
-                    let floor = width * (0.025 + erosion * 0.025);
-                    let wall = smooth((distance - floor) / (width * (0.045 + erosion * 0.055)));
-                    let terraces = (wall * 3.0).floor() / 3.0;
-                    let shoulder = wall * 0.88 + terraces * 0.12;
-                    let tributary = noise2.ridged((px + offset) / (290.0 * k), py / (290.0 * k), 4);
-                    let slope_texture = noise.fbm(px / (95.0 * k), py / (95.0 * k), 3);
-                    amp * (0.05 + 0.82 * shoulder + 0.08 * rough * wall + 0.08 * (1.0 - q)
-                        - 0.07 * tributary * wall * (1.0 - 0.6 * wall)
-                        + 0.014 * slope_texture * wall)
+                Relief::Plateau => {
+                    amp * plateau.elevation(px, py, erosion, rough(), &noise, &noise2)
                 }
-                Relief::Plateau => amp * plateau.elevation(px, py, erosion, rough, &noise, &noise2),
                 Relief::Volcano | Relief::Caldera => {
-                    amp * volcano.elevation(px, py, rough, &noise, &noise2)
+                    amp * volcano.elevation(px, py, rough(), &noise, &noise2)
                 }
                 _ => height[i] as f64,
             };
@@ -269,10 +288,21 @@ fn generate_motif(
     }
     if matches!(
         relief,
-        Relief::Flat | Relief::Canyon | Relief::Plateau | Relief::Volcano | Relief::Caldera
+        Relief::Flat | Relief::Plateau | Relief::Volcano | Relief::Caldera
     ) {
-        if matches!(relief, Relief::Volcano | Relief::Caldera) {
-            erode_volcanic(&mut height, n, cell, erosion);
+        if matches!(relief, Relief::Volcano | Relief::Caldera | Relief::Plateau) {
+            erode_surface(
+                &mut height,
+                n,
+                cell,
+                erosion,
+                if relief == Relief::Plateau {
+                    0.95
+                } else {
+                    0.55
+                },
+                motif,
+            );
         } else {
             erode_shape(
                 &mut height,
@@ -283,11 +313,111 @@ fn generate_motif(
             );
         }
     }
+    if relief == Relief::Canyon {
+        erosion::erode_canyon(
+            &mut height,
+            n,
+            cell,
+            erosion,
+            1.15,
+            motif,
+            mountain_parameters(relief, width, motif, mountain_mix).amp,
+        );
+    } else if matches!(
+        relief,
+        Relief::Hills | Relief::Mountains | Relief::Mixed | Relief::HighMountains | Relief::Valley
+    ) {
+        erode_surface(
+            &mut height,
+            n,
+            cell,
+            erosion,
+            mountain_parameters(relief, width, motif, mountain_mix).talus,
+            motif,
+        );
+    }
+    Ok(PreparedTerrain { height })
+}
+
+pub(crate) struct MountainParameters {
+    amp: f64,
+    iterations: usize,
+    coarse: usize,
+    mountain_mix: f64,
+    talus: f64,
+    detail: f64,
+    diffusion: f64,
+    crest: f64,
+}
+fn mountain_parameters(relief: Relief, width: f64, motif: f64, mix: f64) -> MountainParameters {
+    let gentle = matches!(relief, Relief::Hills | Relief::Valley);
+    let high = relief == Relief::HighMountains;
+    let canyon = relief == Relief::Canyon;
+    MountainParameters {
+        amp: relief.mixed_amplitude(motif, mix)
+            * if canyon {
+                1.7
+            } else if relief == Relief::Valley {
+                0.65
+            } else if gentle {
+                1.05
+            } else {
+                1.2
+            },
+        crest: if gentle || canyon { 0.0 } else { 1.0 },
+        iterations: if gentle { 18 } else { 22 },
+        coarse: if width > motif * 3.0 { 640 } else { 320 },
+        mountain_mix: if canyon {
+            0.0
+        } else if relief == Relief::Mixed {
+            mix
+        } else if gentle {
+            0.0
+        } else {
+            0.72
+        },
+        talus: if canyon {
+            1.15
+        } else if relief == Relief::Mixed {
+            0.2 + 0.65 * mix
+        } else if gentle {
+            0.2
+        } else if high {
+            1.4
+        } else {
+            0.85
+        },
+        detail: if canyon {
+            0.012
+        } else if relief == Relief::Mixed {
+            0.025 + 0.025 * mix
+        } else if gentle {
+            0.025
+        } else if high {
+            0.085
+        } else {
+            0.05
+        },
+        diffusion: if canyon {
+            0.08
+        } else if relief == Relief::Mixed {
+            0.7 - 0.4 * mix
+        } else if gentle {
+            0.7
+        } else if high {
+            0.12
+        } else {
+            0.3
+        },
+    }
+}
+
+fn normalize(mut height: Vec<f32>) -> Result<PreparedTerrain, String> {
     // Historical relief normalization: shift p1 to 1m without changing physical slope.
     // Rock height and cave floor remain a separate, explicitly marked raster.
     let mut sorted = height.clone();
-    sorted.sort_unstable_by(f32::total_cmp);
-    let p1 = sorted[(sorted.len() as f64 * 0.01).floor() as usize];
+    let index = (sorted.len() as f64 * 0.01).floor() as usize;
+    let p1 = *sorted.select_nth_unstable_by(index, f32::total_cmp).1;
     for value in &mut height {
         *value = (1.0 + *value - p1).max(0.3);
     }
@@ -368,6 +498,7 @@ impl CavernShape {
 struct PlateauShape {
     width: f64,
     level: f64,
+    layout: f64,
     angle: f64,
     axis: f64,
     phase: f64,
@@ -378,43 +509,97 @@ impl PlateauShape {
         Self {
             width,
             level: rng.range(0.38, 0.58),
+            layout: rng.float(),
             angle: rng.range(0.0, TAU),
-            axis: rng.range(0.65, 1.25),
+            axis: rng.range(0.78, 1.12),
             phase: rng.range(0.0, 100.0),
         }
     }
 
+    fn parameters(&self, amp: f64, _erosion: f64) -> Vec<f32> {
+        vec![
+            (self.width * 0.5) as f32,
+            (self.width * 0.5) as f32,
+            (self.width * 0.48) as f32,
+            self.axis as f32,
+            self.angle.cos() as f32,
+            self.angle.sin() as f32,
+            self.level as f32,
+            self.layout as f32,
+            self.phase as f32,
+            (self.width / 2400.0) as f32,
+            2.0,
+            amp as f32,
+            0.0,
+            0.95,
+            0.5,
+            Relief::Plateau.environment_scale() as f32,
+        ]
+    }
+
+    // Union of warped lobes, with bays and occasional detached mesas. This is a
+    // signed geographic boundary, also used for joining the finite raster.
     fn boundary(&self, px: f64, py: f64, noise: &Noise, noise2: &Noise) -> (f64, f64) {
         let k = self.width / 2400.0;
         let dx = (px - self.width * 0.5) / (self.width * 0.48);
         let dy = (py - self.width * 0.5) / (self.width * 0.48);
         let rx = dx * self.angle.cos() + dy * self.angle.sin();
         let ry = (-dx * self.angle.sin() + dy * self.angle.cos()) / self.axis;
-        let radial = rx.hypot(ry);
-        let boundary = radial
-            + 0.12 * noise.fbm(px / (840.0 * k) + self.phase, py / (840.0 * k), 4)
-            + 0.025 * noise2.fbm(px / (500.0 * k), py / (500.0 * k), 2);
-        (radial, boundary)
+        let wx = rx + 0.10 * noise.fbm(px / (700.0 * k) + self.phase, py / (700.0 * k), 3);
+        let wy = ry + 0.10 * noise2.fbm(px / (700.0 * k), py / (700.0 * k) - self.phase, 3);
+        let detached = self.layout > 0.72;
+        let mut boundary = if detached { 10.0 } else { wx.hypot(wy) - 0.31 };
+        let count = 3 + (self.layout * 5.0).floor() as usize;
+        for i in 0..count {
+            let i = i as f64;
+            let angle = self.phase * 0.13 + i * 2.399963;
+            let radius = 0.28 + 0.29 * (0.5 + 0.5 * (self.phase * 0.37 + i * 1.71).sin());
+            let lobe = if detached { 0.14 } else { 0.20 }
+                + 0.10 * (0.5 + 0.5 * (self.phase * 0.83 + i * 2.31).sin());
+            boundary =
+                boundary.min((wx - angle.cos() * radius).hypot(wy - angle.sin() * radius) - lobe);
+        }
+        if self.layout < 0.45 {
+            let angle = self.phase * 0.21;
+            let bay = 0.27 - (wx - 0.44 * angle.cos()).hypot(wy - 0.44 * angle.sin());
+            boundary = boundary.max(bay);
+        }
+        // Keep all support inside the local simulation. No square raster skirt.
+        boundary = boundary.max(dx.hypot(dy) - 0.80);
+        (rx, boundary)
     }
 
-    fn protection(&self, px: f64, py: f64, erosion: f64, noise: &Noise, noise2: &Noise) -> f64 {
-        let (_, boundary) = self.boundary(px, py, noise, noise2);
-        1.0 - smooth((boundary - 0.70) / (0.12 + erosion * 0.12))
+    fn influence(&self, px: f64, py: f64, noise: &Noise, noise2: &Noise) -> f64 {
+        1.0 - smooth((self.boundary(px, py, noise, noise2).1 + 0.01) / 0.15)
+    }
+
+    fn protection(&self, px: f64, py: f64, _erosion: f64, noise: &Noise, noise2: &Noise) -> f64 {
+        1.0 - smooth((self.boundary(px, py, noise, noise2).1 + 0.03) / 0.10)
     }
 
     fn elevation(
         &self,
         px: f64,
         py: f64,
-        erosion: f64,
+        _erosion: f64,
         rough: f64,
         noise: &Noise,
         noise2: &Noise,
     ) -> f64 {
         let k = self.width / 2400.0;
-        let (radial, boundary) = self.boundary(px, py, noise, noise2);
-        let apron = 1.0 - smooth((boundary - 0.70) / (0.12 + erosion * 0.12));
-        let upper = 1.0 - smooth((boundary - self.level) / (0.08 + erosion * 0.06));
+        let (_, boundary) = self.boundary(px, py, noise, noise2);
+        let apron = 1.0 - smooth((boundary + 0.03) / 0.10);
+        // Restore the former summit shelves and small relief, clipped to the
+        // new geographic footprint. Keep the outline's random draws unchanged.
+        let dx = (px - self.width * 0.5) / (self.width * 0.48);
+        let dy = (py - self.width * 0.5) / (self.width * 0.48);
+        let rx = dx * self.angle.cos() + dy * self.angle.sin();
+        let ry = (-dx * self.angle.sin() + dy * self.angle.cos()) / self.axis;
+        let radial = rx.hypot(ry);
+        let summit_boundary = radial
+            + 0.12 * noise.fbm(px / (840.0 * k) + self.phase, py / (840.0 * k), 4)
+            + 0.025 * noise2.fbm(px / (500.0 * k), py / (500.0 * k), 2);
+        let upper = (1.0 - smooth((summit_boundary - self.level) / 0.11)) * apron;
         let upper_lobe =
             smooth((noise2.fbm(px / (650.0 * k) + self.phase, py / (650.0 * k), 3) - 0.03) / 0.22);
         let buttes =
@@ -433,6 +618,7 @@ impl PlateauShape {
 enum FiniteShape {
     Plateau(PlateauShape),
     Volcano(VolcanoShape),
+    Canyon { width: f64, phase: f64 },
 }
 
 impl FiniteShape {
@@ -447,6 +633,10 @@ impl FiniteShape {
                 root.fork("volcano"),
                 relief == Relief::Caldera,
             ))),
+            Relief::Canyon => Some(Self::Canyon {
+                width: motif,
+                phase: root.fork("canyon-outline").range(0.0, 100.0),
+            }),
             _ => None,
         }
     }
@@ -455,7 +645,14 @@ impl FiniteShape {
         match self {
             Self::Plateau(shape) => shape.protection(x, y, erosion, noise, noise2),
             Self::Volcano(shape) => shape.protection(x, y, noise, noise2),
+            Self::Canyon { .. } => 1.0,
         }
+    }
+
+    fn canyon_influence(width: f64, phase: f64, x: f64, y: f64, noise: &Noise) -> f64 {
+        let radius = (x / width - 0.5).hypot(y / width - 0.5);
+        let outline = radius + 0.035 * noise.fbm(x / (width * 0.35) + phase, y / (width * 0.35), 3);
+        (1.0 - smooth((outline - 0.30) / 0.14)) * (1.0 - smooth((radius - 0.39) / 0.10))
     }
 }
 
@@ -484,6 +681,27 @@ impl VolcanoShape {
             phase: rng.range(0.0, 100.0),
             scale: width / 2400.0,
         }
+    }
+
+    fn parameters(&self, amp: f64) -> Vec<f32> {
+        vec![
+            self.center.0 as f32,
+            self.center.1 as f32,
+            self.radius as f32,
+            self.axis as f32,
+            self.rotation.cos() as f32,
+            self.rotation.sin() as f32,
+            self.breach_angle as f32,
+            self.breach_width as f32,
+            self.phase as f32,
+            self.scale as f32,
+            u8::from(self.collapsed) as f32,
+            amp as f32,
+            0.0,
+            0.0,
+            0.0,
+            Relief::Volcano.environment_scale() as f32,
+        ]
     }
 
     fn geometry(&self, px: f64, py: f64, noise: &Noise, noise2: &Noise) -> (f64, f64, f64) {
@@ -536,6 +754,21 @@ impl VolcanoShape {
         // The collapsed sector receives the same max-height surroundings as the
         // exterior, while the intact basin retains its own depression.
         crater * (1.0 - self.opening(radius, rim, azimuth))
+    }
+
+    fn influence(&self, px: f64, py: f64, noise: &Noise, noise2: &Noise) -> f64 {
+        let (radius, _, _) = self.geometry(px, py, noise, noise2);
+        let apron = if self.collapsed { 1.18 } else { 1.05 };
+        let fade = |t: f64| {
+            let t = t.clamp(0.0, 1.0);
+            1.0 - t.powi(3) * (t * (6.0 * t - 15.0) + 10.0)
+        };
+        let outline = fade((radius - (apron - 0.25)) / 0.40);
+        let width = self.scale * 2400.0;
+        let support = (px / width - 0.5).hypot(py / width - 0.5);
+        // Follow the volcanic apron, with circular support ending before the
+        // local raster edge. Its raised foundation must never expose a square.
+        outline * fade((support - 0.39) / 0.10)
     }
 
     fn elevation(&self, px: f64, py: f64, rough: f64, noise: &Noise, noise2: &Noise) -> f64 {
@@ -597,4 +830,27 @@ fn cavern(
         }
     }
     (height, mask)
+}
+
+fn generate_motif(
+    seed: &str,
+    width: f64,
+    relief: &str,
+    erosion: f64,
+    resolution: usize,
+    motif: f64,
+    mountain_mix: f64,
+) -> Result<PreparedTerrain, String> {
+    normalize(
+        generate_motif_base(
+            seed,
+            width,
+            relief,
+            erosion,
+            resolution,
+            motif,
+            mountain_mix,
+        )?
+        .height,
+    )
 }

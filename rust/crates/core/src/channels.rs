@@ -17,6 +17,26 @@ struct Branch {
 }
 
 impl Channels {
+    /// Temporary sampling export: header phase/offset/first/count, then branch vec4s.
+    pub fn sampling_branches(&self) -> Vec<f32> {
+        let mut result = vec![
+            self.phase as f32,
+            self.offset as f32,
+            self.first as f32,
+            self.branches.len() as f32,
+        ];
+        for branches in &self.branches {
+            for branch in branches {
+                result.extend([
+                    branch.join as f32,
+                    branch.across as f32,
+                    branch.length as f32,
+                    branch.bend_phase as f32,
+                ]);
+            }
+        }
+        result
+    }
     pub fn new(
         motif: f64,
         phase: f64,

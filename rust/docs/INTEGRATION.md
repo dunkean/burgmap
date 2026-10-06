@@ -17,25 +17,53 @@ réutilisent le relief préparé et ne relancent pas l'érosion. Le bruit et le 
 préparé filtrent les détails sous la résolution demandée ; normales et courbes
 suivent la même surface. L'érosion régionale utilise désormais les coordonnées
 réelles de la carte, avec une finesse limitée par son raster de 1024². Les vallées
-et canyons ont un réseau courbe d'affluents fixe. La catégorie `mixed` possède
+ont un réseau courbe d'affluents fixe ; les canyons tirent leurs axes du drainage. La catégorie `mixed` possède
 un curseur de proportion de montagnes, transmis comme sixième argument facultatif
 du constructeur WASM. La caldeira ouverte est un type dédié et la caverne ignore
 l'érosion ; ses parois descendent vers les ouvertures et le banc les rend en noir
 ombré sans bandes.
-Le canyon a désormais ses propres lacets avec retours en arrière, corniches et
-chaos ; l'érosion renforcée évolue sur ce réseau réel. Les confluences des vallées
-sont fusionnées sans découpe droite. Plateau et reliefs volcaniques se raccordent
-aux montagnes par un maximum de hauteur, sauf sur les surfaces protégées.
+Le canyon incise spécifiquement les grandes rivières du haut pays. Le drainage
+relie les cuvettes ; l’accumulation physique sélectionne les axes, leurs profondeurs
+et leurs largeurs. Des profils en distance euclidienne élargissent les berges,
+puis 12 passes de surface érodent les parois. Aucun tracé analytique imposé.
+L’érosion normale s’étend de 0 à 200 % (100 % par défaut, 200 % = dose doublée).
+Une passe commune après le détail fin ajuste l’incision à la pente et à la
+surface du bassin versant rapportée au motif ; les contributions excessives
+sont bornées. L’érosion ne creuse plus les exutoires des cuvettes par chaînes
+D8 et ne coupe pas les flats sur la seule base de leur potentiel de drainage.
+Sa grille physique varie de 640 à 1024 cellules, avec une marge extrapolée.
+Les montagnes ont une charpente ridged dans le soulèvement principal.
+Les collines gagnent 10 % d’amplitude ; leur érosion de surface suit un seuil
+de pente adapté au relief. Les alentours du plateau sont à une échelle ×2,5 ;
+ceux des vallées, volcans et caldeiras à ×2. Les formes centrales gardent
+leur propre motif, et le plateau ne change plus d’emprise avec la dose.
+Les plateaux, volcans, caldeiras et canyons génèrent et érodent leur forme locale
+sur GPU FP32. Leurs alentours sont sélectionnables : plaine, collines, mixte,
+montagnes ou hautes montagnes (`environment=`, mixte par défaut). La plaine
+conserve son calcul Rust existant, séparé dans les diagnostics de temps ; les
+autres alentours sont préparés sur GPU. Le champ local et le champ régional ont des
+pyramides séparées ; le zoom conserve l’échelle du motif et ne relance rien.
+Une union lissée et un fondu spatial remplacent le raccord par maximum dur.
+Le plateau possède trois à sept lobes, des baies, parfois des morceaux détachés,
+avec les anciens paliers et petits reliefs du dessus restaurés à la demande
+utilisateur. Son masque de raccord
+suit le contour et s’annule avant le bord du champ local, supprimant la fondation
+carrée signalée avec la graine `14k0yl1` (10 km, motif 5 km, érosion 1,33).
+Le raccord volcan/caldeira suit leur contour bruité et s’annule sur un support
+circulaire avant les bords du champ local, sur CPU comme GPU. Il supprime aussi
+la fondation carrée de la graine `1fc2unq` (12,5 km, motif 7,5 km, érosion 1,21),
+sans modifier le plateau.
+Les quatre formes ont une origine géographique décalée par un fork RNG dédié
+(`geological-placement`), avec une marge quand le motif tient dans la carte.
+Elle reste identique quand seuls les alentours ou la dose changent. La fondation
+utilise cette origine réelle. Le canyon est maintenant un haut pays fini à
+l’échelle du motif, avec un contour irrégulier et ses dépressions protégées ;
+son réseau continue de venir du drainage et de l’incision des grandes rivières.
+Les formes finies sont posées sur une fondation filtrée de l’environnement et
+gardent leur bassin/sommet intact. La brèche rejoint progressivement l’extérieur.
 Le détail régional au zoom révèle la surface préparée sans octave supplémentaire
-ni texture indépendante. Le grain du banc est désactivé. La nouvelle image régionale
-est décodée et chargée avant un court fondu, en conservant l'ancienne jusque-là. La dose
-de la plaine est plus douce au départ et son échelle de rendu reste fixe.
-Les volcans et caldeiras conservent la finesse des ravines sur une grille de
-640 cellules, avec une dose normale et 12 passes, sans l'amplification du canyon.
-Le secteur effondré de la caldeira reçoit le maximum avec les montagnes, y compris
-à son entrée dans le bassin. Le cratère intact reste protégé. La lèvre est arrondie
-et les irrégularités suivent un bruit géographique plutôt qu'un bruit angulaire
-projeté en rayons ; le fond reçoit un bruit doux.
+ni texture indépendante. Le grain du banc reste désactivé. La nouvelle image régionale
+est décodée avant un court fondu, en conservant l’ancienne jusque-là.
 `bridge/` adapte ces données au rendu de terrain actuel. Le modèle `World`
 n'est pas le modèle du moteur Rust. Voir [README](../README.md) pour le
 contrat, les commandes et les limites de cette première étape.

@@ -1,9 +1,82 @@
 # Burgmap — handoff
 
-Updated 2026-10-06. This file describes the current implementation; completed
+Updated 2026-10-07. This file describes the current implementation; completed
 bugs and their evidence are recorded in [ROADMAP.md](ROADMAP.md).
 
 ## Current status
+
+- Geological surroundings and placement (2026-10-07): user validated the volcanic
+  square repair and the new UI/terrain behavior, then authorized merge/commit/push.
+  Plateau, volcano, caldera and canyon offer Alentours: flat/hills/mixed/mountains/
+  high-mountains, replayed through environment= (mixed by default). A dedicated
+  geological-placement RNG fork moves the local source within available map margins,
+  independently of surroundings/erosion; sampling and the filtered foundation use
+  that geographic origin on Rust CPU and WGSL GPU. Canyon is now a finite highland
+  at motif scale with an irregular support mask and protected incised depressions;
+  its network still comes from drainage/erosion. Flat surroundings use the existing
+  native generation path, with separate CPU environment timing; other surroundings
+  and all geological local fields support GPU erosion. Preparation retains separate
+  local/background mips and exact exterior heights, including high-mountain settings.
+  Eleven one-off numeric probes verify overview/detail CPU-GPU sampling, finite
+  heights/normals, unchanged local hashes across environments, repeatable placement,
+  different seed positions, exact untouched exterior and invalid-option rejection.
+  Regional relief ignores dormant environment controls. Native fmt/Clippy/WASM,
+  typecheck, independent app/bench and standalone terrain builds pass. Browser
+  checks pass manual/automatic surroundings changes, exact link replay, retained
+  pins, conditional control visibility, CPU/GPU zoom without preparation, invalid
+  URL fallback, mobile layout and offline GPU canyon startup (main-thread fallback
+  when file:// refuses blob workers), without console/page errors. Evidence:
+  web/out/geological-environment/. User confirms all cases work visually; no
+  screenshots, unit suites or CI matrix added.
+
+- Volcanic square foundation repair (2026-10-06, local): volcano/caldera joining
+  weights now follow seeded volcanic geometry, with C2 circular support ending
+  before the finite raster edge, on Rust CPU and WGSL GPU samplers. The former
+  square edge fade lifted raster corners with the regional foundation. Plateau
+  joining is unchanged, as explicitly confirmed by the user. Same-source GPU
+  probes at seed 1fc2unq / map12.5km / motif7.5km / erosion1.21 remove up to
+  343.5m (volcano) and 484.9m (caldera) of artificial corner uplift. Outside
+  support, heights now equal the regional field exactly; crater-center heights
+  and the plateau overview match the preceding shader exactly. Seven one-off
+  probes cover both volcanic types at 0/121/200% and the plateau at 121%; CPU
+  sampling of those same GPU-produced fields differs by at most 1.2cm, with
+  finite heights/normals. Native fmt/Clippy, WASM checks, strict typecheck,
+  standalone terrain and independent app/bench builds pass. Exact supplied
+  dev URL and caldera variant reach 768² GPU detail without console errors.
+  Evidence: web/out/volcanic-boundary/. No suites, screenshots, commit or
+  publication; visual assessment remains with the user.
+
+- Terrain generation optimization (2026-10-06, local): user rejected FP16 after
+  visual artifacts and requested actual generation acceleration, including GPU
+  erosion or noise. Active bench now uses FP32 only. Separate sampling and
+  generation selectors/URL settings expose CPU reference versus GPU generation
+  noises; overview diagnostics distinguish preparation, noise dispatch/readback,
+  remaining Rust work, sampling and rendering. Pure core numeric interchange
+  exports seeded noise plans; browser WGSL shares the same simplex/FBM kernel
+  between generation and sampling. Default GPU generation evaluates fine warp/
+  ridge, preserving CPU initial erosion inputs; an additional gpu-all option
+  evaluates coarse environment/distribution/initial noises for visual comparison.
+  Physical scales/octaves/grids are unchanged. Fresh-generation warm medians
+  improve preparation by 25–28% versus the preceding integrated CPU source,
+  to ~1.0–1.17 s at 3km/768²/50% erosion. Fine noise drift is <0.6mm in 12
+  measured scenes with identical FP32 sampling. All-noise FP32 can change
+  drainage and has up to 20.5m local drift in these cases; remains selectable.
+  Fine-noise mode retains CPU erosion; the new gpu-erosion mode also ports
+  drainage, accumulation/incision and the complete regional simulation. See
+  the GPU erosion follow-up below for current measurements and quality limits.
+  D8 neighbors/border flags are reused across CPU erosion iterations, preserving
+  visiting/addition order. Renderer unchanged. Existing six exact CPU changes,
+  retained sampler buffers, serialized requests and coalescing remain active.
+  Generation precision can alter drainage; visual judgment remains with user.
+  Historical FP16 experiments remain in audit scripts/data, not active UI/API.
+  Native fmt/Clippy, WASM check, typecheck and terrain/independent builds pass.
+  Ten boundary/region probes including coarse 640 and erosion endpoints are
+  finite; offline GPU startup, zoom, rapid generation switches and genuine
+  unavailable-GPU CPU fallback pass without page errors. Cold offline valley
+  preparation is still ~1.68s, versus ~1.17s warm: 250ms not reached.
+  No suites, commit or publication. Live URLs on localhost:5175. User-requested
+  renders are available for the GPU erosion follow-up.
+  See rust/docs/PERFORMANCE_AUDIT.md for measurements and validation.
 
 - Terrain zoom blink follow-up (2026-10-06): removed all appended ridge octaves
   and their refinement-mask cache; zoom now reveals only the prepared mountain
@@ -832,3 +905,84 @@ The script builds committed HEAD in a clean worktree and publishes `gh-pages`.
 Keep the token local and never print it. Verify the served static build and
 source revision after deployment. The licence is GPL-3.0 because the original
 Python prototype derives from watabou's TownGeneratorOS.
+
+
+## Érosion GPU FP32 — 6 octobre 2026
+
+Le banc terrain propose `generation=gpu-erosion`, en plus de CPU, bruits fins
+GPU (défaut) et tous bruits GPU. `rust/bridge/terrainErosion.{ts,wgsl}` porte
+l'érosion régionale de collines, montagnes, mixte, hautes montagnes et vallée :
+minimax flood tuilé, drainage D8/D-infinity, accumulation/incision topologiques,
+union-find des cuvettes, remplissage/breaching atomique, thermal/diffusion,
+reconstruction et percentiles GPU. Tous les champs intermédiaires restent GPU ;
+le champ physique final passe à `TerrainEngine.with_source` pour l'assemblage
+Rust et les mips. Le renderer n'a pas changé. Ce chemin ne couvre pas encore
+les autres familles. Le GPU valide la convergence et augmente le budget ×2/×4
+avant un éventuel repli CPU explicitement diagnostiqué.
+
+`rootOf` possède maintenant une boucle bornée et un retour final explicite,
+validés avec Naga 30.0.1 et Chrome, après l'erreur de compilation Naga signalée
+par l'utilisateur. Un Firefox headless sans adaptateur ne constitue pas une
+validation du GPU Firefox ; le navigateur utilisateur doit encore être essayé.
+
+Retour visuel : seed `lp13l2`, collines 5 km, motif 3 km, érosion .62, Atlas.
+Les distances D8 unitaires et l'ordre fixe de réception sur les cuvettes formaient
+de longues tranchées axiales. Correction : distance physique, coût favorisant
+les creux existants, priorité seedée pour les niveaux égaux, partage D-infinity
+également sur le potentiel des flats. Cette priorité porte uniquement sur le
+routage et ne modifie pas directement les altitudes. Les positions de drainage
+restent différentes du heap CPU ; l'utilisateur valide la qualité visuellement.
+Voir `rust/docs/PERFORMANCE_AUDIT.md` et le diagnostic ponctuel
+`web/scripts/terrain_erosion_gpu_audit.mjs` (`current`, `boundary`, `lines`).
+
+
+## Relief GPU et retours utilisateur — 6 octobre 2026 (suite)
+
+Cette suite remplace les anciennes notes de couverture GPU et de canyon ci-dessus.
+Plateau, volcan et caldeira génèrent leur champ local et leurs alentours sur GPU,
+avec mips séparés et raccord par union lissée. Les alentours ont un motif ×2,5
+pour le plateau et ×2 pour les vallées, volcans et caldeiras. Les montagnes ont
+une charpente ridged dans leur soulèvement ; les collines gagnent seulement 10 %
+d’amplitude. La dose normale d’érosion vaut 100 %, avec un maximum de 200 %.
+La passe commune sur la surface physique ajuste sa réponse à la pente propre
+au relief. Les longues chaînes D8 de breaching sont retirées de l’érosion
+ordinaire ; les flats ne sont plus creusés sur leur seul potentiel de drainage.
+La grille de surface varie de 640 à 1024 cellules plus sa marge extrapolée.
+
+Le premier canyon à gain 18 / 32 passes a été rejeté visuellement par l’utilisateur :
+il voulait les anciennes rivières profondément incisées des collines, agrandies
+×2 à ×3. Le canyon possède désormais une étape spécifique : drainage des bassins,
+accumulation sélectionnant les grands axes, incision profonde et large suivant
+la surface de captage, propagation de profils de berges en distance euclidienne,
+puis 12 passes ordinaires sur les parois. CPU et GPU appliquent les mêmes règles ;
+le routage parallèle peut différer du heap CPU. Aucun spline prédessiné ni ancien
+module analytique de canyon n’est actif. Son option manquait dans le menu : ajoutée,
+et choix de relief validé avant l’appel WASM pour éviter « type de relief inconnu ».
+
+Plateau : fin des deux paliers concentriques systématiques. Trois à sept lobes,
+baies concaves, excroissances et possibilité de mesas détachées ; un à quatre
+paliers selon la graine, répartis par un champ indépendant. La fondation formait
+un carré sur `14k0yl1`, carte 10 km, motif 5 km, érosion 1,33. Le raccord utilise
+maintenant le contour géographique et s’annule avant la limite du raster.
+
+Validation locale : rustfmt, Clippy -D warnings, compilation WASM, typecheck,
+build app/testbench et page autonome Rust. Démarrage GPU/console du canyon avec
+zoom 768² et du lien exact de plateau fourni par l’utilisateur. Diagnostic
+ponctuel `rust/out/perf-audit/canyon-plateau-current.json` : champs finis sur
+CPU/GPU et canyon 50 km, dose 0/1/2. La profondeur locale mesurée par rapport
+au 75e percentile d’un anneau de rayon 0,08 motif atteint au 99e percentile
+245/766/1280 m pour le canyon seed 42, carte 12 km, motif 6 km, dose 0/1/2 ;
+ce chiffre n’est pas une certification visuelle ou une mesure du lit fluvial.
+Contrôle de raccord avec champs synthétiques sur huit graines : aucun soulèvement
+hors contour sur CPU ; erreur GPU maximale 0,000002 m. Aucun screenshot/suite
+ajouté, conformément au report utilisateur. La qualité visuelle reste à juger.
+Préserver les changements simultanés du renderer/style Copernicus faits ailleurs.
+Serveur de cette session : http://localhost:5175/terrainbench.html.
+
+
+Plateau, retour suivant (6 octobre 2026) : l’utilisateur valide le nouveau
+contour mais préfère l’ancien dessus. Les paliers supérieurs, lobes, buttes et
+petits reliefs ridged sont rétablis sur CPU/GPU ; suppression du champ à un à
+quatre paliers. Ils sont limités au nouveau contour. Les mêmes tirages aléatoires
+sont consommés pour préserver exactement la géométrie extérieure par graine.
+Le masque de raccord et la correction de fondation carrée restent actifs.

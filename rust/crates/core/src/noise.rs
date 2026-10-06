@@ -2,8 +2,8 @@ use crate::rng::Rng;
 use std::f64::consts::TAU;
 
 pub(crate) struct Noise {
-    perm: [u8; 512],
-    gradients: [(f64, f64); 32],
+    pub(crate) perm: [u8; 512],
+    pub(crate) gradients: [(f64, f64); 32],
 }
 
 impl Noise {
