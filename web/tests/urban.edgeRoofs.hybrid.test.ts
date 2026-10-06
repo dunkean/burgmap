@@ -172,9 +172,20 @@ describe('whole exterior roofs on their other actual side', () => {
     const input = fixture(), before = structuredClone(input.buildings);
     input.eligible = (pi) => raw.eligible[pi];
     const result = finishEdgeRoofs(input);
-    expect(result.grown).toBe(3);
-    expect(input.buildings.flatMap((b, i) => JSON.stringify(b.poly) !== JSON.stringify(before[i].poly) ? [i] : []))
-      .toEqual([426, 790, 798, 823]);
+    // New bounded concave-hull proposals may improve other clipped roofs in
+    // this complete mask. Preserve the original four witnessed transactions
+    // and audit every additional accepted roof instead of freezing their count.
+    expect(result.grown).toBeGreaterThanOrEqual(3);
+    const changed = input.buildings.flatMap((b, i) => JSON.stringify(b.poly) !== JSON.stringify(before[i].poly) ? [i] : []);
+    for (const i of [426, 790, 798, 823]) expect(changed).toContain(i);
+    for (const i of changed.filter((i) => ![426, 790, 798, 823].includes(i))) {
+      const roof = input.buildings[i], previous = before[i].poly, owner = input.parcels[roof.parcel!];
+      const lost = tryDifference(previous, roof.poly), outside = tryDifference(roof.poly, owner.poly);
+      expect(lost.failed || outside.failed).toBe(false);
+      expect(mpArea(lost.pieces)).toBeLessThanOrEqual(1e-6);
+      expect(mpArea(outside.pieces)).toBeLessThanOrEqual(1e-6);
+      expect(result.changedBlocks.has(owner.block)).toBe(true);
+    }
     for (const i of [426, 798, 823]) expect(input.buildings[i].poly).toHaveLength(4);
     expect(input.buildings[797]).toEqual(before[797]);
     const dx = input.buildings[790].poly[0].x - before[790].poly[0].x;
