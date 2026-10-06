@@ -27,7 +27,7 @@ export function thickenNarrowWing(poly: Polygon, owner: Polygon, occupied: Polyg
     .map(e => ({ ...e, length: Math.hypot(e.b.x - e.a.x, e.b.y - e.a.y) }))
     .filter(e => e.length >= 5).sort((a, b) => b.length - a.length);
   let trials = 0;
-  for (const edge of edges) for (const side of [-1, 1]) for (const depth of [2, 2.5, 3, 3.5, 4])
+  for (const edge of edges) for (const side of [-1, 1]) for (const depth of [2, 2.5, 3, 3.5, 3.6, 4])
     for (const cap of [0, 0.5, 1, 1.5, 2, 2.5, 3, 4]) {
       if (++trials > 400) return null;
       const t = { x: (edge.b.x - edge.a.x) / edge.length, y: (edge.b.y - edge.a.y) / edge.length };
@@ -48,8 +48,11 @@ export function thickenNarrowWing(poly: Polygon, owner: Polygon, occupied: Polyg
         || mpArea(added.pieces) < 1e-6 || mpArea(added.pieces) > 0.1 * originalArea
         || Math.abs(area(candidate) - originalArea - mpArea(added.pieces)) > 1e-5) continue;
       const escaped = tryDifference(added.pieces, owner);
-      const blocked = occupied.length ? tryIntersection(added.pieces, ...occupied) : { pieces: [], failed: false };
-      if (escaped.failed || blocked.failed || mpArea(escaped.pieces) > 1e-6 || mpArea(blocked.pieces) > 1e-6) continue;
+      if (escaped.failed || mpArea(escaped.pieces) > 1e-6) continue;
+      if (occupied.some((other) => {
+        const blocked = tryIntersection(added.pieces, other);
+        return blocked.failed || mpArea(blocked.pieces) > 1e-6;
+      })) continue;
       if (validate(candidate)) return candidate;
     }
   return null;
