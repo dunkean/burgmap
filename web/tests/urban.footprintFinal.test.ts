@@ -136,4 +136,24 @@ describe('last footprint pass', () => {
     ];
     expect(minNeck(p)?.w ?? Infinity).toBeGreaterThanOrEqual(3.6);
   });
+
+  it('removes a zero-width self-touch spur without claiming the neighbouring roof', () => {
+    const roof: Polygon = [
+      { x: 750.1853459203145, y: 470.69473553358483 }, { x: 735.0790724236791, y: 464.6176146560623 },
+      { x: 737.8566088394319, y: 455.3010038142782 }, { x: 743.9482081792856, y: 457.11707612683387 },
+      { x: 743.8766532149907, y: 468.1568039809795 }, { x: 746.0559644977345, y: 469.0335217299288 },
+      { x: 750.8496467209039, y: 469.0434421365991 },
+    ];
+    const backLand: { outer: Polygon; holes: Polygon[] }[] = [];
+    const u = { buildings: [{ poly: roof, kind: 'rear', parcel: 0 }],
+      parcels: [{ poly: rect(730, 450, 755, 480), use: 'plot', block: 2 }], backLand,
+      validateParts: () => true };
+    expect(minNeck(roof)?.w).toBe(0);
+    const result = finalizeFootprints(u);
+    expect(result.invalid).toEqual([]);
+    expect(u.buildings).toHaveLength(1);
+    expect(area(u.buildings[0].poly)).toBeGreaterThanOrEqual(0.95 * area(roof));
+    expect(minNeck(u.buildings[0].poly)?.w ?? Infinity).toBeGreaterThanOrEqual(3.6);
+    expect(area(u.buildings[0].poly) + backLand.reduce((s, p) => s + area(p.outer), 0)).toBeCloseTo(area(roof), 5);
+  });
 });
