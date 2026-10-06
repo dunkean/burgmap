@@ -25,7 +25,7 @@ import { buildOn, type ArchBldg } from '../bops';
 import { chamferPersianHouse } from '../persianhouse';
 import { finishEdgeRoofs } from '../edgeRoofs';
 import { finalizeFootprints } from '../footprintFinal';
-import { finishOpenEdges, markPlannedTerminalPlots, physicalTipConstraint, openQuarterEdge, footprintAccessGuard, quarterRoofCollar } from '../edgeFinish';
+import { finishOpenEdges, markPlannedTerminalPlots, physicalTipConstraint, openQuarterEdge, footprintAccessGuard, footprintPlacementGuard, quarterRoofCollar } from '../edgeFinish';
 import { naturalGroundEligible } from '../../landuse/urbanGround';
 import { streetStrips } from '../openfringe';
 import { blockReach, carvePassage, makeStreetAt, splitLong, frontRangeDepth, shapeOkObb } from '../access';
@@ -440,6 +440,7 @@ export function megaQuarterDetail(world: World, key: number): UrbanLayer | null 
   finishEdgeRoofs(detailPartition);
   const releasedFootprintLand: PolyH[] = [];
   finalizeFootprints({ buildings, parcels, backLand: releasedFootprintLand,
+    placementClear: footprintPlacementGuard(detailProtectedLand, p => ctx.isWater(p) || ctx.slopeAt(p) > 0.28),
     tipConstrained: physicalTipConstraint(detailProtectedLand, ctx.isWater),
     openQuarterEdge: openQuarterEdge(M.quarters),
     validateParts: footprintAccessGuard(buildings, parcels, carved.map((b) => b.poly), makeStreetAt(

@@ -75,7 +75,7 @@ import { servedFootprint } from './footprint';
 import { finishEdgeRoofs } from './edgeRoofs';
 import { repairResidentialDensity } from './densityRepair';
 import { finalizeFootprints } from './footprintFinal';
-import { finishOpenEdges, markPlannedTerminalPlots, physicalTipConstraint, openQuarterEdge, footprintAccessGuard } from './edgeFinish';
+import { finishOpenEdges, markPlannedTerminalPlots, physicalTipConstraint, openQuarterEdge, footprintAccessGuard, footprintPlacementGuard } from './edgeFinish';
 
 export interface UrbanResult { layer: UrbanLayer; stats: Record<string, number | string>; debug: UrbanDebug }
 export interface UrbanDebug { quarters: { poly: Polygon; phase: number; lab: number[] }[] }
@@ -1109,6 +1109,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   const densityRepair = repairResidentialDensity({ ...edgePartition, morphology: (bi: number) => blockMorph[bi] });
   const releasedFootprintLand: PolyH[] = [];
   const footprintFinal = finalizeFootprints({ buildings, parcels, backLand: releasedFootprintLand,
+    placementClear: footprintPlacementGuard(edgePartition.protectedLand, p => ctx.isWater(p) || ctx.slopeAt(p) > 0.28),
     tipConstrained: physicalTipConstraint(edgePartition.protectedLand, ctx.isWater),
     openQuarterEdge: openQuarterEdge(prim.quarters.map((q) => q.lp)),
     validateParts: footprintAccessGuard(buildings, parcels, carved.map((b) => b.poly), makeStreetAt(

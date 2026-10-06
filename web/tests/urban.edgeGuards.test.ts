@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Polygon, UrbanLayer } from '../src/gen/types';
 import { blockReach, type StreetAt } from '../src/gen/urban/access';
-import { footprintAccessGuard, quarterRoofCollar } from '../src/gen/urban/edgeFinish';
+import { footprintAccessGuard, footprintPlacementGuard, quarterRoofCollar } from '../src/gen/urban/edgeFinish';
 import { differenceSafeS, intersectionS, mpArea } from '../src/gen/geo/bool';
 import { mergeUrban } from '../src/gen/settlements/merge';
 
@@ -12,6 +12,13 @@ const street = ((p: { y: number }) => p.y < 0.1) as StreetAt;
 const parcel = (poly: Polygon, block = 0) => ({ poly, use: 'plot' as const, block });
 
 describe('open-edge footprint guards', () => {
+  it('proves an entire relocated roof avoids a thin road and interior water', () => {
+    const road = { outer: rect(9.95, -5, 0.1, 30), holes: [] };
+    const safe = footprintPlacementGuard([road], p => p.x > 40 && p.x < 45 && p.y > 10 && p.y < 15);
+    expect(safe(rect(0, 0, 8, 8))).toBe(true);
+    expect(safe(rect(5, 0, 10, 8)), 'road crosses the roof despite four dry corners').toBe(false);
+    expect(safe(rect(38, 8, 10, 10)), 'wet grid lies inside four dry corners').toBe(false);
+  });
   it('rejects a proposed part cut off behind a solid front wall', () => {
     const block = rect(0, 0, 12, 40);
     const front = rect(1.6, 0, 10.4, 6), wall = rect(0, 6, 12, 1), rear = rect(0, 8, 12, 6);

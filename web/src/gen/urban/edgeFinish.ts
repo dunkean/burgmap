@@ -4,7 +4,7 @@ import { bboxOf, distToSeg, pointInRing } from '../geo/poly';
 import { GridIndex } from '../geo/spatial';
 import { LAB_OPEN } from './streets';
 import { blockReach, type StreetAt } from './access';
-import { unionMany } from '../geo/bool';
+import { unionMany, tryIntersection, mpArea } from '../geo/bool';
 import { ribbon } from '../geo/offset';
 import type { Plot } from './plots';
 import { naturalGroundEligible } from '../landuse/urbanGround';
@@ -57,8 +57,8 @@ export function openQuarterEdge(quarters: { pts: Polygon; lab: number[] }[]): (t
 }
 
 /** Check a proposed footprint transaction against the current peers, including earlier accepted splits. */
-export function footprintAccessGuard(buildings: UrbanBuilding[], parcels: UrbanParcel[], blocks: Polygon[], streetAt: StreetAt): (original: number, parts: Polygon[], removed?: readonly number[]) => boolean {
-  return (original, parts, removed = []) => {
+export function footprintAccessGuard(buildings: UrbanBuilding[], parcels: UrbanParcel[], blocks: Polygon[], streetAt: StreetAt): (original: number, parts: Polygon[]) => boolean {
+  return (original, parts) => {
     const owner = buildings[original]?.parcel;
     const block = owner === undefined ? undefined : parcels[owner]?.block;
     if (block === undefined || block < 0 || !blocks[block] || !parts.length) return false;
@@ -66,12 +66,32 @@ export function footprintAccessGuard(buildings: UrbanBuilding[], parcels: UrbanP
     const before = blockReach(blocks[block], peers.map(({ b }) => b.poly), streetAt);
     const proposed: Polygon[] = [], required: boolean[] = [];
     peers.forEach(({ b, i }, j) => {
-      if (removed.includes(i)) return;
       if (i === original) for (const part of parts) { proposed.push(part); required.push(true); }
       else { proposed.push(b.poly); required.push(before[j]); }
     });
     const after = blockReach(blocks[block], proposed, streetAt);
     return after.every((reached, i) => reached || !required[i]);
+  };
+}
+
+/** A relocated roof must avoid the full physical reserve, not just sample its corners. */
+export function footprintPlacementGuard(protectedLand: PolyH[], unsafe: (point: Vec2) => boolean): (poly: Polygon) => boolean {
+  const index = new GridIndex<number>(24), large: number[] = [];
+  protectedLand.forEach((p, i) => {
+    const b = bboxOf(p.outer);
+    if ((1 + (b.x1 - b.x0) / 24) * (1 + (b.y1 - b.y0) / 24) > 1024) large.push(i);
+    else index.insertPts(p.outer, i);
+  });
+  return (poly) => {
+    if (poly.length < 3 || poly.some(p => !Number.isFinite(p.x) || !Number.isFinite(p.y) || unsafe(p))) return false;
+    const box = bboxOf(poly);
+    const hit = tryIntersection(poly, [...new Set([...index.query(box.x0, box.y0, box.x1, box.y1), ...large])].map(i => protectedLand[i]));
+    if (hit.failed || mpArea(hit.pieces) > 1e-6) return false;
+    for (let y = box.y0; y <= box.y1; y += 2) for (let x = box.x0; x <= box.x1; x += 2) {
+      const p = { x, y };
+      if (pointInRing(poly, p) && unsafe(p)) return false;
+    }
+    return true;
   };
 }
 
