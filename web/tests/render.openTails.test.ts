@@ -4,6 +4,8 @@ import { fakeWorld } from '../scripts/fakeworld';
 import { urbanLandscapeGround, LandscapeGroundCache } from '../src/gen/landuse/landscapeGround';
 import { buildScene } from '../src/render/scene';
 import { pointInRing } from '../src/gen/geo/poly';
+import { urbanLayer } from '../src/render/urban';
+import { biomePalette } from '../src/render/biomes';
 
 const rect = (x0: number, y0: number, x1: number, y1: number): Polygon => [
   { x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 },
@@ -53,5 +55,17 @@ describe('open edge material and street ink', () => {
     world.urban!.openEdgeGround = [piece(rect(230, 194, 250, 206))];
     expect(contains(cache.layer(world.urban!), 290, 200)).toBe(false);
     expect(contains(urbanLandscapeGround(world, true), 290, 200)).toBe(false);
+  });
+
+  it('uses the same clipped ink path in SVG and Canvas scene for open ground', () => {
+    const world = fixture();
+    world.urban!.renderHints = { towerShape: 'round', openGround: true };
+    const svg = urbanLayer(world, biomePalette('parchment', world.options.biome), 1, false,
+      undefined, true, true, [], false, urbanLandscapeGround(world, true));
+    const scene = buildScene(world);
+    const paths = scene.lines.filter((line) => line.role === 'street').flatMap((line) => line.lines);
+    expect(svg).toContain('M150 200L266 200');
+    expect(svg).not.toContain('M150 200L300 200');
+    expect(paths[0][paths[0].length - 1].x).toBe(266);
   });
 });
