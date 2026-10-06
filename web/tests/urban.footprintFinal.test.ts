@@ -58,6 +58,16 @@ describe('last footprint pass', () => {
     expect(u.backLand).toEqual([]);
   });
 
+  it('keeps a sharp entrance when the access validator rejects the truncation', () => {
+    const needle: Polygon = [{ x: 0, y: 0 }, { x: 24, y: 0 }, { x: 24, y: 10 }, { x: 0, y: 10 }, { x: -40, y: 5 }];
+    const u = { buildings: [{ poly: needle, kind: 'house', parcel: 0 }],
+      parcels: [{ poly: rect(-41, -1, 25, 11), use: 'plot', block: 4 }], backLand: [] as { outer: Polygon; holes: Polygon[] }[],
+      tipConstrained: () => true, validateParts: () => false };
+    finalizeFootprints(u);
+    expect(u.buildings[0].poly).toEqual(needle);
+    expect(u.backLand).toEqual([]);
+  });
+
   it('removes exact duplicate and retraced vertices without losing area at 20 km', () => {
     const p: Polygon = [{ x: 20000, y: 20000 }, { x: 20008, y: 20000 }, { x: 20008, y: 20000 },
       { x: 20008, y: 20006 }, { x: 20004, y: 20006 }, { x: 20004, y: 20008 },
@@ -85,5 +95,22 @@ describe('last footprint pass', () => {
     const before = JSON.stringify(u.buildings[0]);
     expect(finalizeFootprints(u).invalid).toEqual([]);
     expect(JSON.stringify(u.buildings[0])).toBe(before);
+  });
+
+  it('reports a convex matchstick and leaves a rejected access transaction intact', () => {
+    const stick = rect(0, 0, 24, 2.8);
+    const l: Polygon = [{ x: 0, y: 0 }, { x: 12, y: 0 }, { x: 12, y: 2 },
+      { x: 8, y: 2 }, { x: 8, y: 9 }, { x: 0, y: 9 }];
+    const u = { buildings: [{ poly: stick, kind: 'house', parcel: 0 }, { poly: l, kind: 'house', parcel: 1 }],
+      parcels: [{ poly: rect(-1, -1, 25, 4), use: 'plot', block: 0 },
+        { poly: rect(-1, -1, 13, 10), use: 'plot', block: 1 }],
+      backLand: [] as { outer: Polygon; holes: Polygon[] }[],
+      tipConstrained: () => true,
+      validateParts: () => false };
+    const before = JSON.stringify(u.buildings);
+    const result = finalizeFootprints(u);
+    expect(result.invalid).toEqual([0, 1]);
+    expect(JSON.stringify(u.buildings)).toBe(before);
+    expect(u.backLand).toEqual([]);
   });
 });

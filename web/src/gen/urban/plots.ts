@@ -68,7 +68,7 @@ const unit = (a: Vec2, b: Vec2): Vec2 => { const l = dist(a, b) || 1; return { x
 const leftN = (d: Vec2): Vec2 => ({ x: -d.y, y: d.x });
 
 /** Rebuild a merged plot's geometric frame from its actual boundary. No random draw or plot reordering. */
-export function refreshPlotFrame(pl: Plot): void {
+export function refreshPlotFrame(pl: Plot, streetFront?: (a: Vec2, b: Vec2) => boolean): void {
   const poly = pl.poly;
   if (poly.length < 3) return;
   const old = pl.front;
@@ -84,6 +84,7 @@ export function refreshPlotFrame(pl: Plot): void {
   let best = -1, score = -Infinity;
   for (let i = 0; i < poly.length; i++) {
     const a = poly[i], b = poly[(i + 1) % poly.length], t = unit(a, b);
+    if (streetFront && !streetFront(a, b)) continue;
     const align = t.x * oldT.x + t.y * oldT.y;
     if (align < 0.7) continue;
     const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
@@ -518,11 +519,23 @@ export function cutPlots(
   }
   const merged: Plot[] = [];
   const keepBack: Polygon[] = [];
+  const servesStreet = (a: Vec2, b: Vec2): boolean => {
+    const m = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    const ns = streets.nearest(m, 14);
+    return !!ns && (Math.abs(ns.d - ns.hw) < Math.max(0.8, 0.3 * ns.hw)
+      || (ns.d < ns.hw * 1.3 && ns.d > ns.hw * 0.7));
+  };
   for (const c of cells) {
     if (!c) continue;
     const poly = cleanRing(c.poly, 0.005, 0.5, 0.002, false);
     const pp = poly.length >= 3 && isSimple(poly) ? poly : c.poly;
-    if (c.plot) { c.plot.poly = pp; if (c.grown) refreshPlotFrame(c.plot); merged.push(c.plot); } else keepBack.push(pp);
+    if (c.plot) {
+      c.plot.poly = pp;
+      // A merged lot can expose a different boundary edge, but keep a surviving public
+      // frontage: switching it to the long rear edge would erase whole seeded rows.
+      if (c.grown && !servesStreet(...c.plot.front)) refreshPlotFrame(c.plot, servesStreet);
+      merged.push(c.plot);
+    } else keepBack.push(pp);
   }
   // side fronts: plot edges lying on a frontage edge of the block, not parallel to the main frontage
   const frontEdges: [Vec2, Vec2][] = [];
