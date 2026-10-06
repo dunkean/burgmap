@@ -1,7 +1,7 @@
 /** Local, deterministic recovery of an ordinary room after the final footprint checks. */
 import type { Polygon, Vec2 } from '../core/geom';
 import { polygonCentroid } from '../core/geom';
-import { area, cleanRing, convexHull, isSimple, obb } from '../geo/poly';
+import { area, bboxOf, cleanRing, convexHull, distToRing, inscribed, isSimple, obb, pointInRing } from '../geo/poly';
 import { polyInside } from '../geo/split';
 import { mpArea, tryDifference, tryIntersection } from '../geo/bool';
 
@@ -99,6 +99,67 @@ export function reconstructRoom(poly: Polygon, owner: Polygon, occupied: Polygon
         const room = tryRooms(axis, aspect, oldArea * size, localOffsets);
         if (room) return room;
       }
+    }
+  }
+  return null;
+}
+
+/** Last resort: move an entire invalid ordinary room into a free pocket of its own large plot. */
+export function replanWholeRoom(poly: Polygon, owner: Polygon, front: [Vec2, Vec2] | undefined,
+  occupied: Polygon[], clear: (candidate: Polygon) => boolean,
+  validate: (candidate: Polygon) => boolean): Polygon | null {
+  const oldArea = area(poly), oldCenter = polygonCentroid(poly);
+  if (oldArea < 12 || !Number.isFinite(oldArea) || owner.length < 3) return null;
+  const free = tryDifference(owner, occupied.map((outer) => ({ outer, holes: [] })));
+  if (free.failed || !free.pieces.length) return null;
+  const axes: Vec2[] = [];
+  const addAxis = (v: Vec2): void => {
+    const len = Math.hypot(v.x, v.y);
+    if (len < 1e-6) return;
+    const axis = { x: v.x / len, y: v.y / len };
+    if (axes.every((u) => Math.abs(u.x * axis.x + u.y * axis.y) < 0.995)) axes.push(axis);
+  };
+  if (front) addAxis({ x: front[1].x - front[0].x, y: front[1].y - front[0].y });
+  addAxis(obb(poly).u);
+  const centers: { p: Vec2; clearance: number }[] = [];
+  for (const piece of free.pieces) {
+    const bounds = bboxOf(piece.outer);
+    const push = (p: Vec2): void => {
+      if (!pointInRing(piece.outer, p) || piece.holes.some((hole) => pointInRing(hole, p))
+        || distance(p, oldCenter) > 64 + 1e-6) return;
+      const clearance = Math.min(distToRing(piece.outer, p),
+        ...piece.holes.map((hole) => distToRing(hole, p)));
+      if (clearance >= 2) centers.push({ p, clearance });
+    };
+    push(inscribed(piece.outer, piece.holes, 0.5).c);
+    for (let x = bounds.x0 + 2; x < bounds.x1; x += 4) {
+      for (let y = bounds.y0 + 2; y < bounds.y1; y += 4) push({ x, y });
+    }
+  }
+  centers.sort((a, b) => b.clearance - a.clearance
+    || distance(a.p, oldCenter) - distance(b.p, oldCenter) || a.p.x - b.p.x || a.p.y - b.p.y);
+  let trials = 0;
+  for (const retained of [1, 0.95]) for (const { p } of centers.slice(0, 48)) {
+    for (const axis of axes) for (const aspect of [1, 1.5, 2, 2.5]) {
+      if (++trials > 640) return null;
+      const v = { x: -axis.y, y: axis.x };
+      const hu = Math.sqrt(oldArea * retained * aspect) / 2;
+      const hv = oldArea * retained / (4 * hu);
+      const candidate: Polygon = [
+        { x: p.x - axis.x * hu - v.x * hv, y: p.y - axis.y * hu - v.y * hv },
+        { x: p.x + axis.x * hu - v.x * hv, y: p.y + axis.y * hu - v.y * hv },
+        { x: p.x + axis.x * hu + v.x * hv, y: p.y + axis.y * hu + v.y * hv },
+        { x: p.x - axis.x * hu + v.x * hv, y: p.y - axis.y * hu + v.y * hv },
+      ];
+      if (!polyInside(owner, candidate)) continue;
+      const outside = tryDifference(candidate, owner);
+      if (outside.failed || mpArea(outside.pieces) > 1e-6) continue;
+      let occupiedClear = true;
+      for (const other of occupied) {
+        const hit = tryIntersection(candidate, other);
+        if (hit.failed || mpArea(hit.pieces) > 1e-6) { occupiedClear = false; break; }
+      }
+      if (occupiedClear && clear(candidate) && validate(candidate)) return candidate;
     }
   }
   return null;
