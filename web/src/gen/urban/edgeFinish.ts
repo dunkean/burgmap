@@ -1,8 +1,11 @@
 /** Shared open-edge finishing for eager settlements and independent lazy quarters. */
-import type { PolyH, Polygon, UrbanLayer, UrbanStreet, Vec2 } from '../types';
+import type { PolyH, Polygon, UrbanBuilding, UrbanLayer, UrbanParcel, UrbanStreet, Vec2 } from '../types';
 import { bboxOf, distToSeg, pointInRing } from '../geo/poly';
 import { GridIndex } from '../geo/spatial';
 import { LAB_OPEN } from './streets';
+import { blockReach, type StreetAt } from './access';
+import { unionMany } from '../geo/bool';
+import { ribbon } from '../geo/offset';
 import type { Plot } from './plots';
 import { naturalGroundEligible } from '../landuse/urbanGround';
 import { classifyStreetTails, markTerminalPlots, openTailGround, type StreetTailContext } from './openTails';
@@ -51,4 +54,38 @@ export function openQuarterEdge(quarters: { pts: Polygon; lab: number[] }[]): (t
     const beyond = { x: tip.x + 1.5 * outward.x, y: tip.y + 1.5 * outward.y };
     return !quarters.some((q) => pointInRing(q.pts, beyond));
   };
+}
+
+/** Check a proposed footprint transaction against the current peers, including earlier accepted splits. */
+export function footprintAccessGuard(buildings: UrbanBuilding[], parcels: UrbanParcel[], blocks: Polygon[], streetAt: StreetAt): (original: number, parts: Polygon[], removed?: readonly number[]) => boolean {
+  return (original, parts, removed = []) => {
+    const owner = buildings[original]?.parcel;
+    const block = owner === undefined ? undefined : parcels[owner]?.block;
+    if (block === undefined || block < 0 || !blocks[block] || !parts.length) return false;
+    const peers = buildings.map((b, i) => ({ b, i })).filter(({ b }) => b.parcel !== undefined && parcels[b.parcel]?.block === block);
+    const before = blockReach(blocks[block], peers.map(({ b }) => b.poly), streetAt);
+    const proposed: Polygon[] = [], required: boolean[] = [];
+    peers.forEach(({ b, i }, j) => {
+      if (removed.includes(i)) return;
+      if (i === original) for (const part of parts) { proposed.push(part); required.push(true); }
+      else { proposed.push(b.poly); required.push(before[j]); }
+    });
+    const after = blockReach(blocks[block], proposed, streetAt);
+    return after.every((reached, i) => reached || !required[i]);
+  };
+}
+
+/** Fixed collar for independent macro roof ownership; its outer radius is at most r / cos(pi/24). */
+export function quarterRoofCollar(poly: Polygon, radius: number): PolyH[] {
+  const pieces: PolyH[] = [{ outer: poly, holes: [] }];
+  const circumradius = radius / Math.cos(Math.PI / 24);
+  for (let i = 0; i < poly.length; i++) {
+    const p = poly[i], q = poly[(i + 1) % poly.length];
+    pieces.push({ outer: ribbon([p, q], 2 * radius), holes: [] });
+    pieces.push({ outer: Array.from({ length: 24 }, (_, j) => ({
+      x: p.x + circumradius * Math.cos((j + 0.5) * Math.PI / 12),
+      y: p.y + circumradius * Math.sin((j + 0.5) * Math.PI / 12),
+    })), holes: [] });
+  }
+  return unionMany(pieces, 24, true);
 }

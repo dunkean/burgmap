@@ -25,7 +25,7 @@ import { buildOn, type ArchBldg } from '../bops';
 import { chamferPersianHouse } from '../persianhouse';
 import { finishEdgeRoofs } from '../edgeRoofs';
 import { finalizeFootprints } from '../footprintFinal';
-import { finishOpenEdges, markPlannedTerminalPlots, physicalTipConstraint, openQuarterEdge } from '../edgeFinish';
+import { finishOpenEdges, markPlannedTerminalPlots, physicalTipConstraint, openQuarterEdge, footprintAccessGuard, quarterRoofCollar } from '../edgeFinish';
 import { naturalGroundEligible } from '../../landuse/urbanGround';
 import { streetStrips } from '../openfringe';
 import { blockReach, carvePassage, makeStreetAt, splitLong, frontRangeDepth, shapeOkObb } from '../access';
@@ -417,23 +417,34 @@ export function megaQuarterDetail(world: World, key: number): UrbanLayer | null 
   });
   // Macro frames stay immutable. Finish only after the actual fences, ward walls and lot curtains exist,
   // so moving a rectangle inside its lot cannot occupy their reserved ground.
+  // Every independent claim stays in its fixed 16 m collar and outside its neighbours' 18 m collars.
+  // Thus two quarters cannot both claim the same free outer land, even when detail order changes.
+  const neighbourReach = 36;
   const detailProtectedLand: PolyH[] = [
       ...ctx.water, ...waterPieces,
+      ...M.quarters.filter((other) => other.id !== id && other.bb[0] <= mq.bb[2] + neighbourReach && other.bb[2] >= mq.bb[0] - neighbourReach
+        && other.bb[1] <= mq.bb[3] + neighbourReach && other.bb[3] >= mq.bb[1] - neighbourReach).flatMap((other) => quarterRoofCollar(other.pts, 18)),
+      ...(world.roads ?? []).flatMap((s) => streetStrips(s.path, s.width)),
       ...local.list.filter((s) => s.ribbon).flatMap((s) => streetStrips(s.path, s.widths)),
       ...[...(host.walls ?? []), ...walls].flatMap((w) => streetStrips(w.closed && w.path.length ? w.path.concat([w.path[0]]) : w.path, w.thickness)),
       ...lines.filter((l) => /wall|fence|palisade|rampart|barbican|hedge/.test(l.kind)).flatMap((l) => streetStrips(l.closed && l.path.length ? l.path.concat([l.path[0]]) : l.path, l.width ?? 1)),
     ];
-  finishEdgeRoofs({
+  const detailPartition = {
     ctx, quarters: [q], blocks: carved, quarterOf: () => 0, parcels, buildings, streetSpace: [cr.streetSpace],
     footprint: [{ outer: q.lp.pts, holes: [] }], gardens: plotGardens, streets: local,
     protectedLand: detailProtectedLand,
-    allowGrowth: false,
-    eligible: (pi) => parcels[pi].use === 'plot' && ['streetFrontRow', 'detached', 'machiya', 'giebelhaus', 'yardHouse', 'shopRow'].includes(P.buildingOp),
-  });
+    growthLimit: quarterRoofCollar(mq.pts, 16),
+    allowGrowth: naturalGroundEligible(host),
+    eligible: (pi: number) => parcels[pi].use === 'plot' && ['streetFrontRow', 'detached', 'machiya', 'giebelhaus', 'yardHouse', 'shopRow'].includes(P.buildingOp),
+  };
+  finishEdgeRoofs(detailPartition);
   const releasedFootprintLand: PolyH[] = [];
   finalizeFootprints({ buildings, parcels, backLand: releasedFootprintLand,
     tipConstrained: physicalTipConstraint(detailProtectedLand, ctx.isWater),
-    openQuarterEdge: openQuarterEdge(M.quarters) });
+    openQuarterEdge: openQuarterEdge(M.quarters),
+    validateParts: footprintAccessGuard(buildings, parcels, carved.map((b) => b.poly), makeStreetAt(
+      local.list.filter((s) => s.ribbon).map((s) => ({ path: s.path, widths: s.widths, width: s.widths[0] })),
+      parcels.filter((p) => ['place', 'market', 'quay', 'green'].includes(String(p.use))).map((p) => p.poly))) });
   const perBlock: Polygon[][] = carved.map(() => []);
   for (const b of buildings) if (b.parcel !== undefined) perBlock[parcels[b.parcel].block].push(b.poly);
   const masses: PolyH[] = [];
@@ -453,7 +464,7 @@ export function megaQuarterDetail(world: World, key: number): UrbanLayer | null 
     masses, backLand: [...parcels.filter((p) => p.use === 'garden').map((p) => p.poly).concat(plotGardens).map((p): PolyH => ({ outer: p, holes: [] })), ...releasedFootprintLand],
     lines, trees, water: waterPieces, sites,
   };
-  const groundView: UrbanLayer = { ...layer, quarters: [{ poly: { outer: q.lp.pts, holes: [] }, phase: q.phase, zone: q.zone, streetSpace: cr.streetSpace }] };
+  const groundView: UrbanLayer = { ...layer, quarters: [{ poly: { outer: q.lp.pts, holes: [] }, phase: q.phase, zone: q.zone, streetSpace: detailPartition.streetSpace[0] }] };
   finishOpenEdges(groundView, {
     owner: host.footprintH,
     regionalRoads: [...(world.roads ?? []), ...host.streets],

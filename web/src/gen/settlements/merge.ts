@@ -26,7 +26,8 @@ export function mergeUrban(layers: UrbanLayer[]): UrbanLayer | undefined {
     m.openTails!.push(...(u.openTails ?? []).map((tail) => ({ ...tail, street: tail.street + s0 })));
     m.openEdgeGround!.push(...(u.openEdgeGround ?? []));
     m.blocks.push(...u.blocks);
-    m.blockInfo.push(...u.blockInfo.map((bi) => (q0 ? { ...bi, quarter: bi.quarter + q0 } : bi)));
+    // Lazy quarter detail refers to its host's quarter ids and carries no local quarter table.
+    m.blockInfo.push(...u.blockInfo.map((bi) => (q0 && u.quarters.length ? { ...bi, quarter: bi.quarter + q0 } : bi)));
     m.parcels.push(...u.parcels.map((p) => (b0 && p.block >= 0 ? { ...p, block: p.block + b0 } : p)));
     m.buildings.push(...u.buildings.map((b) => (p0 && b.parcel !== undefined && b.parcel >= 0 ? { ...b, parcel: b.parcel + p0 } : b)));
     m.walls!.push(...(u.walls ?? []));

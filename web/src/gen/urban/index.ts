@@ -75,7 +75,7 @@ import { servedFootprint } from './footprint';
 import { finishEdgeRoofs } from './edgeRoofs';
 import { repairResidentialDensity } from './densityRepair';
 import { finalizeFootprints } from './footprintFinal';
-import { finishOpenEdges, markPlannedTerminalPlots, physicalTipConstraint, openQuarterEdge } from './edgeFinish';
+import { finishOpenEdges, markPlannedTerminalPlots, physicalTipConstraint, openQuarterEdge, footprintAccessGuard } from './edgeFinish';
 
 export interface UrbanResult { layer: UrbanLayer; stats: Record<string, number | string>; debug: UrbanDebug }
 export interface UrbanDebug { quarters: { poly: Polygon; phase: number; lab: number[] }[] }
@@ -1110,7 +1110,9 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   const releasedFootprintLand: PolyH[] = [];
   const footprintFinal = finalizeFootprints({ buildings, parcels, backLand: releasedFootprintLand,
     tipConstrained: physicalTipConstraint(edgePartition.protectedLand, ctx.isWater),
-    openQuarterEdge: openQuarterEdge(prim.quarters.map((q) => q.lp)) });
+    openQuarterEdge: openQuarterEdge(prim.quarters.map((q) => q.lp)),
+    validateParts: footprintAccessGuard(buildings, parcels, carved.map((b) => b.poly), makeStreetAt(
+      streets.list.filter((s) => s.ribbon).map((s) => ({ path: s.path, widths: s.widths, width: s.widths[0] })), accessPlaces())) });
   stats['footprint.cleaned'] = footprintFinal.cleaned;
   stats['footprint.invalid'] = footprintFinal.invalid.length;
   stats['footprint.releasedArea'] = footprintFinal.releasedArea;
@@ -1221,6 +1223,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
       .flatMap((l) => streetStrips(l.closed && l.path.length ? [...l.path, l.path[0]] : l.path, l.width ?? 1)),
   });
   stats['openEdge.unserved'] = layer.openTails?.filter((t) => t.kind === 'unservedOpenEdge' && t.excess > 0.5).length ?? 0;
+  stats['buildings'] = buildings.length;
   const debug: UrbanDebug = { quarters: prim.quarters.map((q) => ({ poly: q.lp.pts, phase: q.phase, lab: q.lp.lab })) };
   stats['ms.urban'] = Math.round(performance.now() - t0);
   return { layer, stats, debug };

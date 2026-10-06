@@ -163,12 +163,12 @@ export function clipUrban(u: UrbanLayer, region: Polygon, stats?: Record<string,
   const keptBlocks = u.blocks.filter((_, i) => blockKeep[i]);
   const buildings = u.buildings.filter((b) => inR(b.poly)).map((b) => (b.parcel !== undefined && b.parcel >= 0 ? { ...b, parcel: pMap[b.parcel] >= 0 ? pMap[b.parcel] : undefined } : b));
   // Clip administrative ground, preserving whole retained blocks and houses across its edge. A failed boolean
-  // retains the previous frame and is reported rather than interpreting failure as empty land.
+  // protects the retained buildings but grants no permission to paint the discarded administrative frame.
   const constrain = (source: PolyH[], retained: Polygon[] = []): PolyH[] => {
     const result = tryIntersection(source, region);
     if (result.failed) {
       if (stats) stats['clipUrban.failed'] = Number(stats['clipUrban.failed'] ?? 0) + 1;
-      return source;
+      return retained.map((outer) => ({ outer, holes: [] }));
     }
     return retained.length ? unionMany([...result.pieces, ...retained.map((outer) => ({ outer, holes: [] }))], 24, true) : result.pieces;
   };
@@ -183,7 +183,7 @@ export function clipUrban(u: UrbanLayer, region: Polygon, stats?: Record<string,
       ids.push(quarters.length);
       const space = tryIntersection(publicSpace, poly);
       if (space.failed && stats) stats['clipUrban.failed'] = Number(stats['clipUrban.failed'] ?? 0) + 1;
-      quarters.push({ ...q, poly, streetSpace: space.failed ? publicSpace : space.pieces });
+      quarters.push({ ...q, poly, streetSpace: space.failed ? [] : space.pieces });
     }
     quarterMap.set(qi, ids);
   });
