@@ -3,12 +3,12 @@
  *
  * 1. Frontage: each block edge is classified by the street ribbon it lies on (rank, street id).
  * 2. Runs: consecutive frontage edges with small turns form frontage runs.
- * 3. Territories (α/β strips): each run sweeps inward to its depth (capped at ~half the local block width, so
+ * 3. Territories (α/β strips): each run extends inward along a block axis to its depth (capped at ~half the local block width, so
  *    opposite runs meet near the medial line). Runs are processed by priority (street rank, then length); a
- *    higher-priority run's sweep is extended around convex corners along the neighbouring street, and later
+ *    higher-priority run's strip extends across the block at corners, and later
  *    runs only get what is left (boolean difference) — the corner plots face the more important street.
  *    This replaces the straight-skeleton construction of §3.2 (see report: CGAL-WASM was too slow).
- * 4. Each territory is cut into plots by straight chords along the fanned inward normals of the run.
+ * 4. Each territory is cut along one shared orthogonal frame, with a seeded tilt in organic fabrics.
  * 5. Back land = block minus territories; slivers are merged into the adjacent plot.
  */
 import type { Vec2, Polygon, Polyline } from '../core/geom';
@@ -17,13 +17,14 @@ import type { Rng } from '../core/rng';
 import type { MorphologyParams, Zone } from './morphology';
 import type { Streets } from './streets';
 import { MultiPoly, PolyH, intersectionS, differenceS, difference, unionS, tryIntersection, mpArea } from '../geo/bool';
-import { area, interiorAngle, pointInRing, distToSeg, distToRing, inscribed, cleanRing, orientPos, bboxOf, snapPt, isSimple, convexWidth, obb, convexHull } from '../geo/poly';
+import { area, interiorAngle, pointInRing, distToSeg, distToRing, inscribed, cleanRing, orientPos, bboxOf, snapPt, isSimple, convexWidth, convexHull } from '../geo/poly';
 import { clipPlot } from './buildings';
 import { truncateAcute } from './blocks';
-import { sweepLeft } from '../geo/offset';
 import { stitchUnion } from '../geo/stitch';
 import { rayHit, splitByChord, lpoly, isConvex, locate } from '../geo/split';
 import { cutCourtyards } from './courtyards';
+import { detectPlotFrame, plotBounds, plotDirection, varyPlotAxis } from './plotAxes';
+import { houseBoundarySides } from './houseFrames';
 
 export interface Plot {
   poly: Polygon;
@@ -40,6 +41,14 @@ export interface Plot {
   wide: boolean;
   /** Other street-facing edges of the plot (corner plots), as segments. */
   sideFronts: [Vec2, Vec2][];
+  /** Real block borders, including unserved/open sides, excluding private cuts. */
+  boundarySides?: [Vec2, Vec2][];
+  /** Exact parent boundary for construction after cadastral corner cleaning. Shared, never recut. */
+  blockPoly?: Polygon;
+  /** Served borders after final corner merges (the primary frontage may be a curve chord). */
+  streetSides?: [Vec2, Vec2][];
+  /** Fixed axes used to cut this parcel, before any exterior crop. */
+  axis?: Vec2;
   /** Frontage run within the block and order along it (neighbouring plots share courts). */
   run: number;
   order: number;
@@ -51,6 +60,8 @@ export interface Plot {
   gated?: boolean;
   /** Last served plot on an open street: its frontage is kept at the edge. */
   terminal?: boolean;
+  /** The construction unit is the entire block, with a collective perimeter programme. */
+  wholeBlock?: boolean;
 }
 /** Wealth of a frontage at p on a street of the given rank (0 poor … 1 rich). */
 export type WealthAt = (p: Vec2, rank: number) => number;
@@ -181,27 +192,32 @@ function polyCenter(p: Polygon): Vec2 {
 }
 
 /** Splits a polygon with holes by lines through its holes until every piece is hole-free. */
-export function openHoles(ph: PolyH, depth = 0, exact = false): MultiPoly {
+export function openHoles(ph: PolyH, depth = 0, exact = false, axis?: Vec2): MultiPoly {
   if (!ph.holes.length) return [{ outer: ph.outer, holes: [] }];
   // An unresolved hole is excluded land, never a licence to fill the parent's outer ring.
   if (depth > 4) return [];
   const h = ph.holes[0];
   const c = polyCenter(h);
   const bb = bboxOf(ph.outer);
-  const W = Math.max(bb.x1 - bb.x0, bb.y1 - bb.y0) + 10;
-  const left = [{ x: c.x - W, y: bb.y0 - W }, { x: c.x, y: bb.y0 - W }, { x: c.x, y: bb.y1 + W }, { x: c.x - W, y: bb.y1 + W }];
-  const right = [{ x: c.x, y: bb.y0 - W }, { x: c.x + W, y: bb.y0 - W }, { x: c.x + W, y: bb.y1 + W }, { x: c.x, y: bb.y1 + W }];
+  const W = axis ? Math.hypot(bb.x1 - bb.x0, bb.y1 - bb.y0) + 10 : Math.max(bb.x1 - bb.x0, bb.y1 - bb.y0) + 10;
+  const at = (u: number, v: number): Vec2 => ({ x: c.x + axis!.x * u - axis!.y * v, y: c.y + axis!.y * u + axis!.x * v });
+  const left = axis ? [at(-W, -W), at(0, -W), at(0, W), at(-W, W)]
+    : [{ x: c.x - W, y: bb.y0 - W }, { x: c.x, y: bb.y0 - W }, { x: c.x, y: bb.y1 + W }, { x: c.x - W, y: bb.y1 + W }];
+  const right = axis ? [at(0, -W), at(W, -W), at(W, W), at(0, W)]
+    : [{ x: c.x, y: bb.y0 - W }, { x: c.x + W, y: bb.y0 - W }, { x: c.x + W, y: bb.y1 + W }, { x: c.x, y: bb.y1 + W }];
   const out: MultiPoly = [];
   for (const half of [left, right]) {
     const pieces = exact ? tryIntersection([ph], half).pieces : intersectionS([ph], half);
-    for (const q of pieces) out.push(...openHoles(q, depth + 1, exact));
+    for (const q of pieces) out.push(...openHoles(q, depth + 1, exact, axis));
   }
   return out;
 }
 
 export function cutPlots(
   block: Polygon, bi: number, zone: Zone, infill: number, P: MorphologyParams, streets: Streets, rng: Rng, wealthAt?: WealthAt,
+  axis = detectPlotFrame(block).u,
 ): PlotResult {
+  axis = varyPlotAxis(axis, P.streetOp === 'grid' ? 0 : P.plotTilt, rng);
   const B = orientPos(block);
   const n = B.length;
   // ---- 1. frontage classification
@@ -267,9 +283,6 @@ export function cutPlots(
   // priority: lower rank first, then longer
   good.sort((a, b) => a.rank - b.rank || b.len - a.len);
   good.forEach((r, i) => (r.prio = i));
-  const byStartVertex = new Map<number, Run>();
-  const byEndVertex = new Map<number, Run>();
-  for (const r of good) { byStartVertex.set(r.edges[0], r); byEndVertex.set((r.edges[r.edges.length - 1] + 1) % n, r); }
 
   // ---- depth per run vertex (medial cap)
   const [dmin, dmax] = P.plotDepth[zone];
@@ -280,10 +293,8 @@ export function cutPlots(
   for (const run of good) {
     const pl = run.pts.slice();
     const dz = dmin + (dmax - dmin) * rng.float();
-    const nr = pl.map((_, j) => {
-      const a = pl[Math.max(0, j - 1)], b = pl[Math.min(pl.length - 1, j + 1)];
-      return leftN(unit(a, b));
-    });
+    const inward = plotDirection(leftN(unit(pl[0], pl[pl.length - 1])), axis);
+    const nr = pl.map(() => inward);
     let depth = pl.map((p, j) => {
       const q = { x: p.x + nr[j].x * 0.05, y: p.y + nr[j].y * 0.05 };
       const h = rayHit(B, q, nr[j]);
@@ -303,24 +314,11 @@ export function cutPlots(
       for (let k = Math.max(0, j - 2); k <= Math.min(depth.length - 1, j + 2); k++) { s += depth[k]; w++; }
       return Math.min(depth[j] + 2, s / w);
     });
-    // ---- corner handling: extend along the neighbouring edge at convex corners
-    let startDir: Vec2 | undefined, endDir: Vec2 | undefined, startLen: number | undefined, endLen: number | undefined;
-    const sv = run.edges[0], ev = (run.edges[run.edges.length - 1] + 1) % n;
-    const prevRun = byEndVertex.get(sv), nextRun = byStartVertex.get(ev);
-    const angS = interiorAngle(B, sv), angE = interiorAngle(B, ev);
-    const leadS = !prevRun || prevRun.prio > run.prio;
-    const leadE = !nextRun || nextRun.prio > run.prio;
-    if (leadE && angE >= Math.PI / 2 - 0.05 && angE < Math.PI - 0.1) {
-      const u = unit(B[ev], B[(ev + 1) % n]);
-      endDir = u; endLen = Math.min(2.2 * depth[depth.length - 1], depth[depth.length - 1] / Math.max(0.3, Math.sin(angE)));
-    }
-    if (leadS && angS >= Math.PI / 2 - 0.05 && angS < Math.PI - 0.1) {
-      const u = unit(B[sv], B[(sv - 1 + n) % n]);
-      startDir = u; startLen = Math.min(2.2 * depth[0], depth[0] / Math.max(0.3, Math.sin(angS)));
-    }
-    const S = sweepLeft(pl, depth, startDir, endDir, startLen, endLen);
-    if (S.length < 3) continue;
-    let T = intersectionS(B, S);
+    // The rear boundary also follows a block axis. Run priority assigns corners
+    // by subtracting earlier strips, without introducing diagonal seams.
+    const limit = Math.max(...pl.map((p, j) => p.x * inward.x + p.y * inward.y + depth[j]));
+    let T: MultiPoly = clipPlot(B, [{ p: { x: inward.x * limit, y: inward.y * limit }, n: { x: -inward.x, y: -inward.y } }], isConvex(B, 1e-3))
+      .map((outer) => ({ outer, holes: [] }));
     if (taken.length) {
       const tb = T.length ? bboxOf(T.flatMap((ph) => ph.outer)) : null;
       const prev = tb ? taken.filter((ph) => { const b = bboxOf(ph.outer); return !(b.x0 > tb.x1 || b.x1 < tb.x0 || b.y0 > tb.y1 || b.y1 < tb.y0); }) : [];
@@ -345,7 +343,7 @@ export function cutPlots(
         return taken.some((t) => pointInRing(t.outer, c));
       });
       if (!keep.length) { T2.push({ outer: ph.outer, holes: [] }); continue; }
-      for (const piece of openHoles({ outer: ph.outer, holes: keep })) T2.push(piece);
+      for (const piece of openHoles({ outer: ph.outer, holes: keep }, 0, false, axis)) T2.push(piece);
     }
     T = T2;
     taken = taken.concat(T);
@@ -354,7 +352,6 @@ export function cutPlots(
   // ---- 4. cut territories into plots
   const plots: Plot[] = [];
   const [fwMin, fwMax] = P.frontage[zone];
-  const tiltMax = (P.plotTilt * Math.PI) / 180;
   const leftovers: Polygon[] = [];
   let runNo = 0;
   for (const { run, poly: T, depth } of territories) {
@@ -395,11 +392,10 @@ export function cutPlots(
       const cuts: number[] = [];
       let s = s0;
       for (let j = 0; j < widths.length - 1; j++) { s += widths[j] * k; cuts.push(s); }
-      // walk the cuts, splitting the remaining polygon by chords along the (fanned, tilted) normals
+      // Keep every cut in the retained cadastral frame, even on curved frontages.
       let rem = lpoly(ph.outer, 0);
       let prevS = s0;
-      let tilt = 0;
-      let prevSide: { p: Vec2; d: Vec2 } = { p: pointAt(pl, cum, s0).p, d: normalAt(pl, cum, s0, 3) };
+      let prevSide: { p: Vec2; d: Vec2 } = { p: pointAt(pl, cum, s0).p, d: plotDirection(normalAt(pl, cum, s0, 3), axis) };
       for (let j = 0; j <= cuts.length; j++) {
         const last = j === cuts.length;
         const sc = last ? s1 : cuts[j];
@@ -408,10 +404,8 @@ export function cutPlots(
         let side: { p: Vec2; d: Vec2 };
         if (!last) {
           const pp = pointAt(pl, cum, sc).p;
-          tilt = Math.max(-tiltMax, Math.min(tiltMax, 0.6 * tilt + rng.range(-0.6, 0.6) * tiltMax));
           const nn = normalAt(pl, cum, sc, Math.max(2, w / 2));
-          const c = Math.cos(tilt), si = Math.sin(tilt);
-          const d = { x: nn.x * c - nn.y * si, y: nn.x * si + nn.y * c };
+          const d = plotDirection(nn, axis);
           side = { p: pp, d };
           const h = rayHit(rem.pts, { x: pp.x + d.x * 0.02, y: pp.y + d.y * 0.02 }, d, 1e4, 0.01);
           const res = h ? splitByChord(rem, [pp, h.p], 0) : null;
@@ -431,7 +425,7 @@ export function cutPlots(
           else { plotPoly = Bp.pts; rem = A; }
         } else {
           plotPoly = rem.pts;
-          side = { p: pointAt(pl, cum, s1).p, d: normalAt(pl, cum, s1, 3) };
+          side = { p: pointAt(pl, cum, s1).p, d: plotDirection(normalAt(pl, cum, s1, 3), axis) };
         }
         const fa = pointAt(pl, cum, prevS).p, fb = pointAt(pl, cum, sc).p;
         const nrm = normalAt(pl, cum, (prevS + sc) / 2, Math.max(2, w / 2));
@@ -476,7 +470,7 @@ export function cutPlots(
       const ag = area(g);
       const k = Math.min(8, Math.round(ag / Math.max(60, med)));
       if (k < 2) { gardenCells.push(g); continue; }
-      const o = obb(g);
+      const o = plotBounds(g, axis);
       const conv = isConvex(g, 1e-3);
       for (let j = 0; j < k; j++) {
         const s0 = -o.hu + (2 * o.hu * j) / k, s1 = -o.hu + (2 * o.hu * (j + 1)) / k;
@@ -711,7 +705,17 @@ export function cutPlots(
   }
   const plotsF: Plot[] = [];
   const backF: Polygon[] = [];
-  for (const c of cellsF) { if (c.plot) { c.plot.poly = c.poly; plotsF.push(c.plot); } else backF.push(c.poly); }
+  for (const c of cellsF) {
+    if (c.plot) {
+      c.plot.poly = c.poly;
+      c.plot.axis = axis;
+      c.plot.blockPoly = B;
+      const sides = houseBoundarySides(B, c.poly, c.plot.front);
+      if (sides.length) c.plot.boundarySides = sides;
+      c.plot.streetSides = sides.filter(([a, b]) => plotFrontOnStreet(streets, a, b));
+      plotsF.push(c.plot);
+    } else backF.push(c.poly);
+  }
   if (P.plotOp !== 'siheyuan') return { plots: plotsF, back: backF };
   // Back-land merges can leave a compound fronting several hutongs with only one recorded facade.
   // Refine just those oversized lots, using every actual street edge and preserving the exact partition.
@@ -719,7 +723,7 @@ export function cutPlots(
   const firstRun = Math.max(-1, ...plotsF.map((p) => p.run)) + 1;
   for (const [i, p] of plotsF.entries()) {
     if (area(p.poly) <= Math.max(1600, P.houseArea[zone][1] * 1.8)) { refined.push(p); continue; }
-    const parts = cutCourtyards(p.poly, bi, zone, P, streets, rng.fork('siheyuan:' + i));
+    const parts = cutCourtyards(p.poly, bi, zone, P, streets, rng.fork('siheyuan:' + i), axis);
     if (parts.plots.length < 2) { refined.push(p); continue; }
     refined.push(...parts.plots.map((q) => ({ ...q, run: firstRun + i, wealth: p.wealth, fade: p.fade })));
     back.push(...parts.back);

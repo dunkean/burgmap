@@ -14,8 +14,8 @@ export type Range = [number, number];
 export type StreetOpId =
   | 'radials' | 'rings' | 'organicInfill' | 'grid' | 'axis' | 'gateToGate' | 'culDeSacTree' | 'closes'
   | 'wardWalls' | 'defensiveKinks' | 'ribbon' | 'spiral' | 'switchbacks' | 'extraRadials' | 'roji';
-export type PlotOpId = 'burgage' | 'courtyard' | 'siheyuan' | 'machiya' | 'compound' | 'garden';
-export type BuildingOpId = 'streetFrontRow' | 'courtyardHouse' | 'shopRow' | 'pavilionCompound' | 'yashiki' | 'machiya' | 'detached' | 'treeHouse' | 'hall' | 'longhouse' | 'kancha' | 'yardHouse' | 'tomb' | 'venetian' | 'konak' | 'sahelCompound' | 'giebelhaus' | 'hanok' | 'gnome' | 'primitive' | 'fungalHouse' | 'duergarHall';
+export type PlotOpId = 'burgage' | 'courtyard' | 'siheyuan' | 'machiya' | 'compound' | 'garden' | 'wholeBlock';
+export type BuildingOpId = 'streetFrontRow' | 'courtyardHouse' | 'shopRow' | 'pavilionCompound' | 'yashiki' | 'machiya' | 'detached' | 'treeHouse' | 'hall' | 'longhouse' | 'kancha' | 'yardHouse' | 'tomb' | 'venetian' | 'konak' | 'sahelCompound' | 'giebelhaus' | 'hanok' | 'gnome' | 'primitive' | 'fungalHouse' | 'duergarHall' | 'perimeterBlock' | 'streetFrontRowExperimental';
 export type RoofKind = 'gable' | 'hip' | 'flat' | 'dome' | 'pyramidal' | 'pagoda' | 'thatch-round' | 'none' | 'tiled-hip' | 'conical' | 'barrel' | 'terraced';
 export type Material = 'timber' | 'stone' | 'coral-stone' | 'brick' | 'mud' | 'wood' | 'paper-wood' | 'living-wood' | 'rock' | 'thatch' | 'hide' | 'felt' | 'bark' | 'adobe' | 'turf' | 'earth' | 'wattle' | 'dark-stone' | 'fungal';
 /** Architecture of a building type (metadata for later rendering / 3D). */
@@ -91,7 +91,7 @@ export interface MorphologyParams {
   slitDepth: number;
   frontage: Record<Zone, Range>;
   plotDepth: Record<Zone, Range>;
-  /** Random tilt of plot side lines (degrees). */
+  /** Seeded tilt of the shared parcel frame (degrees); zero retains the block axes. */
   plotTilt: number;
   /** Probability of a double/triple (merchant) plot. */
   wideLotChance: number;
@@ -104,6 +104,14 @@ export interface MorphologyParams {
   coverage: Record<Zone, Range>;
   /** Chance that a wide plot of a dense zone holds a large courtyard building (inn, hall, hôtel). */
   bigCourtChance: number;
+  /** Strength (0–1) of coherent house dimension variation; zero keeps the original programme. */
+  houseVariation?: number;
+  /** Perimeter construction: block-level depth preference; remaining open area is emergent. */
+  blockCourtShare?: Range;
+  /** Probability of a fully built core; small/thin blocks may also collapse naturally. */
+  blockSolidChance?: number;
+  /** Conditional probability of interior buildings in a block that retains a court. */
+  blockInfillChance?: number;
   /**
    * Footprint conformity per zone: 1 = footprints take the plot's shape within their depth band (trapezoids where
    * plots fan, skewed quads, polygonal corners); 0 = orthogonal rectangles inside the plot.
@@ -133,6 +141,14 @@ export interface MorphologyParams {
   /** Gross densities (inhabitants per ha) per zone, used to size phase regions. */
   density: Record<Zone, number>;
 }
+
+/** Experimental strength; production is currently gated by HOUSE_VARIATION_ENABLED. */
+export function effectiveHouseVariation(P: MorphologyParams): number {
+  return P.houseVariation ?? 0;
+}
+
+/** Preserve the experiment, but ignore saved overrides in production for now. */
+export const HOUSE_VARIATION_ENABLED = false;
 
 const EO: MorphologyParams = {
   id: 'european-organic',
@@ -221,7 +237,11 @@ const BASTIDE: MorphologyParams = {
   density: { core: 150, middle: 130, edge: 110, faubourg: 55, village: 35 },
 };
 
-export const MORPHOLOGIES: Record<string, MorphologyParams> = { 'european-organic': EO, bastide: BASTIDE };
+export const MORPHOLOGIES: Record<string, MorphologyParams> = {
+  'european-organic': EO, bastide: BASTIDE,
+  'perimeter-block': { ...EO, id: 'perimeter-block', plotOp: 'burgage', buildingOp: 'perimeterBlock',
+    wideLotChance: 0.3, houseVariation: 0, blockCourtShare: [0.12, 0.45], blockSolidChance: 0.08, blockInfillChance: 0.22 },
+};
 
 export { EO as EO_BASE };
 

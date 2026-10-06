@@ -27,6 +27,7 @@ import { culDeSacTree } from './culdesac';
 import { polygonCentroid } from '../core/geom';
 import { cutPlots, Plot } from './plots';
 import { cutCourtyards } from './courtyards';
+import { retainBlockPlot } from './perimeterBlock';
 import { buildOn, type ArchBldg } from './bops';
 import { chamferPersianHouse } from './persianhouse';
 import { blockReach, carvePassage, makeStreetAt, splitLong, frontRangeDepth, shapeOkObb } from './access';
@@ -748,7 +749,8 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     // faubourgs: plots widen along the ribbon (continuous rows at the gate, wider lots further out)
     const fade = b.zone === 'faubourg' && P.faubFade !== false ? faubFade(interiorPoint(b.poly)) : 0;
     const Pb = fade > 0 ? { ...P, frontage: { ...P.frontage, faubourg: [P.frontage.faubourg[0] * (1 + 0.9 * fade), P.frontage.faubourg[1] * (1 + 1.3 * fade)] as [number, number] } } : P;
-    const r = Pb.plotOp === 'courtyard' || P.plotOp === 'compound' ? cutCourtyards(b.poly, bi, b.zone, P, streets, br)
+    const r = Pb.plotOp === 'wholeBlock' ? retainBlockPlot(b.poly, bi, b.zone, streets)
+      : Pb.plotOp === 'courtyard' || P.plotOp === 'compound' ? cutCourtyards(b.poly, bi, b.zone, P, streets, br)
       : P.plotOp === 'garden' ? { plots: [], back: [b.poly] }
       : cutPlots(b.poly, bi, b.zone, infill, Pb, streets, br, wealthAt);
     for (const p of r.plots) p.wealth = wealthAt({ x: (p.front[0].x + p.front[1].x) / 2, y: (p.front[0].y + p.front[1].y) / 2 }, p.rank);

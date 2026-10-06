@@ -4,6 +4,71 @@ Procedural generator of pre-modern settlements in their landscape. From a seed (
 
 **Live demo:** https://dunkean.github.io/burgmap/ · **Handoff / project state:** [HANDOFF.md](HANDOFF.md)
 
+## House debug bench
+
+Run `npm run dev` from `web/` and open http://localhost:5173/testbench.html.
+The bench generates 3–8 quarters per ring/band with the native operators, in
+three independent steps: streets/blocks, parcels, then buildings. Parcels can
+be generated and inspected without houses. Changing the building preset or
+seed keeps the exact parcel polygons and frontage frames; **Effacer les maisons**
+also keeps parcels, seeds and pins. Visibility checkboxes hide either overlay
+or the buildings without regenerating geometry.
+
+Culture and recipe/phase initialize all three stage presets from the actual
+cultural configuration, including extensions, sectors, villages, hamlets and
+urban-growth recipes. Each stage can select a different cultural recipe or
+registered morphology. Operator menus expose organic/grid splitting, all five
+access variants, and the registered plot and building operators.
+**Paramètres fins par étape** exposes applicable numeric/architecture parameters
+as validated JSON overrides, with effective values for reference. Some IDs
+share a constructor (e.g. streetFrontRow/detached/longhouse); their preset
+dimensions and architecture still differ.
+
+For collective **pâtés de maisons**, select **buildPerimeterBlock** in the
+construction menu, keeping **cutPlots** for the cadastral parcels. Building
+selection does not change the parcel operator. Each street facade gets a row
+perpendicular to that street, with varied widths and depths. Corner returns
+are cropped and merged within their original parcels. The irregular shared
+court emerges from the space these buildings leave unbuilt; no court polygon
+is prescribed and no per-house corridor is carved. `blockCourtShare` is a
+depth preference (not an exact area target), `blockSolidChance` requests full
+depth and `blockInfillChance` allows deeper ranges. All plots of one block
+share that programme, subject to viable geometry and access. The
+**perimeter-block** preset is available to native phase recipes too.
+
+The default **buildPlot** method retains the original house programme on the
+new parcel cuts and axes. The complete later house work is preserved under
+**buildPlotExperimental** in the construction menu for future development.
+
+Experimental `houseVariation` perturbations are retained in source but
+temporarily disabled, including saved URL overrides; the control shows zero
+and is disabled. Perimeter building sizes vary independently of that experiment.
+
+Choose central sectors, **Rectangle** (the previous lateral patch), an oblique
+polygon or a concave notched polygon, with one or two rings/bands. Analytical
+**curved valley** and **hill** constraints restrict the land footprint and provide slope
+samples to native contour-following street fields, without generating a full
+landscape. Grids retain their selected orientation. A straight central river
+(vertical/horizontal/diagonal, adjustable width) cuts real dry quarters before
+blocks and parcels; bank edges are non-frontage. Road crossings are represented
+as simple bridges. Shape, zone, relief, river and monument reservation apply
+at the street/layout step.
+
+**Apply** uses the entered seed; **↻ Graine** changes only the relevant stage's
+seed. Applying an upstream stage clears its downstream results. Pins, notes,
+all three seeds, each applied stage's configuration, visibility and view are
+included in **Copier l’URL**. Reopening a shared URL restores the independently
+applied stages exactly. Prototype URLs remain readable, but their output is
+recomputed with the separated stages. New layout generations clear pins. Each
+pin has a visible **Supprimer** button at the top of the side panel; deletion
+also updates the shared URL, without changing the generated geometry.
+The full settlement planner, global primary-road operators (axes, walls,
+canals…), regional terrain/camp generation and final settlement-wide roof
+repairs remain outside this isolated geometry fixture.
+`npm run build` also produces a self-contained `web/dist/testbench.html`.
+Check the offline UI with `node scripts/testbench_check.mjs`; screenshots and
+check results go to ignored `web/out/testbench/`.
+
 ## What it generates
 
 - **Landscape**

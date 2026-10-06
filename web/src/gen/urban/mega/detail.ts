@@ -21,6 +21,7 @@ import { splitQuarter, addCloses, carveBlocks, buildRibbonIndex, type CarvedBloc
 import { culDeSacTree } from '../culdesac';
 import { cutPlots, type Plot } from '../plots';
 import { cutCourtyards } from '../courtyards';
+import { retainBlockPlot } from '../perimeterBlock';
 import { buildOn, type ArchBldg } from '../bops';
 import { chamferPersianHouse } from '../persianhouse';
 import { finishEdgeRoofs } from '../edgeRoofs';
@@ -257,7 +258,8 @@ export function megaQuarterDetail(world: World, key: number): UrbanLayer | null 
     }
     const fade = b.zone === 'faubourg' && P.faubFade !== false ? faubFade(innerPoint(b.poly)) : 0;
     const Pb = fade > 0 ? { ...P, frontage: { ...P.frontage, faubourg: [P.frontage.faubourg[0] * (1 + 0.9 * fade), P.frontage.faubourg[1] * (1 + 1.3 * fade)] as [number, number] } } : P;
-    const r = Pb.plotOp === 'courtyard' || P.plotOp === 'compound' ? cutCourtyards(b.poly, bi, b.zone, P, local, br)
+    const r = Pb.plotOp === 'wholeBlock' ? retainBlockPlot(b.poly, bi, b.zone, local)
+      : Pb.plotOp === 'courtyard' || P.plotOp === 'compound' ? cutCourtyards(b.poly, bi, b.zone, P, local, br)
       : P.plotOp === 'garden' ? { plots: [], back: [b.poly] }
       : cutPlots(b.poly, bi, b.zone, infill, Pb, local, br, wealthAt);
     for (const p of r.plots) p.wealth = wealthAt({ x: (p.front[0].x + p.front[1].x) / 2, y: (p.front[0].y + p.front[1].y) / 2 }, p.rank);

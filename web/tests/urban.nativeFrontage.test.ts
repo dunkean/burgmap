@@ -10,7 +10,7 @@ describe('native longhouses on merged street frontages', () => {
     const w = generate(makeOptions({ seed: '2', size: 'town', culture: 'native-iroquoian' }));
     const u = w.urban!;
     // This seeded merged faubourg lot selected its frontage as both side lines.
-    // Access then cut one apsidal end: 60.922 mÂ² / 12.230 m became 55.975 mÂ² / 10.824 m.
+    // Access then cut one apsidal end: 60.922 m2 / 12.230 m became 55.975 m2 / 10.824 m.
     const house = u.buildings.find((b) => b.parcel === 824 && b.arch === 'longhouse')!;
     expect(house).toBeDefined();
     expect(house.poly).toHaveLength(12);

@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="fr">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Burgmap — banc de test</title></head>
+<body>
+  <header>
+    <strong>Banc de test du découpage</strong>
+    <label>Mode <select id="mode"><option value="quarters">Quartiers</option><option value="micro">Micro parcelle only</option></select></label>
+    <label>Culture <select id="culture"></select></label>
+    <label>Recette / phase <select id="recipe"></select></label>
+    <label>Zone <select id="zone"><option value="core">Cœur de ville</option><option value="middle">Extension</option><option value="edge">Périphérie</option><option value="faubourg">Faubourg</option><option value="village">Village / hameau</option></select></label>
+    <label>Forme des quartiers <select id="placement"><option value="center">Autour du centre</option><option value="rectangle">Rectangle</option><option value="skew">Polygone oblique</option><option value="notched">Polygone avec encoche</option></select></label>
+    <label>Anneaux / bandes <select id="rings"><option value="1">1</option><option value="2">2</option></select></label>
+    <label>Densité <select id="density"><option value="0.65">Faible</option><option value="1" selected>Normale</option><option value="1.4">Forte</option></select></label>
+    <label>Quartiers <input id="count" type="number" min="3" max="8" value="4"></label>
+    <label>Rayon (m) <input id="radius" type="number" min="80" max="300" step="20" value="160"></label>
+    <label>Monument <select id="monument"></select></label>
+    <label>Contrainte relief <select id="relief"><option value="flat">Aucune · plat</option><option value="valley">Vallée · couloir courbé</option><option value="hill">Butte · sommet</option></select></label>
+    <label>Pente repère (%) <input id="reliefSlope" type="number" min="5" max="60" step="5" value="18"></label>
+    <label>Rivière centrale <select id="river"><option value="none">Aucune</option><option value="vertical">Verticale</option><option value="horizontal">Horizontale</option><option value="diagonal">Diagonale</option></select></label>
+    <label>Largeur rivière (m) <input id="riverWidth" type="number" min="4" max="50" step="2" value="14"></label>
+    <button id="pinMode" aria-pressed="false">Poser des pins</button><button id="copy">Copier l’URL</button><button id="fit">Recentrer</button>
+    <label><input id="blocks" type="checkbox" checked>Sous-zones / îlots</label>
+    <label><input id="showHouses" type="checkbox" checked>Afficher les maisons</label>
+    <label title="Masque les pointillés des îlots et uniformise les fonds des quartiers avec les rues."><input id="realPlan" type="checkbox">Plan réel</label>
+  </header>
+  <section id="stages" aria-label="Étapes de génération">
+    <fieldset><legend id="layoutLegend">1 · Rues et îlots</legend>
+      <label id="shapePresetLabel" hidden>Préréglage <select id="shapePreset"><option value="diversity">Diversité · 10 micro formes</option></select></label>
+      <label id="microScaleLabel" hidden>Taille des parcelles <input id="microScale" type="range" min="1" max="5" step="0.25" value="1" aria-label="Taille des micro parcelles"><output id="microScaleValue" for="microScale">×1</output></label>
+      <label id="microFrontageLabel" hidden>Desserte <select id="microFrontage"><option value="front">Un bord · accès limité</option><option value="perimeter">Tout le pourtour · îlot entouré</option></select></label>
+      <label>Préréglage <select id="streetsPreset"></select></label>
+      <label>Découpage <select id="streetOp"></select></label>
+      <label>Orientation <select id="orientation"></select></label>
+      <label>Accès / impasses <select id="closeOp"></select></label>
+      <label>Graine <input id="layoutSeed" value="42"></label>
+      <div><button id="layout">Appliquer les rues / îlots</button><button id="randomLayout" title="Nouvelle graine et génération des rues">↻ Graine</button></div>
+      <small id="shapeHelp" hidden>Dix petites formes isolées : rectangle, longue fine, angles aigus, parallélogramme, trapèze, L, encoche et bords courbés. ×5 multiplie la surface par 25. Un seul bord desservi peut imposer des lots très profonds ; le pourtour desservi permet des lots compacts, comme un îlot entouré de rues. Les graines des formes, parcelles et maisons restent indépendantes.</small>
+    </fieldset>
+    <fieldset><legend>2 · Parcelles</legend>
+      <label><input id="plots" type="checkbox" checked>Afficher les contours de parcelles</label>
+      <label><input id="showOrientation" type="checkbox" checked>Afficher l’orientation des quartiers</label>
+      <label>Préréglage <select id="plotsPreset"></select></label>
+      <label>Découpage <select id="plotOp"></select></label>
+      <details class="operator-settings" open><summary>Paramètres de l’opérateur</summary><div id="plotsParams" class="operator-params"></div><small id="plotsParamStatus" role="status"></small></details>
+      <details class="culture-settings"><summary>Variations par culture / recette</summary><div id="plotsCultures" class="culture-variants"></div></details>
+      <label>Graine <input id="plotSeed" value="42"></label>
+      <div><button id="parcels">Appliquer les parcelles</button><button id="randomPlots" title="Nouvelle graine et découpage des parcelles">↻ Graine</button></div>
+      <small>Conserve les rues et les îlots. Retire les maisons.</small>
+    </fieldset>
+    <fieldset><legend>3 · Maisons</legend>
+      <label>Préréglage <select id="buildingsPreset"></select></label>
+      <label>Construction <select id="buildingOp"></select></label>
+      <details class="operator-settings" open><summary>Paramètres de l’opérateur</summary><div id="buildingsParams" class="operator-params"></div><small id="buildingsParamStatus" role="status"></small></details>
+      <details class="culture-settings"><summary>Variations par culture / recette</summary><div id="buildingsCultures" class="culture-variants"></div></details>
+      <label>Graine <input id="houseSeed" value="42"></label>
+      <div><button id="houses">Appliquer les maisons</button><button id="randomHouses" title="Nouvelle graine et génération des maisons">↻ Graine</button><button id="clearHouses">Effacer les maisons</button></div>
+      <small>Conserve les rues, les îlots et les parcelles.</small>
+    </fieldset>
+  </section>
+  <details id="advanced"><summary>Paramètres fins par étape · JSON</summary>
+    <p>Les préréglages reprennent les recettes natives des cultures (phases et secteurs). Les menus regroupent les alias par opération réelle ; les paramètres affichés sous les menus sont modifiables pour la zone sélectionnée. Les tableaux culturels comparent les recettes qui utilisent la même opération, à densité et zone identiques. Le JSON permet aussi de modifier les autres zones. Les surcharges s’appliquent après densité.</p>
+    <label>Étape <select id="advancedStage"><option value="streets">Rues / îlots / accès</option><option value="plots">Parcelles</option><option value="buildings">Maisons</option></select></label>
+    <textarea id="params" aria-label="Surcharges JSON" spellcheck="false">{}</textarea>
+    <button id="applyParams">Enregistrer les paramètres</button><button id="resetParams">Réinitialiser cette étape</button>
+    <p id="paramStatus" role="status"></p>
+    <details><summary>Valeurs effectives du préréglage et des surcharges</summary><pre id="effectiveParams"></pre></details>
+  </details>
+  <div id="reproduction"><button id="randomAll">Tout générer au hasard</button><button id="replay">Reproduire le cas avec les graines saisies</button><span id="pipeline"></span></div>
+  <p id="status" role="status"></p>
+  <main><svg id="map" xmlns="http://www.w3.org/2000/svg" aria-label="Quartiers de test"></svg><aside>
+    <strong>Pins</strong><p id="pinHint"><small>Alt-clic ou « Poser des pins » pour ajouter. Cliquer sur un pin pour modifier sa note ; « Supprimer » pour le retirer.</small></p><ol id="pins"></ol>
+    <details><summary>Aide et périmètre du banc</summary><p><small>Molette : zoom · glisser : déplacer.<br><br>Culture / recette initialise les trois étapes. Appliquer une variante garde la même graine. ↻ change la graine.<br><br>Orange : parcelles · vert : arrière-terrain / jardin · brun : réserve de monument.<br><br>Relief analytique : vallée étroite ou sommet elliptique, sans paysage généré. Le champ organique peut suivre les pentes ; les grilles conservent leur orientation. Rivière droite : découpe réelle des quartiers et berges sans façade. Croisements des routes figurés en ponts simples.<br><br>Formes de quartiers imposées : les opérateurs du plan global (axes, remparts, canaux, camps…) et les réparations finales de ville ne sont pas exécutés ici. Les étapes isolées utilisent les vrais découpeurs et constructeurs.<br><br>streetFrontRow, detached et longhouse partagent le constructeur de base ; leurs paramètres et leur architecture font la différence.</small></p></details>
+  </aside></main>
+  <script type="module" src="./testbench.ts"></script>
+</body>
+</html>

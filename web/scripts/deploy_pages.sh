@@ -7,7 +7,9 @@ TMP=$(mktemp -d)
 git -C "$ROOT" worktree add -q "$TMP/src" HEAD
 cp -r "$ROOT/web/node_modules" "$TMP/src/web/" 2>/dev/null || (cd "$TMP/src/web" && npm ci)
 (cd "$TMP/src/web" && npm run build >/dev/null)
-mkdir -p "$TMP/site" && cp "$TMP/src/web/dist/index.html" "$TMP/site/" && touch "$TMP/site/.nojekyll"
+mkdir -p "$TMP/site"
+cp "$TMP/src/web/dist/index.html" "$TMP/src/web/dist/testbench.html" "$TMP/site/"
+touch "$TMP/site/.nojekyll"
 REV=$(git -C "$ROOT" rev-parse --short HEAD)
 FULL_REV=$(git -C "$ROOT" rev-parse HEAD)
 node "$TMP/src/web/scripts/publish_docs.mjs" "$TMP/src" "$TMP/site" "$FULL_REV"

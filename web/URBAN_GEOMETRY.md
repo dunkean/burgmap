@@ -21,7 +21,7 @@ References:
   - split it against existing edges at intersections;
   - snap endpoints to a node within `snapR` (3 m), or onto an edge within `snapR` (split that edge);
   - reject near-parallel overlaps: a new segment within 4 m of an existing one at an angle < 15° is merged, not duplicated.
-  
+
   **Face extraction**: sort half-edges by angle at each node, walk next = twin.prev, drop the outer face. Dangling edges (cul-de-sacs) are kept. The face walk goes around them, and they are handled at block level (§2.4).
 - **Spatial index**: uniform grid hash for segments and polygons, used for snapping and for the tests.
 
@@ -103,8 +103,8 @@ Classify each block edge by the street it faces: find the nearest ribbon and its
    - The remaining **back land** (the block core beyond the depth) becomes shared gardens or courtyards. In an old dense phase, it is instead split among the adjacent plots by extending their side lines (the burgage cycle, §4).
 5. **Cutting a strip into plots**:
    - Walk along the frontage run and cut every `w`, where `w` is drawn per zone (core 4–7 m, middle 6–10 m, edge 10–20 m; merchant and rich plots up to 2–3 w).
-   - The cut direction is the **inward normal of the run at that point**. On curved runs this fans the plots naturally.
-   - Add a small random tilt (±6°), and keep the side lines of neighbouring plots nearly parallel.
+   - The current TypeScript implementation uses a retained cadastral frame detected from the block. Organic fabrics draw one small seeded rotation of that frame (`plotTilt`, usually ±6°); regular grids retain the block axes. Neighbouring cuts share it. The preserved experimental house method also uses it; default houses use their original frontage/side-line programme.
+   - Widths remain seeded draws along the frontage. `plotTilt = 0` gives strict block alignment without disabling width diversity.
    - Each cut is a straight segment across the strip. Clip the strip by the half-planes between consecutive cuts (exact, since a strip is a skeleton region whose cross-sections are simple).
    - If a strip is non-convex and a cut would cross it twice, split along the skeleton arc instead.
 6. **Cleanup**:
@@ -113,17 +113,55 @@ Classify each block edge by the street it faces: find the nearest ribbon and its
 
 **Each plot then has a frontage segment on a street, and plots partition the strip exactly.**
 
+Experimental house dimensions can use `houseVariation` (0–1). The implementation
+is retained in `burgageHouseExperimental` / `buildPlotExperimental`. Production
+`buildPlot` uses the pre-experiment house programme and ignores this field.
+The explicit bench method `buildPlotExperimental` retains the zero-variation
+guard, even for saved overrides; the bench control is disabled. Experimental depth variation is
+bounded to ±12% times the strength. Long frontage subdivisions redistribute
+their spare width using shared party cuts, so neighbouring houses absorb each
+other's dimensional differences without overlap. Street facades and private
+wall axes stay aligned, and parcel boundaries remain fixed. Where the available
+width permits, the varied depth produces both wide and deep silhouettes.
+Explicit zero preserves the prior house programme and parent RNG stream.
+
 ### 3.3 Courtyard houses (medina, siheyuan, haveli, Roman domus)
 
 Recursive **OBB splitting** (Vanegas 2012, OBB method), constrained by access:
-- Split the block perpendicular to its OBB long axis, near the middle (40–60 %).
+- Split perpendicular to the retained frame's long axis, near a seeded preferred position (42–58 %), with fallback positions when geometry or access rejects it. Descendants retain this frame instead of redetecting their orientation.
 - Accept a split only if both halves keep ≥ 3 m of frontage on a street *or a slit* (§2.4). Otherwise try the other axis, or add a slit.
 - Stop when the area is in the house range: medina 80–400 m², siheyuan 300–1 200 m².
 - Houses are inward-facing, so the plots are compact (aspect ratio < 2) rather than deep strips.
+- A cut line may have several interior chords in a concave block; try those chords even when its bounding-box centre is outside the block. Access is still required for both resulting parcels. A large block served on only one edge may remain in deep strips until an access lane exists; the micro bench offers one-edge and perimeter frontage to distinguish this constraint from house geometry.
 
 ### 3.4 Compounds
 
 Large lots are claimed *before* plot cutting: temple, palace, monastery, samurai *yashiki*, castle bailey. They take a whole block, or the union of adjacent plots along a run.
+
+### 3.5 Collective perimeter blocks
+
+`buildPerimeterBlock` (`buildingOp: perimeterBlock`) dispatches to dedicated
+`buildPerimeterPlot` on the existing **cutPlots** parcels. No custom cadastral
+cells, Voronoi ring, offset core or court-first subtraction remains. Buildings
+follow each actual street frontage's perpendicular frame, including secondary
+facades of corner plots. They are clipped to the parcel and exact parent block.
+Seeded shared frontage cuts and independent depths give small and large
+volumes; the collective court is the remaining unbuilt space. Corner returns
+can be deformed/complex, with slivers merged into attached viable buildings.
+
+`blockCourtShare` defaults to [0.12, 0.45], `blockSolidChance` to 0.08 and
+`blockInfillChance` to 0.22. A root-seed fork shares programme decisions across
+the block's parcels. Court share now controls a depth preference, not an exact
+area. Solid requests full available depth; infill permits deeper ranges.
+Geometry may collapse a thin block's heart or leave narrow corners open.
+Native width/aspect normalization and merges remain enforced. Isolated rear
+fragments are not given repetitive carved paths: roofs require a street facade.
+The bounded per-row construction needs no global collision solver.
+
+The `perimeter-block` morphology pairs cutPlots and this construction in eager
+and lazy recipes. Old wholeBlock links replay through cutPlots in the bench;
+the source adapter remains for compatibility, but retainBlock is no longer
+offered in the parcel menu. Existing burgage construction stays available.
 
 ## 4. Level 4 — Built / unbuilt inside each plot (never leaves the plot)
 

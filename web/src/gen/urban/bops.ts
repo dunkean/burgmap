@@ -19,12 +19,14 @@ import type { Rng } from '../core/rng';
 import { primitiveHouse } from './primitive';
 import type { MorphologyParams, ArchSpec } from './morphology';
 import type { Plot } from './plots';
-import { buildPlot, clipPlot, courtyardRing, rectify, shapeOf, dropOverlaps, MIN_BW, MAX_ASPECT, type Bldg, type HalfPlane, type CourtHint } from './buildings';
+import { housePlotNormal } from './houseFrames';
+import { buildPlotExperimental, buildPlot, clipPlot, courtyardRing, rectify, shapeOf, dropOverlaps, MIN_BW, MAX_ASPECT, type Bldg, type HalfPlane, type CourtHint } from './buildings';
 import { area, inscribed, distToRing, orientPos, cleanRing, pointInRing, obb, isSimple } from '../geo/poly';
 import { difference, union, tryDifference, mpArea } from '../geo/bool';
 import { isConvex, polyInside } from '../geo/split';
 import { stitchUnion } from '../geo/stitch';
 import { disk, insetConvex } from '../geo/offset';
+import { buildPerimeterBlock, buildPerimeterPlot } from './perimeterBlock';
 
 export interface ArchBldg extends Bldg {
   arch?: string; roof?: ArchSpec['roof']; storeys?: number; material?: string; courtyards?: Polygon[]; orientation?: number;
@@ -1043,6 +1045,8 @@ export function buildOn(pl: Plot, cov: number, P: MorphologyParams, rng: Rng, hi
 
 function buildOnRaw(pl: Plot, cov: number, P: MorphologyParams, rng: Rng, hint?: CourtHint): ArchBldg[] {
   switch (P.buildingOp) {
+    case 'perimeterBlock': return (pl.wholeBlock ? buildPerimeterBlock(pl, P, rng).buildings : buildPerimeterPlot(pl, P, rng))
+      .map(b => tag(b, P.arch, rng.fork('perimeter-arch:' + b.poly[0].x + ':' + b.poly[0].y)));
     case 'primitive': return primitiveHouse(pl, cov, P, rng);
     case 'courtyardHouse': return courtyardHouse(pl, P, rng, cov);
     case 'shopRow': return shopRow(pl, P, rng);
@@ -1064,8 +1068,10 @@ function buildOnRaw(pl: Plot, cov: number, P: MorphologyParams, rng: Rng, hint?:
     case 'hanok': return hanok(pl, cov, P, rng);
     case 'gnome': return gnomeHouse(pl, cov, P, rng);
     default: {
-      const ori = Math.atan2(pl.nrm.y, pl.nrm.x);
-      return buildPlot(pl, cov, P, rng, hint).map((b) => (b.kind === 'garden' ? b : {
+      const experimental = P.buildingOp === 'streetFrontRowExperimental';
+      const normal = experimental && pl.zone !== 'village' ? housePlotNormal(pl) : pl.nrm;
+      const ori = Math.atan2(normal.y, normal.x);
+      return (experimental ? buildPlotExperimental : buildPlot)(pl, cov, P, rng, hint).map((b) => (b.kind === 'garden' ? b : {
         ...b, arch: b.kind === 'hall' ? 'courtyard-hall' : b.kind === 'house' ? P.arch.typology : P.arch.typology + '-' + b.kind,
         roof: P.arch.roof, material: P.arch.material, storeys: b.kind === 'house' || b.kind === 'hall' ? Math.round(rng.range(P.arch.storeys[0], P.arch.storeys[1])) : Math.max(1, P.arch.storeys[0] - 1), orientation: ori,
       }));

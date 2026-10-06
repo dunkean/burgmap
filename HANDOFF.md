@@ -1,9 +1,195 @@
 # Burgmap — handoff
 
-Updated 2026-10-05. This file describes the current implementation; completed
+Updated 2026-10-06. This file describes the current implementation; completed
 bugs and their evidence are recorded in [ROADMAP.md](ROADMAP.md).
 
 ## Current status
+
+- House programme rollback (2026-10-06, latest user request): production
+  `buildPlot` and `burgageHouse` again use HEAD e34f667's pre-experiment programme.
+  The new cutPlots/cutCourtyards geometry and parcel metadata remain unchanged.
+  The complete local house implementation is preserved as
+  `burgageHouseExperimental` in `housesExperimental.ts`; reversing only its name
+  reproduces original blob 5d9db73be7b4d7db88b924c6a19e8982e4906b96 exactly.
+  `buildPlotExperimental` preserves axis-aware normalization, farm rectification
+  and the disabled-variation guard. The bench offers this explicit method via
+  `streetFrontRowExperimental`; existing buildPlot/default links use the old
+  programme, including street-normal roof orientation and side-line access.
+  Experimental regressions now explicitly select that method. Perimeter building
+  construction remains a separate opt-in. Earlier house-frame/access entries
+  below describe the preserved experiment, not the current default.
+  Baseline replay compares all buildings and the next RNG draw on 339 newly cut
+  parcels (150 burgage, 189 courtyard); all match the committed old programme.
+  The user's clarification keeps only the parcel-axis/cutting work in the default
+  path; later building adaptations stay opt-in. Preserved changes include:
+  parcel-frame room axes and projected width; bowed frontage depth; private-wall
+  frame repairs; unconditional rectangle preference; dimension variation forks;
+  independent/central entrances; wider courts; rear gateways and joined L wings;
+  axis-aware roof normalization; village rectangle preference; variation guard;
+  frame-derived roof orientation and bench access adapters. Default building
+  conformity/corner-fill draws, paired courts, frontage frames, OBB normalization
+  and farm programme are restored. No changes to the new parcel cut algorithms.
+  Validation: 76 focused tests pass (rollback, experimental house/frame/access,
+  parcel diversity, bench, perimeter and eager/lazy dense fabric), plus strict
+  typecheck and both offline builds. Town seed42 PNG inspected at
+  `web/out/buildPlot-rollback/town42.png`. Full suite not run; no publication.
+
+
+- Perimeter construction revision (2026-10-06, latest user corrections):
+  `buildPerimeterPlot` constructs street-front volumes on the actual cutPlots
+  parcels; `buildPerimeterBlock` remains the dispatcher/legacy adapter.
+  The custom Voronoi ring and court-first offset construction were removed.
+  Courts emerge from varied building depths and widths. Each row uses the
+  perpendicular of its own street facade, including secondary corner facades;
+  cropped/deformed corner ranges and thin fragments merge into viable attached
+  buildings. Final exact parent/parcel crops preserve containment. Normal
+  minimum width/aspect rules apply, and isolated rear fragments get no repeated
+  carved paths. Current served-border metadata is retained after cadastral
+  corner merges, without recutting the parcel polygons.
+  The perimeter-block preset now uses burgage/cutPlots. Choosing the builder
+  no longer switches parcel methods; retainBlock was removed from the UI.
+  Saved wholeBlock bench links replay through cutPlots; the source adapter
+  stays compatible. Block programme decisions share the root seed and parent
+  geometry; blockCourtShare is a depth preference, not an exact area target.
+  Solid requests full depth; conditional infill permits deeper ranges. Widths
+  and depths still vary independently within the shared block programme.
+  Final validation: 46 focused regressions, typecheck and app/bench builds pass.
+  Scale-2.5 fixture retains all 242 roofs, with no access-stage cuts/drops.
+  Eager seed1/pop3000: 865 roofs/565 native parcels; lazy seed1/pop9000 central
+  detail: 161 roofs/94 parcels; both pass containment, overlap and access,
+  with deterministic lazy regeneration. Live/offline stage isolation, preserved
+  cutPlots selection, case reload, depth controls and disabled perturbations
+  pass; the full bench/mobile workflow passes too. Native PNGs were inspected
+  in web/out/perimeter-block/. The large ten-block browser fixture builds in
+  about 150–180 ms. No full-suite claim, commit or publication.
+
+- House perturbations temporarily disabled (2026-10-06, user request): keep
+  the experimental implementation and its direct geometry regressions, but
+  production buildPlot forces houseVariation=0, including previously saved
+  nonzero overrides. The UI shows a disabled zero-valued control. Default is
+  zero. Architectural size distribution in perimeter construction is separate.
+
+- Court interpretation / partial rollback (2026-10-06, user correction): the
+  requested courtyards are open block interiors surrounded by perimeter
+  buildings, as in Paris, not small cutouts in individual houses. The later
+  `interiorCourtChance` house programme, its bench control and the added court
+  dependencies have been removed at the user's request. Earlier house-frame
+  and access fixes remain. The intended block-scale mix is predominantly
+  perimeter buildings around an open core, with fewer penetrating alleys and
+  some irregular fabric; avoid a repeating visible pattern at city scale.
+  The partial rollback did not implement that redesign; the dedicated
+  collective builder above now provides it as a separate opt-in method.
+
+- Scaled house courts / access variety (2026-10-06, local follow-up): the
+  reported micro scale 2.5/perimeter cases use layout `gja3b8`, houses
+  `186rtb7`, courtyard plots `1tup5tm` or burgage plots `uvz24c`.
+  Their original bench output had 72/368 and 92/421 unreachable roofs.
+  Native framed street-front houses now vary the wing/entrance side and width,
+  use a central entrance between two viable front houses on some wide lots,
+  retain room-depth courts, and join useful rear wings into L footprints.
+  Intermediate ranges carry access onward; the final back house closes its
+  court. Changes of entrance side occur across open courts, never through a
+  sealed party wall. The bench now checks whole-block building access, prefers
+  short gateways, proves shared side lines before splitting passage width
+  between narrow neighbours, and rejects cuts that destroy a served house.
+  Its final guard removes remaining unserved roofs, as in the native pipeline;
+  this is a bounded repair, not a claim that every original roof survives.
+  Streets, blocks and parcel partitions remain unchanged. New seeded tests
+  cover both reported fixtures and side/central entrance variety in a deep
+  single-front parcel. Final fixtures have 364/391 roofs, all served, and
+  retain 92%/84% of the original occupied area (courts and passages need real
+  space). Twenty-nine focused bench/frame/parcel/access tests and both eager/
+  lazy fabric checks pass, with typecheck and both builds. Native live/offline
+  replay of both URLs and the offline bench UI workflow pass; PNGs inspected.
+  Two existing failures remain outside this fix: dense-house seed-5 turret
+  area (already recorded below) and the native Iroquoian parcel-824 assertion
+  (also reproduced with the pre-change house programme). No full-suite claim;
+  nothing committed or published. Evidence is in `web/out/large-houses/`.
+
+- Parcel diversity / scaled micro access (2026-10-06, local follow-up): native
+  burgage/courtyard cuts retain a coherent cadastral frame but organic fabrics
+  again use `plotTilt` to vary it by parcel seed. Grids and explicit zero tilt
+  retain the block axes. Courtyard cut positions prefer a seeded 42–58% fraction;
+  concave cuts try every interior chord instead of rejecting a line whose OBB
+  centre lies in a notch. The micro bench now offers one-edge vs perimeter road
+  frontage, retaining one-edge semantics for existing URLs. With layout `gja3b8`,
+  parcels `1tup5tm`, houses `186rtb7`, courtyard + streetFrontRow, scale 3, one-edge
+  access was stopping subdivision at lots of 1800–4000 m²; perimeter access yields
+  244 lots, all below 800 m². The concave-curve max lot drops from 2214 to 680 m²
+  with the interior-chord fix. Large single-front blocks still need access lanes
+  before their rear land can become independent compact parcels; this is an
+  access constraint, and the bench does not fabricate rear access at the plot stage.
+  Thirty-two focused tests and both eager/lazy fabric access checks pass, with
+  typecheck, app/bench builds, native scale-three browser replay, and live/offline
+  bench checks. PNG evidence is in `web/out/scaled-bench/` and `web/out/testbench/`.
+  No full-suite claim; nothing committed or published.
+
+- Building parcel frames (2026-10-06, local follow-up): `streetFrontRow` keeps
+  the axes retained by burgage/courtyard subdivision for its rooms and later roof
+  splits. Exterior facades can follow angled or curved block borders; the front
+  depth includes a convex bow outside the frontage chord. Private skew crops may
+  shorten/shift a whole room, and narrow front houses survive a lateral gateway
+  that would otherwise leave them below minimum width. Farm programmes retain
+  their existing street frame. Street, block and parcel geometry is unchanged.
+  Reproductions use layout `1cl51ek`, plots `1f3hikq`, houses `43nbs4`, European
+  organic/core/hill, plus the user's micro burgage and courtyard variants.
+  Twenty-eight focused tests, both eager/lazy fabric access checks, typecheck,
+  app/bench builds and live/offline bench checks pass; native browser pin-case
+  replay and PNGs in `web/out/pin-orientation/` were inspected. Eighteen ordinary
+  house/RNG controls retain their original digest; nine aligned controls also
+  match with explicit axes. The dense-house seed-5 forced-turret test still
+  fails its >200 m² assertion (183.36328 m²), identically with the session's
+  original house source. No full-suite claim; nothing committed or published.
+
+- Micro parcel bench mode (2026-10-06, local follow-up): `testbench.html`
+  offers "Micro parcelle only", with ten isolated small shapes (thin rectangle,
+  acute corners, parallelogram, trapezoid, L/notch and sampled curved edges).
+  The diversity preset retains all families when Random shapes varies their
+  dimensions and angles. Native parcel/house stages and seed isolation remain;
+  quarter/terrain controls are hidden in this mode. URL replay retains the mode,
+  stage settings and geometry. Fourteen focused tests, typecheck, both offline
+  builds and the extended offline browser checks pass. The micro screenshot in
+  `web/out/testbench/micro-shapes.png` was inspected. Nothing published.
+
+- Parcel debugging bench (2026-10-06, local follow-up): the native fixture now
+  separates streets/blocks, parcels and houses, retaining parcel frontage frames
+  across building variants. Culture recipes include phases/sectors and independent
+  stage presets, operator menus and validated JSON overrides. Rectangle, oblique
+  and concave fixtures supplement central sectors. Analytical valley/hill land
+  constraints and straight rivers clip actual dry quarters before subdivision.
+  URL v2 preserves each applied stage independently; prototype links migrate.
+  Thirteen focused bench tests plus urban determinism pass, with typecheck and
+  both offline builds. `web/scripts/testbench_check.mjs` verifies stage isolation,
+  recipe resets, overrides, URL replay, pin deletion, constraints and mobile
+  in development and offline modes; inspected PNGs
+  are in `web/out/testbench/`. The full settlement planner and its final roof
+  repairs remain outside the bench. Nothing published.
+
+- Open edges and dense building fabric (2026-10-06, publication preparation):
+  the two requested Sol xhigh analyses and single Opus 5.5 CLI review are in
+  `ANALYSE_CONTOURS_2026-10-06.md`, `ANALYSE_MAISONS_2026-10-06.md` and
+  `REVIEW_OPUS_GLOBAL_2026-10-06.md`. Sol medium implementations preserve whole
+  roofs on vacant dry exterior land, classify and shorten unserved street tails,
+  blend public outskirts into landscape, and repair ordinary roofs with atomic
+  owner/peer/physical/access checks. Private passages share their full width
+  with a real public edge; all area-reducing proposals share a cumulative reserve.
+  Cultural programmes and plausible triangular roofs are protected. The first
+  generation integration is `f5ecca0`: the Sol xhigh approval covers `3da0804`, with
+  a subsequent principal-agent-checked frame fix restoring wide-street frontage
+  and inward sides across fragmented front edges. Native Chinese and Iroquoian
+  cases cover the restored whole buildings. Tests are integrated at `8d1df55`.
+  Typecheck/build pass; SHA256 `04dc6a3aba9abc714d30036e58c0adbdf266da42e92b1352eba4d89ea0a8b6ad`.
+  Actual browser/export checks pass for the user compact map and Wizard Town in
+  Worker/main/offline/refused-worker modes. Native geometry audits pass for these
+  and open `p4uefz`; 32 SVG/Canvas/style/DPR edge renders and 33 pin/detail images
+  were inspected. Renderer `856cc1e` excludes forest from entire urban quarters,
+  with explicit parks/gardens as exceptions and soil replay unchanged; 91 focused
+  tests and 32 native SVG/Canvas texture/style comparisons pass. The user's new
+  medieval reference with 43 pins is being corrected for long terminal tapers.
+  The complete `f5ecca0` test run is still being compared with the original
+  53-failure baseline; these changes have not yet been published. Mechanisms,
+  measured housing ratios, conservative residuals and evidence paths are in
+  [FIXES_GLOBAUX_2026-10-06.md](FIXES_GLOBAUX_2026-10-06.md).
 
 - Published UI/developer/guide release (2026-10-06): source `3f61c90` is pushed
   to remote `main`, tagged `ui-developer-tools-2026-10-06`, with a public GitHub

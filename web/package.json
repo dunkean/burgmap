@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && vite build --mode testbench",
     "test": "vitest run",
     "test:fast": "vitest run --project fast",
     "test:slow": "vitest run --project slow",

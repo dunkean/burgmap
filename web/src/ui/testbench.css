@@ -1,0 +1,57 @@
+* { box-sizing: border-box; }
+body { margin: 0; font: 14px system-ui, sans-serif; color: #222; background: #f7f7f4; }
+header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 12px; border-bottom: 1px solid #ccc; }
+label { display: inline-flex; align-items: center; gap: 5px; }
+input, select, button { font: inherit; padding: 5px; }
+input[type=number] { width: 65px; }
+input:not([type]) { width: 95px; }
+button { cursor: pointer; }
+button[aria-pressed=true] { background: #f7c5ca; }
+#status { margin: 0; padding: 8px 12px; min-height: 34px; }
+main { display: flex; height: 65vh; min-height: 400px; }
+#map { flex: 1; min-width: 0; width: 100%; background: #f1f0e9; cursor: grab; touch-action: none; }
+aside { width: 220px; padding: 12px; overflow-y: auto; border-left: 1px solid #ccc; }
+select { max-width: 290px; min-width: 0; }
+#stages { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; padding: 10px 12px; }
+fieldset { min-width: 0; margin: 0; border: 1px solid #b9c2ca; border-radius: 5px; display: flex; flex-direction: column; gap: 7px; }
+legend { font-weight: 600; }
+fieldset label { justify-content: space-between; }
+fieldset select { width: 65%; }
+.select-stepper { display: inline-flex; align-items: center; gap: 4px; width: 65%; min-width: 0; }
+.select-stepper select { flex: 1; width: 0; max-width: none; }
+.select-stepper button { flex: none; padding: 5px 8px; }
+fieldset div { display: flex; flex-wrap: wrap; gap: 5px; }
+small { color: #535b60; line-height: 1.45; }
+#advanced, #reproduction { margin: 0 12px 8px; }
+#advanced { padding: 8px; border: 1px solid #ccc; }
+summary { cursor: pointer; }
+textarea { display: block; width: 100%; min-height: 160px; margin: 8px 0; font: 13px monospace; }
+pre { max-height: 300px; overflow: auto; font-size: 12px; }
+#pipeline { margin-left: 10px; font: 12px monospace; }
+#paramStatus { margin: 5px 0; }
+.operator-settings, .culture-settings { border-top: 1px solid #d4d9dc; padding-top: 6px; }
+fieldset .operator-params { display: flex; flex-direction: column; flex-wrap: nowrap; max-height: 270px; overflow: auto; margin-top: 8px; padding: 2px; gap: 6px; }
+.operator-params input[type=number] { width: 85px; }
+.operator-params input[type=text] { width: 130px; min-width: 0; }
+.operator-params label { font-size: 12px; }
+.culture-variants { display: block; max-height: 270px; overflow: auto; margin-top: 8px; font-size: 12px; }
+.culture-variants table { width: 100%; border-collapse: collapse; }
+.culture-variants td, .culture-variants th { text-align: left; vertical-align: top; padding: 6px; border-bottom: 1px solid #ddd; white-space: pre-wrap; overflow-wrap: anywhere; }
+.operator-params input:invalid { outline: 1px solid #bd2638; }
+#microScale { min-width: 80px; width: 55%; padding: 0; }
+#microScaleValue { min-width: 38px; font-variant-numeric: tabular-nums; }
+@media (max-width: 900px) { #stages { grid-template-columns: 1fr; } fieldset label { justify-content: flex-start; } fieldset select { width: auto; } .select-stepper { flex: 1; max-width: 360px; } .select-stepper select { width: 0; } }
+li { margin: 12px 0; font-size: 11px; }
+li input:not([type]) { width: 135px; }
+#pins { padding-left: 20px; }
+#pins li input:not([type]) { display: block; width: 100%; margin-bottom: 5px; }
+#pins li small { display: block; margin-top: 4px; }
+#pinHint { margin: 8px 0; }
+@media (max-width: 650px) {
+  main { flex-direction: column; height: auto; }
+  #map { flex: none; height: 65vh; min-height: 400px; }
+  aside { width: 100%; border-left: 0; border-top: 1px solid #ccc; }
+  li input:not([type]) { width: 180px; }
+}
+
+[hidden] { display: none !important; }

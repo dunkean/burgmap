@@ -19,6 +19,7 @@ import type { Vec2, Polygon } from '../core/geom';
 import { dist } from '../core/geom';
 import type { Rng } from '../core/rng';
 import type { MorphologyParams } from './morphology';
+import { HOUSE_VARIATION_ENABLED } from './morphology';
 import type { Plot } from './plots';
 import { clipHalfPlaneConvex, isConvex, polyInside } from '../geo/split';
 import { intersection, intersectionS, difference, differenceS, unionS } from '../geo/bool';
@@ -27,6 +28,8 @@ import { ribbon } from '../geo/offset';
 import { stitchUnion } from '../geo/stitch';
 import { truncateAcute } from './blocks';
 import { burgageHouse } from './houses';
+import { burgageHouseExperimental } from './housesExperimental';
+import { plotBounds } from './plotAxes';
 
 export interface HalfPlane { p: Vec2; n: Vec2 }
 export type BldgKind = 'house' | 'rear' | 'back' | 'barn' | 'shed' | 'garden' | 'hall' | 'landmark' | 'church' | 'cathedral' | 'hut' | 'pit';
@@ -153,7 +156,7 @@ const shapeOK = (p: Polygon) => { const s = shapeOf(p); return s.w >= MIN_BW && 
  * No matchsticks: pieces longer than MAX_ASPECT × their width are cut across their long axis; pieces thinner
  * than MIN_BW join a neighbouring piece of the same plot when the union is well shaped, else they stay unbuilt.
  */
-export function normalizeFootprints(list: Bldg[]): Bldg[] {
+export function normalizeFootprints(list: Bldg[], axis?: Vec2): Bldg[] {
   const queue = list.map((b) => ({ b, depth: 0 }));
   const out: Bldg[] = [];
   let guard = 0;
@@ -162,7 +165,7 @@ export function normalizeFootprints(list: Bldg[]): Bldg[] {
     const s = shapeOf(b.poly);
     // cut long pieces across their long axis (at most twice: an L-shaped piece may keep a long OBB)
     if (s.asp > MAX_ASPECT && s.w >= MIN_BW * 0.8 && depth < 3) {
-      const o = obb(b.poly);
+      const o = axis ? plotBounds(b.poly, axis) : obb(b.poly);
       const k = Math.ceil(s.asp / (MAX_ASPECT * 0.85));
       const conv = isConvex(b.poly, 1e-3);
       for (let j = 0; j < k; j++) {
@@ -378,6 +381,71 @@ function buildPlotRaw(pl: Plot, cov: number, P: MorphologyParams, rng: Rng, hint
         const rect = rectify(r, fa, t, n);
         if (rect && !rng.chance(cornerFill)) r = rect;
       }
+      let c = cleanRing(r, 0.005, 0.5, 0.002, false);
+      if (c.length < 3) continue;
+      c = truncateAcute(c, (20 * Math.PI) / 180, 2);
+      if (c.length < 3 || area(c) < min) continue;
+      out.push({ poly: c, kind });
+    }
+  };
+  const addGarden = (from: number) => {
+    if (D - from < 3) return;
+    for (const r of clipPlot(poly, band(from, D + 1), convex)) if (area(r) > 20) out.push({ poly: r, kind: 'garden' });
+  };
+  const [sb0, sb1] = P.setback[zone];
+  const [bd0, bd1] = P.buildDepth[zone];
+  farmstead(pl, poly, convex, fa, t, n, W, D, band, add, addGarden, rng);
+  return out;
+}
+
+/** Preserved experimental parcel-frame, court/access and rectification programme; opt-in only. */
+export function buildPlotExperimental(pl: Plot, cov: number, P: MorphologyParams, rng: Rng, hint?: CourtHint): Bldg[] {
+  if (!HOUSE_VARIATION_ENABLED) P = { ...P, houseVariation: 0 };
+  let raw = buildPlotRawExperimental(pl, cov, P, rng, hint);
+  // dense zones: an irregular plot whose layout falls far short of the target is built over its whole depth
+  if (cov >= 0.66 && pl.zone !== 'village') {
+    const built = raw.filter((b) => b.kind !== 'garden').reduce((s, b) => s + area(b.poly), 0);
+    if (built < (cov - 0.2) * area(pl.poly)) raw = buildPlotRawExperimental(pl, 0.9, P, rng, { court: false, f: 0.5 });
+  }
+  const gardens = raw.filter((b) => b.kind === 'garden');
+  const rawB = raw.filter((b) => b.kind !== 'garden');
+  const norm = normalizeFootprints(rawB, pl.zone === 'village' ? undefined : pl.axis);
+  const fin = trimOverlaps(norm);
+  if (BLD_STATS.on && pl.zone === BLD_STATS.zone) {
+    BLD_STATS.plot += area(pl.poly);
+    BLD_STATS.raw += rawB.reduce((s2, b) => s2 + area(b.poly), 0);
+    BLD_STATS.norm += norm.reduce((s2, b) => s2 + area(b.poly), 0);
+    BLD_STATS.fin += fin.reduce((s2, b) => s2 + area(b.poly), 0);
+  }
+  return fin.concat(gardens);
+}
+
+function buildPlotRawExperimental(pl: Plot, cov: number, P: MorphologyParams, rng: Rng, hint?: CourtHint): Bldg[] {
+  // town plots: houses.ts; village plots: farmsteads
+  if (pl.zone !== 'village') return burgageHouseExperimental(pl, cov, P, rng, hint);
+  const poly = pl.poly;
+  const convex = isConvex(poly, 1e-3);
+  const [fa, fb] = pl.front;
+  const W = dist(fa, fb);
+  if (W < 2.5) return [];
+  const t = { x: (fb.x - fa.x) / W, y: (fb.y - fa.y) / W };
+  // inward normal: perpendicular to the frontage chord, oriented like the stored normal
+  let n = { x: -t.y, y: t.x };
+  if (dot(n, pl.nrm) < 0) n = { x: -n.x, y: -n.y };
+  let D = 0;
+  for (const q of poly) D = Math.max(D, (q.x - fa.x) * n.x + (q.y - fa.y) * n.y);
+  if (D < 4) return [];
+  const band = (d0: number, d1: number): HalfPlane[] => [
+    { p: { x: fa.x + n.x * d0, y: fa.y + n.y * d0 }, n },
+    { p: { x: fa.x + n.x * d1, y: fa.y + n.y * d1 }, n: { x: -n.x, y: -n.y } },
+  ];
+  const zone = pl.zone;
+  const out: Bldg[] = [];
+  // Farm buildings also prefer the street frame over the parcel subdivision axes.
+  const add = (hps: HalfPlane[], kind: Bldg['kind'], min = 10) => {
+    for (let r of clipPlot(poly, hps, convex)) {
+      const rect = rectify(r, fa, t, n);
+      if (rect && area(rect) >= min && shapeOf(rect).w >= MIN_BW) r = rect;
       let c = cleanRing(r, 0.005, 0.5, 0.002, false);
       if (c.length < 3) continue;
       c = truncateAcute(c, (20 * Math.PI) / 180, 2);

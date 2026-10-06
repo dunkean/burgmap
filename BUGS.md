@@ -14,6 +14,7 @@ Agents: fix the open reports; parallel work is allowed. Remove a report after it
 ## List (written by the user)
 
 - Le problème de démarcation ville environnement vient de la ligne noire autour de la ville. Elle sert à rien vire là. Idem por les hameaux et extensions et le fait que les maison qui devraient être carrés soient coupés à la frontiere de la ville. Il faut garder le carré de la maison et qu'il déborde sur l'extérieur. En fait la fille avec enceinte coupe les maisons, celle sans, ne les coupe pas. Et tu remplis systématiquement les quatrier de gardens/yards et de fait le background est tout vert et ca peut choquer. Il serait bien que quelques quartier de la périphérique soit avec un background équivalent à lenvironnement. Regarde ce que tu peux faire pour améliorer ce visuel. Les background de jardins dans les villes doivent vraiment globalement être dans le style du biome. Par exemple une ville desertique comme tombouctou semble être construite à meme le desert. Vue de dessus, la ville ne se découpe pas, on ne voit que les maisons. J'aimerai qu'on puisse retrouver ca selon le biome et le type de ville. (Un citadelle est marquée parce que pavée ou autre, une tribu indienne dans la plain non, etc. etc.)
+>> Solution. Retirer 80% des routes qui partent vers l'extérieur et finissent dans le vide. Et garder que des maisons en périphérie de la route principale sauf quelques exceptions (des tours de quartiers, etc.)
 
 État partiel du 2026-10-05 : bordures administratives supprimées et sols adaptés
 au biome/type d'implantation (`ad6e32a`, projection des Workers corrigée dans
@@ -30,11 +31,16 @@ et ne sont pas intégrés. Voir [les résultats et limites](BUGFIXES_VISUAL_2026
 - il faut refondre une partie de la création de batimetns à la frontieres entre quartier. Y a des choix incohérents à pleins d'endroit. A détailler avec des pins pour l'agent (en particuliers dans wizard city)
 
 - Les quais semblent avoir disparu. Il faut un travail important sur les ports et le fait qu'une ville favorise ca.
+- pin mode sans hint. On doit pouvoir activer ou désactiver l'affichage de pin depuis la carte (menu top ou rail right), on doit pouvoir donner un nom au pin depuis la liste; editer en cliquant dessus et avoir le nom on hover.
 
 - Fixer les rues qui sortent vers nulle part dans les villes sans enceintes.
 
 ##FEATURES (a planifier - 1 prioritaire - 5 non prioritaire):
+1 - mettre un option pour pas auto regen la map avec les boutons du rail. et donc mettre un bouton gen.
+1 - travail sur le relief (îles) - faire 9 boutons pour les cotés, et un bouton central qui active ou desactive tout (ile(s), ou rien).
 1 - revoir le contour des villes non fortifiées médiévale et le nombre de route qui finissent dans le vide
+2 - haute montagnes avec routes en tortillons
+2 - diversité des petits settlements et fermes. Ils doivent être différent. idem temples, eglises and co.
 2 - Répartition population et identification batiment + click pour propriétés
 2 - revoir les brush: ajouter des patterns, densités, des variations dans les biomes (pins, feuillus, etc.), améliorer la qualité des brushs, etc.
 2 - hybrid culture par quartier
