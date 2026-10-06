@@ -4,7 +4,7 @@ import type { Rng } from '../core/rng';
 import { Noise2D } from '../core/noise';
 import { gradientAt, sampleGrid, D8 } from '../core/grid';
 import { blurFast as blurGrid } from './blur';
-import { Vec2, Polygon, Polyline, chaikin, simplify, polygonArea, polygonCentroid, polygonContains, bbox, dist } from '../core/geom';
+import { Vec2, Polygon, Polyline, chaikin, simplify, polygonArea, polygonCentroid, polygonContains, bbox, dist, distToPolyline } from '../core/geom';
 import { distanceField, forCellsNearPolyline, smoothstep } from '../core/field';
 import { marchingSquares } from '../terrain/contour';
 import { rasterizePolys } from '../geo/raster';
@@ -765,9 +765,15 @@ export function generateRural(world: World, root: Rng, mainRoads?: number, strip
   }
   {
     // only connected, non-duplicate field ways are cart tracks (the others become headlands)
-    const edges = [world.urban, ...(world.settlements ?? []).filter((st) => !st.main).map((st) => st.urban)]
-      .flatMap((u) => u?.footprintH ?? []).map((ph) => [...ph.outer, ph.outer[0]]);
-    const pr = pruneWays(net, [...roads.map((r) => r.path), ...farmsteads.map((f) => f.drive), ...edges], 1.6 * cell + 20);
+    const urbanWays = [world.urban, ...(world.settlements ?? []).filter((st) => !st.main).map((st) => st.urban)]
+      .flatMap((u) => u?.streets ?? [])
+      .filter((s) => s.role !== 'boundary' && s.role !== 'wall-lane' && s.width > 0)
+      .map((s) => ({ path: s.path, width: s.width }));
+    const roadWays = roads.map((r) => ({ path: r.path, width: r.width }));
+    const farmWays = farmsteads.filter((f) => f.drive.length >= 2 && dist(f.drive[0], f.drive[f.drive.length - 1]) > 0.5
+      && roadWays.some((r) => distToPolyline(f.drive[0], r.path) <= r.width / 2 + 1.5))
+      .map((f) => ({ path: f.drive, width: 3 }));
+    const pr = pruneWays(net, [...roadWays, ...farmWays, ...urbanWays], 1.6 * cell + 20);
     stats['ways.dropped'] = pr.dropped;
     stats['ways.demoted'] = pr.demoted;
   }

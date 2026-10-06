@@ -2,7 +2,7 @@
 import type { Polygon, Polyline, Vec2 } from '../core/geom';
 import { dist } from '../core/geom';
 import type { PolyH, UrbanLayer, UrbanStreet, UrbanStreetTail } from '../types';
-import { differenceS, intersectionS } from '../geo/bool';
+import { differenceSafeS, intersectionS } from '../geo/bool';
 import { pointInRing, segSegT } from '../geo/poly';
 import { ribbon } from '../geo/offset';
 
@@ -72,14 +72,16 @@ function servedDistance(street: UrbanStreet, end: 'start' | 'end', urban: UrbanL
   const path = street.path, L = pathLength(path);
   let best = Infinity;
   const width = Math.max(street.width, 2);
+  const occupied = new Set(urban.buildings.map((b) => b.parcel).filter((i): i is number => i !== undefined));
   const accept = (p: Vec2, extra = 0): void => {
     const pr = pathProjection(path, p);
     if (pr.offset > width / 2 + 3 + extra) return;
     const d = end === 'start' ? pr.distance : L - pr.distance;
     best = Math.min(best, d);
   };
-  for (const parcel of urban.parcels) {
-    if (!parcel.front || parcel.use !== 'plot') continue;
+  for (let i = 0; i < urban.parcels.length; i++) {
+    const parcel = urban.parcels[i];
+    if (!parcel.front || !occupied.has(i)) continue;
     const [a, b] = parcel.front;
     // The whole facade must be reachable; its midpoint alone can leave a visible cut before a corner entrance.
     accept(a); accept(b); accept(at(a, b, 0.5));
@@ -103,9 +105,18 @@ function endStub(path: Polyline, end: 'start' | 'end', length: number): Polyline
 }
 
 function externalCrossing(path: Polyline, width: number, edge: Vec2, owner: PolyH[]): boolean {
-  if (path.length < 2 || !pathsConnect([edge, edge], width, path, width)) return false;
-  // A genuine continuation must have a segment beyond the owner, not just touch its outline.
-  for (const p of path) if (!inside(p, owner)) return true;
+  if (path.length < 2) return false;
+  for (const [a, b] of segments(path, false)) {
+    if (dist(a, b) < 0.1 || project(edge, a, b).d > width / 2 + 2.5) continue;
+    for (const ph of owner) for (const [c, d] of segments(ph.outer, true)) {
+      const hit = segSegT(a, b, c, d);
+      if (!hit || dist(edge, at(a, b, hit.t)) > width / 2 + 2.5) continue;
+      const eps = Math.min(0.05, 1 / dist(a, b));
+      const before = at(a, b, Math.max(0, hit.t - eps));
+      const after = at(a, b, Math.min(1, hit.t + eps));
+      if (inside(before, owner) !== inside(after, owner)) return true;
+    }
+  }
   return false;
 }
 
@@ -121,10 +132,10 @@ export function classifyStreetTails(urban: UrbanLayer, context: StreetTailContex
       if (!onExterior(point, owner, st.width)) continue;
       const L = pathLength(st.path);
       const served = servedDistance(st, end, urban);
-      const stub = endStub(st.path, end, Math.min(L, Math.max(5, st.width * 1.5)));
       let kind: UrbanStreetTail['kind'];
       if (context.regionalRoads?.some((r) => externalCrossing(r.path, r.width, point, owner))) kind = 'regionalContinuation';
-      else if (urban.streets.some((other, i) => i !== street && pathsConnect(stub, st.width, other.path, other.width))) kind = 'urbanJunction';
+      else if (urban.streets.some((other, i) => i !== street && other.path.length >= 2
+        && pathProjection(other.path, point).offset <= (st.width + other.width) / 2 + 0.5)) kind = 'urbanJunction';
       else if (context.accessWays?.some((r) => externalCrossing(r.path, r.width, point, owner))) kind = 'fieldOrFarmAccess';
       else if (context.barriers?.some((b) => inPolyH(point, b))) kind = 'physicalBarrier';
       else if (Number.isFinite(served) && served <= Math.max(12, st.width * 2)) kind = 'servedDeadEnd';
@@ -181,21 +192,65 @@ export function markTerminalPlots<T extends { front: [Vec2, Vec2]; terminal?: bo
 }
 
 /** Exact public surface of discarded tails. Reuse for SVG and Canvas material decisions. */
+function publicProtection(urban: UrbanLayer, tails: UrbanStreetTail[], context: StreetTailContext): Polygon[] {
+  const keep: Polygon[] = [];
+  const add = (path: Polyline, width: number): void => { if (path.length >= 2) keep.push(ribbon(path, Math.max(1, width))); };
+  for (let i = 0; i < urban.streets.length; i++) add(servedStreetPath(urban.streets[i], tails.filter((t) => t.street === i)), urban.streets[i].width + 2);
+  for (const r of context.regionalRoads ?? []) add(r.path, r.width + 3);
+  for (const r of context.accessWays ?? []) add(r.path, r.width + 2);
+  for (const p of urban.squares) keep.push(p);
+  for (const p of urban.parcels) if (p.use === 'place' || p.use === 'market' || p.use === 'church') keep.push(p.poly);
+  for (const s of urban.sites ?? []) keep.push(s.lot);
+  for (const wall of urban.walls ?? []) add(wall.path, wall.thickness + 2);
+  return keep;
+}
+
+function safeGround(subject: Polygon, urban: UrbanLayer, owner: PolyH[] | undefined, protection: Polygon[], context: StreetTailContext): PolyH[] {
+  const space = urban.quarters.flatMap((q) => q.streetSpace);
+  if (!space.length) return [];
+  let pieces = intersectionS(subject, space);
+  if (owner) pieces = intersectionS(pieces, owner);
+  const bounds = (p: Polygon): [number, number, number, number] => p.reduce((b, v) => [Math.min(b[0], v.x), Math.min(b[1], v.y), Math.max(b[2], v.x), Math.max(b[3], v.y)], [Infinity, Infinity, -Infinity, -Infinity]);
+  const sb = bounds(subject);
+  const close = (p: Polygon): boolean => {
+    const b = bounds(p);
+    return b[0] <= sb[2] + 2 && b[2] >= sb[0] - 2 && b[1] <= sb[3] + 2 && b[3] >= sb[1] - 2;
+  };
+  const cuts: (Polygon | PolyH)[] = [...protection.filter(close), ...(urban.water ?? []).filter((p) => close(p.outer)),
+    ...(context.barriers ?? []).filter((p) => close(p.outer)), ...(context.protectedGround ?? []).filter((p) => close(p.outer))];
+  if (cuts.length) pieces = differenceSafeS(pieces, ...cuts);
+  return pieces;
+}
+
+/** Border street-space residue not belonging to any needed ribbon; it has no service or carriage function. */
+export function openEdgeResidualGround(urban: UrbanLayer, tails: UrbanStreetTail[], context: StreetTailContext = {}): PolyH[] {
+  const owner = context.owner ?? urban.footprintH;
+  const protection = publicProtection(urban, tails, context);
+  const out: PolyH[] = [];
+  for (const ph of owner) {
+    const ring = ph.outer;
+    // Process local chunks: a full megacity outline in one boolean is needlessly expensive.
+    for (let i = 0; i < ring.length; i += 8) {
+      const chunk: Polyline = [];
+      for (let j = i; j <= Math.min(ring.length, i + 8); j++) chunk.push(ring[j % ring.length]);
+      if (chunk.length < 2) continue;
+      out.push(...safeGround(ribbon(chunk, 60), urban, owner, protection, context));
+    }
+  }
+  return out;
+}
+
 export function openTailGround(urban: UrbanLayer, tails: UrbanStreetTail[], context: StreetTailContext = {}): PolyH[] {
-  const protectedGround = context.protectedGround ?? [];
+  const protection = publicProtection(urban, tails, context);
   const streetSpace = urban.quarters.flatMap((q) => q.streetSpace);
   if (!streetSpace.length) return [];
-  const out: PolyH[] = [];
+  const out: PolyH[] = openEdgeResidualGround(urban, tails, context);
   for (const tail of tails) {
     if (tail.kind !== 'unservedOpenEdge' || tail.excess < 1) continue;
     const st = urban.streets[tail.street];
     const stub = endStub(st.path, tail.end, tail.excess);
     if (stub.length < 2) continue;
-    let pieces = intersectionS(ribbon(stub, Math.max(1, st.width)), streetSpace);
-    if (context.owner) pieces = intersectionS(pieces, context.owner);
-    if (urban.water?.length) pieces = differenceS(pieces, urban.water);
-    if (protectedGround.length) pieces = differenceS(pieces, protectedGround);
-    if (urban.squares.length) pieces = differenceS(pieces, ...urban.squares);
+    const pieces = safeGround(ribbon(stub, Math.max(1, st.width)), urban, context.owner, protection, context);
     if (pieces.length) out.push(...pieces);
   }
   return out;

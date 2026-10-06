@@ -58,7 +58,7 @@ export interface FieldNet { furlongs: Furlong[]; ways: Polyline[]; headlands: Po
  * to a headland: the partition is unchanged (the line stays a furlong boundary), but no isolated track runs through
  * the fields without connecting anything.
  */
-export function pruneWays(net: FieldNet, connectors: Polyline[], tol = 12): { dropped: number; demoted: number } {
+export function pruneWays(net: FieldNet, connectors: { path: Polyline; width: number }[], tol = 12): { dropped: number; demoted: number } {
   type Box = { x0: number; y0: number; x1: number; y1: number };
   const boxOf = (pl: Polyline, m: number): Box => {
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
@@ -66,8 +66,10 @@ export function pruneWays(net: FieldNet, connectors: Polyline[], tol = 12): { dr
     return { x0: x0 - m, y0: y0 - m, x1: x1 + m, y1: y1 + m };
   };
   const inBox = (p: Vec2, b: Box): boolean => p.x >= b.x0 && p.x <= b.x1 && p.y >= b.y0 && p.y <= b.y1;
-  const con = connectors.filter((c) => c.length >= 2).map((c) => ({ c, b: boxOf(c, 2 * tol) }));
-  const nearCon = (p: Vec2, d: number): boolean => con.some(({ c, b }) => inBox(p, b) && distToPolyline(p, c) < d);
+  const con = connectors.filter((c) => c.path.length >= 2).map((c) => ({ ...c, b: boxOf(c.path, 2 * tol) }));
+  const nearCon = (p: Vec2, d: number): boolean => con.some(({ path, b }) => inBox(p, b) && distToPolyline(p, path) < d);
+  /** Candidate search may be broad, but connectivity requires the actual carriageway ribbons to meet. */
+  const joins = (end: Vec2, path: Polyline, width: number): boolean => distToPolyline(end, path) <= (GAP.way + width) / 2 + 0.5;
   const samples = (pl: Polyline): Vec2[] => {
     const out: Vec2[] = [];
     for (let i = 1; i < pl.length; i++) {
@@ -89,7 +91,7 @@ export function pruneWays(net: FieldNet, connectors: Polyline[], tol = 12): { dr
     kept.push({ pl, b: boxOf(pl, 2 * tol) });
   }
   // 2. connectivity to the road network (fixpoint over the ways touching each other)
-  const linked = kept.map((k) => nearCon(k.pl[0], tol) || nearCon(k.pl[k.pl.length - 1], tol));
+  const linked = kept.map((k) => [k.pl[0], k.pl[k.pl.length - 1]].some((end) => con.some((c) => inBox(end, c.b) && joins(end, c.path, c.width))));
   for (let changed = true; changed;) {
     changed = false;
     for (let i = 0; i < kept.length; i++) {
@@ -99,7 +101,7 @@ export function pruneWays(net: FieldNet, connectors: Polyline[], tol = 12): { dr
       for (let j = 0; j < kept.length && !linked[i]; j++) {
         if (!linked[j] || i === j) continue;
         const b = kept[j].pl;
-        if (ends.some((e) => inBox(e, kept[j].b) && distToPolyline(e, b) < tol) || [b[0], b[b.length - 1]].some((e) => inBox(e, kept[i].b) && distToPolyline(e, a) < tol)) { linked[i] = true; changed = true; }
+        if (ends.some((e) => inBox(e, kept[j].b) && joins(e, b, GAP.way)) || [b[0], b[b.length - 1]].some((e) => inBox(e, kept[i].b) && joins(e, a, GAP.way))) { linked[i] = true; changed = true; }
       }
     }
   }
