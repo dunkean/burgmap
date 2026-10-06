@@ -26,6 +26,41 @@ const rect = (x: number): Polygon => [
 ];
 
 describe('native fringe infill decisions', () => {
+  it('preserves the served near-triangular native roof 1072 byte for byte', () => {
+    const f = fixture.cases.find((c) => c.i === 1072)!;
+    const before = blockReach(f.block, f.peers.map((p) => p.poly), streetAt);
+    const buildings = [{ poly: f.roof, kind: f.kind, arch: f.arch, parcel: 0 },
+      ...f.occupied.map((p) => ({ poly: p.poly, kind: 'landmark' })),
+      ...Array.from({ length: 49 }, (_, j) => ({ poly: rect(3000 + 20 * j), kind: 'house' }))];
+    const source = JSON.stringify(f.roof), backLand: { outer: Polygon; holes: Polygon[] }[] = [];
+    const result = finalizeFootprints({ buildings,
+      parcels: [{ poly: f.owner, front: f.front, use: 'plot', block: 78 }], backLand,
+      placementClear: () => false, allowFillRemoval: true, validateRemoval: () => true,
+      validateParts: (_, parts) => {
+        const after = blockReach(f.block,
+          f.peers.flatMap((p) => p.i === f.i ? parts : [p.poly]), streetAt);
+        return after.every((served, j) => served || !before[j]);
+      },
+    });
+    expect(result.invalid).not.toContain(0);
+    expect(result.removed).toEqual([]);
+    expect(JSON.stringify(buildings[0].poly)).toBe(source);
+    expect(backLand).toEqual([]);
+  }, 30_000);
+
+  it('does not classify a long capped matchstick as a plausible triangle', () => {
+    const stick: Polygon = [{ x: 0, y: 0 }, { x: 0.1, y: 0 },
+      { x: 14, y: 2 }, { x: 0, y: 2 }];
+    const buildings = [{ poly: stick, kind: 'house', parcel: 0 },
+      ...Array.from({ length: 49 }, (_, j) => ({ poly: rect(3000 + 20 * j), kind: 'house' }))];
+    const result = finalizeFootprints({ buildings,
+      parcels: [{ poly: [{ x: -1, y: -1 }, { x: 15, y: -1 },
+        { x: 15, y: 3 }, { x: -1, y: 3 }], use: 'plot', block: 0 }], backLand: [],
+      placementClear: () => false, allowFillRemoval: true, validateRemoval: () => true,
+    });
+    expect(result.removed).toEqual([0]);
+  });
+
   it('keeps a real small room from roof 647 and returns its unusable arms to the yard', () => {
     const f = fixture.cases.find((c) => c.i === 647)!;
     const before = blockReach(f.block, f.peers.map((p) => p.poly), streetAt);

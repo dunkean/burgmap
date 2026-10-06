@@ -81,6 +81,17 @@ function plausibleWorkshopCompound(p: Polygon, arch: string | undefined): boolea
     });
 }
 
+function plausibleCappedTriangle(p: Polygon): boolean {
+  if (p.length !== 4 || !isSimple(p) || !isConvex(p, 1e-3) || area(p) < 12
+    || minAngle(p) < 20 * Math.PI / 180) return false;
+  const shortest = Math.min(...p.map((v, i) => Math.hypot(v.x - p[(i + 1) % 4].x,
+    v.y - p[(i + 1) % 4].y)));
+  if (shortest > 0.2) return false;
+  const box = obb(p), short = Math.min(box.hu, box.hv), long = Math.max(box.hu, box.hv);
+  return 2 * short >= 3 && long / Math.max(short, 1e-6) <= 2.2
+    && 2 * inscribed(p, [], 0.05).r >= 3;
+}
+
 function normalize(p: Polygon): Polygon | null {
   // No coordinate snapping: the native partition and world-scale translations stay exact.
   const q = cleanRing(p, 1e-6, 0.0001, 1e-9, false);
@@ -156,9 +167,11 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
   const initialHousingArea = housingArea();
   const initialHousingCount = u.buildings.filter((b) => ['house', 'rear', 'back'].includes(b.kind)).length;
   let pendingRemovalArea = 0;
-  const housingBudget = (kind: string, before: number, after: number, floor = 0.98): boolean =>
+  // One uniform reserve against housing area at entry to this pass. A roof
+  // kept at full area or enlarged remains legal even below the floor.
+  const housingBudget = (kind: string, before: number, after: number): boolean =>
     !['house', 'rear', 'back'].includes(kind) || after >= before - 1e-6
-      || housingArea() - before + after >= floor * initialHousingArea - 1e-6;
+      || housingArea() - before + after >= 0.97 * initialHousingArea - 1e-6;
   const parcelIndex = new GridIndex<number>(24);
   u.parcels.forEach((p, i) => { if (p.poly.length >= 3) parcelIndex.insertPts(p.poly, i); });
   const respectsOtherOwners = (i: number, after: Polygon): boolean => {
@@ -448,7 +461,7 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
     if (!proper(main) || retained < 0.65 * oldArea || retained >= 0.7 * oldArea
       || overlapsRoof(i, main) || !polyInside(owner.poly, main)
       || !u.placementClear(main, original) || !respectsOtherOwners(i, main)
-      || housingArea() - oldArea + retained < 0.97 * initialHousingArea
+      || !housingBudget(b.kind, oldArea, retained)
       || !u.validateParts(i, [main])) return false;
     const added = tryDifference(main, original), freed = tryDifference(original, main), land = planOpenLand(main);
     if (!land || added.failed || freed.failed || freed.pieces.some((p) => p.holes.length)
@@ -510,6 +523,8 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
       }
     }
     if (proper(b.poly) && !overlapsRoof(i, b.poly)) continue;
+    if (plausibleCappedTriangle(b.poly) && !overlapsRoof(i, b.poly)
+      && (!u.validateParts || u.validateParts(i, [b.poly]))) continue;
     if (!owner || !u.backLand) { invalid.push(i); continue; }
     // A vertex can touch a distant edge exactly at a neighbouring roof seam.
     // Filling the loop would claim that neighbour; remove only a small existing
@@ -559,7 +574,7 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
       }
       // A large bent plot can hold the same complete dwelling in another
       // pocket. Exhaust this full-area option before releasing an arm or
-      // spending the layer's 2% programme-loss budget on compact rooms.
+      // spending the layer's uniform 3% programme-loss reserve on compact rooms.
       if (owner.use === 'plot' && u.validateParts) {
         const replanned = replanWholeRoom(b.poly, owner.poly, owner.front, occupied,
           (candidate) => u.placementClear!(candidate, b.poly) && respectsOtherOwners(i, candidate)
@@ -610,7 +625,7 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
       }
       // A tiny, bent plot can contain a believable compact dwelling even when
       // no 70%-area rectangle fits. Require a true convex room and cap the
-      // cumulative loss of roof area to 2% of this layer's starting programme.
+      // cumulative loss of roof area to 3% of this pass's starting programme.
       if (u.validateParts && area(b.poly) <= 60
         && ((minNeck(b.poly)?.w ?? Infinity) < 3.59 || overlapsRoof(i, b.poly))) {
         const small = reconstructSmallPlotRoom(b.poly, owner.poly, owner.front, occupied,
@@ -635,7 +650,7 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
         }
       }
       // Only after the ordinary repairs fail, allow a smaller real room when
-      // the cumulative layer loss stays below 2%. A free exterior wing is not
+      // the cumulative layer loss stays below 3%. A free exterior wing is not
       // cut merely because it crosses an administrative quarter edge.
       if (u.validateParts && (minNeck(b.poly)?.w ?? Infinity) < 3.59
         && !plausibleWorkshopCompound(b.poly, b.arch)) {
@@ -725,7 +740,7 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
         }
       }
       // Record only the morphological candidate here. The removal decision
-      // follows all roof repairs, so its 2% budget includes every prior loss.
+      // follows all roof repairs, so its 3% budget includes every prior loss.
       const neck = minNeck(b.poly)?.w ?? Infinity;
       const noHabitableCore = 2 * inscribed(b.poly, [], 0.05).r < 3.2 || neck <= 0.02;
       if (u.allowFillRemoval && u.validateRemoval && area(b.poly) <= 60
@@ -755,8 +770,8 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
   }
   for (const i of removalCandidates) {
     const b = u.buildings[i];
-    // Only this last courtyard return may use 3% of the initial housing area
-    // at the start of this pass; ordinary compact repairs keep their 2% cap.
+    // The same 3% pass-wide reserve applies to courtyard returns and all
+    // ordinary roof reductions; a separate 98% count floor guards removals.
     if (housingArea() - pendingRemovalArea - area(b.poly) < 0.97 * initialHousingArea
       || initialHousingCount - removed.length - 1 < 0.98 * initialHousingCount
       || !u.validateRemoval?.(i, [...removed, i])) continue;
