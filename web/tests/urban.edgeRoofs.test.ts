@@ -478,9 +478,11 @@ describe('settlement edge roofs', () => {
         const snapshot = snapshots.at(-1)!;
         expect(snapshot).toBeDefined();
         for (const fence of fences) {
-          const unprotected = tryDifference([fence], snapshot.protectedLand);
-          expect(unprotected.failed).toBe(false);
-          expect(mpArea(unprotected.pieces), 'the real emitted fence is protected before finishing').toBeLessThanOrEqual(1e-6);
+          // The same strip is supplied to the finisher. A boolean difference
+          // against the entire city's overlapping reserve can fail on unrelated
+          // seams, so verify this exact local source polygon directly.
+          expect(snapshot.protectedLand.some((p) => JSON.stringify(p) === JSON.stringify(fence)),
+            'the real emitted fence is protected before finishing').toBe(true);
         }
         assertClearFenceAdditions(snapshot.before, snapshot.after, fences);
         checked = true; break;
