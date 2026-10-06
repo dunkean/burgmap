@@ -517,6 +517,19 @@ export function finishEdgeRoofs(input: EdgeRoofPartition): { grown: number; fitt
   const initialRoofs = input.buildings.map((b) => b.poly);
   const protectedNear = makeObstacleSelection(input.protectedLand);
   const protectedClear = indexedClearance(input.protectedLand);
+  const inheritedSeamClear = (before: Polygon, after: Polygon): boolean => {
+    const added = tryDifference(after, before);
+    if (added.failed) return false;
+    const touched = tryIntersection(added.pieces, input.protectedLand);
+    if (touched.failed || mpArea(touched.pieces) > 1e-4) return false;
+    // A centimetre-scale inherited street seam may gain a rounding triangle.
+    // Its entire new contact must fit within 2 cm; a long narrow road incursion
+    // fails even if its area is similarly small.
+    return touched.pieces.every((piece) => {
+      const bounds = bboxOf(piece.outer);
+      return Math.hypot(bounds.x1 - bounds.x0, bounds.y1 - bounds.y0) <= 0.02;
+    });
+  };
   const waterClear = indexedClearance(input.ctx.water), openedGardens = makeGardenOpening();
   const roofs = new PolygonIndex(input.buildings.map((b) => b.poly));
   const parcels = new PolygonIndex(input.parcels.map((p) => p.poly));
@@ -813,7 +826,8 @@ export function finishEdgeRoofs(input: EdgeRoofPartition): { grown: number; fitt
       const blockPeers = blocks.query(roof, true).filter((j) => j !== bi).map((j) => ({ outer: input.blocks[j].poly, holes: [] }));
       const quarterPeers = quarters.query(roof, true).filter((j) => j !== qi).map((j) => ({ outer: input.quarters[j].lp.pts, holes: [] }));
       const otherBands = (input.phases ?? []).filter((p) => p.id !== quarter.phase).flatMap((p) => p.band);
-      if (!dry || !protectedClear(roof) || !waterClear(roof) || !clear(roof, blockPeers) || !clear(roof, quarterPeers)
+      if (!dry || !(protectedClear(roof) || roof === hull && inheritedSeamClear(b.poly, roof))
+        || !waterClear(roof) || !clear(roof, blockPeers) || !clear(roof, quarterPeers)
         || !clear(extra.pieces, otherBands) || !roofs.query(roof, true).every((j) => j === index
           || clear(roof, [{ outer: input.buildings[j].poly, holes: [] }]))) continue;
       let accepted = false;

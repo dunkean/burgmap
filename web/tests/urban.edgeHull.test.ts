@@ -6,7 +6,7 @@ import { finishEdgeRoofs } from '../src/gen/urban/edgeRoofs';
 import { Streets, LAB_OPEN } from '../src/gen/urban/streets';
 import { streetStrips } from '../src/gen/urban/openfringe';
 import { area, convexHull, minAngle } from '../src/gen/geo/poly';
-import { mpArea, tryDifference } from '../src/gen/geo/bool';
+import { mpArea, tryDifference, tryIntersection } from '../src/gen/geo/bool';
 
 const p = (x: number, y: number) => ({ x, y });
 
@@ -34,11 +34,28 @@ it('reconstructs the clipped cut03 rear house as a whole pentagon on a dry open 
     parcels: [{ poly: owner, block: 0, use: 'plot', front: [p(988.169, 498.568), p(1059.101, 530.183)], zone: 'edge' }],
     buildings: [{ poly: roof, parcel: 0, kind: 'rear', roof: 'gable', arch: 'gabled-row-house-rear' }],
     streetSpace: [[]], footprint: [{ outer: owner, holes: [] }], gardens: [], streets,
-    protectedLand: streetStrips(streets.list[0].path, 6), phases: [], allowGrowth: true, eligible: () => true,
+    protectedLand: [...streetStrips(streets.list[0].path, 6),
+      ...streetStrips([p(987.4406680869301, 493.87100451092056), p(974.9180042201505, 529.1573910247939)],
+        [4.479820852661169, 4.551333371126527])],
+    phases: [], allowGrowth: true, eligible: () => true,
   };
   const candidate = convexHull(roof);
   expect(area(candidate) - area(roof)).toBeLessThan(area(roof));
   expect(minAngle(candidate) * 180 / Math.PI).toBeGreaterThan(20);
+  const oldStreet = tryIntersection(roof, f.protectedLand);
+  expect(mpArea(oldStreet.pieces)).toBeGreaterThan(0.1);
+  const newStreet = tryIntersection(tryDifference(candidate, roof).pieces, f.protectedLand);
+  expect(mpArea(newStreet.pieces)).toBeGreaterThan(1e-6);
+  expect(mpArea(newStreet.pieces)).toBeLessThan(1e-4);
+  const blocked: EdgeRoofPartition = { ...f,
+    quarters: structuredClone(f.quarters), blocks: structuredClone(f.blocks), parcels: structuredClone(f.parcels),
+    buildings: structuredClone(f.buildings), streetSpace: structuredClone(f.streetSpace),
+    footprint: structuredClone(f.footprint), gardens: [], phases: [],
+    protectedLand: [...f.protectedLand, { outer: [p(993, 529), p(995, 529), p(995, 531), p(993, 531)], holes: [] }],
+  };
+  expect(mpArea(tryIntersection(candidate, blocked.protectedLand).pieces)).toBeGreaterThan(1);
+  expect(finishEdgeRoofs(blocked).grown).toBe(0);
+  expect(blocked.buildings[0].poly).toEqual(roof);
   const result = finishEdgeRoofs(f);
   expect(result.grown).toBe(1);
   expect(f.buildings).toHaveLength(1);
