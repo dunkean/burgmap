@@ -32,9 +32,15 @@ export interface FootprintFinalInput {
   proposePrivatePassage?: (originalIndex: number, main: Polygon, path: Vec2[], width: number) => boolean | Vec2[];
   /** Accepted paths are appended only when the corresponding roof transaction commits. */
   privatePassages?: PrivatePassage[];
+  /** Permit a small, provably uninhabitable infill to become open owner land. */
+  allowFillRemoval?: boolean;
+  /** Prove all remaining block peers stay served with these original building indices removed. */
+  validateRemoval?: (originalIndex: number, pendingRemoved: readonly number[]) => boolean;
 }
 export interface PrivatePassage { path: Vec2[]; width: number; parcel: number }
-export interface FootprintFinalResult { changed: Set<number>; invalid: number[]; cleaned: number; releasedArea: number }
+export interface FootprintFinalResult { changed: Set<number>; invalid: number[]; cleaned: number; releasedArea: number;
+  /** Original indices, before deferred removal and any array compaction. */
+  removed: number[] }
 
 function proper(p: Polygon, partOfCompound = false): boolean {
   if (p.length < 3 || !isSimple(p) || area(p) < 12) return false;
@@ -57,6 +63,20 @@ function proper(p: Polygon, partOfCompound = false): boolean {
   const cut = splitByChord(lpoly(p, 0), [neck.a, neck.b], 0, 0.02);
   if (!cut || Math.abs(cut.reduce((sum, piece) => sum + area(piece.pts), 0) - area(p)) > 1e-6) return false;
   return cut.every((piece) => area(piece.pts) >= 15 && proper(piece.pts, true));
+}
+
+function plausibleWorkshopCompound(p: Polygon, arch: string | undefined): boolean {
+  if (!/workshop/.test(arch ?? '')) return false;
+  const neck = minNeck(p);
+  if (!neck || neck.w < 3.2 || neck.w >= 3.59) return false;
+  const rooms = splitByChord(lpoly(p, 0), [neck.a, neck.b], 0, 0.02);
+  return !!rooms && Math.abs(rooms.reduce((s, room) => s + area(room.pts), 0) - area(p)) < 1e-6
+    && rooms.every((room) => {
+      const poly = room.pts, box = obb(poly), short = Math.min(box.hu, box.hv), long = Math.max(box.hu, box.hv);
+      return area(poly) >= 15 && minAngle(poly) >= 20 * Math.PI / 180
+        && 2 * inscribed(poly, [], 0.05).r >= 3.2 && 2 * short >= 3.2
+        && long / Math.max(short, 1e-6) <= 5;
+    });
 }
 
 function normalize(p: Polygon): Polygon | null {
@@ -127,11 +147,13 @@ function clipHallWing(p: Polygon, owner: Polygon,
 }
 
 export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult {
-  const changed = new Set<number>(), invalid: number[] = [];
+  const changed = new Set<number>(), invalid: number[] = [], removed: number[] = [], removalCandidates: number[] = [];
   let cleaned = 0, releasedArea = 0;
   const housingArea = (): number => u.buildings.reduce((sum, b) =>
     sum + (['house', 'rear', 'back'].includes(b.kind) ? area(b.poly) : 0), 0);
   const initialHousingArea = housingArea();
+  const initialHousingCount = u.buildings.filter((b) => ['house', 'rear', 'back'].includes(b.kind)).length;
+  let pendingRemovalArea = 0;
   const parcelIndex = new GridIndex<number>(24);
   u.parcels.forEach((p, i) => { if (p.poly.length >= 3) parcelIndex.insertPts(p.poly, i); });
   const respectsOtherOwners = (i: number, after: Polygon): boolean => {
@@ -271,6 +293,16 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
     const outward = { x: (a.x - m.x) / len, y: (a.y - m.y) / len };
     const tip = arm.reduce((best, p) => (p.x * outward.x + p.y * outward.y > best.x * outward.x + best.y * outward.y ? p : best));
     return { tip, outward };
+  };
+  const losesFreeExteriorWing = (i: number, owner: UrbanParcel, candidate: Polygon): boolean => {
+    const freed = tryDifference(u.buildings[i].poly, candidate);
+    if (freed.failed) return true;
+    for (const piece of freed.pieces) {
+      if (mpArea([piece]) <= 1 || mpArea([piece]) <= 0.005 * area(u.buildings[i].poly)) continue;
+      const { tip, outward } = armEdge(candidate, piece.outer);
+      if (openExterior(owner, tip, outward) && !tipConstrained(u.buildings[i].parcel!, tip, outward)) return true;
+    }
+    return false;
   };
   const splitIntoServedRooms = (i: number, owner: UrbanParcel): boolean => {
     if (!u.backLand || !u.validateParts || !u.placementClear) return false;
@@ -520,6 +552,32 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
           }
         }
       }
+      // Only after the ordinary repairs fail, allow a smaller real room when
+      // the cumulative layer loss stays below 2%. A free exterior wing is not
+      // cut merely because it crosses an administrative quarter edge.
+      if (u.validateParts && (minNeck(b.poly)?.w ?? Infinity) < 3.59
+        && !plausibleWorkshopCompound(b.poly, b.arch)) {
+        const compact = reconstructCompactRoom(b.poly, owner.poly, occupied, owner.front,
+          (candidate) => u.placementClear!(candidate, b.poly) && respectsOtherOwners(i, candidate)
+            && !losesFreeExteriorWing(i, owner, candidate) && !!planOpenLand(candidate),
+          (candidate) => proper(candidate) && !overlapsRoof(i, candidate)
+            && u.validateParts!(i, [candidate]), [0.65, 0.50]);
+        if (compact && housingArea() - area(b.poly) + area(compact)
+          >= 0.98 * initialHousingArea) {
+          const added = tryDifference(compact, b.poly), freed = tryDifference(b.poly, compact);
+          const land = planOpenLand(compact);
+          if (land && !added.failed && !freed.failed && freed.pieces.every((p) => !p.holes.length)
+            && Math.abs(area(b.poly) + mpArea(added.pieces) - area(compact) - mpArea(freed.pieces)) < 1e-5) {
+            commitOpenLand(land);
+            b.poly = compact;
+            u.backLand.push(...freed.pieces);
+            releasedArea += mpArea(freed.pieces);
+            roofIndex.insertPts(compact, i);
+            if (block !== undefined) changed.add(block);
+            continue;
+          }
+        }
+      }
     }
     let main = b.poly;
     const extra: Polygon[] = [], released: Polygon[] = [];
@@ -584,7 +642,14 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
           continue;
         }
       }
-      invalid.push(i); continue;
+      // Record only the morphological candidate here. The removal decision
+      // follows all roof repairs, so its 2% budget includes every prior loss.
+      const neck = minNeck(b.poly)?.w ?? Infinity;
+      const noHabitableCore = 2 * inscribed(b.poly, [], 0.05).r < 3.2 || neck <= 0.02;
+      if (u.allowFillRemoval && u.validateRemoval && area(b.poly) <= 60
+        && noHabitableCore && owner.use === 'plot' && b.parcel !== undefined) removalCandidates.push(i);
+      invalid.push(i);
+      continue;
     }
     b.poly = main;
     for (const p of keptExtra) {
@@ -597,7 +662,8 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
   }
   // Local repairs can expose collinear backtracks which were hidden by the
   // original self-touching vertex. Drop only zero-area vertices after repair.
-  for (const b of u.buildings) {
+  for (let i = 0; i < u.buildings.length; i++) {
+    const b = u.buildings[i];
     const q = normalize(b.poly);
     if (q && q.length < b.poly.length) {
       b.poly = q; cleaned++;
@@ -605,5 +671,18 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
       if (block !== undefined) changed.add(block);
     }
   }
-  return { changed, invalid, cleaned, releasedArea };
+  for (const i of removalCandidates) {
+    const b = u.buildings[i];
+    if (housingArea() - pendingRemovalArea - area(b.poly) < 0.98 * initialHousingArea
+      || initialHousingCount - removed.length - 1 < 0.98 * initialHousingCount
+      || !u.validateRemoval?.(i, [...removed, i])) continue;
+    removed.push(i); pendingRemovalArea += area(b.poly);
+    u.backLand!.push({ outer: b.poly, holes: [] });
+    releasedArea += area(b.poly);
+    const block = b.parcel === undefined ? undefined : u.parcels[b.parcel]?.block;
+    if (block !== undefined) changed.add(block);
+    invalid.splice(invalid.indexOf(i), 1);
+  }
+  for (const i of [...removed].reverse()) u.buildings.splice(i, 1);
+  return { changed, invalid, cleaned, releasedArea, removed };
 }
