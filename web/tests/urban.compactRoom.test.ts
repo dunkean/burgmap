@@ -1,0 +1,139 @@
+import { describe, expect, it } from 'vitest';
+import type { Polygon, Vec2 } from '../src/gen/core/geom';
+import { area, inscribed, isSimple, minNeck } from '../src/gen/geo/poly';
+import { mpArea, tryIntersection } from '../src/gen/geo/bool';
+import { tryDifference } from '../src/gen/geo/bool';
+import { shapeOkObb, blockReach, makeStreetAt } from '../src/gen/urban/access';
+import { streetStrips } from '../src/gen/urban/openfringe';
+import { reconstructCompactRoom } from '../src/gen/urban/compactRoom';
+import { finalizeFootprints } from '../src/gen/urban/footprintFinal';
+import native from './fixtures/compact-pins-v11.json';
+
+interface NativeCase {
+  i: number; roof: Polygon; owner: Polygon; front: [Vec2, Vec2]; block: Polygon;
+  peers: { i: number; poly: Polygon }[]; occupied: Polygon[];
+}
+const fixture = native as unknown as {
+  streets: { path: Vec2[]; width: number; widths?: number[] }[];
+  places: Polygon[]; water: { outer: Polygon; holes: Polygon[] }[];
+  walls: { path: Vec2[] }[]; lines: { kind: string; path: Vec2[]; width?: number; closed?: boolean }[];
+  cases: NativeCase[];
+};
+const streetAt = makeStreetAt(fixture.streets, fixture.places);
+const reserve = [
+  ...fixture.water,
+  ...fixture.streets.flatMap((s) => streetStrips(s.path, s.widths ?? s.width)),
+  ...fixture.walls.flatMap((w) => streetStrips([...w.path, w.path[0]], 5.6)),
+  ...fixture.lines.flatMap((l) => streetStrips(l.closed ? [...l.path, l.path[0]] : l.path, l.width ?? 1)),
+];
+const proper = (p: Polygon): boolean => p.length >= 3 && isSimple(p) && area(p) >= 12
+  && shapeOkObb(p) && 2 * inscribed(p, [], 0.05, 1.8).r >= 3.6
+  && (minNeck(p)?.w ?? Infinity) >= 3.59;
+
+describe('compact recovery on six pinned native blocks', () => {
+  it('splits the pinned 1.55 m rear connector into three served rooms with 98% of its floor', () => {
+    const f = fixture.cases.find((c) => c.i === 180)!;
+    const before = blockReach(f.block, f.peers.map((p) => p.poly), streetAt);
+    const buildings = [{ poly: f.roof, kind: 'rear', parcel: 0 },
+      ...f.occupied.map((poly) => ({ poly, kind: 'landmark', parcel: 0 }))];
+    const backLand: { outer: Polygon; holes: Polygon[] }[] = [];
+    const result = finalizeFootprints({ buildings, parcels: [{ poly: f.owner, use: 'plot', block: 0 }], backLand,
+      placementClear: (p) => !tryIntersection(p, reserve).failed && mpArea(tryIntersection(p, reserve).pieces) <= 1e-6,
+      validateParts: (_, parts) => {
+        const proposed = f.peers.flatMap((peer) => peer.i === f.i ? parts : [peer.poly]);
+        const after = blockReach(f.block, proposed, streetAt);
+        const required = f.peers.flatMap((peer, j) => peer.i === f.i ? parts.map(() => true) : [before[j]]);
+        return after.every((reached, j) => reached || !required[j]);
+      } });
+    expect(result.invalid).not.toContain(0);
+    const parts = [buildings[0].poly, ...buildings.slice(f.occupied.length + 1).map((b) => b.poly)];
+    expect(parts).toHaveLength(3);
+    expect(parts.every(proper)).toBe(true);
+    expect(parts.reduce((s, p) => s + area(p), 0)).toBeGreaterThan(0.98 * area(f.roof));
+    expect(parts.reduce((s, p) => s + area(p), 0)
+      + backLand.reduce((s, p) => s + area(p.outer), 0)
+      - mpArea(tryDifference(parts.map((outer) => ({ outer, holes: [] })), f.roof).pieces))
+      .toBeCloseTo(area(f.roof), 5);
+    const added = tryDifference(parts.map((outer) => ({ outer, holes: [] })), f.roof);
+    expect(added.failed).toBe(false);
+    expect(added.pieces.every((p) => p.holes.length === 0)).toBe(true);
+    const gardens = added.pieces.map((p) => p.outer);
+    const initialGardenArea = gardens.reduce((s, p) => s + area(p), 0);
+    const secondBuildings = [{ poly: f.roof, kind: 'rear', parcel: 0 },
+      ...f.occupied.map((poly) => ({ poly, kind: 'landmark', parcel: 0 }))];
+    const secondBackLand: { outer: Polygon; holes: Polygon[] }[] = [];
+    const second = finalizeFootprints({ buildings: secondBuildings,
+      parcels: [{ poly: f.owner, use: 'plot', block: 0 }], gardens, backLand: secondBackLand,
+      placementClear: (p) => !tryIntersection(p, reserve).failed && mpArea(tryIntersection(p, reserve).pieces) <= 1e-6,
+      validateParts: (_, proposedParts) => {
+        const proposed = f.peers.flatMap((peer) => peer.i === f.i ? proposedParts : [peer.poly]);
+        const after = blockReach(f.block, proposed, streetAt);
+        const required = f.peers.flatMap((peer, j) => peer.i === f.i ? proposedParts.map(() => true) : [before[j]]);
+        return after.every((reached, j) => reached || !required[j]);
+      } });
+    expect(second.invalid).not.toContain(0);
+    const secondParts = [secondBuildings[0].poly, ...secondBuildings.slice(f.occupied.length + 1).map((b) => b.poly)];
+    for (const p of secondParts) {
+      expect(mpArea(tryIntersection(p, gardens.map((outer) => ({ outer, holes: [] }))).pieces))
+        .toBeLessThanOrEqual(1e-6);
+      expect(mpArea(tryIntersection(p, secondBackLand).pieces)).toBeLessThanOrEqual(1e-6);
+    }
+    expect(secondParts.reduce((s, p) => s + area(p), 0) + gardens.reduce((s, p) => s + area(p), 0)
+      + secondBackLand.reduce((s, p) => s + area(p.outer), 0))
+      .toBeCloseTo(area(f.roof) + initialGardenArea, 5);
+  });
+
+  it('rebuilds the river U as a served, clear 85%-area room without taking another plot', () => {
+    const f = fixture.cases.find((c) => c.i === 860)!;
+    const before = blockReach(f.block, f.peers.map((p) => p.poly), streetAt);
+    const candidate = reconstructCompactRoom(f.roof, f.owner, f.occupied, f.front,
+      (p) => !tryIntersection(p, reserve).failed && mpArea(tryIntersection(p, reserve).pieces) <= 1e-6,
+      (p) => {
+        if (!proper(p)) return false;
+        const after = blockReach(f.block, f.peers.map((peer) => peer.i === f.i ? p : peer.poly), streetAt);
+        return after.every((reached, j) => f.peers[j].i === f.i ? reached : reached || !before[j]);
+      });
+    expect(candidate).not.toBeNull();
+    expect(area(candidate!)).toBeGreaterThanOrEqual(0.85 * area(f.roof) - 1e-5);
+    expect(area(candidate!)).toBeLessThan(area(f.roof));
+    expect(mpArea(tryIntersection(candidate!, f.occupied.map((outer) => ({ outer, holes: [] }))).pieces))
+      .toBeLessThanOrEqual(1e-6);
+    expect(mpArea(tryIntersection(candidate!, reserve).pieces)).toBeLessThanOrEqual(1e-6);
+  });
+
+  it('commits the pinned river compact room with its freed land fully accounted', () => {
+    const f = fixture.cases.find((c) => c.i === 860)!;
+    const before = blockReach(f.block, f.peers.map((p) => p.poly), streetAt);
+    const buildings = [{ poly: f.roof, kind: 'house', parcel: 0 },
+      ...f.occupied.map((poly) => ({ poly, kind: 'landmark', parcel: 0 }))];
+    const backLand: { outer: Polygon; holes: Polygon[] }[] = [];
+    const result = finalizeFootprints({ buildings, parcels: [{ poly: f.owner, front: f.front,
+      use: 'plot', block: 0 }], backLand,
+      placementClear: (p) => !tryIntersection(p, reserve).failed && mpArea(tryIntersection(p, reserve).pieces) <= 1e-6,
+      validateParts: (_, parts) => {
+        const proposed = f.peers.flatMap((peer) => peer.i === f.i ? parts : [peer.poly]);
+        const after = blockReach(f.block, proposed, streetAt);
+        const required = f.peers.flatMap((peer, j) => peer.i === f.i ? parts.map(() => true) : [before[j]]);
+        return after.every((reached, j) => reached || !required[j]);
+      } });
+    expect(result.invalid).not.toContain(0);
+    expect(buildings[0].poly).toHaveLength(4);
+    expect(area(buildings[0].poly)).toBeGreaterThanOrEqual(0.85 * area(f.roof) - 1e-5);
+    const added = mpArea(tryDifference(buildings[0].poly, f.roof).pieces);
+    expect(area(buildings[0].poly) + backLand.reduce((s, p) => s + area(p.outer), 0) - added)
+      .toBeCloseTo(area(f.roof), 5);
+  });
+
+  it('does not claim occupied roofs, destroy block access, or squeeze a compact room into a too-small plot', () => {
+    for (const f of fixture.cases.filter((c) => c.i !== 860)) {
+      const before = blockReach(f.block, f.peers.map((p) => p.poly), streetAt);
+      const candidate = reconstructCompactRoom(f.roof, f.owner, f.occupied, f.front, () => true,
+        (p) => {
+          if (!proper(p)) return false;
+          const after = blockReach(f.block, f.peers.map((peer) => peer.i === f.i ? p : peer.poly), streetAt);
+          return after.every((reached, j) => f.peers[j].i === f.i ? reached : reached || !before[j]);
+        });
+      expect(candidate, `roof ${f.i}`).toBeNull();
+    }
+  });
+});
