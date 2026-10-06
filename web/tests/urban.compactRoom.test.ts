@@ -5,6 +5,7 @@ import { mpArea, tryIntersection } from '../src/gen/geo/bool';
 import { tryDifference } from '../src/gen/geo/bool';
 import { shapeOkObb, blockReach, makeStreetAt } from '../src/gen/urban/access';
 import { streetStrips } from '../src/gen/urban/openfringe';
+import { polyInside } from '../src/gen/geo/split';
 import { reconstructCompactRoom } from '../src/gen/urban/compactRoom';
 import { finalizeFootprints } from '../src/gen/urban/footprintFinal';
 import native from './fixtures/compact-pins-v11.json';
@@ -125,6 +126,10 @@ describe('compact recovery on six pinned native blocks', () => {
   });
 
   it('does not claim occupied roofs, destroy block access, or squeeze a compact room into a too-small plot', () => {
+    const bent = fixture.cases.find((c) => c.i === 576)!;
+    const shortcut = bent.roof.filter((_, j) => (189 >> j) & 1);
+    expect(polyInside(bent.owner, shortcut)).toBe(true);
+    expect(mpArea(tryDifference(shortcut, bent.owner).pieces)).toBeGreaterThan(7.7);
     for (const f of fixture.cases.filter((c) => c.i !== 860)) {
       const before = blockReach(f.block, f.peers.map((p) => p.poly), streetAt);
       const candidate = reconstructCompactRoom(f.roof, f.owner, f.occupied, f.front, () => true,

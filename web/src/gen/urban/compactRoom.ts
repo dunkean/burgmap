@@ -44,8 +44,10 @@ export function reconstructCompactRoom(poly: Polygon, owner: Polygon, occupied: 
     if (bb.x0 < bounds.x0 - 1e-6 || bb.y0 < bounds.y0 - 1e-6
       || bb.x1 > bounds.x1 + 1e-6 || bb.y1 > bounds.y1 + 1e-6
       || !polyInside(owner, candidate)) return false;
-    const added = tryDifference(candidate, poly);
-    if (added.failed) return false;
+    // A concave plot can contain every vertex while a long chord crosses its
+    // notch. The exact native difference, not vertices alone, proves ownership.
+    const escaped = tryDifference(candidate, owner), added = tryDifference(candidate, poly);
+    if (escaped.failed || mpArea(escaped.pieces) > 1e-6 || added.failed) return false;
     for (let i = 0; i < occupied.length; i++) {
       const newContact = added.pieces.length ? tryIntersection(added.pieces, occupied[i]) : { pieces: [], failed: false };
       if (newContact.failed || mpArea(newContact.pieces) > 1e-6) return false;
