@@ -16,9 +16,9 @@ const D8: [(isize, isize); 8] = [
 ];
 const DIST: [f64; 8] = [1.0, SQRT_2, 1.0, SQRT_2, 1.0, SQRT_2, 1.0, SQRT_2];
 
-// Keep the lower half of the control; make its upper half substantially stronger.
+// A gentle onset and a bounded endpoint, independent of map extent.
 fn erosion_strength(erosion: f64) -> f64 {
-    erosion + 32.0 * (erosion - 0.5).max(0.0).powi(3)
+    erosion * erosion
 }
 
 fn neighbor(i: usize, n: usize, d: usize) -> Option<usize> {
@@ -250,14 +250,14 @@ fn resolve_pits(h: &mut [f32], fl: &Flood, n: usize, cell: f64, frac: f64) -> us
             continue;
         }
         let spill = fl.filled[pour] as f64;
-        let level = bottom + frac * (spill - bottom);
+        let level = spill - frac * (spill - bottom);
         for &c in &cells {
             if (h[c] as f64) < spill {
                 h[c] = (h[c] as f64 + frac * (spill - h[c] as f64)) as f32;
             }
         }
         let mut current = (h[pour] as f64).min(level);
-        h[pour] = current as f32;
+        h[pour] = (h[pour] as f64 + frac * (current - h[pour] as f64)) as f32;
         let mut r = fl.receiver[pour];
         for _ in 0..400 {
             if r == usize::MAX {
@@ -267,7 +267,7 @@ fn resolve_pits(h: &mut [f32], fl: &Flood, n: usize, cell: f64, frac: f64) -> us
             if h[r] as f64 <= current {
                 break;
             }
-            h[r] = current as f32;
+            h[r] = (h[r] as f64 + frac * (current - h[r] as f64)) as f32;
             r = fl.receiver[r];
         }
         resolved += 1;
@@ -442,7 +442,7 @@ pub(crate) fn mountain(cfg: &MountainCfg<'_>) -> Vec<f32> {
     }
     let uplift_step = cfg.amp * 1.25 / cfg.iterations as f64;
     let strength = erosion_strength(cfg.erosion);
-    let incision = strength * 2.0 / (0.004 * count as f64).sqrt();
+    let incision = strength / (0.004 * count as f64).sqrt();
     let mut acc = vec![1.0_f32; count];
     let mut channels = vec![false; count];
     for _ in 0..cfg.iterations {
@@ -453,7 +453,7 @@ pub(crate) fn mountain(cfg: &MountainCfg<'_>) -> Vec<f32> {
         }
         if cfg.erosion > 0.0 {
             let fl = flood(&h, nc);
-            resolve_pits(&mut h, &fl, nc, cc, (cfg.erosion * 1.2).min(0.85));
+            resolve_pits(&mut h, &fl, nc, cc, (strength * 0.6).min(0.6));
             let flow = continuous_flow(&fl, nc);
             acc.fill(1.0);
             for &c in fl.order.iter().rev() {
@@ -482,11 +482,11 @@ pub(crate) fn mountain(cfg: &MountainCfg<'_>) -> Vec<f32> {
                 let factor = (incision * (acc[c] as f64).sqrt() / flow.distance[c] as f64).min(6.0);
                 h[c] = (h[c] as f64).min((h[c] as f64 + factor * lower) / (1.0 + factor)) as f32;
             }
-            thermal(&mut h, nc, cc, cfg.talus, 3, (cfg.erosion * 0.9).min(0.8));
+            thermal(&mut h, nc, cc, cfg.talus, 3, strength * 0.8);
             for i in 0..count {
                 channels[i] = acc[i] as f64 >= count as f64 * 0.001;
             }
-            let diffusion = cfg.diffusion * 3.0 * strength * 2.0;
+            let diffusion = cfg.diffusion * 3.0 * strength;
             for _ in 0..diffusion.floor() as usize {
                 diffuse(&mut h, nc, &channels, 0.5);
             }
@@ -507,11 +507,11 @@ pub(crate) fn mountain(cfg: &MountainCfg<'_>) -> Vec<f32> {
         thermal(&mut h, nc, cc, cfg.talus * 0.95, 4, strength * 0.8);
         for _ in 0..2 {
             let fl = flood(&h, nc);
-            if resolve_pits(&mut h, &fl, nc, cc, cfg.erosion.min(0.85)) == 0 {
+            if resolve_pits(&mut h, &fl, nc, cc, strength * 0.5) == 0 {
                 break;
             }
         }
-        diffuse(&mut h, nc, &channels, cfg.erosion.min(0.8));
+        diffuse(&mut h, nc, &channels, strength * 0.5);
     }
     let mut output = vec![0.0_f32; n * n];
     let mut drainage_weight = vec![0.0_f64; n * n];
@@ -534,8 +534,10 @@ pub(crate) fn mountain(cfg: &MountainCfg<'_>) -> Vec<f32> {
                         .noise2
                         .fbm(px / warp_wavelength - 4.7, py / warp_wavelength + 2.9, 2);
             let i = y * n + x;
-            drainage_weight[i] =
-                1.0 - 0.85 * smooth((drainage - 4.0) / (count as f64 * 0.001 - 4.0).max(12.0));
+            drainage_weight[i] = 1.0
+                - 0.85
+                    * strength
+                    * smooth((drainage - 4.0) / (count as f64 * 0.001 - 4.0).max(12.0));
             output[i] = sample(&h, nc, (wx - x0) / cc - 0.5, (wy - x0) / cc - 0.5, true) as f32;
             if (x + y * 7) & 15 == 0 {
                 samples.push(output[i]);
@@ -544,8 +546,8 @@ pub(crate) fn mountain(cfg: &MountainCfg<'_>) -> Vec<f32> {
     }
     samples.sort_unstable_by(f32::total_cmp);
     let p99 = samples[(samples.len() as f64 * 0.99).floor() as usize].max(0.0001) as f64;
-    // Full p99 normalization used to undo the loss of relief at strong erosion.
-    let worn_amplitude = cfg.amp / (1.0 + 0.35 * (strength - cfg.erosion));
+    // Keep a legible relief at the endpoint instead of erasing it with runaway incision.
+    let worn_amplitude = cfg.amp * (1.0 - 0.2 * strength);
     let scale = worn_amplitude / p99;
     let slopes = output.clone();
     let wavelength = (cell * 6.0).max(260.0 * cfg.k);
@@ -656,7 +658,8 @@ pub(crate) fn erode_shape(h: &mut [f32], n: usize, cell: f64, erosion: f64, talu
 
 fn erode_shape_coarse(h: &mut [f32], n: usize, cell: f64, erosion: f64, talus: f64) {
     let strength = erosion_strength(erosion);
-    let iterations = (12.0 * erosion + 4.0 * (strength - erosion)).ceil() as usize;
+    // Fixed steps with a continuous dose avoid a whole extra pass at 1%, 9%, etc.
+    let iterations = 12;
     let mut order: Vec<_> = (0..h.len()).collect();
     let mut fractions = vec![[0.0_f32; 8]; h.len()];
     let mut acc = vec![1.0_f32; h.len()];
