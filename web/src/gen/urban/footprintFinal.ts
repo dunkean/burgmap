@@ -9,12 +9,15 @@ import { distToRing, pointInRing } from '../geo/poly';
 import { shapeOkObb } from './access';
 import { splitLong } from './access';
 import { mpArea, tryDifference, tryIntersection } from '../geo/bool';
+import { reconstructRoom } from './roomReconstruct';
 
 export interface FootprintFinalInput {
   buildings: UrbanBuilding[];
   parcels: UrbanParcel[];
   /** Optional receiver for released substandard arms, in native coordinates. */
   backLand?: PolyH[];
+  /** Anonymous plot yards; a successful new roof transaction trims their land. */
+  gardens?: Polygon[];
   /** Physical constraint beyond a sharp tip (sea/water/wall or neighbouring quarter). */
   tipConstrained?: (tip: Vec2, outward: Vec2) => boolean;
   /** True when the tip exits a labelled open quarter boundary. */
@@ -74,8 +77,72 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
   let cleaned = 0, releasedArea = 0;
   const parcelIndex = new GridIndex<number>(24);
   u.parcels.forEach((p, i) => { if (p.poly.length >= 3) parcelIndex.insertPts(p.poly, i); });
+  const respectsOtherOwners = (i: number, after: Polygon): boolean => {
+    const b = u.buildings[i], added = tryDifference(after, b.poly);
+    if (added.failed || b.parcel === undefined) return false;
+    for (const piece of added.pieces) {
+      const bounds = bboxOf(piece.outer);
+      for (const j of parcelIndex.query(bounds.x0, bounds.y0, bounds.x1, bounds.y1)) {
+        if (j === b.parcel) continue;
+        const hit = tryIntersection(piece, u.parcels[j].poly);
+        if (hit.failed || mpArea(hit.pieces) > 1e-6) return false;
+      }
+    }
+    return true;
+  };
   const roofIndex = new GridIndex<number>(24);
   u.buildings.forEach((b, i) => { if (b.poly.length >= 3) roofIndex.insertPts(b.poly, i); });
+  const indexGardens = (): GridIndex<number> => {
+    const index = new GridIndex<number>(24);
+    u.gardens?.forEach((p, i) => { if (p.length >= 3) index.insertPts(p, i); });
+    return index;
+  };
+  let gardenIndex = indexGardens();
+  type OpenLandPlan = { gardens: Map<number, PolyH[]>; back: Map<number, PolyH[]>; backConsumed: number };
+  const planOpenLand = (after: Polygon): OpenLandPlan | null => {
+    const gardens = new Map<number, PolyH[]>(), back = new Map<number, PolyH[]>();
+    let backConsumed = 0;
+    const bounds = bboxOf(after);
+    for (const j of gardenIndex.query(bounds.x0, bounds.y0, bounds.x1, bounds.y1)) {
+      const old = u.gardens![j], hit = tryIntersection(after, old);
+      if (hit.failed) return null;
+      if (mpArea(hit.pieces) <= 1e-6) continue;
+      const rest = tryDifference(old, after);
+      if (rest.failed || Math.abs(area(old) - mpArea(rest.pieces) - mpArea(hit.pieces)) > 1e-5) return null;
+      gardens.set(j, rest.pieces);
+    }
+    for (let j = 0; j < (u.backLand?.length ?? 0); j++) {
+      const old = u.backLand![j], bb = bboxOf(old.outer);
+      if (bb.x1 < bounds.x0 || bb.x0 > bounds.x1 || bb.y1 < bounds.y0 || bb.y0 > bounds.y1) continue;
+      const hit = tryIntersection(after, [old]);
+      if (hit.failed) return null;
+      const consumed = mpArea(hit.pieces);
+      if (consumed <= 1e-6) continue;
+      const rest = tryDifference([old], after);
+      if (rest.failed || Math.abs(mpArea([old]) - mpArea(rest.pieces) - consumed) > 1e-5) return null;
+      back.set(j, rest.pieces); backConsumed += consumed;
+    }
+    return { gardens, back, backConsumed };
+  };
+  const commitOpenLand = (plan: OpenLandPlan): void => {
+    if (u.backLand && plan.back.size) {
+      const old = u.backLand.slice();
+      u.backLand.splice(0, u.backLand.length, ...old.flatMap((p, i) => plan.back.get(i) ?? [p]));
+      releasedArea -= plan.backConsumed;
+    }
+    if (u.gardens && plan.gardens.size) {
+      const old = u.gardens.slice(), holes: PolyH[] = [];
+      const next = old.flatMap((p, i) => {
+        const replacement = plan.gardens.get(i);
+        if (!replacement) return [p];
+        for (const piece of replacement) if (piece.holes.length) holes.push(piece);
+        return replacement.filter((piece) => !piece.holes.length).map((piece) => piece.outer);
+      });
+      u.gardens.splice(0, u.gardens.length, ...next);
+      u.backLand?.push(...holes);
+      gardenIndex = indexGardens();
+    }
+  };
   const relocateNarrowAnnex = (i: number, owner: UrbanParcel): Polygon | null => {
     const b = u.buildings[i], oldArea = area(b.poly);
     if (!u.placementClear || !u.validateParts || !owner.front || owner.use !== 'plot'
@@ -100,7 +167,8 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
           ({ x: cx + a * width / 2 * ux + z * depth / 2 * vx,
             y: cy + a * width / 2 * uy + z * depth / 2 * vy })));
         const candidate = [rectangle[0], rectangle[1], rectangle[3], rectangle[2]];
-        if (!polyInside(owner.poly, candidate) || !u.placementClear(candidate)) continue;
+        if (!polyInside(owner.poly, candidate) || !respectsOtherOwners(i, candidate) || !u.placementClear(candidate)
+          || !planOpenLand(candidate)) continue;
         let clear = true;
         const bounds = bboxOf(candidate);
         for (const j of roofIndex.query(bounds.x0, bounds.y0, bounds.x1, bounds.y1)) {
@@ -191,6 +259,28 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
       }
       if (fixed) continue;
     }
+    if (u.placementClear) {
+      const bounds = bboxOf(owner.poly);
+      const occupied = roofIndex.query(bounds.x0, bounds.y0, bounds.x1, bounds.y1)
+        .filter((j) => j !== i).map((j) => u.buildings[j].poly);
+      const rebuilt = reconstructRoom(b.poly, owner.poly, occupied,
+        (candidate) => u.placementClear!(candidate) && respectsOtherOwners(i, candidate)
+          && !!planOpenLand(candidate),
+        (candidate) => proper(candidate) && (!u.validateParts || u.validateParts(i, [candidate])));
+      if (rebuilt) {
+        const added = tryDifference(rebuilt, b.poly), freed = tryDifference(b.poly, rebuilt), land = planOpenLand(rebuilt);
+        if (land && !added.failed && !freed.failed && freed.pieces.every((p) => !p.holes.length)
+          && Math.abs(area(b.poly) + mpArea(added.pieces) - area(rebuilt) - mpArea(freed.pieces)) < 1e-5) {
+          commitOpenLand(land);
+          b.poly = rebuilt;
+          u.backLand.push(...freed.pieces);
+          releasedArea += mpArea(freed.pieces);
+          roofIndex.insertPts(rebuilt, i);
+          if (block !== undefined) changed.add(block);
+          continue;
+        }
+      }
+    }
     let main = b.poly;
     const extra: Polygon[] = [], released: Polygon[] = [];
     for (let pass = 0; pass < 4 && !proper(main); pass++) {
@@ -236,11 +326,16 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
       || (u.validateParts && !u.validateParts(i, [main, ...keptExtra]))) {
       const relocated = relocateNarrowAnnex(i, owner);
       if (relocated) {
-        u.backLand.push({ outer: b.poly, holes: [] });
-        releasedArea += area(b.poly);
-        b.poly = relocated; roofIndex.insertPts(relocated, i);
-        if (block !== undefined) changed.add(block);
-        continue;
+        const freed = tryDifference(b.poly, relocated), added = tryDifference(relocated, b.poly), land = planOpenLand(relocated);
+        if (land && !freed.failed && !added.failed && freed.pieces.every((p) => !p.holes.length)
+          && Math.abs(area(b.poly) + mpArea(added.pieces) - area(relocated) - mpArea(freed.pieces)) < 1e-5) {
+          commitOpenLand(land);
+          u.backLand.push(...freed.pieces);
+          releasedArea += mpArea(freed.pieces);
+          b.poly = relocated; roofIndex.insertPts(relocated, i);
+          if (block !== undefined) changed.add(block);
+          continue;
+        }
       }
       invalid.push(i); continue;
     }

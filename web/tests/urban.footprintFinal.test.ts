@@ -4,6 +4,7 @@ import { area, minNeck } from '../src/gen/geo/poly';
 import { finalizeFootprints } from '../src/gen/urban/footprintFinal';
 import { splitLong } from '../src/gen/urban/access';
 import { blockReach, makeStreetAt } from '../src/gen/urban/access';
+import { mpArea, tryIntersection } from '../src/gen/geo/bool';
 
 const rect = (x0: number, y0: number, x1: number, y1: number): Polygon => [
   { x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 },
@@ -207,5 +208,25 @@ describe('last footprint pass', () => {
     });
     expect(u.buildings.reduce((s, b) => s + area(b.poly), 0)
       + u.backLand.reduce((s, p) => s + area(p.outer), 0)).toBeCloseTo(oldArea, 5);
+  });
+
+  it('trims anonymous garden and earlier released land atomically when a room fills its notch', () => {
+    const notch: Polygon = [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 },
+      { x: 6, y: 10 }, { x: 6, y: 8 }, { x: 4, y: 8 }, { x: 4, y: 10 }, { x: 0, y: 10 }];
+    const gardens = [rect(4, 8, 5, 10)];
+    const backLand = [{ outer: rect(5, 8, 6, 10), holes: [] as Polygon[] }];
+    const initial = area(notch) + gardens.reduce((s, p) => s + area(p), 0)
+      + backLand.reduce((s, p) => s + area(p.outer), 0);
+    const buildings = [{ poly: notch, kind: 'house', parcel: 0 }];
+    const result = finalizeFootprints({ buildings,
+      parcels: [{ poly: rect(-2, -2, 12, 12), use: 'plot', block: 0 }],
+      gardens, backLand, placementClear: () => true, validateParts: () => true });
+    expect(result.invalid).toEqual([]);
+    expect(buildings).toHaveLength(1);
+    for (const open of [...gardens.map((outer) => ({ outer, holes: [] })), ...backLand]) {
+      expect(mpArea(tryIntersection(buildings[0].poly, [open]).pieces)).toBeLessThanOrEqual(1e-6);
+    }
+    expect(area(buildings[0].poly) + gardens.reduce((s, p) => s + area(p), 0)
+      + backLand.reduce((s, p) => s + area(p.outer), 0)).toBeCloseTo(initial, 5);
   });
 });
