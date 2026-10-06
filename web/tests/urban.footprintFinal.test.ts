@@ -200,14 +200,36 @@ describe('last footprint pass', () => {
     const result = finalizeFootprints(u);
     expect(result.invalid).toEqual([]);
     expect(u.buildings).toHaveLength(2);
-    expect(u.backLand).toHaveLength(2);
-    expect(accessChecks).toBe(2);
+    expect(u.backLand).toHaveLength(4);
+    expect(accessChecks).toBe(4);
     u.buildings.forEach((b, i) => {
-      expect(area(b.poly)).toBeGreaterThan(0.97 * area(halls[i]));
+      expect(area(b.poly)).toBeGreaterThan(0.94 * area(halls[i]));
       expect(minNeck(b.poly)?.w ?? Infinity).toBeLessThan(3.6);
     });
     expect(u.buildings.reduce((s, b) => s + area(b.poly), 0)
       + u.backLand.reduce((s, p) => s + area(p.outer), 0)).toBeCloseTo(oldArea, 5);
+    const exterior = { buildings: halls.map((poly) => ({ poly, kind: 'hall', arch: 'courtyard-hall', parcel: 0 })),
+      parcels: [{ poly: owner, use: 'plot', block: 28 }], backLand: [] as { outer: Polygon; holes: Polygon[] }[],
+      openQuarterEdge: () => true, tipConstrained: () => false };
+    finalizeFootprints(exterior);
+    expect(exterior.backLand).toHaveLength(0);
+    expect(exterior.buildings.map((b) => area(b.poly))).toEqual(halls.map(area));
+  });
+
+  it('removes the zero-area return exposed by the pinned self-touch repair', () => {
+    const roof: Polygon = [
+      { x: 750.1853459203145, y: 470.69473553358483 }, { x: 735.0790724236791, y: 464.6176146560623 },
+      { x: 737.8566088394319, y: 455.3010038142782 }, { x: 743.9482081792856, y: 457.11707612683387 },
+      { x: 743.8766532149907, y: 468.1568039809795 }, { x: 746.0559644977345, y: 469.0335217299288 },
+      { x: 750.8496467209039, y: 469.0434421365991 },
+    ];
+    const buildings = [{ poly: roof, kind: 'rear', parcel: 0 }];
+    const backLand: { outer: Polygon; holes: Polygon[] }[] = [];
+    const result = finalizeFootprints({ buildings, parcels: [{ poly: rect(730, 450, 752, 473),
+      use: 'plot', block: 1 }], backLand, validateParts: () => true });
+    expect(result.invalid).toEqual([]);
+    expect(buildings[0].poly).toHaveLength(4);
+    expect(area(buildings[0].poly) + area(backLand[0].outer)).toBeCloseTo(area(roof), 5);
   });
 
   it('trims anonymous garden and earlier released land atomically when a room fills its notch', () => {
@@ -228,5 +250,21 @@ describe('last footprint pass', () => {
     }
     expect(area(buildings[0].poly) + gardens.reduce((s, p) => s + area(p), 0)
       + backLand.reduce((s, p) => s + area(p.outer), 0)).toBeCloseTo(initial, 5);
+  });
+
+  it('releases a sub-square-metre drafting spur on a dry open edge', () => {
+    const roof: Polygon = [{ x: 0, y: 0 }, { x: 8.4, y: 0 }, { x: 8.4, y: 2 },
+      { x: 8, y: 2 }, { x: 8, y: 22 }, { x: 0, y: 22 }];
+    const backLand: { outer: Polygon; holes: Polygon[] }[] = [];
+    const buildings = [{ poly: roof, kind: 'house', parcel: 0 }];
+    const result = finalizeFootprints({ buildings,
+      parcels: [{ poly: rect(-1, -1, 10, 23), use: 'plot', block: 1 }], backLand,
+      openQuarterEdge: () => true, tipConstrained: () => false, validateParts: () => true });
+    expect(result.invalid).toEqual([]);
+    expect(buildings).toHaveLength(1);
+    expect(area(buildings[0].poly)).toBe(176);
+    expect(backLand).toHaveLength(1);
+    expect(area(backLand[0].outer)).toBeCloseTo(0.8, 6);
+    expect(area(buildings[0].poly) + area(backLand[0].outer)).toBeCloseTo(area(roof), 6);
   });
 });

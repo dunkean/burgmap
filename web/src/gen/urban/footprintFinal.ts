@@ -72,6 +72,38 @@ function clipSharpTip(p: Polygon, owner: Polygon, constrained: (tip: Vec2, outwa
   return null;
 }
 
+/** Blunt the narrow end of a long courtyard wing without filling its court. */
+function clipHallWing(p: Polygon, owner: Polygon,
+  constrained: (tip: Vec2, outward: Vec2) => boolean): { house: Polygon; tip: Polygon } | null {
+  if (p.length < 6 || !isSimple(p)) return null;
+  for (let i = 0; i < p.length; i++) {
+    const j = (i + 1) % p.length;
+    const a = p[(i - 1 + p.length) % p.length], v = p[i], w = p[j], b = p[(i + 2) % p.length];
+    const cap = Math.hypot(v.x - w.x, v.y - w.y);
+    const left = Math.hypot(a.x - v.x, a.y - v.y), right = Math.hypot(b.x - w.x, b.y - w.y);
+    if (cap < 1.6 || cap > 2.8 || left < 7 || right < 7
+      || Math.min(left, right) < 3 * cap) continue;
+    const tip = { x: (v.x + w.x) / 2, y: (v.y + w.y) / 2 };
+    const centre = { x: p.reduce((s, point) => s + point.x, 0) / p.length,
+      y: p.reduce((s, point) => s + point.y, 0) / p.length };
+    const outwardLength = Math.hypot(tip.x - centre.x, tip.y - centre.y) || 1;
+    if (!constrained(tip, { x: (tip.x - centre.x) / outwardLength,
+      y: (tip.y - centre.y) / outwardLength })) continue;
+    for (const trim of [3, 2.5, 2, 1.5]) {
+      if (trim > 0.4 * Math.min(left, right)) continue;
+      const nv = { x: v.x + (a.x - v.x) * trim / left, y: v.y + (a.y - v.y) * trim / left };
+      const nw = { x: w.x + (b.x - w.x) * trim / right, y: w.y + (b.y - w.y) * trim / right };
+      const house = p.map((point, k) => k === i ? nv : k === j ? nw : point);
+      const tip = [v, w, nw, nv];
+      const loss = area(p) - area(house);
+      if (loss < 1 || loss > 0.03 * area(p) || !isSimple(house) || !polyInside(owner, house)
+        || Math.abs(area(tip) - loss) > 1e-6) continue;
+      return { house, tip };
+    }
+  }
+  return null;
+}
+
 export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult {
   const changed = new Set<number>(), invalid: number[] = [];
   let cleaned = 0, releasedArea = 0;
@@ -222,6 +254,14 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
         releasedArea += area(tip.tip);
         if (block !== undefined) changed.add(block);
       }
+      const wing = clipHallWing(b.poly, owner.poly, (p, d) => !openExterior(owner, p, d)
+        || tipConstrained(b.parcel!, p, d));
+      if (wing && (!u.validateParts || u.validateParts(i, [wing.house]))) {
+        b.poly = wing.house;
+        u.backLand.push({ outer: wing.tip, holes: [] });
+        releasedArea += area(wing.tip);
+        if (block !== undefined) changed.add(block);
+      }
     }
     // Courtyard ranges are deliberately narrow rooms; their minimum is set by the builder's rd.
     if (b.courtyards?.length || /courtyard|souk|ring/.test(b.arch ?? '')
@@ -295,7 +335,12 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
       if (!proper(parts[1])) {
         if (area(parts[0]) < 0.7 * area(main)) break;
         const { tip, outward } = armEdge(parts[0], parts[1]);
-        if (openExterior(owner, tip, outward) && !tipConstrained(b.parcel!, tip, outward)) break;
+        // A sub-square-metre return is a drafting spur, not a usable exterior
+        // room. It may be released even on a dry open edge; larger exterior
+        // wings remain whole unless a real neighbouring barrier constrains them.
+        const microscopic = area(parts[1]) <= 1 && area(parts[1]) <= 0.005 * area(main);
+        if (!microscopic && openExterior(owner, tip, outward)
+          && !tipConstrained(b.parcel!, tip, outward)) break;
       }
       main = parts[0];
       if (proper(parts[1])) extra.push(parts[1]); else released.push(parts[1]);
@@ -347,6 +392,16 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
     }
     for (const p of freed) { u.backLand.push({ outer: p, holes: [] }); releasedArea += area(p); }
     if (block !== undefined) changed.add(block);
+  }
+  // Local repairs can expose collinear backtracks which were hidden by the
+  // original self-touching vertex. Drop only zero-area vertices after repair.
+  for (const b of u.buildings) {
+    const q = normalize(b.poly);
+    if (q && q.length < b.poly.length) {
+      b.poly = q; cleaned++;
+      const block = b.parcel === undefined ? undefined : u.parcels[b.parcel]?.block;
+      if (block !== undefined) changed.add(block);
+    }
   }
   return { changed, invalid, cleaned, releasedArea };
 }
