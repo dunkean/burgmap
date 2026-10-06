@@ -38,7 +38,49 @@ describe('real private pedestrian passages', () => {
   it('refuses to turn a virtual block boundary into a street-side seed', () => {
     const input = fixture(100);
     expect(privatePassageAccess(input).proposePrivatePassage(0, main, path, 0.8)).toBe(false);
+    expect(privatePassageAccess(input).connectPrivatePassage(0, main, path, 0.8)).toBe(false);
     expect(input.passages).toEqual([]);
+  });
+
+  it('requires exact street contact, then extends through unclaimed land to a real road edge', () => {
+    const input = { ...fixture(-2.5), footprint: [{ outer: rect(0, 0, 20, 20), holes: [] }] };
+    const before = JSON.stringify(input), access = privatePassageAccess(input);
+    // The access raster can see this nearby road; the original ink still ends 1.5 m short.
+    expect(access.proposePrivatePassage(0, main, path, 0.8)).toBe(false);
+    const route = access.connectPrivatePassage(0, main, path, 0.8);
+    expect(route).not.toBe(false);
+    expect(route).toEqual([{ x: -1.495, y: 9 }, ...path]);
+    expect(access.proposePrivatePassage(0, main, route as typeof path, 0.8)).toBe(true);
+    expect(JSON.stringify(input)).toBe(before);
+  });
+
+  it('rejects a nearby false seed when a physical reserve blocks the extension', () => {
+    const input = { ...fixture(-2.5), footprint: [{ outer: rect(0, 0, 20, 20), holes: [] }],
+      placementClear: (poly: Polygon) => poly.every(p => p.x >= 0) };
+    const access = privatePassageAccess(input);
+    expect(access.proposePrivatePassage(0, main, path, 0.8)).toBe(false);
+    expect(access.connectPrivatePassage(0, main, path, 0.8)).toBe(false);
+  });
+
+  it('can reuse the discarded arm outside its plot without granting new claimed land', () => {
+    const input = { ...fixture(), parcels: [{ use: 'plot', block: 0, poly: rect(2, 0, 20, 20) }],
+      footprint: [{ outer: rect(0, 0, 20, 20), holes: [] }] };
+    const before = JSON.stringify(input);
+    expect(privatePassageAccess(input).proposePrivatePassage(0, main, path, 0.8)).toBe(true);
+    expect(JSON.stringify(input)).toBe(before);
+    // A detour on fresh quarter land, even beside the same old arm, is refused.
+    const detour = [{ x: 0, y: 9 }, { x: 3, y: 7 }, { x: 8, y: 9 }];
+    expect(privatePassageAccess(input).proposePrivatePassage(0, main, detour, 0.8)).toBe(false);
+  });
+
+  it('checks survivor access before a deferred roof removal without mutating the block', () => {
+    const input = fixture();
+    input.buildings.push({ kind: 'house', parcel: 0, poly: rect(15, 8, 18, 11) });
+    const before = JSON.stringify(input), access = privatePassageAccess(input);
+    expect(access.validateRemoval(0, [])).toBe(true);
+    expect(access.validateRemoval(0, [1])).toBe(true);
+    expect(access.validateRemoval(0, [999])).toBe(false);
+    expect(JSON.stringify(input)).toBe(before);
   });
 
   it('refuses obstacles, another owner, and a gap to the house entrance', () => {

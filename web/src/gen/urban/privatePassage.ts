@@ -2,10 +2,11 @@
 import type { Polygon, Vec2 } from '../core/geom';
 import type { PolyH, UrbanBuilding, UrbanParcel } from '../types';
 import { mpArea, tryDifference, tryIntersection } from '../geo/bool';
-import { area, distToRing, isSimple } from '../geo/poly';
+import { area, distToRing, distToSeg, isSimple } from '../geo/poly';
 import { ribbon } from '../geo/offset';
 import { blockReach, makeStreetAt } from './access';
 import { footprintAccessGuard } from './edgeFinish';
+import { streetStrips } from './openfringe';
 
 export interface PrivatePassage { path: Vec2[]; width: number; parcel: number }
 export interface PrivatePassageInput {
@@ -24,32 +25,53 @@ export interface PrivatePassageInput {
 /** Proofs are read-only; the finalizer appends a passage only with its successful roof transaction. */
 export function privatePassageAccess(input: PrivatePassageInput) {
   const { buildings, parcels, blocks, streets, places, passages } = input;
+  let publicPieces: PolyH[] = [];
+  let publicEdges: { a: Vec2; b: Vec2 }[] = [];
+  const length = (path: Vec2[]) => path.slice(1).reduce((sum, p, i) =>
+    sum + Math.hypot(p.x - path[i].x, p.y - path[i].y), 0);
+  const publicContact = (corridor: Polygon): boolean => {
+    // A raster street seed may lie more than a metre from a physical road.
+    // Require the rendered passage itself to meet the exact road/place boundary.
+    const overlap = tryIntersection(corridor, publicPieces);
+    if (overlap.failed || mpArea(overlap.pieces) > 1e-6) return false;
+    return publicEdges.some(e => corridor.some((a, i) => {
+      const b = corridor[(i + 1) % corridor.length];
+      return distToSeg(a, e.a, e.b) <= 0.02 || distToSeg(e.a, a, b) <= 0.02
+        || distToSeg(e.b, a, b) <= 0.02;
+    }));
+  };
   let count = -1;
   let current = makeStreetAt(streets, places);
   let access = footprintAccessGuard(buildings, parcels, blocks, current);
   const refresh = () => {
     if (count === passages.length) return;
     count = passages.length;
+    publicPieces = [...[...streets, ...passages].flatMap(s => streetStrips(s.path, 'widths' in s ? s.widths ?? s.width : s.width)),
+      ...places.map(outer => ({ outer, holes: [] }))];
+    publicEdges = publicPieces.flatMap(piece => piece.outer.map((a, i) =>
+      ({ a, b: piece.outer[(i + 1) % piece.outer.length] })));
     current = makeStreetAt([...streets, ...passages], places);
     // blockReach caches boundary seeds by StreetAt identity. Refresh that identity
     // together with the guard when a newly accepted private entrance is appended.
     access = footprintAccessGuard(buildings, parcels, blocks, current);
   };
-  return {
-    validateParts: (original: number, parts: Polygon[]) => { refresh(); return access(original, parts); },
-    proposePrivatePassage: (original: number, main: Polygon, path: Vec2[], width: number): boolean => {
+  const prove = (original: number, main: Polygon, path: Vec2[], width: number): boolean => {
       refresh();
       const building = buildings[original], ownerId = building?.parcel;
       const owner = ownerId === undefined ? undefined : parcels[ownerId];
       const blockId = owner?.block;
       if (!owner || blockId === undefined || !blocks[blockId] || width < 0.8 || width > 1.5
-        || path.length < 2 || path.some(p => !Number.isFinite(p.x) || !Number.isFinite(p.y))) return false;
+        || path.length < 2 || path.length > 8 || length(path) > 128
+        || path.some(p => !Number.isFinite(p.x) || !Number.isFinite(p.y))) return false;
       const corridor = ribbon(path, width);
-      if (!isSimple(corridor) || area(corridor) < 0.1 || !input.placementClear(corridor, building.poly)) return false;
+      if (!isSimple(corridor) || area(corridor) < 0.1) return false;
+      if (!publicContact(corridor) || !input.placementClear(corridor, building.poly)) return false;
       // The rendered passage must actually meet an entrance, not just fall within
       // the generous street raster slack. Either path orientation is supported.
       if (!([path[0], path[path.length - 1]].some(p => distToRing(main, p) <= 0.05))) return false;
-      const outside = tryDifference(corridor, owner.poly, ...input.publicGround);
+      // The discarded arm was already occupied by this same building. Reuse its
+      // footprint without granting any newly claimed settlement land to the route.
+      const outside = tryDifference(corridor, owner.poly, building.poly, ...input.publicGround);
       if (outside.failed) return false;
       if (mpArea(outside.pieces) > 1e-6) {
         if (!input.footprint?.length) return false;
@@ -73,6 +95,86 @@ export function privatePassageAccess(input: PrivatePassageInput) {
       const proposed = peers.map(({ b, i }) => i === original ? main : b.poly);
       const after = blockReach(blocks[blockId], proposed, candidateStreetAt);
       return after.every((yes, i) => yes || (peers[i].i !== original && !before[i]));
-    },
+  };
+  const connectPrivatePassage = (original: number, main: Polygon, path: Vec2[], width: number): Vec2[] | false => {
+    if (prove(original, main, path, width)) return path.slice();
+    refresh();
+    if (path.length < 2 || path.length > 5 || path.some(p => !Number.isFinite(p.x) || !Number.isFinite(p.y))) return false;
+    const firstHouse = distToRing(main, path[0]) <= 0.05;
+    const lastHouse = distToRing(main, path[path.length - 1]) <= 0.05;
+    if (firstHouse === lastHouse) return false;
+    const reverse = firstHouse, oriented = reverse ? path.slice().reverse() : path;
+    const free = oriented[0], next = oriented[1];
+    const dx = free.x - next.x, dy = free.y - next.y, mag = Math.hypot(dx, dy);
+    if (mag < 0.1) return false;
+    const ranked = publicEdges.map((edge, index) => {
+      const vx = edge.b.x - edge.a.x, vy = edge.b.y - edge.a.y, squared = vx * vx + vy * vy;
+      const t = squared ? Math.max(0, Math.min(1, ((free.x - edge.a.x) * vx + (free.y - edge.a.y) * vy) / squared)) : 0;
+      const nearest = { x: edge.a.x + vx * t, y: edge.a.y + vy * t };
+      return { edge, index, t, nearest, distance: Math.hypot(nearest.x - free.x, nearest.y - free.y),
+        size: Math.sqrt(squared) };
+    }).filter(t => t.distance <= 96).sort((a, b) => a.distance - b.distance || a.index - b.index);
+    const bins = new Set<string>();
+    const targets = ranked.filter(t => {
+      const key = `${Math.floor(t.nearest.x / 8)}:${Math.floor(t.nearest.y / 8)}`;
+      if (bins.has(key)) return false;
+      bins.add(key); return true;
+    }).slice(0, 32);
+    let trials = 0;
+    for (const target of targets) for (const offset of [0, -4, 4]) {
+      const t = Math.max(0, Math.min(1, target.t + offset / Math.max(1e-6, target.size)));
+      const end = { x: target.edge.a.x + (target.edge.b.x - target.edge.a.x) * t,
+        y: target.edge.a.y + (target.edge.b.y - target.edge.a.y) * t };
+      for (const [extension, lateralShift] of [[0, 0], [5, 0], [10, 0], [15, 0],
+        [25, -15], [25, 15], [35, -20], [35, 20]]) {
+        if (++trials > 512) return false;
+        const mid = { x: free.x + dx / mag * extension - dy / mag * lateralShift,
+          y: free.y + dy / mag * extension + dx / mag * lateralShift };
+        const toward = extension ? mid : free;
+        const approachLength = Math.hypot(toward.x - end.x, toward.y - end.y);
+        if (approachLength < 0.1) continue;
+        const ux = (toward.x - end.x) / approachLength, uy = (toward.y - end.y) / approachLength;
+        const ex = target.edge.b.x - target.edge.a.x, ey = target.edge.b.y - target.edge.a.y;
+        const edgeLength = Math.hypot(ex, ey);
+        if (edgeLength < 0.1) continue;
+        const sign = Math.sign(ex * (free.y - end.y) - ey * (free.x - end.x));
+        if (!sign) continue;
+        const nx = -ey / edgeLength * sign, ny = ex / edgeLength * sign;
+        const along = ux * nx + uy * ny;
+        if (along < 0.1) continue;
+        // A diagonal cap would otherwise put one corner inside the road. Stop
+        // five millimetres before that corner reaches the exact public edge.
+        const lateral = Math.abs(-uy * nx + ux * ny) * width / 2;
+        const retreat = (lateral + 0.005) / along;
+        if (retreat > 4 || retreat >= approachLength) continue;
+        const trimmed = { x: end.x + ux * retreat, y: end.y + uy * retreat };
+        const candidate = [trimmed, ...(extension ? [mid] : []), ...oriented];
+        if (length(candidate) > 128 || Math.hypot(trimmed.x - free.x, trimmed.y - free.y) > 96) continue;
+        const route = reverse ? candidate.reverse() : candidate;
+        if (prove(original, main, route, width)) return route;
+      }
+    }
+    return false;
+  };
+  const validateRemoval = (original: number, pendingRemoved: readonly number[]): boolean => {
+    refresh();
+    const ownerId = buildings[original]?.parcel;
+    const blockId = ownerId === undefined ? undefined : parcels[ownerId]?.block;
+    if (blockId === undefined || !blocks[blockId]
+      || pendingRemoved.some(i => !Number.isInteger(i) || i < 0 || i >= buildings.length)) return false;
+    const peers = buildings.map((b, i) => ({ b, i }))
+      .filter(({ b }) => b.parcel !== undefined && parcels[b.parcel]?.block === blockId);
+    if (!peers.some(({ i }) => i === original)) return false;
+    const removed = new Set([original, ...pendingRemoved]);
+    const before = blockReach(blocks[blockId], peers.map(({ b }) => b.poly), current);
+    const survivors = peers.filter(({ i }) => !removed.has(i));
+    const after = blockReach(blocks[blockId], survivors.map(({ b }) => b.poly), current);
+    return survivors.every(({ i }, j) => after[j] || !before[peers.findIndex(p => p.i === i)]);
+  };
+  return {
+    validateParts: (original: number, parts: Polygon[]) => { refresh(); return access(original, parts); },
+    validateRemoval,
+    proposePrivatePassage: prove,
+    connectPrivatePassage,
   };
 }
