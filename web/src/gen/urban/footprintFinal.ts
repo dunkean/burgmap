@@ -155,6 +155,27 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
     }
     if (proper(b.poly)) continue;
     if (!owner || !u.backLand) { invalid.push(i); continue; }
+    // A vertex can touch a distant edge exactly at a neighbouring roof seam.
+    // Filling the loop would claim that neighbour; remove only a small existing
+    // spur, with no added roof land and the owner/access proof intact.
+    if ((minNeck(b.poly)?.w ?? Infinity) < 1e-5) {
+      let fixed = false;
+      for (let vertex = 0; vertex < b.poly.length; vertex++) {
+        const candidate = b.poly.filter((_, j) => j !== vertex);
+        if (!proper(candidate) || area(candidate) < 0.95 * area(b.poly) || !polyInside(owner.poly, candidate)) continue;
+        const added = tryDifference(candidate, b.poly), freed = tryDifference(b.poly, candidate);
+        if (added.failed || freed.failed || mpArea(added.pieces) > 1e-6
+          || freed.pieces.some((p) => p.holes.length)
+          || Math.abs(area(candidate) + mpArea(freed.pieces) - area(b.poly)) > 1e-5
+          || (u.validateParts && !u.validateParts(i, [candidate]))) continue;
+        b.poly = candidate;
+        u.backLand.push(...freed.pieces);
+        releasedArea += mpArea(freed.pieces);
+        if (block !== undefined) changed.add(block);
+        fixed = true; break;
+      }
+      if (fixed) continue;
+    }
     let main = b.poly;
     const extra: Polygon[] = [], released: Polygon[] = [];
     for (let pass = 0; pass < 4 && !proper(main); pass++) {
