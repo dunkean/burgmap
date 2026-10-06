@@ -10,7 +10,7 @@ const distance = (a: Vec2, b: Vec2): number => Math.hypot(a.x - b.x, a.y - b.y);
 /** The caller supplies physical-clearance, all-owner-land and whole-block-access checks. */
 export function reconstructCompactRoom(poly: Polygon, owner: Polygon, occupied: Polygon[],
   front: [Vec2, Vec2] | undefined, clear: (candidate: Polygon) => boolean,
-  validate: (candidate: Polygon) => boolean): Polygon | null {
+  validate: (candidate: Polygon) => boolean, retainedLevels: readonly number[] = [0.85, 0.70]): Polygon | null {
   if (poly.length < 3 || owner.length < 3) return null;
   const oldArea = area(poly), oldCenter = polygonCentroid(poly);
   if (oldArea < 12 || !Number.isFinite(oldArea)) return null;
@@ -56,7 +56,7 @@ export function reconstructCompactRoom(poly: Polygon, owner: Polygon, occupied: 
   };
   // The 95% room search ran first. Try 85% before the finalizer's existing
   // 70% lower bound, while keeping the owner's full access contract.
-  for (const retained of [0.85, 0.70]) {
+  for (const retained of retainedLevels) {
     let trials = 0;
     for (const centre of centers) for (const axis of axes) for (const aspect of [1.5, 1, 2, 3]) {
       const v = { x: -axis.y, y: axis.x };
