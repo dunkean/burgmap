@@ -29,7 +29,7 @@ function ringFault(p: Polygon): Omit<AuditRing, 'layer' | 'building'> {
 function layersOf(w: World): { id: string; u: UrbanLayer }[] {
   const out: { id: string; u: UrbanLayer }[] = [];
   if (w.urban) out.push({ id: 'main', u: w.urban });
-  w.settlements?.forEach((s, i) => { if (s.urban && s.urban !== w.urban) out.push({ id: `settlement:${i}`, u: s.urban }); });
+  w.settlements?.forEach((s, i) => { if (!s.main && s.urban && s.urban !== w.urban) out.push({ id: `settlement:${i}`, u: s.urban }); });
   for (const [id, u] of Object.entries(w.megaDetail ?? {})) out.push({ id: `detail:${id}`, u });
   return out;
 }

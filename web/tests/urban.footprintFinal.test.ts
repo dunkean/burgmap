@@ -23,7 +23,8 @@ describe('last footprint pass', () => {
   it('releases the narrow arm of an L as accounted open land', () => {
     const l: Polygon = [{ x: 0, y: 0 }, { x: 12, y: 0 }, { x: 12, y: 2 },
       { x: 8, y: 2 }, { x: 8, y: 9 }, { x: 0, y: 9 }];
-    const u = { buildings: [{ poly: l, kind: 'house', parcel: 0 }], parcels: [{ poly: rect(-1, -1, 13, 10), use: 'plot', block: 5 }], backLand: [] as { outer: Polygon; holes: Polygon[] }[] };
+    const u = { buildings: [{ poly: l, kind: 'house', parcel: 0 }], parcels: [{ poly: rect(-1, -1, 13, 10), use: 'plot', block: 5 }],
+      backLand: [] as { outer: Polygon; holes: Polygon[] }[], tipConstrained: () => true };
     const initial = area(l);
     const result = finalizeFootprints(u);
     expect(result.invalid).toEqual([]);
@@ -37,13 +38,24 @@ describe('last footprint pass', () => {
   it('truncates only a disproportionate house tip inside its owner parcel', () => {
     const needle: Polygon = [{ x: 0, y: 0 }, { x: 24, y: 0 }, { x: 24, y: 10 }, { x: 0, y: 10 }, { x: -40, y: 5 }];
     const u = { buildings: [{ poly: needle, kind: 'house', parcel: 0 }],
-      parcels: [{ poly: rect(-41, -1, 25, 11), use: 'plot', block: 4 }], backLand: [] as { outer: Polygon; holes: Polygon[] }[] };
+      parcels: [{ poly: rect(-41, -1, 25, 11), use: 'plot', block: 4 },
+        { poly: rect(-44, 3, -41, 7), use: 'plot', block: 6 }], backLand: [] as { outer: Polygon; holes: Polygon[] }[],
+      tipConstrained: () => true };
     const result = finalizeFootprints(u);
     expect(result.changed.has(4)).toBe(true);
     expect(u.buildings).toHaveLength(1);
     expect(u.backLand).toHaveLength(1);
     expect(area(u.buildings[0].poly) + area(u.backLand[0].outer)).toBeCloseTo(area(needle), 6);
     expect(area(u.backLand[0].outer)).toBeLessThan(0.03 * area(needle));
+  });
+
+  it('keeps the whole pointed house at a dry open quarter edge', () => {
+    const needle: Polygon = [{ x: 0, y: 0 }, { x: 24, y: 0 }, { x: 24, y: 10 }, { x: 0, y: 10 }, { x: -40, y: 5 }];
+    const u = { buildings: [{ poly: needle, kind: 'house', parcel: 0 }],
+      parcels: [{ poly: rect(-41, -1, 25, 11), use: 'plot', block: 4 }], backLand: [] };
+    finalizeFootprints(u);
+    expect(u.buildings[0].poly).toEqual(needle);
+    expect(u.backLand).toEqual([]);
   });
 
   it('removes exact duplicate and retraced vertices without losing area at 20 km', () => {
