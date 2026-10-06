@@ -167,6 +167,18 @@ export interface UrbanStreet {
   role: StreetRole;
   phase: number;
 }
+export type UrbanStreetTailKind = 'regionalContinuation' | 'urbanJunction' | 'servedDeadEnd' | 'fieldOrFarmAccess' | 'physicalBarrier' | 'unservedOpenEdge';
+/** A classification of one physical street end; distances are metres along its original path. */
+export interface UrbanStreetTail {
+  street: number;
+  end: 'start' | 'end';
+  kind: UrbanStreetTailKind;
+  point: Vec2;
+  /** Last path distance required by an occupied parcel frontage or site entrance, from this end. */
+  servedFromEnd: number;
+  /** Visible public surface beyond the last service; zero for protected continuations. */
+  excess: number;
+}
 export interface UrbanBlockInfo {
   quarter: number; phase: number; zone: UrbanZone; kind: 'block' | 'place' | 'market' | 'church' | 'green' | 'compound' | 'shanty';
   /** Compound lots: the landmark kind (mosque, temple, castle, yamen, …). */
@@ -242,6 +254,10 @@ export interface UrbanQuarter { poly: PolyH; phase: number; zone: UrbanZone; str
 export interface UrbanLayer {
   footprint: Polygon[];
   streets: UrbanStreet[];
+  /** Network diagnosis in world coordinates, independent of rural land use and rendering order. */
+  openTails?: UrbanStreetTail[];
+  /** Exact public street space permitted to take the surrounding landscape material. */
+  openEdgeGround?: PolyH[];
   blocks: Polygon[];
   parcels: UrbanParcel[];
   buildings: UrbanBuilding[];
