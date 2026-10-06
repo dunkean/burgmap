@@ -238,13 +238,15 @@ describe('opaque landscape ground across settlement models', () => {
     }
     const gaps = differenceSafeS([piece(quarter.pts)], detail.blocks.map(piece));
     expect(mpArea(gaps)).toBeGreaterThan(0);
-    expect(mpArea(intersectionS(ground, gaps))).toBeLessThan(0.01);
+    const ordinaryGaps = differenceSafeS(gaps, detail.openEdgeGround ?? []);
+    expect(mpArea(intersectionS(ground, ordinaryGaps))).toBeLessThan(0.01);
+    expect(mpArea(intersectionS(ground, detail.openEdgeGround ?? []))).toBeGreaterThan(0);
     expect(mpArea(intersectionS(ground, quarter.pts))).toBeGreaterThan(100);
     const displayed = currentLandscapeGround(w, true), material = groundAppearance(detail, w);
     for (const poly of [...material.gardens, ...detail.parcels.filter((p) => p.use !== 'plot' && p.use !== 'hut-lot' && !material.naturalParcels.has(p.poly)).map((p) => piece(p.poly))]) {
       expect(mpArea(intersectionS(displayed, poly))).toBeLessThan(0.01);
     }
-    expect(mpArea(intersectionS(displayed, gaps))).toBeLessThan(0.01);
+    expect(mpArea(intersectionS(displayed, ordinaryGaps))).toBeLessThan(0.01);
     expect(buildScene(w).poly.get('u-landscape-ground')?.polys).toEqual(displayed.map((p) => p.outer));
     const svg = renderSvg(w, { ...opts, width: 1000, raster: false });
     expect(svg).toContain('class="u-landscape-ground"');
