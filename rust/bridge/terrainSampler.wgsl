@@ -96,8 +96,7 @@ fn height_at(xy: vec2<f32>) -> f32 {
     if(plateau){
       let t=clamp(edge/0.045,0.0,1.0);
       weight=t*t*t*(t*(6.0*t-15.0)+10.0)*plateauInfluence(uv*motif);
-    }else if(volcanicParams(2u).z==3.0){weight=canyonInfluence(uv*motif);}
-    else{weight=volcanoInfluence(uv*motif);}
+    }else{weight=volcanoInfluence(uv*motif);}
     if(weight==0.0){h=surroundings;}else{
       let foundation=filteredSurface((origin+motif*0.5)/map,motif*0.35/map,start);
       let local=filteredSurface(uv,cell/motif,0u)+foundation;

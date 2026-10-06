@@ -47,10 +47,7 @@ enum Relief {
 
 impl Relief {
     fn is_geological(self) -> bool {
-        matches!(
-            self,
-            Self::Plateau | Self::Volcano | Self::Caldera | Self::Canyon
-        )
+        matches!(self, Self::Plateau | Self::Volcano | Self::Caldera)
     }
 
     fn environment(value: &str) -> Result<Self, String> {
@@ -618,7 +615,6 @@ impl PlateauShape {
 enum FiniteShape {
     Plateau(PlateauShape),
     Volcano(VolcanoShape),
-    Canyon { width: f64, phase: f64 },
 }
 
 impl FiniteShape {
@@ -633,10 +629,6 @@ impl FiniteShape {
                 root.fork("volcano"),
                 relief == Relief::Caldera,
             ))),
-            Relief::Canyon => Some(Self::Canyon {
-                width: motif,
-                phase: root.fork("canyon-outline").range(0.0, 100.0),
-            }),
             _ => None,
         }
     }
@@ -645,14 +637,7 @@ impl FiniteShape {
         match self {
             Self::Plateau(shape) => shape.protection(x, y, erosion, noise, noise2),
             Self::Volcano(shape) => shape.protection(x, y, noise, noise2),
-            Self::Canyon { .. } => 1.0,
         }
-    }
-
-    fn canyon_influence(width: f64, phase: f64, x: f64, y: f64, noise: &Noise) -> f64 {
-        let radius = (x / width - 0.5).hypot(y / width - 0.5);
-        let outline = radius + 0.035 * noise.fbm(x / (width * 0.35) + phase, y / (width * 0.35), 3);
-        (1.0 - smooth((outline - 0.30) / 0.14)) * (1.0 - smooth((radius - 0.39) / 0.10))
     }
 }
 

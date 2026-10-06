@@ -73,7 +73,7 @@ vérification de compilation pour `wasm32-unknown-unknown`.
   volcan, caldeira ouverte, caverne**.
   Le canyon est de nouveau disponible : il naît d’une érosion massive sur un
   haut pays, avec des branches déterminées par les bassins versants.
-- **Alentours**, pour plateau, volcan, caldeira et canyon : plaine, collines,
+- **Alentours**, pour plateau, volcan et caldeira : plaine, collines,
   collines et montagnes, montagnes ou hautes montagnes. Le choix est conservé
   dans le lien (`environment=`), avec le mélange collines/montagnes par défaut.
   La forme locale et ses tirages restent indépendants du choix des alentours.
@@ -121,7 +121,7 @@ contrôle la dose qui le creuse ; à zéro, il reste un haut pays non incisé.
 Les alentours des formes géologiques suivent le relief choisi dans **Alentours**.
 Autour du plateau, leur taille de motif vaut 2,5 fois celle du plateau,
 sur CPU comme sur GPU. Autour des vallées, volcans et caldeiras, ce facteur
-vaut 2 ; autour du canyon, il vaut 1. La taille de la vallée et du cône reste indépendante. Le plateau
+vaut 2. La taille de la vallée et du cône reste indépendante. Le plateau
 garde une emprise initiale fixe quand la dose change. Son contour combine trois
 à sept lobes déformés, avec des baies concaves et parfois des mesas détachées.
 Son dessus conserve les anciens paliers, lobes secondaires, buttes et petits
@@ -130,11 +130,11 @@ ce même contour et cesse d’agir avant le bord du raster : aucune fondation ca
 Le raccord du volcan et de la caldeira suit également leur contour volcanique,
 avec un support circulaire qui s’annule avant les bords du champ local ; la
 fondation ne relève plus les coins du raster. CPU et GPU partagent ce masque.
-Le canyon occupe maintenant un haut pays local à l’échelle du motif : ses
-incisions restent calculées par drainage/érosion. Son raccord suit un contour
-irrégulier et préserve les creux du réseau au lieu de les remplir avec les
-montagnes environnantes. La fondation est échantillonnée à la position réelle
-de chaque forme. Les alentours en plaine utilisent le calcul Rust existant ;
+Le canyon est généré et érodé sur toute la carte, comme avant l’ajout du menu
+Alentours ; il ne reçoit ni masque local, ni fondation, ni déplacement de forme.
+Les anciens paramètres `environment=` sont ignorés pour ce relief.
+La fondation est échantillonnée à la position réelle des trois formes finies.
+Les alentours en plaine utilisent le calcul Rust existant ;
 les autres alentours et l’érosion locale utilisent le GPU en mode GPU. Le
 diagnostic de préparation distingue le temps de la plaine CPU du calcul GPU.
 Les collines ont une amplitude relevée de 10 % ; leur seuil d’incision suit
@@ -204,7 +204,7 @@ La façade expose un appel complet :
 const engine = new TerrainEngine(seed, mapWidth, relief, erosion, motifSize, mountainMix, environment);
 // mountainMix : 0 à 1, facultatif (0.5 par défaut), utilisé pour relief="mixed".
 // environment : "flat" | "hills" | "mixed" | "mountains" | "high-mountains",
-// facultatif ("mixed" par défaut), utilisé pour les quatre formes géologiques.
+// facultatif ("mixed" par défaut), utilisé pour plateau, volcan et caldeira.
 const region = engine.sample_region(x, y, extent, resolution);
 // getters : x, y, width (= extent), resolution, min_height, max_height,
 //           height: Float32Array, cave_mask: Uint8Array,

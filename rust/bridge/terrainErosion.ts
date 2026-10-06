@@ -35,14 +35,11 @@ class ConvergenceError extends Error {}
 
 /** All simulation state stays on the device; only the final physical raster is read. */
 export async function generateGpuTerrain(state: Context, settings: TerrainSettings, timing?: { nativeEnvironmentMs: number }): Promise<Float32Array> {
-  if (settings.relief === 'volcano' || settings.relief === 'caldera' || settings.relief === 'plateau' || settings.relief === 'canyon') {
-    let shape: Float32Array | undefined;
-    if (settings.relief !== 'canyon') {
-      const plan = GenerationNoisePlan.finite_shape(settings.seed, settings.motifSize, settings.relief, settings.erosion);
-      shape = plan.parameters(); plan.free();
-    }
+  if (settings.relief === 'volcano' || settings.relief === 'caldera' || settings.relief === 'plateau') {
+    const plan = GenerationNoisePlan.finite_shape(settings.seed, settings.motifSize, settings.relief, settings.erosion);
+    const shape = plan.parameters(); plan.free();
     const environment = settings.environment ?? 'mixed';
-    const motif = settings.motifSize * (shape?.[15] ?? 1);
+    const motif = settings.motifSize * shape[15];
     // Plains retain the native analytic/shape-erosion path; geological erosion stays GPU.
     let background: Float32Array;
     if (environment === 'flat') {

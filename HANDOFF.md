@@ -5,7 +5,21 @@ bugs and their evidence are recorded in [ROADMAP.md](ROADMAP.md).
 
 ## Current status
 
-- Geological surroundings and placement (2026-10-07): user validated the volcanic
+- Canyon rollback (2026-10-07): user rejected the finite canyon as a cut plateau.
+  Canyon again generates and erodes its original regional field over the whole
+  map on Rust CPU and WGSL GPU, without a finite contour, foundation or placement
+  offset. Alentours now appears only for plateau, volcano and caldera; old canyon
+  environment= links are ignored and normalized. Three GPU canyon surroundings
+  probes yield identical full-map fields; native canyon also ignores an invalid
+  environment. CPU/GPU sampling differs by at most 0.25 mm. The three retained
+  geological fields match the preceding implementation exactly. Native fmt,
+  Clippy, WASM checks, typecheck, independent app/bench and standalone terrain
+  builds pass. Dev/offline canyon starts and reaches GPU detail without console
+  errors, with Alentours hidden; volcano retains the control. Evidence:
+  web/out/canyon-rollback/. No suites or screenshots; user visual assessment of
+  this rollback remains pending. This supersedes the finite canyon below.
+
+- Initial geological surroundings and placement (2026-10-07): user validated the volcanic
   square repair and the new UI/terrain behavior, then authorized merge/commit/push.
   Plateau, volcano, caldera and canyon offer Alentours: flat/hills/mixed/mountains/
   high-mountains, replayed through environment= (mixed by default). A dedicated

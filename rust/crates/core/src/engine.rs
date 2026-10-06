@@ -146,7 +146,11 @@ impl TerrainGenerator {
             return Err("Le niveau d’érosion doit être compris entre 0 et 2.".into());
         }
         let kind = Relief::parse(relief)?;
-        let environment = environment.unwrap_or("mixed");
+        let environment = if kind.is_geological() {
+            environment.unwrap_or("mixed")
+        } else {
+            "mixed"
+        };
         Relief::environment(environment)?;
         let mountain_mix = if kind == Relief::Mixed {
             mountain_mix
@@ -156,7 +160,7 @@ impl TerrainGenerator {
         let erosion = if kind == Relief::Cavern { 0.0 } else { erosion };
         let finite = matches!(
             kind,
-            Relief::Plateau | Relief::Volcano | Relief::Caldera | Relief::Canyon | Relief::Cavern
+            Relief::Plateau | Relief::Volcano | Relief::Caldera | Relief::Cavern
         );
         let source_relief = if kind == Relief::Valley {
             "mixed"
@@ -390,24 +394,6 @@ impl TerrainGenerator {
                     .iter()
                     .map(|&v| v as f64),
             ),
-            Some(FiniteShape::Canyon { width, phase }) => values.extend([
-                width * 0.5,
-                width * 0.5,
-                width * 0.48,
-                1.0,
-                1.0,
-                0.0,
-                0.0,
-                0.0,
-                *phase,
-                width / 2400.0,
-                3.0,
-                self.amp,
-                0.0,
-                0.0,
-                0.0,
-                self.relief.environment_scale(),
-            ]),
             None => {}
         }
         if self.relief.is_geological() {
@@ -584,7 +570,7 @@ impl TerrainGenerator {
                 let floor = self.amp * (0.08 + 0.035 * fbm(&self.noise2, x, y, 480.0 * scale, 3));
                 floor + self.amp * smooth(distance / 0.035)
             }
-            Relief::Plateau | Relief::Volcano | Relief::Caldera | Relief::Canyon => {
+            Relief::Plateau | Relief::Volcano | Relief::Caldera => {
                 let px = (x - self.feature_origin.0) / self.motif;
                 let py = (y - self.feature_origin.1) / self.motif;
                 let edge = px.min(1.0 - px).min(py).min(1.0 - py);
@@ -601,13 +587,6 @@ impl TerrainGenerator {
                     FiniteShape::Volcano(shape) => {
                         shape.influence(px * self.motif, py * self.motif, &self.noise, &self.noise2)
                     }
-                    FiniteShape::Canyon { width, phase } => FiniteShape::canyon_influence(
-                        *width,
-                        *phase,
-                        px * self.motif,
-                        py * self.motif,
-                        &self.noise,
-                    ),
                 };
                 let surroundings = self.regional(&self.background, x, y, footprint);
                 if weight == 0.0 {
@@ -618,7 +597,7 @@ impl TerrainGenerator {
                     // surroundings; smooth union blends gradients over a physical apron.
                     let foundation = if matches!(
                         self.relief,
-                        Relief::Volcano | Relief::Caldera | Relief::Plateau | Relief::Canyon
+                        Relief::Volcano | Relief::Caldera | Relief::Plateau
                     ) {
                         self.regional(
                             &self.background,
@@ -666,7 +645,8 @@ impl TerrainGenerator {
             | Relief::Mountains
             | Relief::Mixed
             | Relief::HighMountains
-            | Relief::Valley => {
+            | Relief::Valley
+            | Relief::Canyon => {
                 let terrain = self.regional(&self.source, x, y, footprint);
                 if self.relief == Relief::Valley {
                     let (along, across) = self.channel_coordinates(x, y);

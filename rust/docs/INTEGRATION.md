@@ -37,7 +37,7 @@ Les collines gagnent 10 % d’amplitude ; leur érosion de surface suit un seuil
 de pente adapté au relief. Les alentours du plateau sont à une échelle ×2,5 ;
 ceux des vallées, volcans et caldeiras à ×2. Les formes centrales gardent
 leur propre motif, et le plateau ne change plus d’emprise avec la dose.
-Les plateaux, volcans, caldeiras et canyons génèrent et érodent leur forme locale
+Les plateaux, volcans et caldeiras génèrent et érodent leur forme locale
 sur GPU FP32. Leurs alentours sont sélectionnables : plaine, collines, mixte,
 montagnes ou hautes montagnes (`environment=`, mixte par défaut). La plaine
 conserve son calcul Rust existant, séparé dans les diagnostics de temps ; les
@@ -53,12 +53,13 @@ Le raccord volcan/caldeira suit leur contour bruité et s’annule sur un suppor
 circulaire avant les bords du champ local, sur CPU comme GPU. Il supprime aussi
 la fondation carrée de la graine `1fc2unq` (12,5 km, motif 7,5 km, érosion 1,21),
 sans modifier le plateau.
-Les quatre formes ont une origine géographique décalée par un fork RNG dédié
+Les trois formes ont une origine géographique décalée par un fork RNG dédié
 (`geological-placement`), avec une marge quand le motif tient dans la carte.
 Elle reste identique quand seuls les alentours ou la dose changent. La fondation
-utilise cette origine réelle. Le canyon est maintenant un haut pays fini à
-l’échelle du motif, avec un contour irrégulier et ses dépressions protégées ;
-son réseau continue de venir du drainage et de l’incision des grandes rivières.
+utilise cette origine réelle. Le canyon conserve son champ régional sur toute
+la carte et son réseau issu du drainage et de l’incision des grandes rivières.
+Il ne reçoit ni raccord de forme finie, ni déplacement de source, ni alentours
+sélectionnables ; les anciens paramètres `environment=` sont ignorés pour lui.
 Les formes finies sont posées sur une fondation filtrée de l’environnement et
 gardent leur bassin/sommet intact. La brèche rejoint progressivement l’extérieur.
 Le détail régional au zoom révèle la surface préparée sans octave supplémentaire

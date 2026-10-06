@@ -15,16 +15,9 @@ fn volcanoOpening(g:vec3<f32>)->f32 {
   return (1.0-smooth01((angle-b.w*0.40)/(b.w*0.60)))*smooth01((g.x/g.y-0.30)/0.30);
 }
 fn volcanoProtection(xy:vec2<f32>)->f32 {
-  if(volcanicParams(2u).z==3.0){return 1.0;}
   if(volcanicParams(2u).z==2.0){return 1.0-smooth01((plateauBoundary(xy).y+0.03)/0.10);}
   let g=volcanoGeometry(xy);
   return (1.0-smooth01((g.x-g.y)/(g.y*0.12)))*(1.0-volcanoOpening(g));
-}
-fn canyonInfluence(xy:vec2<f32>)->f32 {
-  let c=volcanicParams(2u);let width=2400.0*c.y;
-  let radius=length(xy/width-0.5);
-  let outline=radius+0.035*fbm(xy/(width*0.35)+vec2<f32>(c.x,0.0),0u,3u,0.5,0.0);
-  return (1.0-smooth01((outline-0.30)/0.14))*(1.0-smooth01((radius-0.39)/0.10));
 }
 fn volcanoInfluence(xy:vec2<f32>)->f32 {
   let c=volcanicParams(2u);let g=volcanoGeometry(xy);

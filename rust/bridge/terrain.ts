@@ -5,7 +5,7 @@ import { generateGpuTerrain } from './terrainErosion';
 
 export const RELIEFS = ['flat', 'hills', 'valley', 'canyon', 'mountains', 'mixed', 'plateau', 'high-mountains', 'volcano', 'caldera', 'cavern'] as const;
 export type TerrainRelief = typeof RELIEFS[number];
-export const GEOLOGICAL_RELIEFS = ['plateau', 'volcano', 'caldera', 'canyon'] as const;
+export const GEOLOGICAL_RELIEFS = ['plateau', 'volcano', 'caldera'] as const;
 export const ENVIRONMENT_RELIEFS = ['flat', 'hills', 'mixed', 'mountains', 'high-mountains'] as const;
 export type TerrainEnvironment = typeof ENVIRONMENT_RELIEFS[number];
 export const COMPUTE_MODES = ['wasm', 'gpu-f32'] as const;

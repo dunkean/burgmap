@@ -26,7 +26,7 @@ export async function prepareGpu(mode: TerrainCompute, relief: string): Promise<
   if (mode === 'wasm') return;
   const state = await context();
   if (!state || state.lost) return;
-  const family = relief === 'flat' ? 0 : relief === 'valley' ? 2 : relief === 'volcano' || relief === 'caldera' || relief === 'plateau' || relief === 'canyon' ? 3 : 1;
+  const family = relief === 'flat' ? 0 : relief === 'valley' ? 2 : relief === 'volcano' || relief === 'caldera' || relief === 'plateau' ? 3 : 1;
   const key = `${mode}:${family}`;
   let pipeline = state.pipelines.get(key);
   if (!pipeline) {
