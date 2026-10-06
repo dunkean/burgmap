@@ -137,8 +137,15 @@ export function minNeck(p: Polygon): { w: number; a: Vec2; b: Vec2 } | null {
       const b = { x: c.x + t * dx, y: c.y + t * dy };
       const w = dist(a, b);
       if (best && w >= best.w) continue;
-      const inside = [0.2, 0.5, 0.8].every((f) => pointInRing(p, { x: a.x + f * (b.x - a.x), y: a.y + f * (b.y - a.y) }));
-      if (inside) best = { w, a, b };
+      const inside = [0.05, 0.2, 0.4, 0.6, 0.8, 0.95].every((f) => pointInRing(p, { x: a.x + f * (b.x - a.x), y: a.y + f * (b.y - a.y) }));
+      if (!inside) continue;
+      let crossed = false;
+      for (let k = 0; k < p.length; k++) {
+        if (k === i || (k + 1) % p.length === i || k === j) continue;
+        const hit = segSegT(a, b, p[k], p[(k + 1) % p.length]);
+        if (hit && hit.t > 1e-5 && hit.t < 1 - 1e-5 && hit.u > 1e-5 && hit.u < 1 - 1e-5) { crossed = true; break; }
+      }
+      if (!crossed) best = { w, a, b };
     }
   }
   return best;

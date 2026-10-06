@@ -531,7 +531,11 @@ export function finishEdgeRoofs(input: EdgeRoofPartition): { grown: number; fitt
   const boundaries = input.quarters.map((q) => q.lp.pts.map((a, i) => ({ a, b: q.lp.pts[(i + 1) % q.lp.pts.length], lab: q.lp.lab[i] })));
   const streetAt = makeStreetAt(input.streets.list.filter((s) => s.ribbon).map((s) => ({ path: s.path, widths: s.widths, width: s.widths[0] })), input.parcels.filter((p) => ['place', 'market', 'quay', 'green'].includes(String(p.use))).map((p) => p.poly));
   for (const [index, b] of input.buildings.entries()) {
-    if (b.parcel === undefined || !input.eligible(b.parcel) || !['house', 'rear', 'back', 'barn', 'shed'].includes(b.kind) || b.courtyards?.length || !['gable', 'hip', 'flat'].includes(b.roof ?? '') || !isConvex(b.poly, 1e-3)) continue;
+    if (b.parcel === undefined || !input.eligible(b.parcel) || !['house', 'rear', 'back', 'barn', 'shed'].includes(b.kind) || b.courtyards?.length || !['gable', 'hip', 'flat'].includes(b.roof ?? '')) continue;
+    const convexRoof = isConvex(b.poly, 1e-3);
+    // Concave homes at a dry open edge may grow as a single complete roof. The ownership,
+    // water, neighbour and access proofs below still decide whether the envelope is safe.
+    if (!convexRoof && !input.allowGrowth) continue;
     const ownFrame = obb(b.poly);
     if (4 * ownFrame.hu * ownFrame.hv - area(b.poly) <= 0.02) continue;
     const parcel = input.parcels[b.parcel];
@@ -547,6 +551,7 @@ export function finishEdgeRoofs(input: EdgeRoofPartition): { grown: number; fitt
       return Math.hypot(z.x - a.x, z.y - a.y) >= 1 && [a, z, m].every((p) => distToSeg(p, e.a, e.b) <= tolerance);
     }));
     if (!contacts.length) continue;
+    if (!convexRoof && !contacts.some((e) => e.lab === LAB_OPEN)) continue;
     const peers = byBlock.get(bi)!;
     const beforeReach = reachByBlock.get(bi) ?? blockReach(input.blocks[bi].poly, peers.map((p) => p.b.poly), streetAt);
     reachByBlock.set(bi, beforeReach);
@@ -604,6 +609,9 @@ export function finishEdgeRoofs(input: EdgeRoofPartition): { grown: number; fitt
       if (expanded) break;
     }
     if (expanded) continue;
+    // A failed concave growth remains the original dwelling. An inset rectangle would
+    // discard its legitimate wings even where there is no neighbour beyond the edge.
+    if (!convexRoof) { constrained++; unresolved.push(index); continue; }
     // A wall, water bank or occupied neighbour keeps its real boundary. Fit an intact rectangle on the inside.
     let fittedHere = false;
     for (const fittedRoof of fittedRoofs(b.poly, parcel.poly, parcel.front, contacts.map((e) => [e.a, e.b]))) {
