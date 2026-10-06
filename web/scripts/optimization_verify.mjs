@@ -153,12 +153,14 @@ try {
     await page.screenshot({ path: resolve(out, `${mode}-style.png`) });
     // Two real generation requests; require the latest requested generation to be presented.
     // The synchronous refused-Worker path cannot overlap its calculations.
-    await page.click('#newMap');
+    await page.click('#newMap', { timeout: 180000 });
     await page.waitForFunction(({ gen, allowCompleted }) => window.__burgmap.rendering().gen > gen
       && (allowCompleted || !window.__burgmap.rendering().ready),
       { gen: initial.rendering.gen, allowCompleted: ['refused', 'offline'].includes(mode) }, { timeout: 60000 });
     const firstRun = await page.evaluate(() => window.__burgmap.rendering().gen);
-    await page.click('#newMap');
+    // In the synchronous fallback a dense town can still occupy the main
+    // thread when this second input arrives. Use the same bound as readiness.
+    await page.click('#newMap', { timeout: 180000 });
     await page.waitForFunction(gen => window.__burgmap.rendering().gen > gen, firstRun, { timeout: 60000 });
     const target = await page.evaluate(() => window.__burgmap.rendering().gen);
     await ready(page); await paint(page);
