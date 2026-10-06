@@ -5,11 +5,11 @@ import type { UrbanCtx } from './context';
 import type { Quarter } from './primary';
 import type { Streets } from './streets';
 import { LAB_OPEN, LAB_WALL } from './streets';
-import { area, bboxOf, distToSeg, distToRing, isSimple, obb, orientPos, pointInRing } from '../geo/poly';
+import { area, bboxOf, convexHull, distToSeg, distToRing, isSimple, obb, orientPos, pointInRing } from '../geo/poly';
 import { isConvex, polyInside } from '../geo/split';
 import { union, tryDifference, tryIntersection, prepareIntersection, mpArea, type MultiPoly } from '../geo/bool';
 import { openHoles } from './plots';
-import { blockReach, makeStreetAt } from './access';
+import { blockReach, makeStreetAt, shapeOkObb } from './access';
 import { MIN_BW, MAX_ASPECT } from './buildings';
 import { PolygonIndex } from './polygonIndex';
 import { makeHullRectangleOverlap } from './roofRetention';
@@ -782,14 +782,19 @@ export function finishEdgeRoofs(input: EdgeRoofPartition): { grown: number; fitt
       const envelope = roofEnvelope(b.poly, axis), rounded = roundedGrowthEnvelope(b.poly, axis);
       return rounded ? [envelope, rounded] : [envelope];
     });
-    for (const roof of [...envelopes, ...rounded, ...edgeEnvelopes]) {
+    // A clipped concave roof can need a modest polygonal infill while every full
+    // rectangle would more than double its area. Its convex hull keeps the whole
+    // existing house and still passes the same exterior/ownership/access proofs.
+    const hull = isConvex(b.poly, 1e-3) ? null : convexHull(b.poly);
+    for (const roof of [...envelopes, ...rounded, ...edgeEnvelopes, ...(hull ? [hull] : [])]) {
       if (!withinGrowthLimit(roof)) continue;
       const oldArea = area(b.poly), delta = area(roof) - oldArea;
       const width = Math.hypot(roof[1].x - roof[0].x, roof[1].y - roof[0].y);
       const depth = Math.hypot(roof[2].x - roof[1].x, roof[2].y - roof[1].y);
       // This is the existing exterior-growth allowance, not the smaller inside-lot transfer allowance.
-      if (delta <= 0.02 || delta > oldArea || Math.min(width, depth) < MIN_BW
-        || Math.max(width, depth) / Math.min(width, depth) > MAX_ASPECT || !isSimple(roof)) continue;
+      const useful = roof === hull ? shapeOkObb(roof)
+        : Math.min(width, depth) >= MIN_BW && Math.max(width, depth) / Math.min(width, depth) <= MAX_ASPECT;
+      if (delta <= 0.02 || delta > oldArea || !useful || !isSimple(roof)) continue;
       const lostRoof = tryDifference(b.poly, roof), claim = tryDifference(roof, parcel.poly);
       const exterior = tryDifference(roof, input.footprint), extra = tryDifference(roof, quarter.lp.pts);
       if (lostRoof.failed || claim.failed || exterior.failed || extra.failed || mpArea(lostRoof.pieces) > 1e-6
