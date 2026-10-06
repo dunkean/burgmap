@@ -1,10 +1,10 @@
 /** Shared open-edge finishing for eager settlements and independent lazy quarters. */
 import type { PolyH, Polygon, UrbanBuilding, UrbanLayer, UrbanParcel, UrbanStreet, Vec2 } from '../types';
-import { bboxOf, distToSeg, pointInRing } from '../geo/poly';
+import { bboxOf, distToSeg, inscribed, pointInRing } from '../geo/poly';
 import { GridIndex } from '../geo/spatial';
 import { LAB_OPEN } from './streets';
 import { blockReach, type StreetAt } from './access';
-import { unionMany, tryIntersection, mpArea } from '../geo/bool';
+import { unionMany, tryDifference, tryIntersection, mpArea } from '../geo/bool';
 import { ribbon } from '../geo/offset';
 import type { Plot } from './plots';
 import { naturalGroundEligible } from '../landuse/urbanGround';
@@ -74,19 +74,36 @@ export function footprintAccessGuard(buildings: UrbanBuilding[], parcels: UrbanP
   };
 }
 
-/** A relocated roof must avoid the full physical reserve, not just sample its corners. */
-export function footprintPlacementGuard(protectedLand: PolyH[], unsafe: (point: Vec2) => boolean): (poly: Polygon) => boolean {
+/** A relocated roof may retain a sub-2 cm physical seam, but cannot enlarge or move it. */
+export function footprintPlacementGuard(protectedLand: PolyH[], unsafe: (point: Vec2) => boolean): (poly: Polygon, original?: Polygon) => boolean {
   const index = new GridIndex<number>(24), large: number[] = [];
   protectedLand.forEach((p, i) => {
     const b = bboxOf(p.outer);
     if ((1 + (b.x1 - b.x0) / 24) * (1 + (b.y1 - b.y0) / 24) > 1024) large.push(i);
     else index.insertPts(p.outer, i);
   });
-  return (poly) => {
+  return (poly, original) => {
     if (poly.length < 3 || poly.some(p => !Number.isFinite(p.x) || !Number.isFinite(p.y) || unsafe(p))) return false;
     const box = bboxOf(poly);
-    const hit = tryIntersection(poly, [...new Set([...index.query(box.x0, box.y0, box.x1, box.y1), ...large])].map(i => protectedLand[i]));
-    if (hit.failed || mpArea(hit.pieces) > 1e-6) return false;
+    const nearby = [...new Set([...index.query(box.x0, box.y0, box.x1, box.y1), ...large])];
+    const hit = tryIntersection(poly, nearby.map(i => protectedLand[i]));
+    if (hit.failed) return false;
+    if (mpArea(hit.pieces) > 1e-6) {
+      if (!original || original.length < 3) return false;
+      for (const i of nearby) {
+        const candidateHit = tryIntersection(poly, protectedLand[i]);
+        if (candidateHit.failed) return false;
+        const candidateArea = mpArea(candidateHit.pieces);
+        if (candidateArea <= 1e-6) continue;
+        const originalHit = tryIntersection(original, protectedLand[i]);
+        if (originalHit.failed || !originalHit.pieces.length) return false;
+        const originalArea = mpArea(originalHit.pieces);
+        if (candidateArea > originalArea + 1e-6 || originalHit.pieces.some(p =>
+          2 * inscribed(p.outer, p.holes, 0.0001, 0.0101).r > 0.0201)) return false;
+        const added = tryDifference(candidateHit.pieces, originalHit.pieces);
+        if (added.failed || mpArea(added.pieces) > 1e-6) return false;
+      }
+    }
     for (let y = box.y0; y <= box.y1; y += 2) for (let x = box.x0; x <= box.x1; x += 2) {
       const p = { x, y };
       if (pointInRing(poly, p) && unsafe(p)) return false;
