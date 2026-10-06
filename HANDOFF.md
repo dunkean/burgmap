@@ -5,6 +5,25 @@ bugs and their evidence are recorded in [ROADMAP.md](ROADMAP.md).
 
 ## Current status
 
+- Published house rollback / parcel bench (2026-10-06): source `3cd49a2` is
+  integrated on master, pushed to remote main and released as
+  `house-programme-rollback-2026-10-06`. GitHub Pages `bc2755e` built successfully;
+  live version.json identifies `3cd49a2a5c26a13f423591ad73f5b327aa88c310`.
+  Application, testbench and guide match the validated files byte for byte.
+  Live/offline desktop/mobile bench workflows pass; switching the live bench
+  default → experiment → default retains every parcel and restores identical
+  original roofs. Release assets include offline app, bench, guide, revision
+  and SHA256SUMS. The 76 focused regressions/typecheck/build evidence stands;
+  the exhaustive full suite remains deferred.
+  Cleanup removed five secondary worktrees and 33 obsolete local branches after
+  verified ZIP backups and an all-ref Git bundle. Only the primary worktree
+  remains. Three branches with unique unintegrated commits remain:
+  fix/building-fabric-20261006, fix/estuary-water, fix/secondary-triangles-20261006.
+  Backup/manifest: E:/CodexArtifacts/city-generator-2026-10-06/archive/
+  house-rollback-release-20261006/. The separate Rust preparation remains local.
+  Release evidence: web/out/house-rollback-release/.
+
+
 - House programme rollback (2026-10-06, latest user request): production
   `buildPlot` and `burgageHouse` again use HEAD e34f667's pre-experiment programme.
   The new cutPlots/cutCourtyards geometry and parcel metadata remain unchanged.
