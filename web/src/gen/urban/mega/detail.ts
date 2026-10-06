@@ -25,7 +25,7 @@ import { buildOn, type ArchBldg } from '../bops';
 import { chamferPersianHouse } from '../persianhouse';
 import { finishEdgeRoofs } from '../edgeRoofs';
 import { finalizeFootprints } from '../footprintFinal';
-import { finishOpenEdges, markPlannedTerminalPlots } from '../edgeFinish';
+import { finishOpenEdges, markPlannedTerminalPlots, physicalTipConstraint, openQuarterEdge } from '../edgeFinish';
 import { naturalGroundEligible } from '../../landuse/urbanGround';
 import { streetStrips } from '../openfringe';
 import { blockReach, carvePassage, makeStreetAt, splitLong, frontRangeDepth, shapeOkObb } from '../access';
@@ -417,20 +417,23 @@ export function megaQuarterDetail(world: World, key: number): UrbanLayer | null 
   });
   // Macro frames stay immutable. Finish only after the actual fences, ward walls and lot curtains exist,
   // so moving a rectangle inside its lot cannot occupy their reserved ground.
-  finishEdgeRoofs({
-    ctx, quarters: [q], blocks: carved, quarterOf: () => 0, parcels, buildings, streetSpace: [cr.streetSpace],
-    footprint: [{ outer: q.lp.pts, holes: [] }], gardens: plotGardens, streets: local,
-    protectedLand: [
+  const detailProtectedLand: PolyH[] = [
       ...ctx.water, ...waterPieces,
       ...local.list.filter((s) => s.ribbon).flatMap((s) => streetStrips(s.path, s.widths)),
       ...[...(host.walls ?? []), ...walls].flatMap((w) => streetStrips(w.closed && w.path.length ? w.path.concat([w.path[0]]) : w.path, w.thickness)),
       ...lines.filter((l) => /wall|fence|palisade|rampart|barbican|hedge/.test(l.kind)).flatMap((l) => streetStrips(l.closed && l.path.length ? l.path.concat([l.path[0]]) : l.path, l.width ?? 1)),
-    ],
+    ];
+  finishEdgeRoofs({
+    ctx, quarters: [q], blocks: carved, quarterOf: () => 0, parcels, buildings, streetSpace: [cr.streetSpace],
+    footprint: [{ outer: q.lp.pts, holes: [] }], gardens: plotGardens, streets: local,
+    protectedLand: detailProtectedLand,
     allowGrowth: false,
     eligible: (pi) => parcels[pi].use === 'plot' && ['streetFrontRow', 'detached', 'machiya', 'giebelhaus', 'yardHouse', 'shopRow'].includes(P.buildingOp),
   });
   const releasedFootprintLand: PolyH[] = [];
-  finalizeFootprints({ buildings, parcels, backLand: releasedFootprintLand });
+  finalizeFootprints({ buildings, parcels, backLand: releasedFootprintLand,
+    tipConstrained: physicalTipConstraint(detailProtectedLand, ctx.isWater),
+    openQuarterEdge: openQuarterEdge(M.quarters) });
   const perBlock: Polygon[][] = carved.map(() => []);
   for (const b of buildings) if (b.parcel !== undefined) perBlock[parcels[b.parcel].block].push(b.poly);
   const masses: PolyH[] = [];

@@ -4,7 +4,8 @@ import type { Plot } from '../src/gen/urban/plots';
 import { pointInRing } from '../src/gen/geo/poly';
 import { clipUrban } from '../src/gen/settlements/urban';
 import { mergeUrban } from '../src/gen/settlements/merge';
-import { markPlannedTerminalPlots } from '../src/gen/urban/edgeFinish';
+import { markPlannedTerminalPlots, openQuarterEdge, physicalTipConstraint } from '../src/gen/urban/edgeFinish';
+import { LAB_OPEN } from '../src/gen/urban/streets';
 
 const rect = (x0: number, y0: number, x1: number, y1: number): Polygon => [
   { x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 },
@@ -56,5 +57,18 @@ describe('open-edge integration', () => {
     markPlannedTerminalPlots(plots, u.streets, [{ outer: rect(0, 0, 100, 100), holes: [] }], {});
     expect(plots).toHaveLength(1);
     expect(plots[0].terminal).toBe(true);
+  });
+
+  it('distinguishes an empty exterior from a neighbouring quarter and physical water or paving', () => {
+    const open = openQuarterEdge([
+      { pts: rect(0, 0, 100, 100), lab: [LAB_OPEN, LAB_OPEN, LAB_OPEN, LAB_OPEN] },
+      { pts: rect(100, 0, 200, 100), lab: [LAB_OPEN, LAB_OPEN, LAB_OPEN, LAB_OPEN] },
+    ]);
+    expect(open({ x: 100, y: 50 }, { x: 1, y: 0 })).toBe(false);
+    expect(open({ x: 0, y: 50 }, { x: -1, y: 0 })).toBe(true);
+    const physical = physicalTipConstraint([{ outer: rect(-10, 40, 0, 60), holes: [] }], (p) => p.y < 0);
+    expect(physical({ x: 0, y: 50 }, { x: -1, y: 0 })).toBe(true);
+    expect(physical({ x: 30, y: 0 }, { x: 0, y: -1 })).toBe(true);
+    expect(physical({ x: 0, y: 80 }, { x: -1, y: 0 })).toBe(false);
   });
 });

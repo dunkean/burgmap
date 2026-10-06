@@ -75,7 +75,7 @@ import { servedFootprint } from './footprint';
 import { finishEdgeRoofs } from './edgeRoofs';
 import { repairResidentialDensity } from './densityRepair';
 import { finalizeFootprints } from './footprintFinal';
-import { finishOpenEdges, markPlannedTerminalPlots } from './edgeFinish';
+import { finishOpenEdges, markPlannedTerminalPlots, physicalTipConstraint, openQuarterEdge } from './edgeFinish';
 
 export interface UrbanResult { layer: UrbanLayer; stats: Record<string, number | string>; debug: UrbanDebug }
 export interface UrbanDebug { quarters: { poly: Polygon; phase: number; lab: number[] }[] }
@@ -1108,7 +1108,9 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   // inside existing plots after roof styling, preserving every planning frame and the seeded dwelling counts.
   const densityRepair = repairResidentialDensity({ ...edgePartition, morphology: (bi: number) => blockMorph[bi] });
   const releasedFootprintLand: PolyH[] = [];
-  const footprintFinal = finalizeFootprints({ buildings, parcels, backLand: releasedFootprintLand });
+  const footprintFinal = finalizeFootprints({ buildings, parcels, backLand: releasedFootprintLand,
+    tipConstrained: physicalTipConstraint(edgePartition.protectedLand, ctx.isWater),
+    openQuarterEdge: openQuarterEdge(prim.quarters.map((q) => q.lp)) });
   stats['footprint.cleaned'] = footprintFinal.cleaned;
   stats['footprint.invalid'] = footprintFinal.invalid.length;
   stats['footprint.releasedArea'] = footprintFinal.releasedArea;
