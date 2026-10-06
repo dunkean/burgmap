@@ -2,7 +2,7 @@
 import type { Polygon, Vec2 } from '../core/geom';
 import type { UrbanBuilding, UrbanParcel } from '../types';
 import type { PolyH } from '../geo/bool';
-import { area, bboxOf, cleanRing, isSimple, interiorAngle, minAngle, minNeck, inscribed } from '../geo/poly';
+import { area, bboxOf, cleanRing, isSimple, interiorAngle, minAngle, minNeck, inscribed, obb } from '../geo/poly';
 import { isConvex, lpoly, polyInside, splitByChord } from '../geo/split';
 import { GridIndex } from '../geo/spatial';
 import { distToRing, pointInRing } from '../geo/poly';
@@ -11,6 +11,7 @@ import { splitLong } from './access';
 import { mpArea, tryDifference, tryIntersection } from '../geo/bool';
 import { reconstructRoom } from './roomReconstruct';
 import { reconstructCompactRoom } from './compactRoom';
+import { reconstructSmallPlotRoom } from './smallPlotRoom';
 
 export interface FootprintFinalInput {
   buildings: UrbanBuilding[];
@@ -27,12 +28,22 @@ export interface FootprintFinalInput {
   validateParts?: (originalIndex: number, parts: Polygon[]) => boolean;
   /** Prove a proposed in-owner relocation misses water, roads, walls and other reserves. */
   placementClear?: (poly: Polygon, original?: Polygon) => boolean;
+  /** Read-only proof of a real private path through a released, unusable roof arm. */
+  proposePrivatePassage?: (originalIndex: number, main: Polygon, path: Vec2[], width: number) => boolean;
+  /** Accepted paths are appended only when the corresponding roof transaction commits. */
+  privatePassages?: PrivatePassage[];
 }
+export interface PrivatePassage { path: Vec2[]; width: number; parcel: number }
 export interface FootprintFinalResult { changed: Set<number>; invalid: number[]; cleaned: number; releasedArea: number }
 
 function proper(p: Polygon): boolean {
   if (p.length < 3 || !isSimple(p) || area(p) < 12) return false;
   if (p.length === 3) return 2 * inscribed(p, [], 0.02).r >= 3.2 && minAngle(p) >= 20 * Math.PI / 180;
+  if (area(p) <= 50 && p.length <= 6 && isConvex(p, 1e-3) && minAngle(p) >= Math.PI / 3) {
+    const box = obb(p), short = Math.min(box.hu, box.hv), long = Math.max(box.hu, box.hv);
+    if (2 * short >= 3.2 && long / Math.max(short, 1e-6) <= 2.2
+      && 2 * inscribed(p, [], 0.05).r >= 3.2 && (minNeck(p)?.w ?? Infinity) >= 3.2) return true;
+  }
   if (!shapeOkObb(p)) return false;
   if (2 * inscribed(p, [], 0.05, 1.8).r < 3.6) return false;
   return (minNeck(p)?.w ?? Infinity) >= 3.59;
@@ -108,6 +119,9 @@ function clipHallWing(p: Polygon, owner: Polygon,
 export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult {
   const changed = new Set<number>(), invalid: number[] = [];
   let cleaned = 0, releasedArea = 0;
+  const housingArea = (): number => u.buildings.reduce((sum, b) =>
+    sum + (['house', 'rear', 'back'].includes(b.kind) ? area(b.poly) : 0), 0);
+  const initialHousingArea = housingArea();
   const parcelIndex = new GridIndex<number>(24);
   u.parcels.forEach((p, i) => { if (p.poly.length >= 3) parcelIndex.insertPts(p.poly, i); });
   const respectsOtherOwners = (i: number, after: Polygon): boolean => {
@@ -300,6 +314,49 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
     if (owner.block !== undefined) changed.add(owner.block);
     return true;
   };
+  const releaseArmAsPassage = (i: number, owner: UrbanParcel): boolean => {
+    if (!u.privatePassages || !u.proposePrivatePassage || !u.backLand || !u.placementClear) return false;
+    const b = u.buildings[i], original = b.poly, neck = minNeck(original);
+    if (!neck || neck.w >= 1.2 || b.parcel === undefined) return false;
+    const cut = splitByChord(lpoly(original, 0), [neck.a, neck.b], 0, 0.02);
+    if (!cut) return false;
+    const [main, arm] = cut.map((p) => p.pts).sort((a, c) => area(c) - area(a));
+    if (!proper(main) || proper(arm) || area(arm) < 1 || area(arm) > Math.min(20, 0.1 * area(original))
+      || Math.abs(area(main) + area(arm) - area(original)) > 1e-6) return false;
+    const outside = tryDifference(main, owner.poly), oldOutside = tryDifference(original, owner.poly);
+    const freed = tryDifference(original, main);
+    if (outside.failed || oldOutside.failed || mpArea(outside.pieces) > mpArea(oldOutside.pieces) + 1e-6
+      || freed.failed || freed.pieces.some((p) => p.holes.length)
+      || Math.abs(area(main) + mpArea(freed.pieces) - area(original)) > 1e-5
+      || !u.placementClear(main, original)) return false;
+    const root = { x: (neck.a.x + neck.b.x) / 2, y: (neck.a.y + neck.b.y) / 2 };
+    const tip = armEdge(main, arm), projection = (p: Vec2): number =>
+      (p.x - root.x) * tip.outward.x + (p.y - root.y) * tip.outward.y;
+    const reach = Math.max(...arm.map(projection));
+    if (reach < 3) return false;
+    const endPoints = arm.filter((p) => projection(p) >= reach - Math.min(1, 0.1 * reach));
+    const far = { x: endPoints.reduce((s, p) => s + p.x, 0) / endPoints.length,
+      y: endPoints.reduce((s, p) => s + p.y, 0) / endPoints.length };
+    const dx = root.x - far.x, dy = root.y - far.y, length = Math.hypot(dx, dy);
+    if (length < 3 || length > 24) return false;
+    const normal = { x: -dy / length, y: dx / length };
+    const chordNormal = { x: -(neck.b.y - neck.a.y) / neck.w, y: (neck.b.x - neck.a.x) / neck.w };
+    const side = (far.x - root.x) * chordNormal.x + (far.y - root.y) * chordNormal.y >= 0 ? 1 : -1;
+    const entry = { x: root.x + 0.5 * side * chordNormal.x,
+      y: root.y + 0.5 * side * chordNormal.y };
+    for (const shift of [0, 0.25, -0.25, 0.5, -0.5]) {
+      const path = [{ x: far.x + shift * normal.x, y: far.y + shift * normal.y }, entry, root];
+      const width = 0.8;
+      if (!u.proposePrivatePassage(i, main, path, width)) continue;
+      b.poly = main;
+      u.backLand.push(...freed.pieces);
+      releasedArea += mpArea(freed.pieces);
+      u.privatePassages.push({ path, width, parcel: b.parcel });
+      if (owner.block !== undefined) changed.add(owner.block);
+      return true;
+    }
+    return false;
+  };
   const count = u.buildings.length;
   for (let i = 0; i < count; i++) {
     const b = u.buildings[i], owner = b.parcel === undefined ? undefined : u.parcels[b.parcel];
@@ -368,6 +425,7 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
       if (fixed) continue;
     }
     if ((minNeck(b.poly)?.w ?? Infinity) < 2 && splitIntoServedRooms(i, owner)) continue;
+    if ((minNeck(b.poly)?.w ?? Infinity) < 1.2 && releaseArmAsPassage(i, owner)) continue;
     if (u.placementClear) {
       const bounds = bboxOf(owner.poly);
       const occupied = roofIndex.query(bounds.x0, bounds.y0, bounds.x1, bounds.y1)
@@ -407,6 +465,30 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
             u.backLand.push(...freed.pieces);
             releasedArea += mpArea(freed.pieces);
             roofIndex.insertPts(compact, i);
+            if (block !== undefined) changed.add(block);
+            continue;
+          }
+        }
+      }
+      // A tiny, bent plot can contain a believable compact dwelling even when
+      // no 70%-area rectangle fits. Require a true convex room and cap the
+      // cumulative loss of roof area to 2% of this layer's starting programme.
+      if (u.validateParts && area(b.poly) <= 60 && (minNeck(b.poly)?.w ?? Infinity) < 2) {
+        const small = reconstructSmallPlotRoom(b.poly, owner.poly, owner.front, occupied,
+          u.placementClear,
+          (candidate) => proper(candidate) && respectsOtherOwners(i, candidate)
+            && !!planOpenLand(candidate) && u.validateParts!(i, [candidate]));
+        const currentHousingArea = housingArea();
+        if (small && currentHousingArea - area(b.poly) + area(small) >= 0.98 * initialHousingArea) {
+          const added = tryDifference(small, b.poly), freed = tryDifference(b.poly, small);
+          const land = planOpenLand(small);
+          if (land && !added.failed && !freed.failed
+            && Math.abs(area(b.poly) + mpArea(added.pieces) - area(small) - mpArea(freed.pieces)) < 1e-5) {
+            commitOpenLand(land);
+            b.poly = small;
+            u.backLand.push(...freed.pieces);
+            releasedArea += mpArea(freed.pieces);
+            roofIndex.insertPts(small, i);
             if (block !== undefined) changed.add(block);
             continue;
           }
