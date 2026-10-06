@@ -118,6 +118,32 @@ export function distToSeg(p: Vec2, a: Vec2, b: Vec2): number {
   return Math.hypot(p.x - a.x - t * dx, p.y - a.y - t * dy);
 }
 
+/** Narrowest visible cross-section at a reflex vertex. Convex triangles have no neck. */
+export function minNeck(p: Polygon): { w: number; a: Vec2; b: Vec2 } | null {
+  if (p.length < 4) return null;
+  const positive = polygonArea(p) >= 0;
+  let best: { w: number; a: Vec2; b: Vec2 } | null = null;
+  for (let i = 0; i < p.length; i++) {
+    const prev = p[(i - 1 + p.length) % p.length], a = p[i], next = p[(i + 1) % p.length];
+    const cross = (a.x - prev.x) * (next.y - a.y) - (a.y - prev.y) * (next.x - a.x);
+    if ((positive ? cross : -cross) >= -1e-7) continue;
+    for (let j = 0; j < p.length; j++) {
+      if (j === i || (j + 1) % p.length === i || j === (i - 1 + p.length) % p.length) continue;
+      const c = p[j], d = p[(j + 1) % p.length], dx = d.x - c.x, dy = d.y - c.y;
+      const len2 = dx * dx + dy * dy;
+      if (len2 < 1e-12) continue;
+      const t = ((a.x - c.x) * dx + (a.y - c.y) * dy) / len2;
+      if (t < 1e-5 || t > 1 - 1e-5) continue;
+      const b = { x: c.x + t * dx, y: c.y + t * dy };
+      const w = dist(a, b);
+      if (best && w >= best.w) continue;
+      const inside = [0.2, 0.5, 0.8].every((f) => pointInRing(p, { x: a.x + f * (b.x - a.x), y: a.y + f * (b.y - a.y) }));
+      if (inside) best = { w, a, b };
+    }
+  }
+  return best;
+}
+
 export function distToRing(p: Polygon, pt: Vec2): number {
   let best = Infinity;
   for (let i = 0; i < p.length; i++) best = Math.min(best, distToSeg(pt, p[i], p[(i + 1) % p.length]));
