@@ -5,6 +5,7 @@ import { megaQuarterDetail } from '../src/gen/urban/mega/detail';
 import { quarterRoofCollar } from '../src/gen/urban/edgeFinish';
 import { bboxOf } from '../src/gen/geo/poly';
 import { tryDifference, tryIntersection, mpArea } from '../src/gen/geo/bool';
+import { LAB_OPEN } from '../src/gen/urban/streets';
 
 it('keeps whole exterior houses without order dependence or cross-quarter claims', () => {
   const world = generate(makeOptions({ seed: '42', size: 'town', population: 9000, eagerPop: 1,
@@ -41,4 +42,23 @@ it('keeps whole exterior houses without order dependence or cross-quarter claims
   expect(megaQuarterDetail(reversed, 2)).toEqual(a);
   expect(JSON.stringify(world.urban)).toBe(host);
   expect(JSON.stringify(reversed.urban)).toBe(host);
+}, 180000);
+
+it('preserves a whole free faubourg roof when the host also has a walled core', () => {
+  const world = generate(makeOptions({ seed: '42', size: 'town', population: 9000, eagerPop: 1,
+    mapSize: 4000, walls: 'single', suburbs: 'some', settlements: 'none', river: 'none', coast: 'none' }));
+  expect(world.urban!.walls!.length).toBeGreaterThan(0);
+  const host = JSON.stringify(world.urban), q = world.urban!.macro!.quarters.find(q => q.id === 2)!;
+  expect(q.lab).toContain(LAB_OPEN);
+  const detail = megaQuarterDetail(world, q.id)!;
+  const extensions = detail.buildings.map(b => tryDifference(b.poly, q.pts));
+  expect(extensions.every(r => !r.failed)).toBe(true);
+  expect(extensions.reduce((n, r) => n + mpArea(r.pieces), 0)).toBeGreaterThan(1);
+  const limit = quarterRoofCollar(q.pts, 16);
+  for (const b of detail.buildings) {
+    const escaped = tryDifference(b.poly, limit);
+    expect(escaped.failed).toBe(false);
+    expect(mpArea(escaped.pieces)).toBeLessThan(0.01);
+  }
+  expect(JSON.stringify(world.urban)).toBe(host);
 }, 180000);

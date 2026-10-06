@@ -1108,7 +1108,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   // inside existing plots after roof styling, preserving every planning frame and the seeded dwelling counts.
   const densityRepair = repairResidentialDensity({ ...edgePartition, morphology: (bi: number) => blockMorph[bi] });
   const releasedFootprintLand: PolyH[] = [];
-  const footprintFinal = finalizeFootprints({ buildings, parcels, backLand: releasedFootprintLand,
+  const footprintFinal = finalizeFootprints({ buildings, parcels, backLand: releasedFootprintLand, gardens: plotGardens,
     placementClear: footprintPlacementGuard(edgePartition.protectedLand, p => ctx.isWater(p) || ctx.slopeAt(p) > 0.28),
     tipConstrained: physicalTipConstraint(edgePartition.protectedLand, ctx.isWater),
     openQuarterEdge: openQuarterEdge(prim.quarters.map((q) => q.lp)),

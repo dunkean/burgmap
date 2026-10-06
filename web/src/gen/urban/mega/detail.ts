@@ -439,7 +439,7 @@ export function megaQuarterDetail(world: World, key: number): UrbanLayer | null 
   };
   finishEdgeRoofs(detailPartition);
   const releasedFootprintLand: PolyH[] = [];
-  finalizeFootprints({ buildings, parcels, backLand: releasedFootprintLand,
+  finalizeFootprints({ buildings, parcels, backLand: releasedFootprintLand, gardens: plotGardens,
     placementClear: footprintPlacementGuard(detailProtectedLand, p => ctx.isWater(p) || ctx.slopeAt(p) > 0.28),
     tipConstrained: physicalTipConstraint(detailProtectedLand, ctx.isWater),
     openQuarterEdge: openQuarterEdge(M.quarters),
