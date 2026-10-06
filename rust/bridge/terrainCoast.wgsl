@@ -39,12 +39,9 @@ fn coastalHeight(xy:vec2<f32>, terrainHeight:f32)->f32 {
       cachedPhase=shape.w;
     }
     if(base+detail>distance){
-      distance=base+detail;scale=s;apron=geology.w;isletHeight=0.0;
-      if(geology.x>0.0){
-        let relief=fbm(uv/(s*0.45)+vec2<f32>(shape.w,0.0),2u,4u,0.5,footprint/(s*0.45));
-        let ridge=1.0-abs(fbm(uv/(s*0.18)+vec2<f32>(-shape.w,shape.w),2u,3u,0.5,footprint/(s*0.18)));
-        isletHeight=geology.x*max(0.1,0.8+geology.y*relief+geology.z*(ridge*ridge-0.5));
-      }
+      distance=base+detail;scale=s;apron=geology.w;
+      // Same simple elevation as Rust; shore taper and erosion provide slopes.
+      isletHeight=geology.x;
     }
   }
   if(isletHeight>0.0){height=isletHeight;}

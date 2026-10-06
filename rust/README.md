@@ -78,7 +78,9 @@ vérification de compilation pour `wasm32-unknown-unknown`.
   Un bruit côtier indépendant à plusieurs échelles forme baies, caps et petites
   découpes. Les petits îlots alternent rochers compacts, branches, lobes, croissants
   et bandes allongées ; leur hauteur et leur relief sont tirés indépendamment
-  du terrain continental, avec des parties basses et des crêtes rocheuses.
+  du terrain continental, avec des parties basses et des rochers plus élevés.
+  Leur intérieur utilise une hauteur simple, sans bruit ajouté ni petites crêtes
+  artificielles ; le raccord à la mer et l'érosion forment leurs pentes.
   Leurs tailles mêlent petits rochers, îlots moyens et îles secondaires ; les
   grandes formes cherchent une poche marine plus large avant de réduire leur
   taille si les directions sélectionnées manquent de place.

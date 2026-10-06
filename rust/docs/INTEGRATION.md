@@ -104,8 +104,12 @@ Pour les plaines côtières, la référence marine retire 35 % de l'amplitude no
 avant un plancher positif doux et la découpe : le socle constant de la formule
 intérieure ne crée plus une marche de près de vingt mètres vers la mer.
 Les petits îlots ont six familles de silhouettes, de compactes à ramifiées,
-avec des hauteurs, crêtes et largeurs de raccord propres à chaque îlot. Le relief
-est continu entre les branches d'un même îlot, puis soumis à l'érosion commune.
+avec des hauteurs et largeurs de raccord propres à chaque îlot. Une hauteur
+simple est partagée entre ses branches, puis soumise au raccord à la mer et à
+l'érosion commune. Les bruits fBm et ridged ajoutés à l'intérieur ont été retirés
+après le signalement des deux îles marquées sur `12fu8j0` (canyon, carte10km,
+motif8km, érosion1,37). Les anciens tirages de détail sont consommés pour
+conserver exactement les silhouettes, tailles et placements de cette graine.
 Un fork `islet-sizes` mélange trois classes de rayon rapportées à la carte
 (0,25–0,85 %, 0,9–2,3 %, 2,5–4,5 %). Les premières cibles comprennent une grande
 et deux moyennes. Le placement tient compte de leur emprise, des formes déjà

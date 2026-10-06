@@ -215,7 +215,7 @@ impl Coast {
     fn islet(&mut self, rng: &mut Rng, x: f64, y: f64, r: f64, turn: f64) {
         let shape = (rng.float() * 6.0) as usize;
         let phase = rng.range(0.0, 100.0);
-        // Low sandy outcrops, weathered rocks and craggy ridges are independent
+        // Low sandy outcrops and taller rocks are independent
         // of the mainland's height at their offshore position.
         let rocky = rng.float() < 0.55;
         let peak = if rocky {
@@ -223,8 +223,12 @@ impl Coast {
         } else {
             rng.range(0.8, 5.0)
         };
-        let roughness = if rocky { rng.range(0.2, 0.5) } else { 0.08 };
-        let ridge_mix = if rocky { rng.range(0.35, 0.8) } else { 0.0 };
+        // Retain the former detail draws so removing interior noise does not
+        // change this seed's silhouettes, sizes or subsequent placements.
+        if rocky {
+            rng.range(0.2, 0.5);
+            rng.range(0.35, 0.8);
+        }
         let apron = if rocky {
             rng.range(0.45, 1.0)
         } else {
@@ -240,12 +244,7 @@ impl Coast {
         let mut segment = |a, b, ra: f64, rb: f64| {
             self.capsule(point(a), point(b), r * ra, r * rb, r * 3.0, phase);
             let start = self.parameters.len() - 4;
-            self.parameters[start..].copy_from_slice(&[
-                peak as f32,
-                roughness as f32,
-                ridge_mix as f32,
-                apron as f32,
-            ]);
+            self.parameters[start..].copy_from_slice(&[peak as f32, 0.0, 0.0, apron as f32]);
         };
         match shape {
             // Compact asymmetric rock; no repeated long capsule.
@@ -255,7 +254,7 @@ impl Coast {
                 segment((-0.6, 0.4), (0.2, -0.65), 0.5, 0.35);
                 segment((-0.2, 0.0), (0.7, 0.35), 0.6, 0.35);
             }
-            // Broad two-lobed island with a lower connecting saddle.
+            // Broad two-lobed island.
             2 => {
                 segment((-0.55, 0.0), (0.1, 0.15), 0.85, 0.4);
                 segment((0.0, 0.1), (0.75, -0.15), 0.4, lean);
@@ -359,31 +358,9 @@ impl Coast {
             if base + detail > distance {
                 distance = base + detail;
                 scale = s;
-                islet_height = if at(j + 8) > 0.0 {
-                    let relief = self.noise.fbm_filtered(
-                        x / (s * 0.45) + phase,
-                        y / (s * 0.45),
-                        4,
-                        0.5,
-                        footprint / (s * 0.45),
-                    );
-                    let ridge = 1.0
-                        - self
-                            .noise
-                            .fbm_filtered(
-                                x / (s * 0.18) - phase,
-                                y / (s * 0.18) + phase,
-                                3,
-                                0.5,
-                                footprint / (s * 0.18),
-                            )
-                            .abs();
-                    // One continuous field per islet, including across branch joins.
-                    at(j + 8)
-                        * (0.8 + at(j + 9) * relief + at(j + 10) * (ridge * ridge - 0.5)).max(0.1)
-                } else {
-                    0.0
-                };
+                // A simple shared elevation per islet. Shore taper and physical
+                // erosion provide its slopes; no fBm or ridged interior texture.
+                islet_height = at(j + 8);
                 apron = at(j + 11);
             }
         }

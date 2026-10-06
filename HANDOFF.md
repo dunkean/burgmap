@@ -5,6 +5,18 @@ bugs and their evidence are recorded in [ROADMAP.md](ROADMAP.md).
 
 ## Current status
 
+- Simpler secondary-island relief (2026-10-07): user rejected the added Perlin /
+  salt-like interior texture at pins2879.7/1329.1 and903.6/2977.9 on12fu8j0
+  (canyon, map10km/motif8km, erosion1.37, N/SW/W/NW). Remove the optional
+  multi-octave bump and ridged fields on CPU/WGSL. Each islet shares one seeded
+  elevation across its branches; shore taper and retained physical erosion
+  provide slopes. Height differences between islands, cliffs, coast detail,
+  shapes and sizes remain. Consume the former RNG detail draws to retain
+  the same silhouettes and placements. Native fmt/Clippy/WASM, typecheck and
+  app/bench/terrain builds pass. The exact replay and offline GPU page keep both
+  pins on land with no browser errors; isolated coast probes find flat interiors
+  and CPU/GPU height drift≤1.01cm. Evidence: web/out/islet-simple/audit.json.
+
 - Coastal surface and islets (2026-10-07, local): user requested rounded mainland
   corners, a smooth shoreline at zoom, cutting before erosion while keeping cliffs,
   a variable multiplicative shore ramp, lower coastal plains, and varied islet
