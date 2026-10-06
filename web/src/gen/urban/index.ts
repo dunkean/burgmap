@@ -665,7 +665,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     const first = parcels.length;
     for (const p of out.parcels) parcels.push({ poly: p.poly, use: p.use, block: bi, zone: carved[bi].zone });
     for (const b of out.buildings) {
-      buildings.push({ poly: b.poly, kind: b.kind, parcel: first + b.parcel, arch: b.arch, roof: b.roof, storeys: b.storeys, material: b.material, courtyards: b.courtyards, orientation: b.orientation });
+      buildings.push({ poly: b.poly, kind: b.kind, parcel: first + b.parcel, arch: b.arch, roof: b.roof, storeys: b.storeys, material: b.material, courtyards: b.courtyards, orientation: b.orientation, ...(b.ring ? { ring: true } : {}) });
     }
     lines.push(...out.lines);
     for (const w of out.water) waterPieces.push({ outer: w, holes: [] });
@@ -943,7 +943,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
       // Passage cuts can create new acute patio corners. Finish only after all access cuts and filters;
       // subsequent containment checks and mass unions consume these footprints without cutting them again.
       const poly = b.kind === 'house' && b.arch === 'persian-courtyard-house' ? chamferPersianHouse(b.poly) : b.poly;
-      buildings.push({ poly, kind: b.kind, parcel: parcelIndexOfPlot[pi], arch: b.arch, roof: b.roof, storeys: b.storeys, material: b.material, courtyards: b.courtyards, orientation: b.orientation });
+      buildings.push({ poly, kind: b.kind, parcel: parcelIndexOfPlot[pi], arch: b.arch, roof: b.roof, storeys: b.storeys, material: b.material, courtyards: b.courtyards, orientation: b.orientation, ...(b.ring ? { ring: true } : {}) });
     }
   });
   // final guard of the partition (level 4 ⊂ level 3): a footprint must lie inside its parcel
@@ -1116,7 +1116,8 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     places: accessPlaces(), publicGround: streetSpace.flat(), footprint: edgePartition.footprint,
     passages: privatePassages, placementClear });
   const footprintFinal = finalizeFootprints({ buildings, parcels, backLand: releasedFootprintLand, gardens: plotGardens,
-    placementClear, privatePassages, ...privateAccess,
+    placementClear, privatePassages, ...privateAccess, proposePrivatePassage: privateAccess.connectPrivatePassage,
+    allowFillRemoval: true,
     tipConstrained: physicalTipConstraint(edgePartition.protectedLand, ctx.isWater),
     openQuarterEdge: openQuarterEdge(prim.quarters.map((q) => q.lp)) });
   for (const passage of privatePassages) {
@@ -1128,6 +1129,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   stats['footprint.cleaned'] = footprintFinal.cleaned;
   stats['footprint.invalid'] = footprintFinal.invalid.length;
   stats['footprint.releasedArea'] = footprintFinal.releasedArea;
+  if (footprintFinal.removed.length) stats['footprint.rejectedFill'] = footprintFinal.removed.length;
   if (densityRepair.enlarged) {
     stats['densityRepair.enlarged'] = densityRepair.enlarged;
     stats['densityRepair.addedArea'] = densityRepair.addedArea;

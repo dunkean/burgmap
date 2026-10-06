@@ -217,7 +217,7 @@ export function megaQuarterDetail(world: World, key: number): UrbanLayer | null 
     if (!out.parcels.length) return false;
     const first = parcels.length;
     for (const p of out.parcels) parcels.push({ poly: p.poly, use: p.use, block: bi, zone: carved[bi].zone });
-    for (const b of out.buildings) buildings.push({ poly: b.poly, kind: b.kind, parcel: first + b.parcel, arch: b.arch, roof: b.roof, storeys: b.storeys, material: b.material, courtyards: b.courtyards, orientation: b.orientation });
+    for (const b of out.buildings) buildings.push({ poly: b.poly, kind: b.kind, parcel: first + b.parcel, arch: b.arch, roof: b.roof, storeys: b.storeys, material: b.material, courtyards: b.courtyards, orientation: b.orientation, ...(b.ring ? { ring: true } : {}) });
     lines.push(...out.lines);
     for (const w of out.water) waterPieces.push({ outer: w, holes: [] });
     landmarks.push(...out.landmarks);
@@ -377,7 +377,7 @@ export function megaQuarterDetail(world: World, key: number): UrbanLayer | null 
     for (const b of plotBld[pi]) {
       // Match the eager path: bevel final roofs after access, before read-only containment/mass assembly.
       const poly = b.kind === 'house' && b.arch === 'persian-courtyard-house' ? chamferPersianHouse(b.poly) : b.poly;
-      buildings.push({ poly, kind: b.kind, parcel: parcelIndexOfPlot[pi], arch: b.arch, roof: b.roof, storeys: b.storeys, material: b.material, courtyards: b.courtyards, orientation: b.orientation });
+      buildings.push({ poly, kind: b.kind, parcel: parcelIndexOfPlot[pi], arch: b.arch, roof: b.roof, storeys: b.storeys, material: b.material, courtyards: b.courtyards, orientation: b.orientation, ...(b.ring ? { ring: true } : {}) });
     }
   });
   for (let i = buildings.length - 1; i >= 0; i--) {
@@ -448,7 +448,8 @@ export function megaQuarterDetail(world: World, key: number): UrbanLayer | null 
     publicGround: detailPartition.streetSpace.flat(), footprint: detailPartition.footprint,
     passages: privatePassages, placementClear });
   finalizeFootprints({ buildings, parcels, backLand: releasedFootprintLand, gardens: plotGardens,
-    placementClear, privatePassages, ...privateAccess,
+    placementClear, privatePassages, ...privateAccess, proposePrivatePassage: privateAccess.connectPrivatePassage,
+    allowFillRemoval: true,
     tipConstrained: physicalTipConstraint(detailProtectedLand, ctx.isWater),
     openQuarterEdge: openQuarterEdge(M.quarters) });
   for (const passage of privatePassages) {
