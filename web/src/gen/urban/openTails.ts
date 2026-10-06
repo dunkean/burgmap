@@ -5,8 +5,12 @@ import type { PolyH, UrbanLayer, UrbanStreet, UrbanStreetTail } from '../types';
 import { differenceSafeS, intersectionS } from '../geo/bool';
 import { pointInRing, segSegT } from '../geo/poly';
 import { ribbon } from '../geo/offset';
+import { Noise2D } from '../core/noise';
+import { Rng } from '../core/rng';
 
 export interface StreetTailContext {
+  /** World seed; the same seed and coordinates give the same border before and after lazy detail. */
+  seed?: string;
   /** True regional carriageways, with an actual path across the settlement boundary. */
   regionalRoads?: { path: Polyline; width: number }[];
   /** Existing field ways or farm drives, never an administrative outline. */
@@ -231,16 +235,28 @@ function safeGround(subject: Polygon, urban: UrbanLayer, owner: PolyH[] | undefi
 export function openEdgeResidualGround(urban: UrbanLayer, tails: UrbanStreetTail[], context: StreetTailContext = {}): PolyH[] {
   const owner = context.owner ?? urban.footprintH;
   const protection = publicProtection(urban, tails, context);
+  const noise = new Noise2D(new Rng(context.seed ?? 'open-edge').fork('public-border-depth'));
+  const depth = (p: Vec2): number => Math.max(18, Math.min(42,
+    30 + 9 * noise.noise(p.x / 60, p.y / 60) + 3 * noise.noise(p.x / 12 + 37, p.y / 12 - 19)));
   const out: PolyH[] = [];
   for (const ph of owner) {
     const ring = ph.outer;
-    // Process local chunks: a full megacity outline in one boolean is needlessly expensive.
-    for (let i = 0; i < ring.length; i += 8) {
-      const chunk: Polyline = [];
-      for (let j = i; j <= Math.min(ring.length, i + 8); j++) chunk.push(ring[j % ring.length]);
-      if (chunk.length < 2) continue;
-      out.push(...safeGround(ribbon(chunk, 60), urban, owner, protection, context));
+    // A bounded local polygon per ~250 m also handles a single very long macro edge without a giant boolean.
+    let chunk: Polyline = ring.length ? [ring[0]] : [];
+    const flush = (): void => {
+      if (chunk.length < 2) return;
+      out.push(...safeGround(ribbon(chunk, chunk.map((p) => 2 * depth(p))), urban, owner, protection, context));
+      chunk = [chunk[chunk.length - 1]];
+    };
+    for (let i = 0; i < ring.length; i++) {
+      const a = ring[i], b = ring[(i + 1) % ring.length];
+      const n = Math.max(1, Math.ceil(dist(a, b) / 8));
+      for (let k = 1; k <= n; k++) {
+        chunk.push(at(a, b, k / n));
+        if (chunk.length >= 33) flush();
+      }
     }
+    flush();
   }
   return out;
 }
