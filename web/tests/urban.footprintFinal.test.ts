@@ -25,13 +25,14 @@ describe('last footprint pass', () => {
   it('releases the narrow arm of an L as accounted open land', () => {
     const l: Polygon = [{ x: 0, y: 0 }, { x: 12, y: 0 }, { x: 12, y: 2 },
       { x: 8, y: 2 }, { x: 8, y: 9 }, { x: 0, y: 9 }];
-    const u = { buildings: [{ poly: l, kind: 'house', parcel: 0 }], parcels: [{ poly: rect(-1, -1, 13, 10), use: 'plot', block: 5 }],
+    const u = { buildings: [{ poly: l, kind: 'house', parcel: 0 },
+      { poly: rect(1000, 0, 1032, 32), kind: 'house', parcel: 0 }], parcels: [{ poly: rect(-1, -1, 13, 10), use: 'plot', block: 5 }],
       backLand: [] as { outer: Polygon; holes: Polygon[] }[], tipConstrained: () => true };
     const initial = area(l);
     const result = finalizeFootprints(u);
     expect(result.invalid).toEqual([]);
     expect(result.changed.has(5)).toBe(true);
-    expect(u.buildings).toHaveLength(1);
+    expect(u.buildings).toHaveLength(2);
     expect(u.backLand).toHaveLength(1);
     expect(area(u.buildings[0].poly) + area(u.backLand[0].outer)).toBeCloseTo(initial, 6);
     expect(minNeck(u.buildings[0].poly)?.w ?? Infinity).toBeGreaterThanOrEqual(3.6);
@@ -39,13 +40,14 @@ describe('last footprint pass', () => {
 
   it('truncates only a disproportionate house tip inside its owner parcel', () => {
     const needle: Polygon = [{ x: 0, y: 0 }, { x: 24, y: 0 }, { x: 24, y: 10 }, { x: 0, y: 10 }, { x: -40, y: 5 }];
-    const u = { buildings: [{ poly: needle, kind: 'house', parcel: 0 }],
+    const u = { buildings: [{ poly: needle, kind: 'house', parcel: 0 },
+      { poly: rect(1000, 0, 1032, 32), kind: 'house', parcel: 0 }],
       parcels: [{ poly: rect(-41, -1, 25, 11), use: 'plot', block: 4 },
         { poly: rect(-44, 3, -41, 7), use: 'plot', block: 6 }], backLand: [] as { outer: Polygon; holes: Polygon[] }[],
       tipConstrained: () => true };
     const result = finalizeFootprints(u);
     expect(result.changed.has(4)).toBe(true);
-    expect(u.buildings).toHaveLength(1);
+    expect(u.buildings).toHaveLength(2);
     expect(u.backLand).toHaveLength(1);
     expect(area(u.buildings[0].poly) + area(u.backLand[0].outer)).toBeCloseTo(area(needle), 6);
     expect(area(u.backLand[0].outer)).toBeLessThan(0.03 * area(needle));
@@ -147,13 +149,14 @@ describe('last footprint pass', () => {
       { x: 750.8496467209039, y: 469.0434421365991 },
     ];
     const backLand: { outer: Polygon; holes: Polygon[] }[] = [];
-    const u = { buildings: [{ poly: roof, kind: 'rear', parcel: 0 }],
+    const u = { buildings: [{ poly: roof, kind: 'rear', parcel: 0 },
+      { poly: rect(1000, 0, 1032, 32), kind: 'house', parcel: 0 }],
       parcels: [{ poly: rect(730, 450, 755, 480), use: 'plot', block: 2 }], backLand,
       validateParts: () => true };
     expect(minNeck(roof)?.w).toBe(0);
     const result = finalizeFootprints(u);
     expect(result.invalid).toEqual([]);
-    expect(u.buildings).toHaveLength(1);
+    expect(u.buildings).toHaveLength(2);
     expect(area(u.buildings[0].poly)).toBeGreaterThanOrEqual(0.95 * area(roof));
     expect(minNeck(u.buildings[0].poly)?.w ?? Infinity).toBeGreaterThanOrEqual(3.6);
     expect(area(u.buildings[0].poly) + backLand.reduce((s, p) => s + area(p.outer), 0)).toBeCloseTo(area(roof), 5);
@@ -223,7 +226,8 @@ describe('last footprint pass', () => {
       { x: 743.8766532149907, y: 468.1568039809795 }, { x: 746.0559644977345, y: 469.0335217299288 },
       { x: 750.8496467209039, y: 469.0434421365991 },
     ];
-    const buildings = [{ poly: roof, kind: 'rear', parcel: 0 }];
+    const buildings = [{ poly: roof, kind: 'rear', parcel: 0 },
+      { poly: rect(1000, 0, 1032, 32), kind: 'house', parcel: 0 }];
     const backLand: { outer: Polygon; holes: Polygon[] }[] = [];
     const result = finalizeFootprints({ buildings, parcels: [{ poly: rect(730, 450, 752, 473),
       use: 'plot', block: 1 }], backLand, validateParts: () => true });
