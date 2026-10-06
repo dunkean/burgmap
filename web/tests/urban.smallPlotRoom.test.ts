@@ -42,5 +42,8 @@ describe('compact crop of real bent plots from xrv97g', () => {
     expect(reconstructSmallPlotRoom(poly, owner, front as [Vec2, Vec2], [], () => false, () => true)).toBeNull();
     expect(reconstructSmallPlotRoom(poly, owner, front as [Vec2, Vec2], [], () => true, () => false)).toBeNull();
     expect(reconstructSmallPlotRoom(poly, owner, front as [Vec2, Vec2], [owner], () => true, () => true)).toBeNull();
+    const far: Polygon = [{ x: -100, y: -100 }, { x: -90, y: -100 },
+      { x: -90, y: -90 }, { x: -100, y: -90 }];
+    expect(reconstructSmallPlotRoom(poly, owner, front as [Vec2, Vec2], [far, owner], () => true, () => true)).toBeNull();
   }, 30_000);
 });

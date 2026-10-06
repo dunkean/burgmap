@@ -74,8 +74,12 @@ export function reconstructSmallPlotRoom(poly: Polygon, owner: Polygon, front: [
       if (narrow < MIN_WIDTH || Math.max(box.hu, box.hv) / Math.max(1e-6, Math.min(box.hu, box.hv)) > MAX_ASPECT
         || 2 * inscribed(candidate, [], 0.05).r < MIN_WIDTH
         || (minNeck(candidate)?.w ?? Infinity) < MIN_WIDTH) continue;
-      const escaped = tryDifference(candidate, owner), peers = occupied.length ? tryIntersection(candidate, ...occupied) : { pieces: [], failed: false };
-      if (escaped.failed || peers.failed || mpArea(escaped.pieces) > 1e-6 || mpArea(peers.pieces) > 1e-6) continue;
+      const escaped = tryDifference(candidate, owner);
+      if (escaped.failed || mpArea(escaped.pieces) > 1e-6) continue;
+      if (occupied.some((other) => {
+        const hit = tryIntersection(candidate, other);
+        return hit.failed || mpArea(hit.pieces) > 1e-6;
+      })) continue;
       if (clear(candidate, poly) && validate(candidate)) return candidate;
     }
   }
