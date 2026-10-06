@@ -2,7 +2,7 @@
 import type { Polygon, Vec2 } from '../core/geom';
 import type { PolyH, UrbanBuilding, UrbanParcel } from '../types';
 import { mpArea, tryDifference, tryIntersection } from '../geo/bool';
-import { area, distToRing, distToSeg, isSimple } from '../geo/poly';
+import { area, distToRing, isSimple } from '../geo/poly';
 import { ribbon } from '../geo/offset';
 import { blockReach, makeStreetAt } from './access';
 import { footprintAccessGuard } from './edgeFinish';
@@ -29,16 +29,33 @@ export function privatePassageAccess(input: PrivatePassageInput) {
   let publicEdges: { a: Vec2; b: Vec2 }[] = [];
   const length = (path: Vec2[]) => path.slice(1).reduce((sum, p, i) =>
     sum + Math.hypot(p.x - path[i].x, p.y - path[i].y), 0);
-  const publicContact = (corridor: Polygon): boolean => {
-    // A raster street seed may lie more than a metre from a physical road.
-    // Require the rendered passage itself to meet the exact road/place boundary.
+  const publicContact = (path: Vec2[], main: Polygon, width: number, corridor: Polygon): boolean => {
+    // Only a full terminal cap shared with the actual road/place edge connects
+    // a passage. A nearby point or a two-centimetre gap is not an entrance.
+    const firstHouse = distToRing(main, path[0]) <= 0.05;
+    const lastHouse = distToRing(main, path[path.length - 1]) <= 0.05;
+    if (firstHouse === lastHouse) return false;
+    const end = firstHouse ? path[path.length - 1] : path[0];
+    const near = firstHouse ? path[path.length - 2] : path[1];
+    const dx = near.x - end.x, dy = near.y - end.y, mag = Math.hypot(dx, dy);
+    if (mag < 1e-7) return false;
+    const side = { x: -dy / mag * width / 2, y: dx / mag * width / 2 };
+    const a = { x: end.x + side.x, y: end.y + side.y };
+    const b = { x: end.x - side.x, y: end.y - side.y };
+    const hasVertex = (p: Vec2) => corridor.some(q => Math.hypot(q.x - p.x, q.y - p.y) <= 1e-7);
+    if (!hasVertex(a) || !hasVertex(b)) return false;
     const overlap = tryIntersection(corridor, publicPieces);
-    if (overlap.failed || mpArea(overlap.pieces) > 1e-6) return false;
-    return publicEdges.some(e => corridor.some((a, i) => {
-      const b = corridor[(i + 1) % corridor.length];
-      return distToSeg(a, e.a, e.b) <= 0.02 || distToSeg(e.a, a, b) <= 0.02
-        || distToSeg(e.b, a, b) <= 0.02;
-    }));
+    if (overlap.failed || mpArea(overlap.pieces) > 1e-8) return false;
+    return publicEdges.some(e => {
+      const ex = e.b.x - e.a.x, ey = e.b.y - e.a.y, size = Math.hypot(ex, ey);
+      if (size < width - 1e-7) return false;
+      const ux = ex / size, uy = ey / size;
+      const signed = (p: Vec2) => Math.abs((p.x - e.a.x) * uy - (p.y - e.a.y) * ux);
+      if (signed(a) > 1e-7 || signed(b) > 1e-7) return false;
+      const ta = (a.x - e.a.x) * ux + (a.y - e.a.y) * uy;
+      const tb = (b.x - e.a.x) * ux + (b.y - e.a.y) * uy;
+      return Math.min(size, Math.max(ta, tb)) - Math.max(0, Math.min(ta, tb)) >= width - 1e-7;
+    });
   };
   let count = -1;
   let current = makeStreetAt(streets, places);
@@ -65,7 +82,7 @@ export function privatePassageAccess(input: PrivatePassageInput) {
         || path.some(p => !Number.isFinite(p.x) || !Number.isFinite(p.y))) return false;
       const corridor = ribbon(path, width);
       if (!isSimple(corridor) || area(corridor) < 0.1) return false;
-      if (!publicContact(corridor) || !input.placementClear(corridor, building.poly)) return false;
+      if (!publicContact(path, main, width, corridor) || !input.placementClear(corridor, building.poly)) return false;
       // The rendered passage must actually meet an entrance, not just fall within
       // the generous street raster slack. Either path orientation is supported.
       if (!([path[0], path[path.length - 1]].some(p => distToRing(main, p) <= 0.05))) return false;
@@ -122,7 +139,9 @@ export function privatePassageAccess(input: PrivatePassageInput) {
     }).slice(0, 32);
     let trials = 0;
     for (const target of targets) for (const offset of [0, -4, 4]) {
-      const t = Math.max(0, Math.min(1, target.t + offset / Math.max(1e-6, target.size)));
+      if (target.size <= width + 2e-6) continue;
+      const t = Math.max((width / 2 + 1e-6) / target.size,
+        Math.min(1 - (width / 2 + 1e-6) / target.size, target.t + offset / target.size));
       const end = { x: target.edge.a.x + (target.edge.b.x - target.edge.a.x) * t,
         y: target.edge.a.y + (target.edge.b.y - target.edge.a.y) * t };
       for (const [extension, lateralShift] of [[0, 0], [5, 0], [10, 0], [15, 0],
@@ -130,26 +149,18 @@ export function privatePassageAccess(input: PrivatePassageInput) {
         if (++trials > 512) return false;
         const mid = { x: free.x + dx / mag * extension - dy / mag * lateralShift,
           y: free.y + dy / mag * extension + dx / mag * lateralShift };
-        const toward = extension ? mid : free;
-        const approachLength = Math.hypot(toward.x - end.x, toward.y - end.y);
-        if (approachLength < 0.1) continue;
-        const ux = (toward.x - end.x) / approachLength, uy = (toward.y - end.y) / approachLength;
         const ex = target.edge.b.x - target.edge.a.x, ey = target.edge.b.y - target.edge.a.y;
         const edgeLength = Math.hypot(ex, ey);
         if (edgeLength < 0.1) continue;
         const sign = Math.sign(ex * (free.y - end.y) - ey * (free.x - end.x));
         if (!sign) continue;
         const nx = -ey / edgeLength * sign, ny = ex / edgeLength * sign;
-        const along = ux * nx + uy * ny;
-        if (along < 0.1) continue;
-        // A diagonal cap would otherwise put one corner inside the road. Stop
-        // five millimetres before that corner reaches the exact public edge.
-        const lateral = Math.abs(-uy * nx + ux * ny) * width / 2;
-        const retreat = (lateral + 0.005) / along;
-        if (retreat > 4 || retreat >= approachLength) continue;
-        const trimmed = { x: end.x + ux * retreat, y: end.y + uy * retreat };
-        const candidate = [trimmed, ...(extension ? [mid] : []), ...oriented];
-        if (length(candidate) > 128 || Math.hypot(trimmed.x - free.x, trimmed.y - free.y) > 96) continue;
+        const distance = Math.hypot(end.x - free.x, end.y - free.y);
+        if (distance < 1e-5 || distance > 96) continue;
+        const step = Math.min(2, distance / 2);
+        const approach = { x: end.x + nx * step, y: end.y + ny * step };
+        const candidate = [end, approach, ...(extension ? [mid] : []), ...oriented];
+        if (length(candidate) > 128) continue;
         const route = reverse ? candidate.reverse() : candidate;
         if (prove(original, main, route, width)) return route;
       }

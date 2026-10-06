@@ -49,9 +49,42 @@ describe('real private pedestrian passages', () => {
     expect(access.proposePrivatePassage(0, main, path, 0.8)).toBe(false);
     const route = access.connectPrivatePassage(0, main, path, 0.8);
     expect(route).not.toBe(false);
-    expect(route).toEqual([{ x: -1.495, y: 9 }, ...path]);
+    expect(route).toEqual([{ x: -1.5, y: 9 }, { x: -0.75, y: 9 }, ...path]);
     expect(access.proposePrivatePassage(0, main, route as typeof path, 0.8)).toBe(true);
     expect(JSON.stringify(input)).toBe(before);
+  });
+
+  it('requires a full-width flush cap, rejecting millimetre gaps and oblique point contacts', () => {
+    const input = { ...fixture(-2.5), footprint: [{ outer: rect(0, 0, 20, 20), holes: [] }] };
+    const access = privatePassageAccess(input);
+    expect(access.proposePrivatePassage(0, main, [{ x: -1.5, y: 9 }, ...path], 0.8)).toBe(true);
+    expect(access.proposePrivatePassage(0, main, [{ x: -1.499, y: 9 }, ...path], 0.8)).toBe(false);
+    expect(access.proposePrivatePassage(0, main, [{ x: -1.48, y: 9 }, ...path], 0.8)).toBe(false);
+    expect(access.proposePrivatePassage(0, main, [{ x: -1.501, y: 9 }, ...path], 0.8)).toBe(false);
+    expect(access.proposePrivatePassage(0, main, [{ x: -1.5, y: 9 }, { x: 0, y: 10 }, { x: 8, y: 9 }], 0.8)).toBe(false);
+  });
+
+  it('can meet a true place edge at full passage width', () => {
+    const input = { ...fixture(100), streets: [], places: [rect(-2, 0, 0, 20)] };
+    expect(privatePassageAccess(input).proposePrivatePassage(0, main, path, 0.8)).toBe(true);
+  });
+
+  it('does not count a short corner seam as a full-width connection', () => {
+    const input = fixture();
+    input.streets = [{ path: [{ x: -1, y: 8.8 }, { x: -1, y: 9.2 }], width: 2 }];
+    expect(privatePassageAccess(input).proposePrivatePassage(0, main, path, 0.8)).toBe(false);
+  });
+
+  it('turns an oblique approach into a perpendicular, flush street junction', () => {
+    const input = { ...fixture(-2.5), footprint: [{ outer: rect(0, 0, 20, 20), holes: [] }] };
+    const route = privatePassageAccess(input).connectPrivatePassage(0, main,
+      [{ x: 0, y: 9.2 }, { x: 4, y: 9 }, { x: 8, y: 9 }], 0.8);
+    expect(route).not.toBe(false);
+    const connected = route as typeof path;
+    expect(connected[0].x).toBeCloseTo(-1.5, 8);
+    expect(connected[1].x).toBeGreaterThan(-1.5);
+    expect(connected[1].y).toBeCloseTo(connected[0].y, 8);
+    expect(privatePassageAccess(input).proposePrivatePassage(0, main, connected, 0.8)).toBe(true);
   });
 
   it('rejects a nearby false seed when a physical reserve blocks the extension', () => {
