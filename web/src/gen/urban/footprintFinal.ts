@@ -6,6 +6,7 @@ import { area, cleanRing, isSimple, interiorAngle, minAngle, minNeck, inscribed 
 import { lpoly, polyInside, splitByChord } from '../geo/split';
 import { GridIndex } from '../geo/spatial';
 import { distToRing, pointInRing } from '../geo/poly';
+import { shapeOkObb } from './access';
 
 export interface FootprintFinalInput {
   buildings: UrbanBuilding[];
@@ -16,12 +17,16 @@ export interface FootprintFinalInput {
   tipConstrained?: (tip: Vec2, outward: Vec2) => boolean;
   /** True when the tip exits a labelled open quarter boundary. */
   openQuarterEdge?: (tip: Vec2, outward: Vec2) => boolean;
+  /** Prove all proposed rooms retain street access and do not disconnect block peers. */
+  validateParts?: (originalIndex: number, parts: Polygon[]) => boolean;
 }
 export interface FootprintFinalResult { changed: Set<number>; invalid: number[]; cleaned: number; releasedArea: number }
 
 function proper(p: Polygon): boolean {
   if (p.length < 3 || !isSimple(p) || area(p) < 12) return false;
   if (p.length === 3) return 2 * inscribed(p, [], 0.02).r >= 3.2 && minAngle(p) >= 20 * Math.PI / 180;
+  if (!shapeOkObb(p)) return false;
+  if (2 * inscribed(p, [], 0.05, 1.8).r < 3.6) return false;
   return (minNeck(p)?.w ?? Infinity) >= 3.59;
 }
 
@@ -98,7 +103,7 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
     if (owner && u.backLand) {
       const tip = clipSharpTip(b.poly, owner.poly, (p, d) => !openExterior(owner, p, d)
         || tipConstrained(b.parcel!, p, d));
-      if (tip) {
+      if (tip && (!u.validateParts || u.validateParts(i, [tip.house]))) {
         b.poly = tip.house;
         u.backLand.push({ outer: tip.tip, holes: [] });
         releasedArea += area(tip.tip);
@@ -126,12 +131,19 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
       main = parts[0];
       if (proper(parts[1])) extra.push(parts[1]); else released.push(parts[1]);
     }
-    if (!proper(main) || area(main) + extra.reduce((s, p) => s + area(p), 0) < 0.7 * area(b.poly)) {
+    let keptExtra = extra, freed = released;
+    if (u.validateParts && !u.validateParts(i, [main, ...extra]) && extra.length
+      && area(main) >= 0.7 * area(b.poly) && u.validateParts(i, [main])) {
+      keptExtra = [];
+      freed = [...released, ...extra];
+    }
+    if (!proper(main) || area(main) + keptExtra.reduce((s, p) => s + area(p), 0) < 0.7 * area(b.poly)
+      || (u.validateParts && !u.validateParts(i, [main, ...keptExtra]))) {
       invalid.push(i); continue;
     }
     b.poly = main;
-    for (const p of extra) u.buildings.push({ ...b, poly: p });
-    for (const p of released) { u.backLand.push({ outer: p, holes: [] }); releasedArea += area(p); }
+    for (const p of keptExtra) u.buildings.push({ ...b, poly: p });
+    for (const p of freed) { u.backLand.push({ outer: p, holes: [] }); releasedArea += area(p); }
     if (block !== undefined) changed.add(block);
   }
   return { changed, invalid, cleaned, releasedArea };
