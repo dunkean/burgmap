@@ -46,8 +46,9 @@ vérification de compilation pour `wasm32-unknown-unknown`.
 - Graine : chaîne reproductible ; bouton pour tirer une nouvelle graine.
 - Relief : **plaine, colline, vallée, canyon, montagne, plateau, haute montagne,
   volcan, caldeira ouverte, caverne**.
-- Érosion : **0 à 100 %**. À 0 %, le relief initial est conservé ; la moitié
-  supérieure du curseur renforce progressivement l'incision et l'usure. Ce réglage agit sur
+- Érosion : **0 à 100 %**. À 0 %, le relief initial est conservé ; la dose augmente
+  progressivement avec le carré du curseur, jusqu’à une érosion maximale bornée.
+  Le passage de 0 à 1 % ne déclenche plus une incision complète des cuvettes. Ce réglage agit sur
   l'évolution du terrain, sans ajouter de rivières rendues à cette étape.
   La caverne ignore l'érosion, aussi bien pour le sol que pour ses parois.
 - Générer et Autogénérer : la case active une génération après modification
@@ -71,14 +72,20 @@ Le banc demande une vue d'ensemble puis des échantillons détaillés de la zone
 visible quand on zoome ou déplace la carte. Il ne grossit pas seulement une
 image couvrant les 100 km et ne relance pas l'érosion à chaque déplacement.
 Les positions restent en mètres et le détail suit le même champ de terrain.
-L'ombrage utilise des normales calculées avec un pas physique constant dans
-Rust, plutôt que les différences de hauteur entre pixels de l'image affichée.
+Les octaves trop fines pour la vue sont atténuées progressivement, sans
+renormaliser les basses fréquences. Une pyramide filtrée applique le même
+principe aux reliefs préparés et aux corrections d’érosion. L’ombrage et les
+courbes utilisent cette même surface filtrée ; les normales sont calculées
+avec un pas adapté à la résolution physique demandée. Le détail revient au
+zoom, avec des coordonnées de terrain fixes et sans relancer l’érosion.
 Le statut indique la taille des échantillons et les temps de calcul. Ces durées
 ne sont pas une comparaison Rust/TypeScript ni une mesure complète des frames.
 
-Pour ce prototype, les reliefs régionaux réemploient une source d'érosion
-continue et déformée par le bruit mondial. Il ne s'agit pas encore d'une
-simulation hydrologique intégrale d'un territoire de 100 km.
+Pour ce prototype, les reliefs régionaux réemploient une source d’érosion
+continue via des coordonnées de bruit mondial fixes et apériodiques.
+La source n’est plus répétée par modulo ni mélangée sur une grille de motifs.
+Cette projection peut réemployer des formes locales ; il ne s'agit pas encore
+d'une simulation hydrologique intégrale d'un territoire de 100 km.
 
 Le mélange de plusieurs reliefs, l'hydrologie, les villes et le futur moteur
 de rendu restent des étapes ultérieures. La caverne fournit pour l'instant un

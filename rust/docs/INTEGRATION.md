@@ -13,7 +13,9 @@ taille de carte (jusqu'à 100 km) et la taille physique du motif sont indépenda
 Les appels `sample_region` transportent des grilles d'altitudes et de normales
 `Float32Array` et, pour la caverne, un masque `Uint8Array`. Un aperçu de 512²
 est complété par des régions de 768² au déplacement et au zoom ; ces appels
-réutilisent le relief préparé et ne relancent pas l'érosion. La caldeira ouverte
+réutilisent le relief préparé et ne relancent pas l'érosion. Le bruit et le relief
+préparé filtrent les détails sous la résolution demandée ; normales et courbes
+suivent la même surface. La projection régionale est apériodique. La caldeira ouverte
 est un type dédié et la caverne ignore l'érosion.
 `bridge/` adapte ces données au rendu de terrain actuel. Le modèle `World`
 n'est pas le modèle du moteur Rust. Voir [README](../README.md) pour le

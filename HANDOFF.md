@@ -5,6 +5,27 @@ bugs and their evidence are recorded in [ROADMAP.md](ROADMAP.md).
 
 ## Current status
 
+- Terrain erosion / zoom filtering repair (2026-10-06): erosion uses a bounded
+  squared dose; pit breach depth and application now scale with that dose,
+  and drainage detail masking fades continuously from zero. Shape erosion
+  keeps fixed fractional-dose steps. The maximum no longer uses the previous
+  fivefold strength boost. Regional source coordinates are aperiodic and fixed
+  across LODs, replacing the visible modulo/blending lattice. Analytic octaves
+  fade below the sampling resolution without changing low-band amplitudes;
+  a filtered source pyramid handles prepared relief and erosion deltas.
+  Normals and contours follow the same filtered surface. This supersedes the
+  constant physical normal step and periodic source reuse described below.
+  The regional projection still reuses a finite erosion source; it is not a
+  full-map hydrology simulation. Prior prototype saved locally as `9b726d9`;
+  the erosion repair is saved independently as `62ec918`.
+  Read-only Sol xhigh review passes. Native fmt/Clippy, WASM compilation,
+  TypeScript typecheck, standalone terrain and independent app/bench builds
+  pass. Chromium startup reaches overview and 768² detail for the user's
+  seed42 / map30km / motif3km link in dev and offline, without console errors.
+  One-off WASM data diagnostics at identical resolution give RMS differences
+  from 0% erosion of 0.004m at 1%, 1.83m at 50%, and 5.47m at 100%.
+  No suites or screenshots were run; visual assessment remains with the user.
+
 - Terrain WASM dev reload fix (2026-10-06): Vite retained an old inline WASM
   asset while updating the JS bindings, causing `wasm.terrainengine_new is not
   a function`. Terrain dev mode now explicitly watches the generated package,

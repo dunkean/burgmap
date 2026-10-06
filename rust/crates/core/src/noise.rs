@@ -63,9 +63,20 @@ impl Noise {
     }
 
     pub fn fbm_gain(&self, x: f64, y: f64, octaves: usize, gain: f64) -> f64 {
+        self.fbm_filtered(x, y, octaves, gain, 0.0)
+    }
+
+    /// Pixel footprint in noise coordinates. Fade unresolved octaves without
+    /// renormalizing the retained bands (large features must not change amplitude).
+    pub fn fbm_filtered(&self, x: f64, y: f64, octaves: usize, gain: f64, footprint: f64) -> f64 {
         let (mut amp, mut freq, mut sum, mut norm) = (1.0, 1.0, 0.0, 0.0);
         for o in 0..octaves {
-            sum += amp * self.noise(x * freq + o as f64 * 17.3, y * freq - o as f64 * 9.1);
+            let weight = band_weight(footprint * freq);
+            if weight > 0.0 {
+                sum += amp
+                    * weight
+                    * self.noise(x * freq + o as f64 * 17.3, y * freq - o as f64 * 9.1);
+            }
             norm += amp;
             amp *= gain;
             freq *= 2.0;
@@ -74,19 +85,38 @@ impl Noise {
     }
 
     pub fn ridged(&self, x: f64, y: f64, octaves: usize) -> f64 {
+        self.ridged_filtered(x, y, octaves, 0.0)
+    }
+
+    pub fn ridged_filtered(&self, x: f64, y: f64, octaves: usize, footprint: f64) -> f64 {
         let (mut amp, mut freq, mut sum, mut norm, mut weight) = (1.0, 1.0, 0.0, 0.0, 1.0);
         for o in 0..octaves {
+            let band = band_weight(footprint * freq);
+            if band == 0.0 {
+                // The missing ridge bands retain their neutral level.
+                sum += amp * 0.5;
+                norm += amp;
+                amp *= 0.5;
+                freq *= 2.0;
+                continue;
+            }
             let r = 1.0
                 - self
                     .noise(x * freq + o as f64 * 31.7, y * freq + o as f64 * 5.3)
                     .abs();
             let v = r * r * weight;
             weight = (v * 1.6).clamp(0.0, 1.0);
-            sum += amp * v;
+            sum += amp * (0.5 + band * (v - 0.5));
             norm += amp;
             amp *= 0.5;
             freq *= 2.0;
         }
         sum / norm
     }
+}
+
+fn band_weight(footprint: f64) -> f64 {
+    // Simplex contains frequencies above its nominal wavelength: retain at least
+    // four samples per wavelength, with a smooth transition starting at eight.
+    1.0 - crate::smooth((footprint - 0.125) / 0.125)
 }

@@ -1,5 +1,5 @@
 //! Retained physical terrain. Camera sampling never reruns erosion or changes the seed.
-//! Regional relief reuses an seamless warped periodic erosion source in this prototype;
+//! Regional relief reuses an aperiodically mapped erosion source in this prototype;
 //! analytic world noise and finite features are evaluated at fixed physical scales.
 use crate::{CavernShape, Noise, Relief, Rng, Terrain, generate_motif, smooth};
 
@@ -10,8 +10,8 @@ pub struct TerrainGenerator {
     motif: f64,
     relief: Relief,
     erosion: f64,
-    source: Vec<f32>,
-    delta: Vec<f32>,
+    source: Surface,
+    delta: Surface,
     noise: Noise,
     noise2: Noise,
     down: (f64, f64),
@@ -109,8 +109,8 @@ impl TerrainGenerator {
             motif,
             relief: kind,
             erosion,
-            source: prepared.height,
-            delta,
+            source: Surface::new(prepared.height),
+            delta: Surface::new(delta),
             noise,
             noise2,
             down,
@@ -168,7 +168,7 @@ impl TerrainGenerator {
         let mut normal_y = vec![0.0_f32; count];
         let mut normal_z = vec![0.0_f32; count];
         let cell = extent / resolution as f64;
-        let epsilon = self.motif / SOURCE_N as f64;
+        let epsilon = (self.motif / SOURCE_N as f64).max(cell * 0.5);
         let mut min = f32::INFINITY;
         let mut max = f32::NEG_INFINITY;
         for row in 0..resolution {
@@ -177,15 +177,17 @@ impl TerrainGenerator {
                 let wy = y + (row as f64 + 0.5) * cell;
                 let i = row * resolution + col;
                 let rock = self.rock_at(wx, wy);
-                let h = self.height_at(wx, wy) + if rock == 1 { self.amp } else { 0.0 };
+                let h = self.height_at(wx, wy, cell) + if rock == 1 { self.amp } else { 0.0 };
                 height[i] = h.clamp(0.3, self.max_height) as f32;
                 if !cave_mask.is_empty() {
                     cave_mask[i] = rock;
                 }
-                // Derivative sampling uses the prepared field's physical cell, never the viewport cell.
-                let gx = (self.height_at(wx + epsilon, wy) - self.height_at(wx - epsilon, wy))
+                // Shade the same filtered surface as the contours, not subpixel gullies.
+                let gx = (self.height_at(wx + epsilon, wy, cell)
+                    - self.height_at(wx - epsilon, wy, cell))
                     / (2.0 * epsilon);
-                let gy = (self.height_at(wx, wy + epsilon) - self.height_at(wx, wy - epsilon))
+                let gy = (self.height_at(wx, wy + epsilon, cell)
+                    - self.height_at(wx, wy - epsilon, cell))
                     / (2.0 * epsilon);
                 let norm = (1.0 + gx * gx + gy * gy).sqrt();
                 normal_x[i] = (-gx / norm) as f32;
@@ -219,9 +221,15 @@ impl TerrainGenerator {
         cave.rock(px, py, self.motif, 0.0, &self.noise)
     }
 
-    fn height_at(&self, x: f64, y: f64) -> f64 {
+    fn height_at(&self, x: f64, y: f64, footprint: f64) -> f64 {
         let fbm = |noise: &Noise, x: f64, y: f64, wavelength: f64, octaves: usize| {
-            noise.fbm(x / wavelength, y / wavelength, octaves)
+            noise.fbm_filtered(
+                x / wavelength,
+                y / wavelength,
+                octaves,
+                0.5,
+                footprint / wavelength,
+            )
         };
         let scale = self.motif / 2400.0;
         let rough = fbm(&self.noise, x + self.phase, y, 720.0 * scale, 4);
@@ -236,22 +244,19 @@ impl TerrainGenerator {
                 } else {
                     self.amp * (0.07 + 0.035 * rough)
                 };
-                let local = sample_c2(
-                    &self.source,
-                    SOURCE_N,
-                    px * SOURCE_N as f64 - 0.5,
-                    py * SOURCE_N as f64 - 0.5,
-                );
+                let local = self.source.sample(px, py, footprint / self.motif);
                 background * (1.0 - weight) + local * weight
             }
             Relief::Flat => {
-                let swell = self.noise.fbm_gain(
+                let swell = self.noise.fbm_filtered(
                     (x + self.phase) / (1200.0 * scale),
                     y / (1200.0 * scale),
                     4,
                     0.42,
+                    footprint / (1200.0 * scale),
                 );
-                self.amp * (0.45 + 0.275 * swell + 0.065 * rough) + self.periodic(&self.delta, x, y)
+                self.amp * (0.45 + 0.275 * swell + 0.065 * rough)
+                    + self.regional(&self.delta, x, y, footprint)
             }
             Relief::Canyon => {
                 let along = (x - self.map_width * 0.5) * self.down.0
@@ -278,15 +283,18 @@ impl TerrainGenerator {
                 let shelf = wall * 0.92
                     + smooth((wall - 0.30) / 0.07) * 0.025
                     + smooth((wall - 0.69) / 0.06) * 0.055;
-                let tributary =
-                    self.noise2
-                        .ridged((x + self.phase) / (290.0 * scale), y / (290.0 * scale), 4);
+                let tributary = self.noise2.ridged_filtered(
+                    (x + self.phase) / (290.0 * scale),
+                    y / (290.0 * scale),
+                    4,
+                    footprint / (290.0 * scale),
+                );
                 let rock = fbm(&self.noise, x, y, 95.0 * scale, 3);
                 self.amp
                     * (0.09 + 0.78 * shelf + 0.08 * rough * wall
                         - 0.07 * tributary * wall * (1.0 - 0.6 * wall)
                         + 0.014 * rock * wall)
-                    + self.periodic(&self.delta, x, y) * wall
+                    + self.regional(&self.delta, x, y, footprint) * wall
             }
             Relief::Hills | Relief::Mountains | Relief::HighMountains | Relief::Valley => {
                 let variation = fbm(
@@ -296,7 +304,8 @@ impl TerrainGenerator {
                     self.motif * 1.8,
                     3,
                 );
-                let terrain = self.periodic(&self.source, x, y) * (1.0 + 0.22 * variation)
+                let terrain = self.regional(&self.source, x, y, footprint)
+                    * (1.0 + 0.22 * variation)
                     + self.amp * (0.15 + 0.11 * rough);
                 let wavelength = self.motif / 160.0;
                 let detail_amp =
@@ -332,40 +341,20 @@ impl TerrainGenerator {
         height.clamp(0.3, self.max_height)
     }
 
-    fn periodic(&self, field: &[f32], x: f64, y: f64) -> f64 {
-        if field.is_empty() {
-            return 0.0;
-        }
-        let warp_x = self.motif
-            * 0.18
-            * self
-                .noise2
-                .fbm(x / (self.motif * 1.7) + 11.3, y / (self.motif * 1.7), 2);
-        let warp_y = self.motif
-            * 0.18
-            * self.noise2.fbm(
-                x / (self.motif * 1.7) - 4.7,
-                y / (self.motif * 1.7) + 2.9,
-                2,
-            );
-        let u = ((x + warp_x) / self.motif).rem_euclid(1.0);
-        let v = ((y + warp_y) / self.motif).rem_euclid(1.0);
-        let weight = |t: f64| {
-            let a = (std::f64::consts::PI * t).sin().powi(4);
-            let b = (std::f64::consts::PI * t).cos().powi(4);
-            a / (a + b)
-        };
-        let wx = weight(u);
-        let wy = weight(v);
-        let ax = u * SOURCE_N as f64 - 0.5;
-        let ay = v * SOURCE_N as f64 - 0.5;
-        let bx = (u + 0.5).rem_euclid(1.0) * SOURCE_N as f64 - 0.5;
-        let by = (v + 0.5).rem_euclid(1.0) * SOURCE_N as f64 - 0.5;
-        (sample_c2(field, SOURCE_N, ax, ay) * wx + sample_c2(field, SOURCE_N, bx, ay) * (1.0 - wx))
-            * wy
-            + (sample_c2(field, SOURCE_N, ax, by) * wx
-                + sample_c2(field, SOURCE_N, bx, by) * (1.0 - wx))
-                * (1.0 - wy)
+    fn regional(&self, field: &Surface, x: f64, y: f64, footprint: f64) -> f64 {
+        // Continuous world coordinates without modulo or tile blending. The old
+        // repeated source exposed its motif-sized lattice even with zero erosion.
+        let wavelength = self.motif * 1.2;
+        // Keep the coordinate map fixed at every LOD: filtering these coordinates
+        // would move whole hills as the camera zooms. Only filter the sampled field.
+        let u = 0.5 + 0.44 * self.noise2.fbm(x / wavelength + 11.3, y / wavelength, 2);
+        let v = 0.5
+            + 0.44
+                * self
+                    .noise2
+                    .fbm(x / wavelength - 4.7, y / wavelength + 2.9, 2);
+        // Account conservatively for coordinate deformation when selecting a mip.
+        field.sample(u, v, footprint * 2.0 / self.motif)
     }
 }
 
@@ -397,4 +386,59 @@ fn sample_c2(field: &[f32], n: usize, fx: f64, fy: f64) -> f64 {
         }
     }
     value
+}
+
+// Box-filtered physical source pyramid. Heights, normals and contours share the
+// same smoothly interpolated level, including finite features and erosion deltas.
+struct Surface {
+    levels: Vec<Vec<f32>>,
+}
+
+impl Surface {
+    fn new(field: Vec<f32>) -> Self {
+        if field.is_empty() {
+            return Self { levels: Vec::new() };
+        }
+        let mut levels = vec![field];
+        let mut n = SOURCE_N;
+        while n > 1 {
+            let previous = levels.last().unwrap();
+            let half = n / 2;
+            let mut next = vec![0.0; half * half];
+            for y in 0..half {
+                for x in 0..half {
+                    let i = 2 * y * n + 2 * x;
+                    next[y * half + x] =
+                        (previous[i] + previous[i + 1] + previous[i + n] + previous[i + n + 1])
+                            * 0.25;
+                }
+            }
+            levels.push(next);
+            n = half;
+        }
+        Self { levels }
+    }
+
+    fn sample(&self, u: f64, v: f64, footprint: f64) -> f64 {
+        if self.levels.is_empty() {
+            return 0.0;
+        }
+        let lod = (footprint * SOURCE_N as f64)
+            .max(1.0)
+            .log2()
+            .min((self.levels.len() - 1) as f64);
+        let lower = lod.floor() as usize;
+        let upper = (lower + 1).min(self.levels.len() - 1);
+        let at = |level: usize| {
+            let n = SOURCE_N >> level;
+            sample_c2(
+                &self.levels[level],
+                n,
+                u * n as f64 - 0.5,
+                v * n as f64 - 0.5,
+            )
+        };
+        let t = lod - lower as f64;
+        at(lower) * (1.0 - t) + at(upper) * t
+    }
 }
