@@ -209,7 +209,11 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
       invalid.push(i); continue;
     }
     b.poly = main;
-    for (const p of keptExtra) u.buildings.push({ ...b, poly: p });
+    for (const p of keptExtra) {
+      const index = u.buildings.length;
+      u.buildings.push({ ...b, poly: p });
+      roofIndex.insertPts(p, index);
+    }
     for (const p of freed) { u.backLand.push({ outer: p, holes: [] }); releasedArea += area(p); }
     if (block !== undefined) changed.add(block);
   }
