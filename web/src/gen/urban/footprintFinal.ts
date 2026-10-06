@@ -483,7 +483,6 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
       if (fixed) continue;
     }
     if ((minNeck(b.poly)?.w ?? Infinity) < 2 && splitIntoServedRooms(i, owner)) continue;
-    if ((minNeck(b.poly)?.w ?? Infinity) < 1.2 && releaseArmAsPassage(i, owner)) continue;
     if (u.placementClear) {
       const bounds = bboxOf(owner.poly);
       const occupied = roofIndex.query(bounds.x0, bounds.y0, bounds.x1, bounds.y1)
@@ -506,6 +505,30 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
           continue;
         }
       }
+      // A large bent plot can hold the same complete dwelling in another
+      // pocket. Exhaust this full-area option before releasing an arm or
+      // spending the layer's 2% programme-loss budget on compact rooms.
+      if (owner.use === 'plot' && u.validateParts) {
+        const replanned = replanWholeRoom(b.poly, owner.poly, owner.front, occupied,
+          (candidate) => u.placementClear!(candidate, b.poly) && respectsOtherOwners(i, candidate)
+            && !!planOpenLand(candidate),
+          (candidate) => proper(candidate) && !overlapsRoof(i, candidate)
+            && u.validateParts!(i, [candidate]));
+        if (replanned && housingArea() - area(b.poly) + area(replanned) >= 0.98 * initialHousingArea) {
+          const freed = tryDifference(b.poly, replanned), added = tryDifference(replanned, b.poly);
+          const land = planOpenLand(replanned);
+          if (land && !freed.failed && !added.failed && freed.pieces.every((p) => !p.holes.length)
+            && Math.abs(area(b.poly) + mpArea(added.pieces) - area(replanned) - mpArea(freed.pieces)) < 1e-5) {
+            commitOpenLand(land);
+            u.backLand.push(...freed.pieces);
+            releasedArea += mpArea(freed.pieces);
+            b.poly = replanned; roofIndex.insertPts(replanned, i);
+            if (block !== undefined) changed.add(block);
+            continue;
+          }
+        }
+      }
+      if ((minNeck(b.poly)?.w ?? Infinity) < 1.2 && releaseArmAsPassage(i, owner)) continue;
       // An unusable sub-2 m connector can join substantial but uninhabitable
       // wings. Search a compact replacement only after every ≥95% candidate
       // failed, and only with the same physical, ownership and access proofs.
@@ -643,32 +666,6 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
           b.poly = relocated; roofIndex.insertPts(relocated, i);
           if (block !== undefined) changed.add(block);
           continue;
-        }
-      }
-      // A large, bent owner plot may have a separate empty pocket beyond the
-      // 18 m local search. Move the *whole* invalid room without losing its
-      // programme, after all local repairs and only with full block proofs.
-      if (owner.use === 'plot' && u.placementClear && u.validateParts) {
-        const bounds = bboxOf(owner.poly);
-        const occupied = roofIndex.query(bounds.x0, bounds.y0, bounds.x1, bounds.y1)
-          .filter((j) => j !== i).map((j) => u.buildings[j].poly);
-        const replanned = replanWholeRoom(b.poly, owner.poly, owner.front, occupied,
-          (candidate) => u.placementClear!(candidate, b.poly) && respectsOtherOwners(i, candidate)
-            && !!planOpenLand(candidate),
-          (candidate) => proper(candidate) && !overlapsRoof(i, candidate)
-            && u.validateParts!(i, [candidate]));
-        if (replanned && housingArea() - area(b.poly) + area(replanned) >= 0.98 * initialHousingArea) {
-          const freed = tryDifference(b.poly, replanned), added = tryDifference(replanned, b.poly);
-          const land = planOpenLand(replanned);
-          if (land && !freed.failed && !added.failed && freed.pieces.every((p) => !p.holes.length)
-            && Math.abs(area(b.poly) + mpArea(added.pieces) - area(replanned) - mpArea(freed.pieces)) < 1e-5) {
-            commitOpenLand(land);
-            u.backLand.push(...freed.pieces);
-            releasedArea += mpArea(freed.pieces);
-            b.poly = replanned; roofIndex.insertPts(replanned, i);
-            if (block !== undefined) changed.add(block);
-            continue;
-          }
         }
       }
       // Record only the morphological candidate here. The removal decision

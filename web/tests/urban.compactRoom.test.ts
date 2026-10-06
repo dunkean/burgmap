@@ -257,7 +257,7 @@ describe('compact recovery on six pinned native blocks', () => {
     const added = mpArea(tryDifference(room, f.roof).pieces);
     expect(area(room) + mpArea(land) - added).toBeCloseTo(area(f.roof), 5);
   }, 30_000);
-  it('replaces the pinned uninhabitable arm with a real 0.8 m passage to served public apron', () => {
+  it('prefers a complete replanned house; a private passage remains a proved fallback', () => {
     const f = fixture.cases.find((c) => c.i === 845)!;
     const buildings = [{ poly: f.roof, kind: 'back', parcel: 0 },
       ...f.occupied.map((poly) => ({ poly, kind: 'landmark', parcel: 0 }))];
@@ -295,12 +295,41 @@ describe('compact recovery on six pinned native blocks', () => {
         return after.every((reached, j) => reached || !required[j]);
       } });
     expect(result.invalid).not.toContain(0);
-    expect(privatePassages).toHaveLength(1);
-    expect(privatePassages[0].width).toBe(0.8);
-    expect(privatePassages[0].path).toEqual(approvedPath);
-    expect(privatePassages[0].path).not.toBe(approvedPath);
-    expect(area(buildings[0].poly)).toBeGreaterThan(100);
-    expect(area(buildings[0].poly) + mpArea(backLand)).toBeCloseTo(area(f.roof), 5);
+    expect(privatePassages).toEqual([]);
+    expect(area(buildings[0].poly)).toBeGreaterThanOrEqual(0.95 * area(f.roof));
+    expect(area(buildings[0].poly) + result.releasedArea
+      - mpArea(tryDifference(buildings[0].poly, f.roof).pieces)).toBeCloseTo(area(f.roof), 5);
+    const pathBuildings = [{ poly: f.roof, kind: 'back', parcel: 0 },
+      ...f.occupied.map((poly) => ({ poly, kind: 'landmark', parcel: 0 }))];
+    const pathPassages: typeof privatePassages = [];
+    const pathLand: typeof backLand = [];
+    const pathResult = finalizeFootprints({ buildings: pathBuildings,
+      parcels: [{ poly: f.owner, front: f.front, use: 'plot', block: 0 }],
+      backLand: pathLand, privatePassages: pathPassages,
+      // A plot with no separate room-sized pocket still permits its existing
+      // narrow arm to become a real public-apron-connected passage.
+      placementClear: (p) => {
+        const hit = tryIntersection(p, reserve);
+        return area(p) < 0.95 * area(f.roof) && !hit.failed && mpArea(hit.pieces) <= 1e-6;
+      },
+      proposePrivatePassage: (i, main, path, width) => {
+        if (!validatePassage(i, main, path, width)) return false;
+        approvedPath = path.map((p) => ({ ...p }));
+        return approvedPath;
+      },
+      validateParts: (_, parts) => {
+        const proposed = f.peers.flatMap((peer) => peer.i === f.i ? parts : [peer.poly]);
+        const after = blockReach(f.block, proposed, streetAt);
+        const required = f.peers.flatMap((peer, j) => peer.i === f.i ? parts.map(() => true) : [before[j]]);
+        return after.every((reached, j) => reached || !required[j]);
+      } });
+    expect(pathResult.invalid).not.toContain(0);
+    expect(pathPassages).toHaveLength(1);
+    expect(pathPassages[0].width).toBe(0.8);
+    expect(pathPassages[0].path).toEqual(approvedPath);
+    expect(pathPassages[0].path).not.toBe(approvedPath);
+    expect(area(pathBuildings[0].poly)).toBeGreaterThan(100);
+    expect(area(pathBuildings[0].poly) + mpArea(pathLand)).toBeCloseTo(area(f.roof), 5);
     const denied = [{ poly: f.roof, kind: 'back', parcel: 0 }];
     const deniedPassages: typeof privatePassages = [];
     const deniedLand: typeof backLand = [];
