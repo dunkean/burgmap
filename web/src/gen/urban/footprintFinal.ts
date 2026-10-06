@@ -3,10 +3,12 @@ import type { Polygon, Vec2 } from '../core/geom';
 import type { UrbanBuilding, UrbanParcel } from '../types';
 import type { PolyH } from '../geo/bool';
 import { area, cleanRing, isSimple, interiorAngle, minAngle, minNeck, inscribed } from '../geo/poly';
-import { lpoly, polyInside, splitByChord } from '../geo/split';
+import { isConvex, lpoly, polyInside, splitByChord } from '../geo/split';
 import { GridIndex } from '../geo/spatial';
 import { distToRing, pointInRing } from '../geo/poly';
 import { shapeOkObb } from './access';
+import { splitLong } from './access';
+import { tryDifference } from '../geo/bool';
 
 export interface FootprintFinalInput {
   buildings: UrbanBuilding[];
@@ -130,6 +132,22 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
       }
       main = parts[0];
       if (proper(parts[1])) extra.push(parts[1]); else released.push(parts[1]);
+    }
+    if (!proper(main) && main.length === 4 && isConvex(main, 1e-3)) {
+      const sections = splitLong([{ poly: main, kind: b.kind }]);
+      const pieces = sections.map((s) => s.poly);
+      if (pieces.length > 1 && pieces.every((p) => proper(p) && polyInside(owner.poly, p))
+        && pieces.reduce((s, p) => s + area(p), 0) >= 0.7 * area(main)) {
+        const remainder = tryDifference(main, ...pieces);
+        if (!remainder.failed && remainder.pieces.every((p) => !p.holes.length)) {
+          const accounted = pieces.reduce((s, p) => s + area(p), 0)
+            + remainder.pieces.reduce((s, p) => s + area(p.outer), 0);
+          if (Math.abs(accounted - area(main)) < 1e-5) {
+            main = pieces[0]; extra.push(...pieces.slice(1));
+            released.push(...remainder.pieces.map((p) => p.outer));
+          }
+        }
+      }
     }
     let keptExtra = extra, freed = released;
     if (u.validateParts && !u.validateParts(i, [main, ...extra]) && extra.length

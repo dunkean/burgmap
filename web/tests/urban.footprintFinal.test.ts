@@ -113,4 +113,18 @@ describe('last footprint pass', () => {
     expect(JSON.stringify(u.buildings)).toBe(before);
     expect(u.backLand).toEqual([]);
   });
+
+  it('divides a long, wide convex house into accessed rooms with exact area accounting', () => {
+    const long = rect(0, 0, 25, 5);
+    const calls: number[] = [];
+    const u = { buildings: [{ poly: long, kind: 'house', parcel: 0 }],
+      parcels: [{ poly: rect(-1, -1, 26, 6), use: 'plot', block: 3 }],
+      backLand: [] as { outer: Polygon; holes: Polygon[] }[],
+      validateParts: (_index: number, parts: Polygon[]) => { calls.push(parts.length); return true; } };
+    const result = finalizeFootprints(u);
+    expect(result.invalid).toEqual([]);
+    expect(u.buildings.length).toBeGreaterThan(1);
+    expect(calls.some((n) => n > 1)).toBe(true);
+    expect(u.buildings.reduce((s, b) => s + area(b.poly), 0) + u.backLand.reduce((s, p) => s + area(p.outer), 0)).toBeCloseTo(area(long), 5);
+  });
 });
