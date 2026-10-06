@@ -134,6 +134,9 @@ export function minNeck(p: Polygon): { w: number; a: Vec2; b: Vec2 } | null {
       if (len2 < 1e-12) continue;
       const t = ((a.x - c.x) * dx + (a.y - c.y) * dy) / len2;
       if (t < 1e-5 || t > 1 - 1e-5) continue;
+      // Near a neighbouring vertex this is a corner notch, not a cross-section of a
+      // corridor. Such a chord is adjacent to the reflex edge and cannot split the ring.
+      if (Math.min(t, 1 - t) * Math.sqrt(len2) < 0.05) continue;
       const b = { x: c.x + t * dx, y: c.y + t * dy };
       const w = dist(a, b);
       if (best && w >= best.w) continue;

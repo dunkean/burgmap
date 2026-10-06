@@ -127,4 +127,13 @@ describe('last footprint pass', () => {
     expect(calls.some((n) => n > 1)).toBe(true);
     expect(u.buildings.reduce((s, b) => s + area(b.poly), 0) + u.backLand.reduce((s, p) => s + area(p.outer), 0)).toBeCloseTo(area(long), 5);
   });
+
+  it('does not mistake a reflex-to-adjacent-vertex notch for a corridor neck', () => {
+    const p: Polygon = [
+      { x: 466.04609604629417, y: 406.8345555735861 }, { x: 473.0504106462478, y: 405.65722850093124 },
+      { x: 474.80260638499675, y: 415.76683706209525 }, { x: 471.8483017481581, y: 416.26341424751223 },
+      { x: 472.3185907591118, y: 420.40231659191824 }, { x: 467.6764143525161, y: 421.18260135519273 },
+    ];
+    expect(minNeck(p)?.w ?? Infinity).toBeGreaterThanOrEqual(3.6);
+  });
 });
