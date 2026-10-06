@@ -16,6 +16,11 @@ declare module '*burgmap_wasm.js' {
     constructor(seed: string, map_width: number, relief: string, erosion: number, motif_size: number, mountain_mix?: number, environment?: string);
     readonly min_height: number; readonly max_height: number;
     sampling_field(): Float32Array;
+    set_coast(mask: number, mode: string): void;
+    coast_parameters(): Float32Array;
+    configure_coast(mask: number, mode: string): void;
+    coast_erosion_parameters(): Float32Array;
+    set_coast_surface(heights: Float32Array): void;
     sampling_parameters(): Float64Array;
     sampling_permutations(): Uint32Array;
     sampling_gradients(): Float32Array;

@@ -1,10 +1,11 @@
 import './terrainbench.css';
 import TerrainWorker from './terrainWorker?worker&inline';
 import { sampleRustTerrain, RELIEFS, GEOLOGICAL_RELIEFS, ENVIRONMENT_RELIEFS, COMPUTE_MODES, type TerrainEnvironment, type TerrainCompute, type TerrainData, type TerrainSettings, type TerrainRequest, type TerrainResponse, type TerrainRelief, type TerrainRegion } from '../../../rust/bridge/terrain';
-import { renderRustTerrain, type TerrainStyle, type TerrainScene } from '../../../rust/bridge/terrainRender';
+import { renderRustTerrain, terrainContourWidths, type TerrainStyle, type TerrainScene } from '../../../rust/bridge/terrainRender';
 import { createPins } from './pins';
 import { pinsFromString, pinsToString, viewFromString, viewToString } from './share';
 import { clampView, fitView, panBy, screenToWorld, zoomAt, type View } from '../render/view';
+import { COAST_DIRECTIONS, ISLAND_MODES, type IslandMode } from '../../../rust/bridge/terrain';
 
 const el = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 const input = (id: string): HTMLInputElement => el<HTMLInputElement>(id);
@@ -23,6 +24,11 @@ let settings: TerrainSettings = {
   motifSize: bounded(finite(query.get('motif'), 3000), 250, 50000),
   relief: RELIEFS.includes(initialRelief) ? initialRelief : 'flat',
   environment: ENVIRONMENT_RELIEFS.includes(initialEnvironment) ? initialEnvironment : 'mixed',
+  coastMask: (query.get('coasts') ?? '').split(',').reduce((mask, direction) => {
+    const index = (COAST_DIRECTIONS as readonly string[]).indexOf(direction);
+    return index < 0 ? mask : mask | (1 << index);
+  }, 0),
+  islandMode: ISLAND_MODES.includes(query.get('islands') as IslandMode) ? query.get('islands') as IslandMode : 'island',
   mountainMix: bounded(finite(query.get('mix'), 0.5), 0, 1),
   erosion: bounded(finite(query.get('erosion'), 1), 0, 2), resolution: 512,
   compute: COMPUTE_MODES.includes(query.get('compute') as TerrainCompute) ? query.get('compute') as TerrainCompute : 'gpu-f32',
@@ -52,7 +58,29 @@ el<HTMLSelectElement>('environment').value = settings.environment!;
 el<HTMLSelectElement>('compute').value = settings.compute!;
 el<HTMLSelectElement>('generationCompute').value = settings.generationCompute!;
 input('auto').checked = query.get('auto') !== '0'; input('showPins').checked = query.get('showPins') !== '0';
+input('showContours').checked = query.get('contours') !== '0';
+function updateContourControl(): void {
+  input('showContours').disabled = style === 'copernicus' || settings.relief === 'cavern';
+  map.dataset.contours = String(input('showContours').checked && !input('showContours').disabled);
+}
+updateContourControl();
+let draftCoastMask = settings.coastMask ?? 0;
+const coastButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-coast]'));
+el<HTMLSelectElement>('islandMode').value = settings.islandMode!;
+function updateCoastControl(): void {
+  const cavern = el<HTMLSelectElement>('relief').value === 'cavern';
+  coastButtons.forEach(button => {
+    const index = (COAST_DIRECTIONS as readonly string[]).indexOf(button.dataset.coast!);
+    button.setAttribute('aria-pressed', String((draftCoastMask & (1 << index)) !== 0));
+    button.disabled = cavern;
+  });
+  el<HTMLButtonElement>('coastAll').disabled = cavern;
+  el('coastAll').setAttribute('aria-pressed', String(draftCoastMask === 255));
+  el('coastControl').title = cavern ? 'Sans côtes en caverne' : 'Choisir les directions couvertes par la mer';
+  el('islandControl').hidden = cavern || draftCoastMask !== 255;
+}
 function updateErosionControl(): void {
+  updateCoastControl();
   el('environmentControl').hidden = !geological(el<HTMLSelectElement>('relief').value);
   el('mountainMixControl').hidden = el<HTMLSelectElement>('relief').value !== 'mixed';
   el('mountainMixValue').textContent = `${Math.round(Number(input('mountainMix').value) * 100)} %`;
@@ -68,8 +96,13 @@ function status(message: string, error = false): void {
 }
 function shareQuery(): string {
   const params = new URLSearchParams({ engine: 'rust', v: '2', seed: settings.seed, width: String(settings.width), motif: String(settings.motifSize), relief: settings.relief, erosion: String(settings.erosion), style, auto: input('auto').checked ? '1' : '0' });
+  params.set('contours', input('showContours').checked ? '1' : '0');
   if (settings.relief === 'mixed') params.set('mix', String(settings.mountainMix));
   if (geological(settings.relief)) params.set('environment', settings.environment ?? 'mixed');
+  if (settings.relief !== 'cavern' && settings.coastMask) {
+    params.set('coasts', COAST_DIRECTIONS.filter((_, i) => settings.coastMask! & (1 << i)).join(','));
+    params.set('islands', settings.islandMode ?? 'island');
+  }
   params.set('compute', settings.compute ?? 'gpu-f32');
   params.set('generation', settings.generationCompute ?? 'gpu-erosion');
   if (pins.pins.length) params.set('pins', pinsToString(pins.pins));
@@ -93,6 +126,9 @@ const pinDelete = el('pinPopover').querySelector('button')!; pinDelete.textConte
 function updateView(): void {
   const w = viewport.clientWidth, h = viewport.clientHeight;
   view = clampView(view, terrain?.width ?? settings.width, w, h);
+  const contourWidths = terrainContourWidths(style, view.scale);
+  map.style.setProperty('--terrain-contour-width', `${contourWidths.thin}px`);
+  map.style.setProperty('--terrain-contour-index-width', `${contourWidths.index}px`);
   map.setAttribute('viewBox', `${view.cx - w / (2 * view.scale)} ${view.cy - h / (2 * view.scale)} ${w / view.scale} ${h / view.scale}`);
   pins.update(view, w, h);
   const sampling = displayedDetail ? `${(displayedDetail.terrain.width / displayedDetail.terrain.resolution).toFixed(2)} m / échantillon` : 'aperçu';
@@ -125,11 +161,13 @@ function renderedStatus(): void {
   const generationBackend = terrain.generationBackend === 'gpu-erosion-f32' ? 'érosion GPU FP32' : terrain.generationBackend === 'gpu-noise-all-f32' ? 'tous bruits GPU FP32 + érosion CPU' : terrain.generationBackend === 'gpu-noise-f32' ? 'bruits fins GPU FP32 + érosion CPU' : 'génération CPU';
   const preparation = terrain.prepareMs === undefined ? '' : ` · préparation ${terrain.prepareMs.toFixed(0)} ms (${generationBackend}${terrain.gpuSimulationMs ? `, simulation GPU ${terrain.gpuSimulationMs.toFixed(0)} ms` : ''}${terrain.nativeEnvironmentMs ? `, alentours CPU ${terrain.nativeEnvironmentMs.toFixed(0)} ms` : ''}${terrain.noiseMs ? `, bruits ${terrain.noiseMs.toFixed(0)} ms, suite Rust ${terrain.erosionMs!.toFixed(0)} ms` : ''})${terrain.generationReason ? ` · ${terrain.generationReason}` : ''}`;
   const setup = terrain.gpuSetupMs ? ` · initialisation GPU ${terrain.gpuSetupMs.toFixed(0)} ms` : '';
-  status(`${name}${environment} · ${backend} · carte ${settings.width.toLocaleString('fr-FR')} m · relief ${settings.motifSize.toLocaleString('fr-FR')} m · aperçu ${terrain.resolution}² · ${contourStep ? `courbes ${contourStep} m` : 'sans courbes'}${preparation}${setup} · génération + aperçu ${terrain.generationMs.toFixed(0)} ms${detail} · rendu ${renderingMs.toFixed(0)} ms`);
+  const coast = terrain.coastBackend ? ` · littoral + érosion ${terrain.coastBackend === 'gpu-f32' ? 'GPU FP32' : 'CPU Rust'}${terrain.coastMs ? ` ${terrain.coastMs.toFixed(0)} ms` : ''}${terrain.coastReason ? ` (${terrain.coastReason})` : ''}` : '';
+  status(`${name}${environment} · ${backend} · carte ${settings.width.toLocaleString('fr-FR')} m · relief ${settings.motifSize.toLocaleString('fr-FR')} m · aperçu ${terrain.resolution}² · ${contourStep && map.dataset.contours === 'true' ? `courbes ${contourStep} m` : 'sans courbes'}${preparation}${coast}${setup} · génération + aperçu ${terrain.generationMs.toFixed(0)} ms${detail} · rendu ${renderingMs.toFixed(0)} ms`);
 }
 function render(): void {
   if (!terrain) return;
-  const start = performance.now(), scene = renderRustTerrain(terrain, style);
+  updateContourControl();
+  const start = performance.now(), scene = renderRustTerrain(terrain, style, true, settings);
   map.innerHTML = `<g id="terrainOverview">${scene.svg}</g><g id="terrainDetail"></g>`;
   contourStep = scene.contourStep; renderingMs = performance.now() - start;
   displayedDetail = undefined;
@@ -211,7 +249,7 @@ function receive(response: TerrainResponse): void {
     try {
       const start = performance.now();
       const data = response.terrain;
-      const scene = renderRustTerrain(data, style, false), image = new Image();
+      const scene = renderRustTerrain(data, style, false, settings), image = new Image();
       image.src = scene.imageUrl;
       const tile: DetailTile = {
         terrain: { x: data.x, y: data.y, width: data.width, resolution: data.resolution, generationMs: data.generationMs, backend: data.backend, backendReason: data.backendReason, prepareMs: data.prepareMs, samplingMs: data.samplingMs, gpuSetupMs: data.gpuSetupMs },
@@ -257,7 +295,7 @@ function readSettings(): TerrainSettings | undefined {
   if (!RELIEFS.includes(relief)) { status('Choisissez un relief dans le menu.', true); return; }
   const environment = el<HTMLSelectElement>('environment').value as TerrainEnvironment;
   if (!ENVIRONMENT_RELIEFS.includes(environment)) { status('Choisissez un relief environnant dans le menu.', true); return; }
-  return { seed, width, motifSize, relief, environment, erosion: Number(input('erosion').value), mountainMix: Number(input('mountainMix').value), resolution: 512, compute: el<HTMLSelectElement>('compute').value as TerrainCompute, generationCompute: el<HTMLSelectElement>('generationCompute').value as TerrainSettings['generationCompute'] };
+  return { seed, width, motifSize, relief, environment, coastMask: relief === 'cavern' ? 0 : draftCoastMask, islandMode: el<HTMLSelectElement>('islandMode').value as IslandMode, erosion: Number(input('erosion').value), mountainMix: Number(input('mountainMix').value), resolution: 512, compute: el<HTMLSelectElement>('compute').value as TerrainCompute, generationCompute: el<HTMLSelectElement>('generationCompute').value as TerrainSettings['generationCompute'] };
 }
 function generate(): void {
   clearTimeout(generationTimer);
@@ -271,7 +309,12 @@ function parameterChanged(): void {
   if (input('auto').checked) generationTimer = setTimeout(generate, 220);
   else status('Paramètres modifiés · cliquez sur Générer pour les appliquer.');
 }
-for (const id of ['width', 'motifSize', 'relief', 'environment', 'mountainMix', 'erosion', 'seed']) el(id).addEventListener('input', parameterChanged);
+for (const id of ['width', 'motifSize', 'relief', 'environment', 'mountainMix', 'erosion', 'seed', 'islandMode']) el(id).addEventListener('input', parameterChanged);
+coastButtons.forEach(button => { button.onclick = () => {
+  draftCoastMask ^= 1 << (COAST_DIRECTIONS as readonly string[]).indexOf(button.dataset.coast!);
+  parameterChanged();
+}; });
+el('coastAll').onclick = () => { draftCoastMask = draftCoastMask === 255 ? 0 : 255; parameterChanged(); };
 el('generate').onclick = generate;
 el<HTMLSelectElement>('compute').onchange = generate;
 el<HTMLSelectElement>('generationCompute').onchange = generate;
@@ -284,6 +327,7 @@ el<HTMLSelectElement>('style').onchange = () => {
 el('fit').onclick = fit; el('zoomIn').onclick = () => zoom(1.4); el('zoomOut').onclick = () => zoom(1 / 1.4);
 el('pinMode').onclick = () => { pinMode = !pinMode; el('pinMode').setAttribute('aria-pressed', String(pinMode)); viewport.classList.toggle('pin-mode', pinMode); };
 input('showPins').onchange = () => { showPins(); save(); };
+input('showContours').onchange = () => { updateContourControl(); renderedStatus(); save(); };
 
 function link(): string { save(); const url = new URL(location.href); url.search = shareQuery(); return url.href; }
 async function copy(text: string): Promise<void> {
@@ -295,6 +339,8 @@ el('copyReport').onclick = () => {
   const erosion = settings.relief === 'cavern' ? 'sans objet (caverne)' : `${Math.round(settings.erosion * 100)} %`;
   const lines = ['Burgmap · prototype terrain Rust/WASM v2', link(), '', `Graine : ${settings.seed}`, `Largeur carte : ${settings.width} m · échelle relief : ${settings.motifSize} m · relief : ${settings.relief} · érosion : ${erosion}`, `Rendu : ${style} · vue : ${viewToString(view)}`, '', ...pins.pins.map((pin, i) => `Pin ${i + 1} : ${pin.x.toFixed(1)}, ${pin.y.toFixed(1)} m — ${pin.note || '(sans note)'}`)];
   if (geological(settings.relief)) lines.splice(5, 0, `Relief environnant : ${settings.environment ?? 'mixed'}`);
+  lines.push(`Courbes de niveau : ${map.dataset.contours === 'true' ? 'visibles' : 'masquées'}`);
+  if (settings.coastMask) lines.push(`Côtes : ${COAST_DIRECTIONS.filter((_, i) => settings.coastMask! & (1 << i)).join(', ')} · îles : ${settings.islandMode}`);
   if (terrain) lines.push('', `Source physique : 1024² · aperçu : ${terrain.resolution}² · génération : ${terrain.generationMs.toFixed(1)} ms · rendu : ${renderingMs.toFixed(1)} ms`);
   if (displayedDetail) lines.push(`Région détaillée : ${displayedDetail.terrain.x}, ${displayedDetail.terrain.y}, ${displayedDetail.terrain.width} m · ${displayedDetail.terrain.resolution}² · échantillonnage : ${detailSamplingMs.toFixed(1)} ms`);
   void copy(lines.join('\n'));

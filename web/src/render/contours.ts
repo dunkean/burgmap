@@ -14,10 +14,9 @@ export interface ContourSet {
 }
 
 /** Every 5th level is an index contour; short and near-flat loops are dropped. `u` = mapSize / 1600. */
-export function contourSet(world: World, u: number): ContourSet {
+export function contourSet(world: World, u: number, interval = CONTOUR_INTERVAL[world.options.relief]): ContourSet {
   const t = world.terrain;
   const hg = t.height;
-  const interval = CONTOUR_INTERVAL[world.options.relief];
   let maxH = 0;
   for (let i = 0; i < hg.data.length; i++) if (hg.data[i] > maxH) maxH = hg.data[i];
   const out: ContourSet = { thin: [], index: [] };

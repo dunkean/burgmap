@@ -32,14 +32,19 @@ surface du bassin versant rapportée au motif ; les contributions excessives
 sont bornées. L’érosion ne creuse plus les exutoires des cuvettes par chaînes
 D8 et ne coupe pas les flats sur la seule base de leur potentiel de drainage.
 Sa grille physique varie de 640 à 1024 cellules, avec une marge extrapolée.
-Les montagnes ont une charpente ridged dans le soulèvement principal.
+Le relief Montagne et le mélange collines/montagnes gardent un soulèvement doux,
+avec les réglages de talus, diffusion et détail de la référence TypeScript.
+Le relief Montagnes (chaînes, anciennement haute montagne) conserve la charpente
+ridged dans le soulèvement principal. Le CPU et le plan d’érosion GPU utilisent
+les mêmes paramètres ; les identifiants `mountains` et `high-mountains` restent
+compatibles avec les liens existants.
 Les collines gagnent 10 % d’amplitude ; leur érosion de surface suit un seuil
 de pente adapté au relief. Les alentours du plateau sont à une échelle ×2,5 ;
 ceux des vallées, volcans et caldeiras à ×2. Les formes centrales gardent
 leur propre motif, et le plateau ne change plus d’emprise avec la dose.
 Les plateaux, volcans et caldeiras génèrent et érodent leur forme locale
 sur GPU FP32. Leurs alentours sont sélectionnables : plaine, collines, mixte,
-montagnes ou hautes montagnes (`environment=`, mixte par défaut). La plaine
+montagne ou montagnes (chaînes, `environment=`, mixte par défaut). La plaine
 conserve son calcul Rust existant, séparé dans les diagnostics de temps ; les
 autres alentours sont préparés sur GPU. Le champ local et le champ régional ont des
 pyramides séparées ; le zoom conserve l’échelle du motif et ne relance rien.
@@ -68,6 +73,45 @@ est décodée avant un court fondu, en conservant l’ancienne jusque-là.
 `bridge/` adapte ces données au rendu de terrain actuel. Le modèle `World`
 n'est pas le modèle du moteur Rust. Voir [README](../README.md) pour le
 contrat, les commandes et les limites de cette première étape.
+
+### Extension côtes (7 octobre 2026)
+
+Le banc terrain accepte un masque de huit directions indépendantes, conservé
+dans les liens et désactivé en caverne. Toutes les directions activées donnent
+une île principale ou un archipel de trois à sept îles principales, selon un menu
+qui propose aussi un tirage seedé. `TerrainEngine.set_coast(mask, mode)` réutilise
+le relief préparé, découpe la côte puis applique l'érosion finale de surface.
+Le chemin GPU utilise `configure_coast`, assemble directement un champ 1024²
+sur le device, puis applique les passes physiques GPU avant `set_coast_surface`.
+Le champ signé final revient à Rust pour ses mips ; aucune normalisation ne
+déplace le niveau marin. L'érosion antérieure du relief principal reste conservée.
+Le cœur Rust et le sampler WGSL consomment les mêmes paramètres FP32, avec
+coordonnées rapportées à la carte et niveau marin à zéro. Les altitudes négatives
+portent le fond marin ; le renderer transitoire découpe la terre par un masque
+vectoriel antialiasé issu de la même surface, sans trait brun de bordure.
+La surface littorale physique est conservée au zoom ; sa finesse est bornée
+par la grille 1024². Pas de nouvelle hydrologie ni simulation marine.
+
+Le retour utilisateur suivant remplace les ellipses et les découpes cumulées :
+un contour à huit secteurs garde de larges attaches dans les directions terrestres.
+Les îles combinent des axes courbes de largeur variable et des branches, avec
+des îlots détachés près des côtes. Un fork `shore-noise` fournit plusieurs échelles
+de découpe sur CPU et GPU ; le filtrage suit le pas physique d'échantillonnage.
+Le support continental utilise une superellipse tournée et seedée pour éviter
+les angles droits. Une rampe multiplicative de largeur variable alterne plages
+douces et portions rocheuses ; elle reste bornée par la taille locale.
+Pour les plaines côtières, la référence marine retire 35 % de l'amplitude nominale
+avant un plancher positif doux et la découpe : le socle constant de la formule
+intérieure ne crée plus une marche de près de vingt mètres vers la mer.
+Les petits îlots ont six familles de silhouettes, de compactes à ramifiées,
+avec des hauteurs, crêtes et largeurs de raccord propres à chaque îlot. Le relief
+est continu entre les branches d'un même îlot, puis soumis à l'érosion commune.
+Un fork `islet-sizes` mélange trois classes de rayon rapportées à la carte
+(0,25–0,85 %, 0,9–2,3 %, 2,5–4,5 %). Les premières cibles comprennent une grande
+et deux moyennes. Le placement tient compte de leur emprise, des formes déjà
+placées et du continent ; une cible trop grande rétrécit progressivement si
+les secteurs maritimes n'offrent pas assez de place. CPU/GPU consomment le même
+plan de formes et de tailles.
 
 ## 1. Design puis moteur natif
 

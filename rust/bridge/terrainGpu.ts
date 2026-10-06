@@ -2,6 +2,7 @@ import shader from './terrainSampler.wgsl?raw';
 import noiseShader from './terrainNoise.wgsl?raw';
 import generationShader from './terrainGeneration.wgsl?raw';
 import volcanicShader from './terrainFinite.wgsl?raw';
+import coastShader from './terrainCoast.wgsl?raw';
 import { GenerationNoisePlan } from '../pkg/wasm/burgmap_wasm.js';
 import type { TerrainEngine } from '../pkg/wasm/burgmap_wasm.js';
 import type { TerrainData, TerrainRegion, TerrainSettings, TerrainCompute } from './terrain';
@@ -31,7 +32,7 @@ export async function prepareGpu(mode: TerrainCompute, relief: string): Promise<
   let pipeline = state.pipelines.get(key);
   if (!pipeline) {
     pipeline = (async () => {
-      const code = shader.replace('// NOISE_KERNEL', noiseShader).replace('// VOLCANIC_KERNEL', volcanicShader);
+      const code = shader.replace('// NOISE_KERNEL', noiseShader).replace('// VOLCANIC_KERNEL', volcanicShader).replace('// COAST_KERNEL', coastShader);
       const module = state.device.createShaderModule({ code });
       return state.device.createComputePipelineAsync({ layout: 'auto', compute: { module, entryPoint: 'main', constants: { FAMILY: family } } });
     })();
@@ -101,6 +102,7 @@ export class GpuTerrainSampler {
   private perm: GPUBuffer;
   private gradients: GPUBuffer;
   private branches: GPUBuffer;
+  private coast: GPUBuffer;
   private output?: GPUBuffer;
   private readback?: GPUBuffer;
   private group?: GPUBindGroup;
@@ -118,6 +120,7 @@ export class GpuTerrainSampler {
     this.perm = this.upload(engine.sampling_permutations());
     this.gradients = this.upload(engine.sampling_gradients());
     this.branches = this.upload(engine.sampling_branches());
+    this.coast = this.upload(engine.coast_parameters());
     this.uniform = this.upload(new Float32Array(36), GPUBufferUsage.UNIFORM);
   }
 
@@ -128,15 +131,21 @@ export class GpuTerrainSampler {
     return buffer;
   }
 
-  async sample(region: TerrainRegion, settings: TerrainSettings, globalMinHeight: number, globalMaxHeight: number): Promise<TerrainData> {
+  /** Assemble the full coast on the device; the erosion stage reads this buffer directly. */
+  prepareCoastField(settings: TerrainSettings): GPUBuffer {
+    this.dispatchField({ x: 0, y: 0, extent: settings.width, resolution: 1024 }, settings);
+    return this.output!;
+  }
+
+  private dispatchField(region: TerrainRegion, settings: TerrainSettings): void {
     const { x, y, extent, resolution: n } = region;
     if (![x, y, extent, n].every(Number.isFinite) || x < 0 || y < 0 || extent <= 0
       || x + extent > settings.width + 0.0001 || y + extent > settings.width + 0.0001
       || !Number.isInteger(n) || n < 64 || n > 1024) throw new Error('Région d’échantillonnage invalide.');
-    const started = performance.now(), device = this.state.device;
+    const device = this.state.device;
     const cell = extent / n, epsilon = Math.max(settings.motifSize / 65536, cell * 0.5);
-    const lod = Math.min(10, Math.log2(Math.max(1, cell * (settings.relief === 'flat' ? 2 / settings.motifSize : 1 / settings.width) * 1024)));
     const a = this.parameters;
+    const lod = Math.min(10, Math.log2(Math.max(1, cell * (settings.relief === 'flat' && a[5] !== 4 ? 2 / settings.motifSize : 1 / settings.width) * 1024)));
     const params = new Float32Array([a[0], a[1], a[2], a[3], a[4], a[5], this.hasField ? 1 : 0, n,
       x, y, extent, cell, Math.floor(lod), Math.min(10, Math.floor(lod) + 1), lod - Math.floor(lod), epsilon, a[6], a[7], 0, 0, ...Array.from({ length: 16 }, (_, i) => a[8 + i] ?? 0)]);
     const bytes = n * n * 16;
@@ -145,13 +154,21 @@ export class GpuTerrainSampler {
       this.output = device.createBuffer({ size: bytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
       this.readback = device.createBuffer({ size: bytes, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
       this.group = device.createBindGroup({ layout: this.pipeline.getBindGroupLayout(0), entries:
-        [this.uniform, this.field, this.perm, this.gradients, this.output, this.branches].map((buffer, binding) => ({ binding, resource: { buffer } })) });
+        [this.uniform, this.field, this.perm, this.gradients, this.output, this.branches, this.coast].map((buffer, binding) => ({ binding, resource: { buffer } })) });
     }
     device.queue.writeBuffer(this.uniform, 0, params);
     const commands = device.createCommandEncoder();
     const pass = commands.beginComputePass();
     pass.setPipeline(this.pipeline); pass.setBindGroup(0, this.group!);
     pass.dispatchWorkgroups(Math.ceil(n / 8), Math.ceil(n / 8)); pass.end();
+    device.queue.submit([commands.finish()]);
+  }
+
+  async sample(region: TerrainRegion, settings: TerrainSettings, globalMinHeight: number, globalMaxHeight: number): Promise<TerrainData> {
+    const started = performance.now(), device = this.state.device;
+    const { x, y, extent, resolution: n } = region;
+    this.dispatchField(region, settings);
+    const bytes = n * n * 16, commands = device.createCommandEncoder();
     commands.copyBufferToBuffer(this.output!, 0, this.readback!, 0, bytes);
     device.queue.submit([commands.finish()]);
     await this.readback!.mapAsync(GPUMapMode.READ, 0, bytes);

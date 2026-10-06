@@ -251,6 +251,11 @@ fn fineSample(pos:vec2<f32>)->f32{
 }
 @compute @workgroup_size(256)
 fn surfaceLoad(@builtin(global_invocation_id) id:vec3<u32>){let i=id.x;if(i>=count()){return;}let xy=(vec2<f32>(f32(i%size()),f32(i/size()))+0.5)*p.values[1].x+p.values[1].y;let h=fineSample(xy/p.values[2].w-0.5);nodes[i].h=h;nodes[i].uplift=h;nodes[i].acc=1.0;nodes[i].routingPriority=seededRoutingPriority(i);}
+// Coast assembly uses x for height. Preserve signed meters throughout erosion.
+@compute @workgroup_size(256)
+fn coastLoad(@builtin(global_invocation_id) id:vec3<u32>){let i=id.x;if(i<1048576u){fine[i].w=fine[i].x;}}
+@compute @workgroup_size(256)
+fn coastResult(@builtin(global_invocation_id) id:vec3<u32>){let i=id.x;if(i<1048576u){fine[i].x=fine[i].w;}}
 @compute @workgroup_size(256)
 fn surfaceFlowInit(@builtin(global_invocation_id) id:vec3<u32>){let i=id.x;if(i<count()){nodes[i].flood[0]=vec2<f32>(nodes[i].h,0.0);}}
 @compute @workgroup_size(256)

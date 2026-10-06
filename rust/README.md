@@ -50,7 +50,7 @@ vérification de compilation pour `wasm32-unknown-unknown`.
   revient à Rust pour préparer le terrain et ses mips ; le rendu reste inchangé.
   Le mode fin conserve les entrées CPU du drainage. Les champs préparés sont
   réutilisés lors des déplacements de caméra.
-  Ces modes GPU sont actifs pour collines, montagnes, mixte, hautes montagnes,
+  Ces modes GPU sont actifs pour collines, montagne, mixte, montagnes (chaînes),
   vallée, canyon, plateau, volcan et caldeira. Pour ces quatre derniers reliefs,
   les choix GPU utilisent la génération et l’érosion complètes ; les modes
   bruits seuls restent des comparaisons des reliefs régionaux. L'échantillonnage GPU couvre aussi la plaine. Les autres familles
@@ -69,12 +69,44 @@ vérification de compilation pour `wasm32-unknown-unknown`.
 - Taille du motif : **250 à 50 000 mètres**, par défaut **3 000 m**, indépendante
   de la largeur de la carte. Elle règle les dimensions des formes et leur détail.
 - Graine : chaîne reproductible ; bouton pour tirer une nouvelle graine.
-- Relief : **plaine, colline, vallée, montagne, collines et montagnes, plateau, haute montagne,
+- **Côtes** : huit boutons indépendants N, NE, E, SE, S, SO, O, NO ; le bouton
+  central active tout ou retire tout. Les directions diagonales ouvrent la mer
+  dans les coins. Sans sélection, le terrain existant reste identique.
+  Avec les huit directions, **Îles** choisit une île principale, un archipel
+  de trois à sept îles principales, ou un tirage reproductible entre les deux.
+  Les contours sont allongés et ramifiés, avec des îlots détachés près du rivage.
+  Un bruit côtier indépendant à plusieurs échelles forme baies, caps et petites
+  découpes. Les petits îlots alternent rochers compacts, branches, lobes, croissants
+  et bandes allongées ; leur hauteur et leur relief sont tirés indépendamment
+  du terrain continental, avec des parties basses et des crêtes rocheuses.
+  Leurs tailles mêlent petits rochers, îlots moyens et îles secondaires ; les
+  grandes formes cherchent une poche marine plus large avant de réduire leur
+  taille si les directions sélectionnées manquent de place.
+  Les secteurs
+  sans côte gardent de larges attaches au continent, même avec six directions
+  maritimes sur huit.
+  La taille des îles suit la carte ; le relief conserve sa taille de motif.
+  Le lien conserve `coasts=N,NE,...` (W/SW/NW pour l'ouest) et
+  `islands=island|archipelago|random`. Les côtes sont désactivées en caverne.
+  Rust et WebGPU FP32 appliquent le même plan seedé avant une passe finale
+  d'érosion de surface. Une déformation multiplicative rejoint le niveau marin
+  à **0 m**, dans une bande de largeur variable : plages larges et portions
+  rocheuses plus abruptes. En plaine côtière, la référence marine compense
+  le socle constant de la formule intérieure ; les dépressions gardent un
+  plancher positif doux avant découpe. Les altitudes négatives décrivent le fond
+  marin. Le contour continental est arrondi et légèrement tourné selon la graine.
+  Changer les côtes réutilise le relief préparé et recalcule la surface littorale
+  et son érosion. Cette surface physique de 1024² est conservée au zoom avec ses
+  mips, sans seconde découpe ni érosion locale ; sa résolution borne le détail
+  sur les grandes cartes. Le rivage est un masque vectoriel antialiasé, sans
+  l'ancienne ligne brune ni frontière de pixels. Cette étape ne simule pas
+  encore l'érosion marine, les rivières ni leur raccord à la mer.
+- Relief : **plaine, colline, vallée, montagne, collines et montagnes, plateau, montagnes (chaînes),
   volcan, caldeira ouverte, caverne**.
   Le canyon est de nouveau disponible : il naît d’une érosion massive sur un
   haut pays, avec des branches déterminées par les bassins versants.
 - **Alentours**, pour plateau, volcan et caldeira : plaine, collines,
-  collines et montagnes, montagnes ou hautes montagnes. Le choix est conservé
+  collines et montagnes, montagne ou montagnes (chaînes). Le choix est conservé
   dans le lien (`environment=`), avec le mélange collines/montagnes par défaut.
   La forme locale et ses tirages restent indépendants du choix des alentours.
   Sa position varie de façon reproductible avec la graine ; une marge garde
@@ -102,6 +134,15 @@ vérification de compilation pour `wasm32-unknown-unknown`.
   des paramètres, avec une courte temporisation pour les curseurs.
 - Parchemin, Atlas et Topographique : changement de rendu du même terrain,
   avec un ombrage continu sans les anciennes hachures noires ni grain haute fréquence.
+  Les courbes réutilisent le lissage et le filtrage TypeScript, avec ses intervalles
+  fixes : 2 m en plaine, 5 m en colline/vallée, 40 m pour les autres reliefs de
+  surface. Une courbe sur cinq est renforcée ; couleur et épaisseur au zoom
+  suivent le Canvas de l'application, avec une opacité atténuée dans le banc.
+  La case **Courbes de niveau**, à côté du rendu, masque immédiatement les lignes
+  sans recalcul du terrain ; le lien conserve `contours=0|1`. Le choix est gardé
+  quand on passe en caverne ou MNE, où cette case est désactivée.
+  L'ombrage garde les normales Rust,
+  l'exagération fixe du banc et son échelle globale ; le grain reste désactivé.
 - **MNE · Copernicus** : altitudes du terrain généré en dégradé bleu foncé, vert,
   jaune, rouge, gris puis blanc, sans ombrage ni courbes. L'échelle globale
   reste fixe au zoom ; ce rendu n'importe pas de données Copernicus.
@@ -139,9 +180,13 @@ les autres alentours et l’érosion locale utilisent le GPU en mode GPU. Le
 diagnostic de préparation distingue le temps de la plaine CPU du calcul GPU.
 Les collines ont une amplitude relevée de 10 % ; leur seuil d’incision suit
 leur propre pente caractéristique pour garder des ravines lisibles.
-Les montagnes et hautes montagnes ont une charpente de crêtes ridged dans le
-champ de soulèvement principal, avant l’érosion. Elle suit la taille du motif ;
-les collines et le haut pays du canyon gardent des formes initiales plus douces.
+**Montagne** garde un soulèvement doux et les réglages de talus, diffusion et
+détail de la référence TypeScript, pour des sommets moins ciselés. Le mélange
+collines/montagnes utilise ce même profil. **Montagnes** (anciennement haute
+montagne) représente des chaînes, avec une charpente de crêtes ridged dans le
+champ de soulèvement principal, avant l’érosion. Elle suit la taille du motif.
+CPU et GPU consomment ces mêmes paramètres. Les identifiants de liens/API
+restent `mountains` pour Montagne et `high-mountains` pour Montagnes.
 Le raccord des formes finies utilise une union lissée sur 18 % de leur amplitude
 et un fondu spatial à dérivées continues dans une large bande extérieure.
 Les formes finies reposent sur une fondation filtrée de leur environnement,
@@ -205,6 +250,9 @@ const engine = new TerrainEngine(seed, mapWidth, relief, erosion, motifSize, mou
 // mountainMix : 0 à 1, facultatif (0.5 par défaut), utilisé pour relief="mixed".
 // environment : "flat" | "hills" | "mixed" | "mountains" | "high-mountains",
 // facultatif ("mixed" par défaut), utilisé pour plateau, volcan et caldeira.
+engine.set_coast(255, 'archipelago'); // facultatif, sans côtes par défaut
+// Masque 8 bits, du bit 0 au bit 7 : N, NE, E, SE, S, SW, W, NW.
+// Modes : 'island' | 'archipelago' | 'random' ; seuls 255 active les îles.
 const region = engine.sample_region(x, y, extent, resolution);
 // getters : x, y, width (= extent), resolution, min_height, max_height,
 //           height: Float32Array, cave_mask: Uint8Array,

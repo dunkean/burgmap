@@ -168,6 +168,42 @@ impl TerrainEngine {
         self.generator.max_height()
     }
 
+    pub fn set_coast(&mut self, mask: f64, mode: &str) -> Result<(), JsValue> {
+        if !mask.is_finite() || mask.fract() != 0.0 || !(0.0..=255.0).contains(&mask) {
+            return Err(JsValue::from_str(
+                "Masque de côtes invalide (entier de 0 à 255).",
+            ));
+        }
+        self.generator
+            .set_coast(mask as u32, mode)
+            .map_err(|e| JsValue::from_str(&e))
+    }
+
+    pub fn coast_parameters(&self) -> Vec<f32> {
+        self.generator.coast_parameters()
+    }
+
+    pub fn configure_coast(&mut self, mask: f64, mode: &str) -> Result<(), JsValue> {
+        if !mask.is_finite() || mask.fract() != 0.0 || !(0.0..=255.0).contains(&mask) {
+            return Err(JsValue::from_str(
+                "Masque de côtes invalide (entier de 0 à 255).",
+            ));
+        }
+        self.generator
+            .configure_coast(mask as u32, mode)
+            .map_err(|e| JsValue::from_str(&e))
+    }
+
+    pub fn coast_erosion_parameters(&self) -> Vec<f32> {
+        self.generator.coast_erosion_parameters()
+    }
+
+    pub fn set_coast_surface(&mut self, heights: &[f32]) -> Result<(), JsValue> {
+        self.generator
+            .set_coast_surface(heights)
+            .map_err(|e| JsValue::from_str(&e))
+    }
+
     pub fn sampling_field(&self) -> Vec<f32> {
         self.generator.sampling_field()
     }

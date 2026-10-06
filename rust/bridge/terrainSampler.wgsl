@@ -11,6 +11,7 @@ override FAMILY: u32 = 0u;
 // NOISE_KERNEL
 fn volcanicParams(i:u32)->vec4<f32>{return p.values[5u+i];}
 // VOLCANIC_KERNEL
+// COAST_KERNEL
 fn weights(t: f32) -> vec4<f32> {
   let t3=t*t*t; let omt=1.0-t;
   return vec4<f32>(omt*omt*omt,3.0*t3-6.0*t*t+4.0,-3.0*t3+3.0*t*t+3.0*t+1.0,t3)/6.0;
@@ -75,6 +76,9 @@ fn valley_wall(along: f32, across: f32, footprint: f32) -> f32 {
   return wall;
 }
 fn height_at(xy: vec2<f32>) -> f32 {
+  // This signed physical surface was cut before its final erosion pass.
+  // It is retained at camera changes: no second analytic coast cut at zoom.
+  if(p.values[1].y==4.0){return surface(xy/p.values[0].x);}
   let map=p.values[0].x; let motif=p.values[0].y; let phase=p.values[0].z; let amp=p.values[0].w;
   let cell=p.values[2].w; var h=0.0;
   if(FAMILY == 0u) {
@@ -114,7 +118,7 @@ fn height_at(xy: vec2<f32>) -> f32 {
       h=amp*(0.06+0.012*rough)+h*pow(valley_wall(along,across,cell),1.2);
     }
   }
-  return clamp(h,0.3,p.values[1].x);
+  return coastalHeight(xy,clamp(h,0.3,p.values[1].x));
 }
 @compute @workgroup_size(8,8)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {

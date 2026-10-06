@@ -5,6 +5,114 @@ bugs and their evidence are recorded in [ROADMAP.md](ROADMAP.md).
 
 ## Current status
 
+- Coastal surface and islets (2026-10-07, local): user requested rounded mainland
+  corners, a smooth shoreline at zoom, cutting before erosion while keeping cliffs,
+  a variable multiplicative shore ramp, lower coastal plains, and varied islet
+  silhouettes, elevations and sizes on CPU/GPU. Seed tz1pyl (map10km/motif8km,
+  flat, erosion1.18, N/SW/W/NW) exposed the plain's constant elevation pedestal.
+  Coastal plains now compensate that marine datum, with a smooth positive floor;
+  median land height in this replay changes from 18.40m to 4.39m. Unselected
+  coasts retain the previous plain. Mainland support is a seeded rotated
+  superellipse. Wide gentle ramps alternate with shorter rocky sections.
+  Coast cutting precedes an additional final physical surface erosion pass;
+  original relief preparation is retained. GPU assembles and erodes on-device,
+  transferring only the final signed 1024² field to Rust for retained mips.
+  Camera changes reuse it without recutting or rerunning erosion. This grid
+  limits physical coastal detail on large maps. The transitional renderer uses
+  a smooth SVG land clip and extended land colors, removing the raster boundary
+  and brown coast stroke. Islets have six compact/lobed/branched/crescent/long
+  shape families, independent low or rocky height fields continuous across their
+  branches, and three seeded size classes. Larger targets seek wider offshore
+  pockets, reducing their size only when selected sea sectors lack room.
+  One-off tz1pyl probes find 14 islets, nominal radii38.7–272.9m, raw peaks
+  1.17–19.97m and aspect ratios1.09–3.20; CPU/GPU raw sampling differs by≤2.44mm.
+  CPU and GPU final erosion are variants, not bit-identical. Browser probes
+  verify the user's exact replay, six GPU erosion cases, native coast preparation,
+  retained zoom, all four render styles and offline GPU startup without errors.
+  Native fmt/Clippy/WASM, typecheck and independent app/bench/terrain builds pass.
+  Evidence: web/out/coasts-erosion/{audit,datum-before,datum-final,islets}.json.
+  No suites/screenshots; visual quality remains for the user's assessment.
+
+- Terrainbench lighter contours (2026-10-07, local): user found the TypeScript
+  mountain density too strong. Mountain/extended-family interval is now 40m
+  (previously 20m); plain/hills/valley retain 2/5/5m. Thin opacity changes from
+  palette ×0.7 to ×0.5, index from ×1 to ×0.75. Shared contourSet accepts an
+  optional interval; existing application callers retain their defaults.
+  A Courbes de niveau checkbox beside Rendu immediately hides all overview/detail
+  contours through inherited display state, without rebuilding or resampling;
+  links/reports preserve the choice. Cavern/MNE disable the control while retaining
+  its preference. Typecheck, app/bench and standalone terrain builds pass;
+  browser probes verify weights, mountain spacing, on/off without scene mutation,
+  zoom, style changes, URL replay and offline startup, without console errors.
+  Evidence: web/out/contour-style/toggle-audit.json. No suites/screenshots.
+
+- Coast refinement (2026-10-07, local): user rejected low-frequency shores,
+  round archipelago domes and near-islands when two sectors remain mainland.
+  Partial coasts now interpolate eight sectors with broad landward extent,
+  instead of intersecting sea half-planes. All 28 mainland-direction pairs
+  keep a continuous 7-cell-wide center-to-boundary strip in the seeded 128²
+  GPU probe. Principal islands use curved tapered axes and branches; independent
+  multi-octave noise adds bays/coves and offshore rocks (6–14 placement targets,
+  18–32 for archipelagos). Physical footprint filtering reveals finer coast
+  detail at zoom; narrow beaches retain inland relief. The dedicated third
+  noise stream is exported only for sampling; relief/generation streams stay
+  intact. 79 one-off cases pass: CPU/GPU masks (plain-height drift ≤2.53mm),
+  principal island count, finite heights/normals, mainland widths, all GPU
+  generation families, retained detail/coast updates, manual UI/replay,
+  offline GPU and CPU fallback without browser errors. Native fmt/Clippy/WASM,
+  typecheck and app/bench/terrain builds pass. Evidence:
+  web/out/coasts-detail/audit.json. Recorded offline warm GPU detail is 30ms;
+  CPU fallback is about 9.8s for that plain/archipelago case, so this is not
+  a CPU speed improvement. No suites/screenshots or publication; user assesses
+  visual quality. The contour and mountain changes from other work are retained.
+
+- Terrainbench contour style (2026-10-07, local): the transitional adapter now
+  reuses TypeScript contourSet (fixed 2/5/20m relief intervals, every fifth index,
+  Chaikin/simplification and short/near-flat filtering). Extended surface families
+  use 20m. Color/opacity and zoom-bounded weights follow the working Canvas app;
+  SVG inherits live screen widths so cached detail tiles follow camera/style changes.
+  Rust terrain generation, continuous shading, fixed exaggeration and disabled
+  grain are retained; this copies contour styling, not terrain geometry or the
+  entire raster appearance. Typecheck and independent app/bench/standalone terrain
+  builds pass. Seven one-off browser probes cover plain/hills/mountains GPU,
+  zoom, elevation without contours, CPU coasts and offline GPU startup/detail,
+  with matching computed weights/opacities and no console/page errors. Evidence:
+  web/out/contour-style/audit.json. No suites/screenshots; user visual assessment.
+
+- Mountain profiles (2026-10-07, local): terrainbench now labels the former
+  Haute montagne as Montagnes (mountain chains), including Alentours. URL/API
+  IDs remain mountains / high-mountains. Ordinary Montagne and mixed regions
+  no longer inject the ridged skeleton into uplift; their existing TypeScript
+  talus/diffusion/detail profile remains. Chains retain their previous geometry.
+  Rust CPU and the GPU erosion plan share this setting. One-off seed42 probes
+  at map/motif3km and 100% erosion reduce ordinary summit curvature RMS by 61%
+  on both backends; chain hashes/parameters match the preceding source exactly.
+  All four generation modes, CPU/GPU sampling, 12km-map erosion endpoints and
+  mixed terrain return finite heights/normals without fallback. Native fmt,
+  Clippy, WASM checks, TypeScript typecheck and app/bench/terrain builds pass.
+  CPU/GPU startup for both categories, geological surroundings labels and
+  standalone offline GPU startup reach 768² detail without console errors.
+  Evidence: web/out/mountain-profiles/. No suites or screenshots; visual
+  assessment remains with the user. Existing coast work preserved; no commit.
+
+- Rust coast extension (2026-10-07, local): eight independent directions in a
+  3×3 control, center toggles all/none; all selected exposes island/archipelago/
+  seeded-random modes. Single islands are connected; archipelagos have 3–7
+  separated, irregularly placed islands. Rust core and WGSL sampler share the
+  same compact FP32 plan, applied after existing relief/erosion; heights below
+  zero are sea. Renderer adapter colors the sea and draws the zero-meter shore,
+  keeping underwater contours off. Coast edits and camera sampling reuse the
+  prepared relief; caves ignore dormant coast choices. URL coasts=/islands=
+  and bug reports preserve applied controls, including manual generation.
+  Native fmt/Clippy/WASM, strict typecheck, independent app/bench and standalone
+  Rust builds pass. One-off browser/numeric checks cover 51 cases: eight
+  directions, combined masks, three seeds, island/archipelago/random, all nine
+  GPU generation families, finite normals, CPU/GPU sea masks, unchanged disabled
+  coast output, invalid input rejection, retained detail, manual UI/replay,
+  offline GPU and unavailable-GPU/main-thread fallback. No console/page errors.
+  Evidence: web/out/coasts/audit.json. No suites/screenshots or publication;
+  visual quality remains for user assessment. No marine erosion or hydrology.
+
 - Canyon rollback (2026-10-07): user rejected the finite canyon as a cut plateau.
   Canyon again generates and erodes its original regional field over the whole
   map on Rust CPU and WGSL GPU, without a finite contour, foundation or placement

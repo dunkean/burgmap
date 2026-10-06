@@ -26,6 +26,8 @@ pub struct TerrainGenerator {
     amp: f64,
     max_height: f64,
     cave: Option<CavernShape>,
+    coast: crate::coast::Coast,
+    coastal_surface: Surface,
 }
 
 impl TerrainGenerator {
@@ -337,12 +339,33 @@ impl TerrainGenerator {
                 limit
             }),
             cave,
+            coast: crate::coast::Coast::new(
+                root.fork("coast"),
+                map_width,
+                motif,
+                amp,
+                if kind == Relief::Flat {
+                    amp * 0.35
+                } else {
+                    0.0
+                },
+            ),
+            coastal_surface: Surface::new(Vec::new()),
         };
         Ok(result)
     }
 
     /// Retained mip levels, largest first. Empty correction means no field for plains.
     pub fn sampling_field(&self) -> Vec<f32> {
+        if !self.coastal_surface.levels.is_empty() {
+            return self
+                .coastal_surface
+                .levels
+                .iter()
+                .flatten()
+                .copied()
+                .collect();
+        }
         let mut values: Vec<f32> = self
             .sampling_surface()
             .levels
@@ -401,6 +424,9 @@ impl TerrainGenerator {
             values[21] = self.feature_origin.0;
             values[22] = self.feature_origin.1;
         }
+        if !self.coastal_surface.levels.is_empty() {
+            values[5] = 4.0;
+        }
         values
     }
 
@@ -422,6 +448,7 @@ impl TerrainGenerator {
             .perm
             .iter()
             .chain(self.noise2.perm.iter())
+            .chain(self.coast.noise.perm.iter())
             .map(|&v| v as u32)
             .collect()
     }
@@ -430,12 +457,81 @@ impl TerrainGenerator {
             .gradients
             .iter()
             .chain(self.noise2.gradients.iter())
+            .chain(self.coast.noise.gradients.iter())
             .flat_map(|&(x, y)| [x as f32, y as f32])
             .collect()
     }
     pub fn sampling_branches(&self) -> Vec<f32> {
         self.channels.sampling_branches()
     }
+    /// Optional surface sea. Caverns intentionally retain their underground floor.
+    pub fn set_coast(&mut self, mask: u32, mode: &str) -> Result<(), String> {
+        self.configure_coast(mask, mode)?;
+        if mask == 0 {
+            return Ok(());
+        }
+        let cell = self.map_width / SOURCE_N as f64;
+        let mut field = Vec::with_capacity(SOURCE_N * SOURCE_N);
+        for y in 0..SOURCE_N {
+            for x in 0..SOURCE_N {
+                field.push(
+                    self.height_at((x as f64 + 0.5) * cell, (y as f64 + 0.5) * cell, cell) as f32,
+                );
+            }
+        }
+        crate::erosion::erode_surface(
+            &mut field,
+            SOURCE_N,
+            cell,
+            self.erosion,
+            self.coast_talus(),
+            self.motif,
+        );
+        self.set_coast_surface(&field)
+    }
+
+    /// Shape only, for GPU assembly followed by physical surface erosion.
+    pub fn configure_coast(&mut self, mask: u32, mode: &str) -> Result<(), String> {
+        if self.relief == Relief::Cavern && mask != 0 {
+            return Err("Les côtes ne s’appliquent pas aux cavernes.".into());
+        }
+        self.coast.configure(mask, mode)?;
+        self.coastal_surface = Surface::new(Vec::new());
+        Ok(())
+    }
+
+    fn coast_talus(&self) -> f64 {
+        crate::mountain_parameters(self.relief, self.map_width, self.motif, 0.5)
+            .talus
+            .clamp(0.2, 0.85)
+    }
+
+    pub fn coast_erosion_parameters(&self) -> Vec<f32> {
+        crate::erosion::surface_parameters(
+            self.map_width,
+            self.motif,
+            self.erosion,
+            self.coast_talus(),
+        )
+        .to_vec()
+    }
+
+    /// Prepared signed heights; sea level must not be renormalized or cut again.
+    pub fn set_coast_surface(&mut self, heights: &[f32]) -> Result<(), String> {
+        if !self.coast.active()
+            || heights.len() != SOURCE_N * SOURCE_N
+            || !heights.iter().all(|h| h.is_finite())
+        {
+            return Err("Surface littorale préparée invalide.".into());
+        }
+        self.coastal_surface = Surface::new(heights.to_vec());
+        Ok(())
+    }
+
+    pub fn coast_parameters(&self) -> Vec<f32> {
+        self.coast.parameters.clone()
+    }
+
     pub fn width(&self) -> f64 {
         self.map_width
     }
@@ -443,7 +539,14 @@ impl TerrainGenerator {
         self.motif
     }
     pub fn min_height(&self) -> f64 {
-        0.3
+        if let Some(field) = self.coastal_surface.levels.first() {
+            return field.iter().copied().fold(f32::INFINITY, f32::min) as f64;
+        }
+        if self.coast.active() {
+            -self.coast.depth()
+        } else {
+            0.3
+        }
     }
     pub fn max_height(&self) -> f64 {
         self.max_height
@@ -493,7 +596,7 @@ impl TerrainGenerator {
                 let i = row * resolution + col;
                 let rock = self.rock_at(wx, wy);
                 let h = self.height_at(wx, wy, cell);
-                height[i] = h.clamp(0.3, self.max_height) as f32;
+                height[i] = h as f32;
                 if !cave_mask.is_empty() {
                     cave_mask[i] = rock;
                 }
@@ -551,6 +654,9 @@ impl TerrainGenerator {
     }
 
     fn height_at(&self, x: f64, y: f64, footprint: f64) -> f64 {
+        if !self.coastal_surface.levels.is_empty() {
+            return self.regional(&self.coastal_surface, x, y, footprint);
+        }
         let fbm = |noise: &Noise, x: f64, y: f64, wavelength: f64, octaves: usize| {
             noise.fbm_filtered(
                 x / wavelength,
@@ -664,7 +770,13 @@ impl TerrainGenerator {
                 }
             }
         };
-        height.clamp(0.3, self.max_height)
+        self.coast.apply(
+            x,
+            y,
+            self.map_width,
+            height.clamp(0.3, self.max_height),
+            footprint,
+        )
     }
 
     fn channel_coordinates(&self, x: f64, y: f64) -> (f64, f64) {

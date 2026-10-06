@@ -1,7 +1,7 @@
 import init, { TerrainEngine } from '../pkg/wasm/burgmap_wasm.js';
 import wasmUrl from '../pkg/wasm/burgmap_wasm_bg.wasm?url&inline';
 import { GpuTerrainSampler, prepareGpu, generateGpuNoise, GPU_RELIEFS, GPU_GENERATION_RELIEFS } from './terrainGpu';
-import { generateGpuTerrain } from './terrainErosion';
+import { generateGpuTerrain, erodeGpuCoast } from './terrainErosion';
 
 export const RELIEFS = ['flat', 'hills', 'valley', 'canyon', 'mountains', 'mixed', 'plateau', 'high-mountains', 'volcano', 'caldera', 'cavern'] as const;
 export type TerrainRelief = typeof RELIEFS[number];
@@ -10,7 +10,10 @@ export const ENVIRONMENT_RELIEFS = ['flat', 'hills', 'mixed', 'mountains', 'high
 export type TerrainEnvironment = typeof ENVIRONMENT_RELIEFS[number];
 export const COMPUTE_MODES = ['wasm', 'gpu-f32'] as const;
 export type TerrainCompute = typeof COMPUTE_MODES[number];
-export interface TerrainSettings { seed: string; width: number; motifSize: number; relief: TerrainRelief; environment?: TerrainEnvironment; erosion: number; mountainMix: number; resolution: number; compute?: TerrainCompute; generationCompute?: 'cpu' | 'gpu' | 'gpu-all' | 'gpu-erosion' }
+export const COAST_DIRECTIONS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'] as const;
+export const ISLAND_MODES = ['island', 'archipelago', 'random'] as const;
+export type IslandMode = typeof ISLAND_MODES[number];
+export interface TerrainSettings { seed: string; width: number; motifSize: number; relief: TerrainRelief; environment?: TerrainEnvironment; coastMask?: number; islandMode?: IslandMode; erosion: number; mountainMix: number; resolution: number; compute?: TerrainCompute; generationCompute?: 'cpu' | 'gpu' | 'gpu-all' | 'gpu-erosion' }
 export interface TerrainRegion { x: number; y: number; extent: number; resolution: number }
 export interface TerrainData {
   x: number; y: number; width: number; resolution: number; minHeight: number; maxHeight: number;
@@ -19,12 +22,15 @@ export interface TerrainData {
   normalX: Float32Array; normalY: Float32Array; normalZ: Float32Array; generationMs: number;
   backend?: TerrainCompute; backendReason?: string; prepareMs?: number; samplingMs?: number; gpuSetupMs?: number;
   generationBackend?: 'cpu' | 'gpu-noise-f32' | 'gpu-noise-all-f32' | 'gpu-erosion-f32'; generationReason?: string; noiseMs?: number; erosionMs?: number; gpuSimulationMs?: number; nativeEnvironmentMs?: number;
+  coastBackend?: 'cpu' | 'gpu-f32'; coastMs?: number; coastReason?: string;
 }
 export interface TerrainRequest { id: number; generation: number; kind: 'overview' | 'detail'; settings: TerrainSettings; region: TerrainRegion }
 export type TerrainResponse = Pick<TerrainRequest, 'id' | 'generation' | 'kind'> & ({ terrain: TerrainData } | { error: string });
 
 let ready: Promise<unknown> | undefined;
 let engine: TerrainEngine | undefined, engineKey = '';
+let engineCoastKey = '';
+let coastBackend: TerrainData['coastBackend'], coastReason: string | undefined;
 let sampler: GpuTerrainSampler | undefined, samplerMode: TerrainCompute | undefined;
 let generationBackend: TerrainData['generationBackend'] = 'cpu', generationReason: string | undefined;
 let queue: Promise<unknown> = Promise.resolve();
@@ -37,6 +43,8 @@ async function sampleTerrain({ settings, region }: TerrainRequest): Promise<Terr
   const mode = settings.compute === 'wasm' ? 'wasm' : 'gpu-f32';
   const generationMode = settings.generationCompute ?? 'gpu-erosion';
   const environment = (GEOLOGICAL_RELIEFS as readonly string[]).includes(settings.relief) ? settings.environment ?? 'mixed' : 'mixed';
+  const coastMask = settings.relief === 'cavern' ? 0 : settings.coastMask ?? 0;
+  const islandMode = settings.islandMode ?? 'island';
   const supported = GPU_RELIEFS.includes(settings.relief);
   const gpu = mode !== 'wasm' && supported ? prepareGpu(mode, settings.relief).catch(() => undefined) : undefined;
   // Vite embeds this asset in the standalone HTML (and in the inline worker).
@@ -53,7 +61,7 @@ async function sampleTerrain({ settings, region }: TerrainRequest): Promise<Terr
   let prepareMs = 0, noiseMs = 0, erosionMs = 0, gpuSimulationMs = 0, nativeEnvironmentMs = 0;
   if (!engine || engineKey !== key) {
     sampler?.dispose(); sampler = undefined; samplerMode = undefined;
-    engine?.free(); engine = undefined; engineKey = '';
+    engine?.free(); engine = undefined; engineKey = ''; engineCoastKey = '';
     const prepareStarted = performance.now();
     generationBackend = 'cpu'; generationReason = undefined;
     const mix = settings.relief === 'mixed' ? settings.mountainMix : 0.5;
@@ -82,6 +90,38 @@ async function sampleTerrain({ settings, region }: TerrainRequest): Promise<Terr
     prepareMs = performance.now() - prepareStarted;
     engineKey = key;
   }
+  // Reuse the underlying relief, then cut the coast before its physical erosion.
+  const gpuCoast = coastMask !== 0 && generationMode !== 'cpu' && mode !== 'wasm';
+  const coastKey = JSON.stringify([coastMask, coastMask === 255 ? islandMode : 'island', coastMask ? gpuCoast : false]);
+  let coastMs = 0;
+  if (engineCoastKey !== coastKey) {
+    sampler?.dispose(); sampler = undefined; samplerMode = undefined;
+    coastBackend = undefined; coastReason = undefined;
+    const coastStarted = performance.now();
+    if (gpuCoast && readyGpu) {
+      let coastSampler: GpuTerrainSampler | undefined;
+      try {
+        const compiled = await pipelineReady;
+        if (!compiled || readyGpu.context.lost) throw new Error('WebGPU indisponible');
+        engine.configure_coast(coastMask, islandMode);
+        coastSampler = new GpuTerrainSampler(readyGpu.context, compiled.pipeline, mode, engine);
+        const source = coastSampler.prepareCoastField(settings);
+        const height = await erodeGpuCoast(readyGpu.context, settings, source, engine.coast_erosion_parameters());
+        engine.set_coast_surface(height);
+        coastBackend = 'gpu-f32';
+      } catch (error) {
+        coastReason = `Littoral GPU indisponible : ${error instanceof Error ? error.message : String(error)}`;
+      } finally { coastSampler?.dispose(); }
+    }
+    if (!coastBackend) {
+      engine.set_coast(coastMask, islandMode);
+      if (coastMask) coastBackend = 'cpu';
+      if (gpuCoast && !readyGpu) coastReason = 'WebGPU indisponible';
+    }
+    engineCoastKey = coastKey;
+    coastMs = coastMask ? performance.now() - coastStarted : 0;
+    prepareMs += coastMs;
+  }
   let backendReason: string | undefined;
   let gpuSetupMs = 0;
   if (mode !== 'wasm' && supported) {
@@ -96,7 +136,7 @@ async function sampleTerrain({ settings, region }: TerrainRequest): Promise<Terr
         }
         gpuSetupMs = performance.now() - setupStarted;
         const data = await sampler.sample(region, settings, engine.min_height, engine.max_height);
-        return { ...data, generationMs: performance.now() - started, prepareMs, gpuSetupMs, generationBackend, generationReason, noiseMs, erosionMs, gpuSimulationMs, nativeEnvironmentMs };
+        return { ...data, generationMs: performance.now() - started, prepareMs, gpuSetupMs, generationBackend, generationReason, noiseMs, erosionMs, gpuSimulationMs, nativeEnvironmentMs, coastBackend, coastMs, coastReason };
       }
       backendReason = 'WebGPU indisponible';
     } catch (error) {
@@ -116,6 +156,7 @@ async function sampleTerrain({ settings, region }: TerrainRequest): Promise<Terr
       generationMs: performance.now() - started,
       backend: 'wasm', backendReason, prepareMs, samplingMs: performance.now() - samplingStarted, gpuSetupMs,
       generationBackend, generationReason, noiseMs, erosionMs, gpuSimulationMs, nativeEnvironmentMs,
+      coastBackend, coastMs, coastReason,
     };
   } finally { result.free(); }
 }

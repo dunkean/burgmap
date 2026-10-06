@@ -1,6 +1,7 @@
 //! First isolated Rust generation stage. World coordinates and elevations are meters.
 //! The square raster uses cell centers and has its origin at the upper left.
 mod channels;
+mod coast;
 mod engine;
 mod erosion;
 mod generation_noise;
@@ -361,7 +362,10 @@ fn mountain_parameters(relief: Relief, width: f64, motif: f64, mix: f64) -> Moun
             } else {
                 1.2
             },
-        crest: if gentle || canyon { 0.0 } else { 1.0 },
+        // Reserve the ridge skeleton for mountain chains. Ordinary mountains
+        // (including mixed regions) use the smoother TypeScript uplift profile.
+        // GenerationNoisePlan exports this same setting to GPU erosion.
+        crest: if high { 1.0 } else { 0.0 },
         iterations: if gentle { 18 } else { 22 },
         coarse: if width > motif * 3.0 { 640 } else { 320 },
         mountain_mix: if canyon {

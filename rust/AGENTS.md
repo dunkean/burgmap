@@ -4,6 +4,8 @@
 
 - Read `README.md` and `docs/INTEGRATION.md`. The user owns the engine design.
 - The user authorized the terrain-only prototype: port the existing relief to Rust, add ten relief families including an open caldera, adjustable erosion, independent map/motif sizes, and regional sampling for zoom in a separate lightweight terrain bench. Other generation stages and a permanent renderer/domain model still await the user's design.
+- The user also authorized eight independently selectable coast directions, with all directions forming an island or an archipelago, an optional seeded random choice, and CPU/GPU support. Sea shaping remains isolated from future hydrology and settlements.
+- Coast refinements include rounded mainland support, variable multiplicative shore transitions with retained cliffs, coastal plain marine datum, varied islet shapes/relief, and a final physical erosion pass after cutting on CPU/GPU. Camera sampling retains that signed surface; it does not cut or erode again.
 - Keep `../web/` fully functional and independently buildable. Preserve existing local changes; do not move or rewrite the TypeScript engine.
 - The existing menus/UI are retained long term. The existing renderer is transitional; keep its future replacement independent of engine integration.
 

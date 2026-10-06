@@ -5,7 +5,7 @@ import { GenerationNoisePlan, TerrainEngine } from '../pkg/wasm/burgmap_wasm.js'
 import type { Context } from './terrainGpu';
 import type { TerrainSettings } from './terrain';
 
-const ENTRIES = ['initialize', 'uplift', 'start', 'clearNext', 'floodInit', 'solveTile', 'receivers', 'flow', 'graphInit', 'graphFinish', 'floodCheck', 'pitInit', 'pitUnion', 'pitCompress', 'pitReduce', 'pitPour', 'pitFill', 'breachInit', 'breach', 'breachFinish', 'thermalFlux', 'thermalApply', 'copyHeight', 'bounds', 'diffuse', 'reconstruct', 'percentileInit', 'histogramClear', 'histogram', 'percentileSelect', 'detail', 'normalize', 'volcanicInitial', 'surfaceLoad', 'surfaceFlowInit', 'surfaceDelta', 'surfaceReconstruct', 'canyonSeed', 'canyonSpread', 'canyonApply'] as const;
+const ENTRIES = ['initialize', 'uplift', 'start', 'clearNext', 'floodInit', 'solveTile', 'receivers', 'flow', 'graphInit', 'graphFinish', 'floodCheck', 'pitInit', 'pitUnion', 'pitCompress', 'pitReduce', 'pitPour', 'pitFill', 'breachInit', 'breach', 'breachFinish', 'thermalFlux', 'thermalApply', 'copyHeight', 'bounds', 'diffuse', 'reconstruct', 'percentileInit', 'histogramClear', 'histogram', 'percentileSelect', 'detail', 'normalize', 'volcanicInitial', 'surfaceLoad', 'surfaceFlowInit', 'surfaceDelta', 'surfaceReconstruct', 'canyonSeed', 'canyonSpread', 'canyonApply', 'coastLoad', 'coastResult'] as const;
 type Entry = typeof ENTRIES[number];
 interface Pipelines { layout: GPUBindGroupLayout; values: Map<Entry, GPUComputePipeline> }
 const compiled = new WeakMap<GPUDevice, Promise<Pipelines>>();
@@ -32,6 +32,15 @@ function pipelines(device: GPUDevice): Promise<Pipelines> {
 }
 
 class ConvergenceError extends Error {}
+
+/** Cut/assembled coast -> the existing hydraulic/thermal surface pass, without normalization. */
+export async function erodeGpuCoast(state: Context, settings: TerrainSettings, source: GPUBuffer, tuning: Float32Array): Promise<Float32Array> {
+  for (const factor of [1, 2, 4]) {
+    try { return await generateOnce(state, settings, factor, undefined, { source, tuning }); }
+    catch (error) { if (!(error instanceof ConvergenceError) || factor === 4) throw error; }
+  }
+  throw new Error('Érosion littorale GPU non convergée.');
+}
 
 /** All simulation state stays on the device; only the final physical raster is read. */
 export async function generateGpuTerrain(state: Context, settings: TerrainSettings, timing?: { nativeEnvironmentMs: number }): Promise<Float32Array> {
@@ -64,16 +73,16 @@ async function generateWithBudget(state: Context, settings: TerrainSettings, sha
   throw new Error('Érosion GPU non convergée.');
 }
 
-async function generateOnce(state: Context, settings: TerrainSettings, factor: number, shape?: Float32Array): Promise<Float32Array> {
+async function generateOnce(state: Context, settings: TerrainSettings, factor: number, shape?: Float32Array, coast?: { source: GPUBuffer; tuning: Float32Array }): Promise<Float32Array> {
   const device = state.device;
-  const plan = GenerationNoisePlan.erosion(settings.seed, settings.width, shape ? 'mixed' : settings.relief, settings.erosion, settings.motifSize, settings.mountainMix);
+  const plan = GenerationNoisePlan.erosion(settings.seed, settings.width, coast ? 'hills' : shape ? 'mixed' : settings.relief, settings.erosion, settings.motifSize, settings.mountainMix);
   const buffers: GPUBuffer[] = [];
   try {
-    const parameters = plan.parameters(), base = parameters.slice(0, 24), tuning = parameters.slice(24, 32);
+    const parameters = plan.parameters(), base = parameters.slice(0, 24), tuning = coast?.tuning ?? parameters.slice(24, 32);
     const n = base[2], iterations = base[13], strength = base[18];
     const surface = base.slice();
     surface[2] = tuning[0]; surface[4] = tuning[1]; surface[5] = tuning[2];
-    surface[15] = shape ? shape[13] : tuning[4]; surface[18] = tuning[5]; surface[22] = tuning[6];
+    surface[15] = shape && !coast ? shape[13] : tuning[4]; surface[18] = tuning[5]; surface[22] = tuning[6];
     const program = await pipelines(device);
     const create = (size: number, usage: GPUBufferUsageFlags) => {
       const buffer = device.createBuffer({ size, usage }); buffers.push(buffer); return buffer;
@@ -84,7 +93,7 @@ async function generateOnce(state: Context, settings: TerrainSettings, factor: n
     };
     const uniform = create(65536, GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST);
     const nodes = create(Math.max(n, surface[2]) ** 2 * 112, GPUBufferUsage.STORAGE);
-    const fine = create(1024 * 1024 * 16, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC);
+    const fine = create(1024 * 1024 * 16, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST);
     const control = create(1088, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC);
     const readback = create(1024 * 1024 * 16 + 1088, GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ);
     const group = device.createBindGroup({ layout: program.layout, entries: [
@@ -100,7 +109,9 @@ async function generateOnce(state: Context, settings: TerrainSettings, factor: n
       }
       return value;
     };
-    const encoder = device.createCommandEncoder(), pass = encoder.beginComputePass();
+    const encoder = device.createCommandEncoder();
+    if (coast) encoder.copyBufferToBuffer(coast.source, 0, fine, 0, 1024 * 1024 * 16);
+    const pass = encoder.beginComputePass();
     const normal = [0, 0, 1, 0, 0, 0, .6, 0];
     normal[4] = parameters[32];
     const tail = [0, 0, .95, strength * .5, 0, 0, .5, 0];
@@ -136,7 +147,9 @@ async function generateOnce(state: Context, settings: TerrainSettings, factor: n
         extras[5] = shift; dispatch('histogramClear', extras, 1); dispatch('histogram', extras, 4096); dispatch('percentileSelect', extras, 1);
       }
     };
-    if (!shape) {
+    if (coast) {
+      config = surface; dispatch('coastLoad', normal, 4096);
+    } else if (!shape) {
       dispatch('initialize');
       for (let iteration = 0; iteration < iterations; iteration++) {
         dispatch('uplift');
@@ -161,7 +174,7 @@ async function generateOnce(state: Context, settings: TerrainSettings, factor: n
     }
     if (settings.erosion > 0) {
       config = surface; dispatch('surfaceLoad');
-      if (settings.relief === 'canyon') {
+      if (settings.relief === 'canyon' && !coast) {
         // Basin routing supplies continuous trunk rivers. Only this relief
         // deliberately enlarges their incision into deep, broad canyons.
         solve(0, 128 * factor); dispatch('flow'); solve(1, 128 * factor);
@@ -183,7 +196,8 @@ async function generateOnce(state: Context, settings: TerrainSettings, factor: n
       }
       dispatch('surfaceDelta'); dispatch('surfaceReconstruct', normal, 4096);
     }
-    percentile(1); dispatch('normalize', normal, 4096);
+    if (coast) dispatch('coastResult', normal, 4096);
+    else { percentile(1); dispatch('normalize', normal, 4096); }
     pass.end();
     const bytes = 1024 * 1024 * 16;
     encoder.copyBufferToBuffer(fine, 0, readback, 0, bytes); encoder.copyBufferToBuffer(control, 0, readback, bytes, 1088);
@@ -194,7 +208,7 @@ async function generateOnce(state: Context, settings: TerrainSettings, factor: n
     const packed = new Float32Array(mapped, 0, 1024 * 1024 * 4), height = new Float32Array(1024 * 1024);
     for (let i = 0; i < height.length; i++) height[i] = packed[i * 4];
     readback.unmap();
-    if (!height.every(value => Number.isFinite(value) && value >= .3 - 1e-7)) throw new Error('Champ GPU invalide.');
+    if (!height.every(value => Number.isFinite(value) && (coast || value >= .3 - 1e-7))) throw new Error('Champ GPU invalide.');
     return height;
   } finally { plan.free(); buffers.forEach(buffer => buffer.destroy()); }
 }
