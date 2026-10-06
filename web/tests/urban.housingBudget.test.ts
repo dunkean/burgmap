@@ -13,7 +13,7 @@ const rect = (x: number, width: number): Polygon => [
 ];
 
 describe('cumulative housing-area budget', () => {
-  it('accepts a full-area later room after the 98% floor and refuses further loss beyond 97%', () => {
+  it('accepts a full-area later room after crossing 98% and refuses loss beyond the uniform 97% floor', () => {
     const wing = fringeCases.find((c) => c.i === 647)!;
     const compact = pinCases.find((c) => c.i === 104)!;
     const whole = pinCases.find((c) => c.i === 845)!;
