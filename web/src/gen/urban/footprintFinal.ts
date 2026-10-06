@@ -297,6 +297,10 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
     return { tip, outward };
   };
   const losesFreeExteriorWing = (i: number, owner: UrbanParcel, candidate: Polygon): boolean => {
+    // The owner edge alone does not identify an open quarter edge: in a
+    // fused plot it can be an internal planning seam. Require the caller's
+    // actual quarter-edge oracle for this additional compact-room guard.
+    if (!u.openQuarterEdge) return false;
     const freed = tryDifference(u.buildings[i].poly, candidate);
     if (freed.failed) return true;
     for (const piece of freed.pieces) {
@@ -414,6 +418,43 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
     }
     return false;
   };
+  const retainSmallRoom = (i: number, owner: UrbanParcel): boolean => {
+    if (!u.backLand || !u.placementClear || !u.validateParts) return false;
+    const b = u.buildings[i], original = b.poly;
+    if (area(original) > 60 || (minNeck(original)?.w ?? Infinity) >= 1.2) return false;
+    let main = original;
+    const arms: Polygon[] = [];
+    for (let pass = 0; pass < 4 && !proper(main); pass++) {
+      const neck = minNeck(main);
+      if (!neck || neck.w >= 3.59) return false;
+      const cut = splitByChord(lpoly(main, 0), [neck.a, neck.b], 0, 0.02);
+      if (!cut) return false;
+      const [body, arm] = cut.map((p) => p.pts).sort((a, c) => area(c) - area(a));
+      if (Math.abs(area(body) + area(arm) - area(main)) > 1e-6 || proper(arm)) return false;
+      const { tip, outward } = armEdge(body, arm);
+      const microscopic = area(arm) <= 1 && area(arm) <= 0.005 * area(main);
+      if (!microscopic && openExterior(owner, tip, outward)
+        && !tipConstrained(b.parcel!, tip, outward)) return false;
+      main = body; arms.push(arm);
+    }
+    const retained = area(main), oldArea = area(original);
+    if (!proper(main) || retained < 0.65 * oldArea || retained >= 0.7 * oldArea
+      || overlapsRoof(i, main) || !polyInside(owner.poly, main)
+      || !u.placementClear(main, original) || !respectsOtherOwners(i, main)
+      || housingArea() - oldArea + retained < 0.97 * initialHousingArea
+      || !u.validateParts(i, [main])) return false;
+    const added = tryDifference(main, original), freed = tryDifference(original, main), land = planOpenLand(main);
+    if (!land || added.failed || freed.failed || freed.pieces.some((p) => p.holes.length)
+      || mpArea(added.pieces) > 1e-6
+      || Math.abs(oldArea - retained - mpArea(freed.pieces)) > 1e-5
+      || Math.abs(arms.reduce((s, p) => s + area(p), 0) - mpArea(freed.pieces)) > 1e-5) return false;
+    commitOpenLand(land);
+    b.poly = main;
+    u.backLand.push(...freed.pieces);
+    releasedArea += mpArea(freed.pieces);
+    if (owner.block !== undefined) changed.add(owner.block);
+    return true;
+  };
   const count = u.buildings.length;
   for (let i = 0; i < count; i++) {
     const b = u.buildings[i], owner = b.parcel === undefined ? undefined : u.parcels[b.parcel];
@@ -529,13 +570,14 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
         }
       }
       if ((minNeck(b.poly)?.w ?? Infinity) < 1.2 && releaseArmAsPassage(i, owner)) continue;
+      if (retainSmallRoom(i, owner)) continue;
       // An unusable sub-2 m connector can join substantial but uninhabitable
       // wings. Search a compact replacement only after every ≥95% candidate
       // failed, and only with the same physical, ownership and access proofs.
       if (u.validateParts && ((minNeck(b.poly)?.w ?? Infinity) < 2 || overlapsRoof(i, b.poly))) {
         const compact = reconstructCompactRoom(b.poly, owner.poly, occupied, owner.front,
           (candidate) => u.placementClear!(candidate, b.poly) && respectsOtherOwners(i, candidate)
-            && !!planOpenLand(candidate),
+            && !losesFreeExteriorWing(i, owner, candidate) && !!planOpenLand(candidate),
           (candidate) => proper(candidate) && !overlapsRoof(i, candidate)
             && u.validateParts!(i, [candidate]));
         if (compact) {
@@ -561,6 +603,7 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
         const small = reconstructSmallPlotRoom(b.poly, owner.poly, owner.front, occupied,
           u.placementClear,
           (candidate) => proper(candidate) && !overlapsRoof(i, candidate) && respectsOtherOwners(i, candidate)
+            && !losesFreeExteriorWing(i, owner, candidate)
             && !!planOpenLand(candidate) && u.validateParts!(i, [candidate]));
         const currentHousingArea = housingArea();
         if (small && currentHousingArea - area(b.poly) + area(small) >= 0.98 * initialHousingArea) {
@@ -699,7 +742,9 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
   }
   for (const i of removalCandidates) {
     const b = u.buildings[i];
-    if (housingArea() - pendingRemovalArea - area(b.poly) < 0.98 * initialHousingArea
+    // Only this last courtyard return may use 3% of the initial housing area
+    // at the start of this pass; ordinary compact repairs keep their 2% cap.
+    if (housingArea() - pendingRemovalArea - area(b.poly) < 0.97 * initialHousingArea
       || initialHousingCount - removed.length - 1 < 0.98 * initialHousingCount
       || !u.validateRemoval?.(i, [...removed, i])) continue;
     removed.push(i); pendingRemovalArea += area(b.poly);
