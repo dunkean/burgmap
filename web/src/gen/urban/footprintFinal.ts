@@ -10,6 +10,7 @@ import { shapeOkObb } from './access';
 import { splitLong } from './access';
 import { mpArea, tryDifference, tryIntersection } from '../geo/bool';
 import { reconstructRoom } from './roomReconstruct';
+import { reconstructCompactRoom } from './compactRoom';
 
 export interface FootprintFinalInput {
   buildings: UrbanBuilding[];
@@ -25,7 +26,7 @@ export interface FootprintFinalInput {
   /** Prove all proposed rooms retain street access and do not disconnect block peers. */
   validateParts?: (originalIndex: number, parts: Polygon[]) => boolean;
   /** Prove a proposed in-owner relocation misses water, roads, walls and other reserves. */
-  placementClear?: (poly: Polygon) => boolean;
+  placementClear?: (poly: Polygon, original?: Polygon) => boolean;
 }
 export interface FootprintFinalResult { changed: Set<number>; invalid: number[]; cleaned: number; releasedArea: number }
 
@@ -131,26 +132,31 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
   };
   let gardenIndex = indexGardens();
   type OpenLandPlan = { gardens: Map<number, PolyH[]>; back: Map<number, PolyH[]>; backConsumed: number };
-  const planOpenLand = (after: Polygon): OpenLandPlan | null => {
+  const planOpenLand = (after: Polygon | Polygon[]): OpenLandPlan | null => {
+    const proposed: PolyH[] = after.length && Array.isArray(after[0])
+      ? (after as Polygon[]).map((outer) => ({ outer, holes: [] }))
+      : [{ outer: after as Polygon, holes: [] }];
     const gardens = new Map<number, PolyH[]>(), back = new Map<number, PolyH[]>();
     let backConsumed = 0;
-    const bounds = bboxOf(after);
+    const boxes = proposed.map((p) => bboxOf(p.outer));
+    const bounds = { x0: Math.min(...boxes.map((b) => b.x0)), y0: Math.min(...boxes.map((b) => b.y0)),
+      x1: Math.max(...boxes.map((b) => b.x1)), y1: Math.max(...boxes.map((b) => b.y1)) };
     for (const j of gardenIndex.query(bounds.x0, bounds.y0, bounds.x1, bounds.y1)) {
-      const old = u.gardens![j], hit = tryIntersection(after, old);
+      const old = u.gardens![j], hit = tryIntersection(proposed, old);
       if (hit.failed) return null;
       if (mpArea(hit.pieces) <= 1e-6) continue;
-      const rest = tryDifference(old, after);
+      const rest = tryDifference(old, proposed);
       if (rest.failed || Math.abs(area(old) - mpArea(rest.pieces) - mpArea(hit.pieces)) > 1e-5) return null;
       gardens.set(j, rest.pieces);
     }
     for (let j = 0; j < (u.backLand?.length ?? 0); j++) {
       const old = u.backLand![j], bb = bboxOf(old.outer);
       if (bb.x1 < bounds.x0 || bb.x0 > bounds.x1 || bb.y1 < bounds.y0 || bb.y0 > bounds.y1) continue;
-      const hit = tryIntersection(after, [old]);
+      const hit = tryIntersection(proposed, [old]);
       if (hit.failed) return null;
       const consumed = mpArea(hit.pieces);
       if (consumed <= 1e-6) continue;
-      const rest = tryDifference([old], after);
+      const rest = tryDifference([old], proposed);
       if (rest.failed || Math.abs(mpArea([old]) - mpArea(rest.pieces) - consumed) > 1e-5) return null;
       back.set(j, rest.pieces); backConsumed += consumed;
     }
@@ -199,7 +205,7 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
           ({ x: cx + a * width / 2 * ux + z * depth / 2 * vx,
             y: cy + a * width / 2 * uy + z * depth / 2 * vy })));
         const candidate = [rectangle[0], rectangle[1], rectangle[3], rectangle[2]];
-        if (!polyInside(owner.poly, candidate) || !respectsOtherOwners(i, candidate) || !u.placementClear(candidate)
+        if (!polyInside(owner.poly, candidate) || !respectsOtherOwners(i, candidate) || !u.placementClear(candidate, b.poly)
           || !planOpenLand(candidate)) continue;
         let clear = true;
         const bounds = bboxOf(candidate);
@@ -231,6 +237,63 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
     const outward = { x: (a.x - m.x) / len, y: (a.y - m.y) / len };
     const tip = arm.reduce((best, p) => (p.x * outward.x + p.y * outward.y > best.x * outward.x + best.y * outward.y ? p : best));
     return { tip, outward };
+  };
+  const splitIntoServedRooms = (i: number, owner: UrbanParcel): boolean => {
+    if (!u.backLand || !u.validateParts || !u.placementClear) return false;
+    const b = u.buildings[i], original = b.poly;
+    const bounds = bboxOf(owner.poly);
+    const occupied = roofIndex.query(bounds.x0, bounds.y0, bounds.x1, bounds.y1)
+      .filter((j) => j !== i).map((j) => u.buildings[j].poly);
+    let main = original;
+    const extra: Polygon[] = [];
+    for (let pass = 0; pass < 4 && !proper(main); pass++) {
+      const neck = minNeck(main);
+      if (!neck || neck.w >= 3.59) return false;
+      const cut = splitByChord(lpoly(main, 0), [neck.a, neck.b], 0, 0.02);
+      if (!cut) return false;
+      const parts = cut.map((p) => p.pts).sort((a, c) => area(c) - area(a));
+      if (Math.abs(area(parts[0]) + area(parts[1]) - area(main)) > 1e-6
+        || !parts.every((p) => polyInside(owner.poly, p))) return false;
+      main = parts[0];
+      const arm = parts[1];
+      if (proper(arm)) extra.push(arm);
+      else if (area(arm) >= 12) {
+        const rebuilt = reconstructRoom(arm, owner.poly, occupied,
+          (candidate) => u.placementClear!(candidate, original) && respectsOtherOwners(i, candidate)
+            && !!planOpenLand(candidate),
+          (candidate) => proper(candidate));
+        if (!rebuilt) return false;
+        extra.push(rebuilt);
+      } else if (area(arm) > 0.02 * area(original)) return false;
+    }
+    const rooms = [main, ...extra];
+    if (!rooms.every(proper) || rooms.reduce((s, p) => s + area(p), 0) < 0.95 * area(original)) return false;
+    const proposed: PolyH[] = rooms.map((outer) => ({ outer, holes: [] }));
+    for (let k = 0; k < rooms.length; k++) for (let j = k + 1; j < rooms.length; j++) {
+      const hit = tryIntersection(rooms[k], rooms[j]);
+      if (hit.failed || mpArea(hit.pieces) > 1e-6) return false;
+    }
+    const added = tryDifference(proposed, original), freed = tryDifference(original, proposed);
+    if (added.failed || freed.failed || freed.pieces.some((p) => p.holes.length)
+      || Math.abs(area(original) + mpArea(added.pieces)
+        - rooms.reduce((s, p) => s + area(p), 0) - mpArea(freed.pieces)) > 1e-5) return false;
+    for (const piece of added.pieces) for (const other of occupied) {
+      const hit = tryIntersection(piece, other);
+      if (hit.failed || mpArea(hit.pieces) > 1e-6) return false;
+    }
+    const land = planOpenLand(rooms);
+    if (!land || !u.validateParts(i, rooms)) return false;
+    commitOpenLand(land);
+    b.poly = main;
+    for (const p of extra) {
+      const index = u.buildings.length;
+      u.buildings.push({ ...b, poly: p });
+      roofIndex.insertPts(p, index);
+    }
+    u.backLand.push(...freed.pieces);
+    releasedArea += mpArea(freed.pieces);
+    if (owner.block !== undefined) changed.add(owner.block);
+    return true;
   };
   const count = u.buildings.length;
   for (let i = 0; i < count; i++) {
@@ -299,12 +362,13 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
       }
       if (fixed) continue;
     }
+    if ((minNeck(b.poly)?.w ?? Infinity) < 2 && splitIntoServedRooms(i, owner)) continue;
     if (u.placementClear) {
       const bounds = bboxOf(owner.poly);
       const occupied = roofIndex.query(bounds.x0, bounds.y0, bounds.x1, bounds.y1)
         .filter((j) => j !== i).map((j) => u.buildings[j].poly);
       const rebuilt = reconstructRoom(b.poly, owner.poly, occupied,
-        (candidate) => u.placementClear!(candidate) && respectsOtherOwners(i, candidate)
+        (candidate) => u.placementClear!(candidate, b.poly) && respectsOtherOwners(i, candidate)
           && !!planOpenLand(candidate),
         (candidate) => proper(candidate) && (!u.validateParts || u.validateParts(i, [candidate])));
       if (rebuilt) {
@@ -318,6 +382,29 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
           roofIndex.insertPts(rebuilt, i);
           if (block !== undefined) changed.add(block);
           continue;
+        }
+      }
+      // An unusable sub-2 m connector can join substantial but uninhabitable
+      // wings. Search a compact replacement only after every ≥95% candidate
+      // failed, and only with the same physical, ownership and access proofs.
+      if (u.validateParts && (minNeck(b.poly)?.w ?? Infinity) < 2) {
+        const compact = reconstructCompactRoom(b.poly, owner.poly, occupied, owner.front,
+          (candidate) => u.placementClear!(candidate, b.poly) && respectsOtherOwners(i, candidate)
+            && !!planOpenLand(candidate),
+          (candidate) => proper(candidate) && u.validateParts!(i, [candidate]));
+        if (compact) {
+          const added = tryDifference(compact, b.poly), freed = tryDifference(b.poly, compact);
+          const land = planOpenLand(compact);
+          if (land && !added.failed && !freed.failed && freed.pieces.every((p) => !p.holes.length)
+            && Math.abs(area(b.poly) + mpArea(added.pieces) - area(compact) - mpArea(freed.pieces)) < 1e-5) {
+            commitOpenLand(land);
+            b.poly = compact;
+            u.backLand.push(...freed.pieces);
+            releasedArea += mpArea(freed.pieces);
+            roofIndex.insertPts(compact, i);
+            if (block !== undefined) changed.add(block);
+            continue;
+          }
         }
       }
     }
