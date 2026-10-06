@@ -57,22 +57,49 @@ export function reconstructRoom(poly: Polygon, owner: Polygon, occupied: Polygon
   if (hull) return hull;
 
   // Final ordinary-house fallback: a room of equal area in the original OBB orientation, searched only in-owner.
-  const box = obb(poly), aspect = Math.max(1, Math.min(3, box.hu / Math.max(0.1, box.hv)));
-  const v = { x: -box.u.y, y: box.u.x };
-  const halfU = Math.sqrt(oldArea * aspect) / 2, halfV = oldArea / (4 * halfU);
+  const box = obb(poly), originalAspect = Math.max(1, Math.min(3, box.hu / Math.max(0.1, box.hv)));
+  let longest = { x: box.u.x, y: box.u.y }, longestLength = 0;
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i], b = poly[(i + 1) % poly.length];
+    const length = distance(a, b);
+    if (length > longestLength) {
+      longest = { x: (b.x - a.x) / length, y: (b.y - a.y) / length };
+      longestLength = length;
+    }
+  }
+  const axes = [box.u, longest];
   const offsets: [number, number][] = [[0, 0]];
   for (const d of [3, 6, 9, 12, 15, 18]) offsets.push([d, 0], [-d, 0], [0, d], [0, -d]);
-  for (const [du, dv] of offsets) {
-    const cx = box.c.x + box.u.x * du + v.x * dv;
-    const cy = box.c.y + box.u.y * du + v.y * dv;
-    const c: Polygon = [
-      { x: cx - box.u.x * halfU - v.x * halfV, y: cy - box.u.y * halfU - v.y * halfV },
-      { x: cx + box.u.x * halfU - v.x * halfV, y: cy + box.u.y * halfU - v.y * halfV },
-      { x: cx + box.u.x * halfU + v.x * halfV, y: cy + box.u.y * halfU + v.y * halfV },
-      { x: cx - box.u.x * halfU + v.x * halfV, y: cy - box.u.y * halfU + v.y * halfV },
-    ];
-    const room = accept(c);
-    if (room) return room;
+  // First retain the historical OBB candidate order. Only unresolved rooms
+  // need varied wall ratios, a longest-wall axis and diagonal shifts.
+  const tryRooms = (axis: Vec2, aspect: number, targetArea: number, positions: [number, number][]): Polygon | null => {
+    const v = { x: -axis.y, y: axis.x };
+    const halfU = Math.sqrt(targetArea * aspect) / 2, halfV = targetArea / (4 * halfU);
+    for (const [du, dv] of positions) {
+      const cx = box.c.x + axis.x * du + v.x * dv;
+      const cy = box.c.y + axis.y * du + v.y * dv;
+      const c: Polygon = [
+        { x: cx - axis.x * halfU - v.x * halfV, y: cy - axis.y * halfU - v.y * halfV },
+        { x: cx + axis.x * halfU - v.x * halfV, y: cy + axis.y * halfU - v.y * halfV },
+        { x: cx + axis.x * halfU + v.x * halfV, y: cy + axis.y * halfU + v.y * halfV },
+        { x: cx - axis.x * halfU + v.x * halfV, y: cy - axis.y * halfU + v.y * halfV },
+      ];
+      const room = accept(c);
+      if (room) return room;
+    }
+    return null;
+  };
+  const original = tryRooms(box.u, originalAspect, oldArea, offsets);
+  if (original) return original;
+  const localOffsets: [number, number][] = [[0, 0], [3, 0], [-3, 0], [0, 3], [0, -3],
+    [6, 0], [-6, 0], [0, 6], [0, -6], [3, 3], [3, -3], [-3, 3], [-3, -3]];
+  for (const axis of axes) {
+    for (const aspect of [1, 1.5, 2, 3]) {
+      for (const size of [1, 0.95]) {
+        const room = tryRooms(axis, aspect, oldArea * size, localOffsets);
+        if (room) return room;
+      }
+    }
   }
   return null;
 }
