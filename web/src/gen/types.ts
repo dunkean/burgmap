@@ -211,6 +211,8 @@ export interface UrbanBuilding {
   material?: string;
   /** Inner courtyards of the building (inside its footprint envelope, not part of `poly`). */
   courtyards?: Polygon[];
+  /** Intentional ring or slim culturally specific room from the architecture builder. */
+  ring?: boolean;
   /** Main facade / ridge orientation (radians). */
   orientation?: number;
 }

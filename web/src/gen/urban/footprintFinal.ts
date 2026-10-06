@@ -446,7 +446,8 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
       }
     }
     // Courtyard ranges are deliberately narrow rooms; their minimum is set by the builder's rd.
-    if (b.courtyards?.length || /courtyard|souk|ring/.test(b.arch ?? '')
+    if (b.ring || b.courtyards?.length || /courtyard|souk|ring/.test(b.arch ?? '')
+      || /(?:^|-)longhouse(?:-|$)|^pueblo-room$|^roundhouse$|^wigwam$|^hogan$|^tipi$|^yurt$|^tree-(house|pod)$|^fungal-/.test(b.arch ?? '')
       || !['house', 'rear', 'back'].includes(b.kind)) continue;
     if (owner && u.backLand) {
       const tip = clipSharpTip(b.poly, owner.poly, (p, d) => !openExterior(owner, p, d)

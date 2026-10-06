@@ -154,4 +154,30 @@ describe('last-resort ordinary infill removal', () => {
     expect(result.removed).toEqual([]);
     expect(buildings[0].poly).toBe(triangle);
   });
+
+  it('keeps intentional ring, longhouse and pueblo room footprints under all fallback callbacks', () => {
+    const buildings = [
+      { poly: rect(0, 0, 18, 2.4), kind: 'house', arch: 'longhouse', parcel: 0 },
+      { poly: rect(25, 0, 43, 2.4), kind: 'back', arch: 'granary', ring: true, parcel: 1 },
+      { poly: rect(50, 0, 53, 3), kind: 'house', arch: 'pueblo-room', parcel: 2 },
+    ];
+    const source = JSON.stringify(buildings);
+    const backLand: { outer: Polygon; holes: Polygon[] }[] = [];
+    let callbacks = 0;
+    const result = finalizeFootprints({ buildings,
+      parcels: [
+        { poly: rect(-1, -1, 20, 4), use: 'plot', block: 0 },
+        { poly: rect(24, -1, 45, 4), use: 'plot', block: 1 },
+        { poly: rect(49, -1, 54, 4), use: 'plot', block: 2 },
+      ], backLand, allowFillRemoval: true,
+      placementClear: () => { callbacks++; return true; },
+      validateParts: () => { callbacks++; return true; },
+      validateRemoval: () => { callbacks++; return true; },
+    });
+    expect(JSON.stringify(buildings)).toBe(source);
+    expect(callbacks).toBe(0);
+    expect(backLand).toEqual([]);
+    expect(result.removed).toEqual([]);
+    expect(result.invalid).toEqual([]);
+  });
 });
