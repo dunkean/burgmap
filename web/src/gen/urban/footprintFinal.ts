@@ -36,17 +36,27 @@ export interface FootprintFinalInput {
 export interface PrivatePassage { path: Vec2[]; width: number; parcel: number }
 export interface FootprintFinalResult { changed: Set<number>; invalid: number[]; cleaned: number; releasedArea: number }
 
-function proper(p: Polygon): boolean {
+function proper(p: Polygon, partOfCompound = false): boolean {
   if (p.length < 3 || !isSimple(p) || area(p) < 12) return false;
   if (p.length === 3) return 2 * inscribed(p, [], 0.02).r >= 3.2 && minAngle(p) >= 20 * Math.PI / 180;
-  if (area(p) <= 50 && p.length <= 6 && isConvex(p, 1e-3) && minAngle(p) >= Math.PI / 3) {
+  const compactQuad = p.length === 4 && minAngle(p) >= 20 * Math.PI / 180;
+  if (area(p) <= 50 && p.length <= 6 && isConvex(p, 1e-3)
+    && (compactQuad || minAngle(p) >= Math.PI / 3)) {
     const box = obb(p), short = Math.min(box.hu, box.hv), long = Math.max(box.hu, box.hv);
-    if (2 * short >= 3.2 && long / Math.max(short, 1e-6) <= 2.2
+    if (2 * short >= 3.2 && long / Math.max(short, 1e-6) <= (compactQuad ? 2.5 : 2.2)
       && 2 * inscribed(p, [], 0.05).r >= 3.2 && (minNeck(p)?.w ?? Infinity) >= 3.2) return true;
   }
   if (!shapeOkObb(p)) return false;
   if (2 * inscribed(p, [], 0.05, 1.8).r < 3.6) return false;
-  return (minNeck(p)?.w ?? Infinity) >= 3.59;
+  const neck = minNeck(p);
+  if ((neck?.w ?? Infinity) >= 3.59) return true;
+  // A 3.2 m interior connection can join two actual rooms. It is not the
+  // sub-2 m drafting arm that the finalizer removes, and neither lobe may be
+  // a long strip or a tiny leftover.
+  if (partOfCompound || !neck || neck.w < 3.2) return false;
+  const cut = splitByChord(lpoly(p, 0), [neck.a, neck.b], 0, 0.02);
+  if (!cut || Math.abs(cut.reduce((sum, piece) => sum + area(piece.pts), 0) - area(p)) > 1e-6) return false;
+  return cut.every((piece) => area(piece.pts) >= 15 && proper(piece.pts, true));
 }
 
 function normalize(p: Polygon): Polygon | null {
@@ -486,7 +496,7 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
       // no 70%-area rectangle fits. Require a true convex room and cap the
       // cumulative loss of roof area to 2% of this layer's starting programme.
       if (u.validateParts && area(b.poly) <= 60
-        && ((minNeck(b.poly)?.w ?? Infinity) < 2 || overlapsRoof(i, b.poly))) {
+        && ((minNeck(b.poly)?.w ?? Infinity) < 3.59 || overlapsRoof(i, b.poly))) {
         const small = reconstructSmallPlotRoom(b.poly, owner.poly, owner.front, occupied,
           u.placementClear,
           (candidate) => proper(candidate) && !overlapsRoof(i, candidate) && respectsOtherOwners(i, candidate)

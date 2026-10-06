@@ -11,6 +11,9 @@ import { reconstructSmallPlotRoom } from '../src/gen/urban/smallPlotRoom';
 import { finalizeFootprints } from '../src/gen/urban/footprintFinal';
 import native from './fixtures/compact-pins-v11.json';
 import roofPeer from './fixtures/urban-roof-peer-v13.json';
+import compound from './fixtures/urban-compound-v13.json';
+import spur from './fixtures/urban-spur-v13.json';
+import workshop from './fixtures/urban-workshop-v13.json';
 
 interface NativeCase {
   i: number; roof: Polygon; owner: Polygon; front: [Vec2, Vec2]; block: Polygon;
@@ -34,6 +37,93 @@ const proper = (p: Polygon): boolean => p.length >= 3 && isSimple(p) && area(p) 
   && (minNeck(p)?.w ?? Infinity) >= 3.59;
 
 describe('compact recovery on six pinned native blocks', () => {
+  it('replaces a narrow craft wing with a physical-clear served workshop in the same plot', () => {
+    const f = workshop as unknown as { i: number; roof: Polygon; owner: Polygon; front: [Vec2, Vec2];
+      block: Polygon; peers: { i: number; poly: Polygon }[];
+      streets: { path: Vec2[]; widths?: number[]; width: number }[]; places: Polygon[];
+      water: { outer: Polygon; holes: Polygon[] }[]; walls: { path: Vec2[]; thickness?: number }[];
+      lines: { kind: string; path: Vec2[]; width?: number; closed?: boolean }[] };
+    const streets = makeStreetAt(f.streets, f.places);
+    const reserve = [...f.water, ...f.streets.flatMap((s) => streetStrips(s.path, s.widths ?? s.width)),
+      ...f.walls.flatMap((w) => streetStrips([...w.path, w.path[0]], Math.max(w.thickness ?? 1, 5.6))),
+      ...f.lines.filter((line) => /wall|fence|palisade|rampart|barbican|hedge/.test(line.kind))
+        .flatMap((line) => streetStrips(line.closed ? [...line.path, line.path[0]] : line.path, line.width ?? 1))];
+    const before = blockReach(f.block, f.peers.map((p) => p.poly), streets);
+    const buildings = [{ poly: f.roof, kind: 'house', parcel: 0 },
+      ...f.peers.filter((p) => p.i !== f.i).map((p) => ({ poly: p.poly, kind: 'landmark', parcel: undefined })),
+      { poly: [{ x: 0, y: 0 }, { x: 40, y: 0 }, { x: 40, y: 40 }, { x: 0, y: 40 }],
+        kind: 'house', parcel: undefined }];
+    const backLand: { outer: Polygon; holes: Polygon[] }[] = [];
+    const result = finalizeFootprints({ buildings,
+      parcels: [{ poly: f.owner, front: f.front, use: 'plot', block: 0 }], backLand,
+      openQuarterEdge: () => false,
+      placementClear: (p) => {
+        const hit = tryIntersection(p, reserve);
+        return !hit.failed && mpArea(hit.pieces) <= 1e-6;
+      },
+      validateParts: (_, parts) => {
+        const proposed = f.peers.flatMap((peer) => peer.i === f.i ? parts : [peer.poly]);
+        const after = blockReach(f.block, proposed, streets);
+        const required = f.peers.flatMap((peer, j) => peer.i === f.i ? parts.map(() => true) : [before[j]]);
+        return after.every((reached, j) => reached || !required[j]);
+      } });
+    expect(result.invalid).not.toContain(0);
+    expect(area(buildings[0].poly)).toBeGreaterThanOrEqual(25);
+    expect(area(buildings[0].poly)).toBeLessThan(0.7 * area(f.roof));
+    expect(mpArea(tryDifference(buildings[0].poly, f.owner).pieces)).toBeLessThanOrEqual(1e-6);
+    expect(mpArea(tryIntersection(buildings[0].poly, reserve).pieces)).toBeLessThanOrEqual(1e-6);
+    expect(area(buildings[0].poly) + mpArea(backLand)
+      - mpArea(tryDifference(buildings[0].poly, f.roof).pieces)).toBeCloseTo(area(f.roof), 5);
+  });
+  it('cuts a 2.23 m² inner spur into open land and keeps the plausible small quadrilateral', () => {
+    const f = spur as unknown as { i: number; roof: Polygon; owner: Polygon; front: [Vec2, Vec2];
+      block: Polygon; peers: { i: number; poly: Polygon }[];
+      streets: { path: Vec2[]; widths?: number[]; width: number }[]; places: Polygon[] };
+    const streetAt = makeStreetAt(f.streets, f.places);
+    const before = blockReach(f.block, f.peers.map((p) => p.poly), streetAt);
+    const buildings = [{ poly: f.roof, kind: 'back', parcel: 0 },
+      ...f.peers.filter((p) => p.i !== f.i).map((p) => ({ poly: p.poly, kind: 'landmark', parcel: undefined }))];
+    const backLand: { outer: Polygon; holes: Polygon[] }[] = [];
+    const result = finalizeFootprints({ buildings,
+      parcels: [{ poly: f.owner, front: f.front, use: 'plot', block: 0 }], backLand,
+      openQuarterEdge: () => false,
+      validateParts: (_, parts) => {
+        const proposed = f.peers.flatMap((peer) => peer.i === f.i ? parts : [peer.poly]);
+        const after = blockReach(f.block, proposed, streetAt);
+        const required = f.peers.flatMap((peer, j) => peer.i === f.i ? parts.map(() => true) : [before[j]]);
+        return after.every((reached, j) => reached || !required[j]);
+      } });
+    expect(result.invalid).not.toContain(0);
+    expect(buildings[0].poly).toHaveLength(4);
+    expect(area(buildings[0].poly)).toBeGreaterThan(0.9 * area(f.roof));
+    expect(area(buildings[0].poly) + mpArea(backLand)).toBeCloseTo(area(f.roof), 5);
+    expect(2 * inscribed(buildings[0].poly, [], 0.05).r).toBeGreaterThanOrEqual(3.2);
+  });
+  it('removes only a 4.49 m² interior spur while keeping two 20 m² rooms connected and served', () => {
+    const f = compound as unknown as { i: number; roof: Polygon; owner: Polygon; front: [Vec2, Vec2];
+      block: Polygon; peers: { i: number; poly: Polygon }[];
+      streets: { path: Vec2[]; widths?: number[]; width: number }[]; places: Polygon[] };
+    const streetAt = makeStreetAt(f.streets, f.places);
+    const before = blockReach(f.block, f.peers.map((p) => p.poly), streetAt);
+    const buildings = [{ poly: f.roof, kind: 'back', parcel: 0 },
+      ...f.peers.filter((p) => p.i !== f.i).map((p) => ({ poly: p.poly, kind: 'landmark', parcel: undefined }))];
+    const backLand: { outer: Polygon; holes: Polygon[] }[] = [];
+    const result = finalizeFootprints({ buildings,
+      parcels: [{ poly: f.owner, front: f.front, use: 'plot', block: 0 }], backLand,
+      openQuarterEdge: () => false,
+      validateParts: (_, parts) => {
+        const proposed = f.peers.flatMap((peer) => peer.i === f.i ? parts : [peer.poly]);
+        const after = blockReach(f.block, proposed, streetAt);
+        const required = f.peers.flatMap((peer, j) => peer.i === f.i ? parts.map(() => true) : [before[j]]);
+        return after.every((reached, j) => reached || !required[j]);
+      } });
+    expect(result.invalid).not.toContain(0);
+    expect(area(buildings[0].poly)).toBeGreaterThan(0.90 * area(f.roof));
+    expect(area(buildings[0].poly) + mpArea(backLand)).toBeCloseTo(area(f.roof), 5);
+    expect((minNeck(buildings[0].poly)?.w ?? Infinity)).toBeGreaterThanOrEqual(3.2);
+    expect((minNeck(buildings[0].poly)?.w ?? Infinity)).toBeLessThan(3.59);
+    expect(buildings).toHaveLength(f.peers.length);
+  });
   it('repairs a small convex rear roof that overlaps its same-plot main roof by 9 m²', () => {
     const f = roofPeer as unknown as { main: Polygon; peer: Polygon; owner: Polygon; front: [Vec2, Vec2] };
     expect(mpArea(tryIntersection(f.main, f.peer).pieces)).toBeGreaterThan(9);
