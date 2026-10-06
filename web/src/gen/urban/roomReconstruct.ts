@@ -123,7 +123,11 @@ export function replanWholeRoom(poly: Polygon, owner: Polygon, front: [Vec2, Vec
   addAxis(obb(poly).u);
   const centers: { p: Vec2; clearance: number }[] = [];
   for (const piece of free.pieces) {
+    if (mpArea([piece]) < 0.95 * oldArea - 1e-6) continue;
     const bounds = bboxOf(piece.outer);
+    const x0 = Math.max(bounds.x0, oldCenter.x - 64), x1 = Math.min(bounds.x1, oldCenter.x + 64);
+    const y0 = Math.max(bounds.y0, oldCenter.y - 64), y1 = Math.min(bounds.y1, oldCenter.y + 64);
+    if (x0 > x1 || y0 > y1) continue;
     const push = (p: Vec2): void => {
       if (!pointInRing(piece.outer, p) || piece.holes.some((hole) => pointInRing(hole, p))
         || distance(p, oldCenter) > 64 + 1e-6) return;
@@ -132,8 +136,8 @@ export function replanWholeRoom(poly: Polygon, owner: Polygon, front: [Vec2, Vec
       if (clearance >= 2) centers.push({ p, clearance });
     };
     push(inscribed(piece.outer, piece.holes, 0.5).c);
-    for (let x = bounds.x0 + 2; x < bounds.x1; x += 4) {
-      for (let y = bounds.y0 + 2; y < bounds.y1; y += 4) push({ x, y });
+    for (let x = x0 + 2; x < x1; x += 4) {
+      for (let y = y0 + 2; y < y1; y += 4) push({ x, y });
     }
   }
   centers.sort((a, b) => b.clearance - a.clearance
