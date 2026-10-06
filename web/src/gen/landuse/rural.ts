@@ -9,7 +9,7 @@ import { distanceField, forCellsNearPolyline, smoothstep } from '../core/field';
 import { marchingSquares } from '../terrain/contour';
 import { rasterizePolys } from '../geo/raster';
 import { differenceSafeS, intersectionS, mpArea, unionS } from '../geo/bool';
-import { urbanNaturalGround } from './urbanGround';
+import { naturalGroundEligible, urbanNaturalGround } from './urbanGround';
 import { urbanLandscapeGround, landscapeCoverGround } from './landscapeGround';
 import { partitionRegion, pruneWays, FieldCtx, FieldNet } from './fields';
 import type { World, LandArea, LandKind, Farmstead, LandUseLayer, PolyH } from '../types';
@@ -20,6 +20,16 @@ type Ring = [number, number][];
 
 /** Extra layer data (field ways = cart tracks between furlongs, headlands = narrow baulks/hedges); closes carry `enclosed` on their LandArea. */
 export interface FieldNetExtras { ways: Polyline[]; headlands: Polyline[] }
+
+/** Reserve a lazy roof's bounded outer collar for farm lots, accounting for raster and lot-sampling error. */
+export function farmGrowthReserve(base: Uint8Array, n: number, cell: number, openMacroFootprints: PolyH[][]): Uint8Array {
+  if (!openMacroFootprints.length) return base;
+  const farm = base.slice(), radius = 21 + Math.SQRT2 * cell;
+  for (const footprints of openMacroFootprints) for (const ph of footprints) for (const ring of [ph.outer, ...ph.holes]) {
+    if (ring.length >= 3) forCellsNearPolyline([...ring, ring[0]], n, n, cell, radius, (idx) => { farm[idx] = 1; });
+  }
+  return farm;
+}
 
 const K_NONE = 0;
 const KINDS: (LandKind | null)[] = [null, 'field', 'meadow', 'pasture', 'forest', 'orchard', 'garden', 'marsh', 'commons', 'field'];
@@ -228,6 +238,13 @@ export function generateRural(world: World, root: Rng, mainRoads?: number, strip
     }
   }
 
+  // Farms alone need the larger macro collar. Cover, field strips and their reserve keep the original margin.
+  // Lazy detail must not depend on landuse: protect its possible roof growth before placing any farm lot.
+  const farmReserve = farmGrowthReserve(reserve, n, cell,
+    [world.urban, ...secondary.map((st) => st.urban)]
+      .filter((u): u is NonNullable<typeof u> => !!u?.macro && naturalGroundEligible(u))
+      .map((u) => u.footprintH));
+
   // slope thresholds adapt to the relief: the best-drained/flattest ground near the town is always the arable
   const slopeL = blurGrid(terrain.slope, Math.max(1, Math.round(45 / cell)), 1).data;
   const nearSl: number[] = [];
@@ -301,7 +318,7 @@ export function generateRural(world: World, root: Rng, mainRoads?: number, strip
     const st = Math.min(4, 0.45 * cell);
     for (let v = 0.5; v <= D; v += st) for (let u = -W / 2 + 0.5; u <= W / 2; u += st) {
       const i = cellAt(P(u, v));
-      if (terrain.water[i] || reserve[i] || f.dWater[i] < cell) return false;
+      if (terrain.water[i] || farmReserve[i] || f.dWater[i] < cell) return false;
     }
     const seen = new Set<number>();
     for (let y = Math.floor((c.y - rad - 20) / BK); y <= Math.floor((c.y + rad + 20) / BK); y++) for (let x = Math.floor((c.x - rad - 20) / BK); x <= Math.floor((c.x + rad + 20) / BK); x++) {
@@ -409,7 +426,7 @@ export function generateRural(world: World, root: Rng, mainRoads?: number, strip
         const p = { x: o.x + V.x * 25, y: o.y + V.y * 25 };
         if (p.x < 0.06 * S || p.y < 0.06 * S || p.x > 0.94 * S || p.y > 0.94 * S) continue;
         const idx = cellAt(p);
-        if (terrain.water[idx] || f.dWater[idx] < 40 || f.hab[idx] < 0.8 || slopeL[idx] > pastureMax || reserve[idx] || uDist[idx] < (custom ? 0.07 : 0.1) * Lm || uDist[idx] > 0.42 * Lm) continue;
+        if (terrain.water[idx] || f.dWater[idx] < 40 || f.hab[idx] < 0.8 || slopeL[idx] > pastureMax || farmReserve[idx] || uDist[idx] < (custom ? 0.07 : 0.1) * Lm || uDist[idx] > 0.42 * Lm) continue;
         cand.push({ o, V, score: fr.float() });
       }
     }
