@@ -2,6 +2,7 @@
 // node scripts/optimization_verify.mjs --html dist/index.html --out out/optimization/native
 // Add --url https://dunkean.github.io/burgmap/ to check the identical published build.
 // --query selects a non-macro village/town fixture for native regression checks.
+// --views adds JSON [{tag,cx,cy,scale}] views for matched close-up screenshots.
 import { chromium } from 'playwright';
 import { createServer } from 'node:http';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
@@ -15,6 +16,11 @@ const htmlPath = resolve(arg('--html', 'dist/index.html'));
 const out = resolve(arg('--out', 'out/optimization-implementation-2026-10-05/native'));
 const publishedUrl = arg('--url', null);
 const fixtureQuery = arg('--query', 'seed=7&size=village&legend=1&style=illuminated');
+const extraViews = JSON.parse(arg('--views', '[]'));
+if (!Array.isArray(extraViews) || extraViews.some(view => !/^[a-z0-9-]+$/i.test(view.tag ?? '')
+  || ![view.cx, view.cy, view.scale].every(Number.isFinite) || view.scale <= 0)) {
+  throw new Error('--views must contain tagged views with finite coordinates and positive scales');
+}
 if (publishedUrl) {
   const url = new URL(publishedUrl);
   if (!['https:', 'http:'].includes(url.protocol) || url.search || url.hash) {
@@ -59,6 +65,18 @@ try {
     });
     const page = await context.newPage();
     const errors = [], requests = [];
+    let documentVerified = false;
+    if (mode !== 'offline') await page.route('**/*', async route => {
+      const request = route.request();
+      if (!request.isNavigationRequest() || request.resourceType() !== 'document') {
+        await route.continue(); return;
+      }
+      // Read the navigation bytes outside Chromium's bounded inspector cache: the
+      // offline app can exceed its per-resource limit before generation finishes.
+      const response = await route.fetch();
+      documentVerified = response.ok() && html.equals(await response.body());
+      await route.fulfill({ response });
+    });
     page.on('pageerror', error => errors.push(error.message));
     page.on('request', request => requests.push(request.url()));
     const base = mode === 'offline' ? pathToFileURL(htmlPath).href : local;
@@ -66,7 +84,7 @@ try {
     query.delete('render');
     if (mode === 'main') query.set('render', 'main');
     const navigation = await page.goto(base + '?' + query.toString());
-    if (mode !== 'offline') assert(navigation?.ok() && html.equals(await navigation.body()),
+    if (mode !== 'offline') assert(navigation?.ok() && documentVerified,
       `${mode}: navigated HTML differs from the supplied build`);
     await ready(page); await paint(page);
     const actualMode = await page.evaluate(() => window.__burgmap.mode());
@@ -105,19 +123,20 @@ try {
     }
     await page.click('#quickShare > summary');
     const center = await page.evaluate(() => window.__burgmap.center());
-    for (const scale of [0.6, 1.5]) {
-      const tick = await page.evaluate(({ center, scale }) => {
+    const views = [0.6, 1.5].map(scale => ({ tag: String(scale), cx: center.x + 0.37, cy: center.y - 0.63, scale })).concat(extraViews);
+    for (const view of views) {
+      const tick = await page.evaluate(view => {
         const previous = window.__perf.frames.length;
-        window.__burgmap.setView({ cx: center.x + 0.37, cy: center.y - 0.63, scale });
+        window.__burgmap.setView(view);
         return { previous, target: window.__burgmap.getView() };
-      }, { center, scale });
+      }, { cx: view.cx, cy: view.cy, scale: view.scale });
       await page.waitForFunction(({ previous, target }) => {
         if (window.__perf.frames.length <= previous) return false;
         const view = window.__burgmap.mode() === 'offscreen' ? window.__perf.extra.lastFrameView : window.__burgmap.getView();
         return view?.cx === target.cx && view.cy === target.cy && view.scale === target.scale;
       }, tick, { timeout: 60000 });
       await paint(page);
-      await page.screenshot({ path: resolve(out, `${mode}-zoom-${scale}.png`) });
+      await page.screenshot({ path: resolve(out, `${mode}-zoom-${view.tag}.png`) });
     }
     const beforeStyleImage = await page.locator('#view').screenshot();
     const styleTick = await page.evaluate(() => ({ frames: window.__perf.frames.length, ver: window.__burgmap.rendering().frameVer }));
