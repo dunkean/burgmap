@@ -5,7 +5,7 @@ import type { UrbanCtx } from './context';
 import type { Quarter } from './primary';
 import type { Streets } from './streets';
 import { LAB_OPEN, LAB_WALL } from './streets';
-import { area, bboxOf, convexHull, distToSeg, distToRing, isSimple, obb, orientPos, pointInRing } from '../geo/poly';
+import { area, bboxOf, convexHull, distToSeg, distToRing, isSimple, minNeck, obb, orientPos, pointInRing } from '../geo/poly';
 import { isConvex, polyInside } from '../geo/split';
 import { union, tryDifference, tryIntersection, prepareIntersection, mpArea, type MultiPoly } from '../geo/bool';
 import { openHoles } from './plots';
@@ -17,6 +17,7 @@ import { makeGardenOpening } from './gardenProof';
 import { makeObstacleSelection } from './obstacleIndex';
 import { convexCenterDomain } from './roofProof';
 import { roofCandidateBatches, type RoofAreaBand, type RoofCandidateSearch } from './roofSearch';
+import { thickenNarrowWing } from './wingThicken';
 
 interface Frame { at: (u: number, d: number) => Vec2; us: number[]; ds: number[] }
 function frame(poly: Polygon, front: [Vec2, Vec2]): Frame {
@@ -367,6 +368,12 @@ const simpleMerge = (a: Polygon, b: Polygon): Polygon | null => {
   const m = mergeLand(a, b);
   return m?.length === 1 && !m[0].holes.length && isSimple(m[0].outer) ? m[0].outer : null;
 };
+const simplePreservingMerge = (a: Polygon, b: Polygon): Polygon | null => {
+  const usual = simpleMerge(a, b);
+  if (usual) return usual;
+  const kept = mergeTransferLand(a, b);
+  return kept?.length === 1 && !kept[0].holes.length && isSimple(kept[0].outer) ? kept[0].outer : null;
+};
 const meets = (a: Polygon, b: Polygon): boolean => {
   const A = bboxOf(a), B = bboxOf(b);
   return !(A.x0 > B.x1 || A.x1 < B.x0 || A.y0 > B.y1 || A.y1 < B.y0);
@@ -588,25 +595,75 @@ export function finishEdgeRoofs(input: EdgeRoofPartition): { grown: number; fitt
       const overlap = intersect(poly);
       return !overlap.failed && mpArea(overlap.pieces) <= 1e-6;
     });
+    const roofClearAdded = (added: MultiPoly): boolean => added.every((piece) => roofClear(piece.outer));
     let expanded = false;
     // The existing frontage envelope remains first. A clipped roof's own dominant axis can need
     // less land, so try its true perpendicular frame through the same complete ownership transaction.
     // Reconstruct the perpendicular in roofEnvelope; do not depend on an OBB's returned secondary axis.
     const dominantAxis: [Vec2, Vec2] = [ownFrame.c, { x: ownFrame.c.x + ownFrame.u.x, y: ownFrame.c.y + ownFrame.u.y }];
-    for (const candidate of input.allowGrowth ? [env, roofEnvelope(b.poly, dominantAxis)] : []) {
-      const env = candidate, delta = area(env) - area(b.poly);
+    const safe = (p: Vec2) => p.x >= Math.max(3, input.ctx.win.x0) && p.y >= Math.max(3, input.ctx.win.y0) && p.x <= Math.min(input.ctx.mapSize - 3, input.ctx.win.x1) && p.y <= Math.min(input.ctx.mapSize - 3, input.ctx.win.y1) && !input.ctx.isWater(p) && input.ctx.slopeAt(p) <= 0.28;
+    const dryAdded = (proposed: MultiPoly, bounds: Polygon): boolean => {
+      if (!proposed.every((piece) => piece.outer.every(safe))) return false;
+      const bb = bboxOf(bounds);
+      for (let y = bb.y0; y <= bb.y1; y += 2) for (let x = bb.x0; x <= bb.x1; x += 2) {
+        if (proposed.some((piece) => pointInRing(piece.outer, { x, y }) && !piece.holes.some((h) => pointInRing(h, { x, y }))) && !safe({ x, y })) return false;
+      }
+      return true;
+    };
+    const viableWing = (proposal: Polygon): boolean => {
+      if (!withinGrowthLimit(proposal)) return false;
+      const added = tryDifference(proposal, b.poly), claim = tryDifference(proposal, parcel.poly);
+      if (added.failed || claim.failed || !dryAdded(added.pieces, proposal)
+        || !protectedClear(added.pieces) || !waterClear(added.pieces) || !roofClearAdded(added.pieces)) return false;
+      const parcelPeers = parcels.query(proposal, true).filter((j) => j !== b.parcel).map((j) => ({ outer: input.parcels[j].poly, holes: [] }));
+      const blockPeers = blocks.query(proposal, true).filter((j) => j !== bi).map((j) => ({ outer: input.blocks[j].poly, holes: [] }));
+      const quarterPeers = quarters.query(proposal, true).filter((j) => j !== qi).map((j) => ({ outer: input.quarters[j].lp.pts, holes: [] }));
+      if (!clear(claim.pieces, parcelPeers) || !clear(proposal, blockPeers) || !clear(proposal, quarterPeers)) return false;
+      const newPlot = simplePreservingMerge(parcel.poly, proposal), newBlock = simplePreservingMerge(input.blocks[bi].poly, proposal);
+      const newQuarter = simplePreservingMerge(quarter.lp.pts, proposal), newFootprint = mergeLand(input.footprint, proposal);
+      const space = tryDifference(input.streetSpace[qi] ?? [], proposal), extra = tryDifference(proposal, quarter.lp.pts);
+      const otherBands = (input.phases ?? []).filter((p) => p.id !== quarter.phase).flatMap((p) => p.band);
+      const gardens = input.gardens.map((p) => meets(proposal, p) ? tryDifference(p, proposal) : { pieces: [{ outer: p, holes: [] }], failed: false });
+      const phases = (input.phases ?? []).map((p) => ({ region: p.id >= quarter.phase ? mergeLand(p.region, proposal) : p.region,
+        band: p.id === quarter.phase ? mergeLand(p.band, proposal) : p.band }));
+      return !!newPlot && !!newBlock && !!newQuarter && !!newFootprint && !space.failed && !extra.failed
+        && clear(extra.pieces, otherBands) && gardens.every((g) => !g.failed)
+        && phases.every((p) => p.region && p.band) && accessible(proposal, newBlock);
+    };
+    const wingCandidate = !convexRoof && input.allowGrowth && (minNeck(b.poly)?.w ?? Infinity) < 3.59
+      && contacts.some((e) => e.lab === LAB_OPEN) ? (() => {
+        const bounds = bboxOf(b.poly), margin = 5;
+        const domain: Polygon = [
+          { x: bounds.x0 - margin, y: bounds.y0 - margin }, { x: bounds.x1 + margin, y: bounds.y0 - margin },
+          { x: bounds.x1 + margin, y: bounds.y1 + margin }, { x: bounds.x0 - margin, y: bounds.y1 + margin },
+        ];
+        const nearby = roofs.query(domain, true).filter((j) => j !== index).map((j) => input.buildings[j].poly);
+        return thickenNarrowWing(b.poly, domain, nearby, viableWing);
+      })() : null;
+    const candidates = input.allowGrowth ? [
+      { poly: env, wing: false }, { poly: roofEnvelope(b.poly, dominantAxis), wing: false },
+      ...(wingCandidate ? [{ poly: wingCandidate, wing: true }] : []),
+    ] : [];
+    for (const candidate of candidates) {
+      const env = candidate.poly, delta = area(env) - area(b.poly);
       const width = Math.hypot(env[1].x - env[0].x, env[1].y - env[0].y), depth = Math.hypot(env[2].x - env[1].x, env[2].y - env[1].y);
-      if (input.allowGrowth && delta <= area(b.poly) && Math.min(width, depth) >= MIN_BW && Math.max(width, depth) / Math.min(width, depth) <= MAX_ASPECT && contacts.some((e) => e.lab === LAB_OPEN) && withinGrowthLimit(env)) {
+      const box = candidate.wing ? obb(env) : null;
+      const dimensionsOk = candidate.wing
+        ? (minNeck(env)?.w ?? Infinity) >= 3.59 && 2 * Math.min(box!.hu, box!.hv) >= MIN_BW
+          && Math.max(box!.hu, box!.hv) / Math.min(box!.hu, box!.hv) <= MAX_ASPECT
+        : Math.min(width, depth) >= MIN_BW && Math.max(width, depth) / Math.min(width, depth) <= MAX_ASPECT;
+      if (input.allowGrowth && delta <= area(b.poly) && dimensionsOk && contacts.some((e) => e.lab === LAB_OPEN) && withinGrowthLimit(env)) {
         const claim = tryDifference(env, parcel.poly);
-        const safe = (p: Vec2) => p.x >= Math.max(3, input.ctx.win.x0) && p.y >= Math.max(3, input.ctx.win.y0) && p.x <= Math.min(input.ctx.mapSize - 3, input.ctx.win.x1) && p.y <= Math.min(input.ctx.mapSize - 3, input.ctx.win.y1) && !input.ctx.isWater(p) && input.ctx.slopeAt(p) <= 0.28;
-        let dry = env.every(safe);
-        const bb = bboxOf(env);
-        for (let y = bb.y0; y <= bb.y1 && dry; y += 2) for (let x = bb.x0; x <= bb.x1; x += 2) if (pointInRing(env, { x, y }) && !safe({ x, y })) { dry = false; break; }
+        const added = candidate.wing ? tryDifference(env, b.poly) : null;
+        if (added?.failed || (candidate.wing && (!added || mpArea(added.pieces) > 0.1 * area(b.poly) + 1e-6))) continue;
+        const proposed = candidate.wing ? added!.pieces : [{ outer: env, holes: [] }];
+        const dry = dryAdded(proposed, env);
         const parcelPeers = parcels.query(env, true).filter((j) => j !== b.parcel).map((j) => ({ outer: input.parcels[j].poly, holes: [] }));
         const blockPeers = blocks.query(env, true).filter((j) => j !== bi).map((j) => ({ outer: input.blocks[j].poly, holes: [] }));
         const quarterPeers = quarters.query(env, true).filter((j) => j !== qi).map((j) => ({ outer: input.quarters[j].lp.pts, holes: [] }));
-        if (!claim.failed && dry && protectedClear(env) && clear(claim.pieces, parcelPeers) && clear(env, blockPeers) && clear(env, quarterPeers) && roofClear(env)) {
-          const newPlot = simpleMerge(parcel.poly, env), newBlock = simpleMerge(input.blocks[bi].poly, env), newQuarter = simpleMerge(quarter.lp.pts, env), newFootprint = mergeLand(input.footprint, env);
+        if (!claim.failed && dry && protectedClear(proposed) && waterClear(proposed) && clear(claim.pieces, parcelPeers) && clear(env, blockPeers) && clear(env, quarterPeers) && (candidate.wing ? roofClearAdded(proposed) : roofClear(env))) {
+          const merged = candidate.wing ? simplePreservingMerge : simpleMerge;
+          const newPlot = merged(parcel.poly, env), newBlock = merged(input.blocks[bi].poly, env), newQuarter = merged(quarter.lp.pts, env), newFootprint = mergeLand(input.footprint, env);
           const space = tryDifference(input.streetSpace[qi] ?? [], env), extra = tryDifference(env, quarter.lp.pts);
           const gardens = input.gardens.map((p) => meets(env, p) ? tryDifference(p, env) : { pieces: [{ outer: p, holes: [] }], failed: false });
           const phases = (input.phases ?? []).map((p) => ({ p, region: p.id >= quarter.phase ? mergeLand(p.region, env) : p.region, band: p.id === quarter.phase ? mergeLand(p.band, env) : p.band }));

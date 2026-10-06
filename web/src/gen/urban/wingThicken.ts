@@ -1,10 +1,10 @@
-/** Preserve a whole narrow roof by filling only unused land inside its own plot. */
+/** Preserve a whole narrow roof by filling unused land inside a bounded candidate domain. */
 import type { Polygon } from '../core/geom';
 import { area, inscribed, isSimple, minNeck, obb } from '../geo/poly';
 import { lpoly, splitByChord } from '../geo/split';
 import { mpArea, tryDifference, tryIntersection, union } from '../geo/bool';
 
-/** The caller validates physical reserve, other owners, open land and whole-block access. */
+/** The caller validates physical reserve, actual owners, open land and whole-block access. */
 export function thickenNarrowWing(poly: Polygon, owner: Polygon, occupied: Polygon[],
   validate: (candidate: Polygon) => boolean): Polygon | null {
   const originalArea = area(poly);
@@ -23,12 +23,23 @@ export function thickenNarrowWing(poly: Polygon, owner: Polygon, occupied: Polyg
     source = parts[0];
   }
   if (!wing) return null;
-  const edges = wing.map((a, i) => ({ a, b: wing![(i + 1) % wing!.length], i }))
+  const straightRuns = poly.flatMap((a, i) => {
+    const mid = poly[(i + 1) % poly.length], b = poly[(i + 2) % poly.length];
+    const ux = mid.x - a.x, uy = mid.y - a.y, vx = b.x - mid.x, vy = b.y - mid.y;
+    const u = Math.hypot(ux, uy), v = Math.hypot(vx, vy);
+    return u > 0.1 && v > 0.1 && ux * vx + uy * vy > 0
+      && Math.abs(ux * vy - uy * vx) <= 0.01 * u * v ? [{ a, b, i }] : [];
+  });
+  const ranked = (raw: { a: Polygon[number]; b: Polygon[number]; i: number }[]) => raw
     .map(e => ({ ...e, length: Math.hypot(e.b.x - e.a.x, e.b.y - e.a.y) }))
     .filter(e => e.length >= 5).sort((a, b) => b.length - a.length);
+  // A split can omit a straight outer run when an extra collinear vertex lies on it.
+  // Try those short runs first, then retain the established wing-edge search.
+  const edges = [...ranked(straightRuns).filter(e => e.length <= 12),
+    ...ranked(wing.map((a, i) => ({ a, b: wing![(i + 1) % wing!.length], i })))];
   let trials = 0;
-  for (const edge of edges) for (const side of [-1, 1]) for (const depth of [2, 2.5, 3, 3.5, 3.6, 4])
-    for (const cap of [0, 0.5, 1, 1.5, 2, 2.5, 3, 4]) {
+  for (const edge of edges) for (const side of [1, -1]) for (const depth of [3.6, 2, 2.5, 3, 3.5, 4])
+    for (const cap of [3, 0, 0.5, 1, 1.5, 2, 2.5, 4]) {
       if (++trials > 400) return null;
       const t = { x: (edge.b.x - edge.a.x) / edge.length, y: (edge.b.y - edge.a.y) / edge.length };
       const n = { x: side * t.y, y: -side * t.x };
