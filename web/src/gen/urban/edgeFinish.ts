@@ -58,16 +58,31 @@ export function openQuarterEdge(quarters: { pts: Polygon; lab: number[] }[]): (t
 
 /** Check a proposed footprint transaction against the current peers, including earlier accepted splits. */
 export function footprintAccessGuard(buildings: UrbanBuilding[], parcels: UrbanParcel[], blocks: Polygon[], streetAt: StreetAt): (original: number, parts: Polygon[]) => boolean {
+  // Footprint finalization changes polygons in place and only appends split rooms.
+  // Cache membership, not geometry: each proof must observe the latest peer footprints.
+  const peersByBlock = new Map<number, number[]>();
+  let indexed = 0;
+  const syncAppended = () => {
+    for (; indexed < buildings.length; indexed++) {
+      const parcel = buildings[indexed].parcel;
+      const block = parcel === undefined ? undefined : parcels[parcel]?.block;
+      if (block === undefined || block < 0) continue;
+      const peers = peersByBlock.get(block) ?? [];
+      peers.push(indexed);
+      peersByBlock.set(block, peers);
+    }
+  };
   return (original, parts) => {
     const owner = buildings[original]?.parcel;
     const block = owner === undefined ? undefined : parcels[owner]?.block;
     if (block === undefined || block < 0 || !blocks[block] || !parts.length) return false;
-    const peers = buildings.map((b, i) => ({ b, i })).filter(({ b }) => b.parcel !== undefined && parcels[b.parcel]?.block === block);
-    const before = blockReach(blocks[block], peers.map(({ b }) => b.poly), streetAt);
+    syncAppended();
+    const peers = peersByBlock.get(block) ?? [];
+    const before = blockReach(blocks[block], peers.map((i) => buildings[i].poly), streetAt);
     const proposed: Polygon[] = [], required: boolean[] = [];
-    peers.forEach(({ b, i }, j) => {
+    peers.forEach((i, j) => {
       if (i === original) for (const part of parts) { proposed.push(part); required.push(true); }
-      else { proposed.push(b.poly); required.push(before[j]); }
+      else { proposed.push(buildings[i].poly); required.push(before[j]); }
     });
     const after = blockReach(blocks[block], proposed, streetAt);
     return after.every((reached, i) => reached || !required[i]);

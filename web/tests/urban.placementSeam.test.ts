@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Polygon } from '../src/gen/types';
 import * as booleanOps from '../src/gen/geo/bool';
-import { footprintPlacementGuard } from '../src/gen/urban/edgeFinish';
+import { footprintAccessGuard, footprintPlacementGuard } from '../src/gen/urban/edgeFinish';
 
 const rect = (x: number, y: number, w: number, h: number): Polygon => [
   { x, y }, { x: x + w, y }, { x: x + w, y: y + h }, { x, y: y + h },
@@ -35,4 +35,18 @@ describe('physical reserve seam preservation', () => {
     const spy = vi.spyOn(booleanOps, 'tryDifference').mockReturnValue({ pieces: [], failed: true });
     try { expect(safe(original, original)).toBe(false); } finally { spy.mockRestore(); }
   });
+});
+
+it('updates block peers appended after the access guard was created', () => {
+  const block = rect(0, 0, 12, 40);
+  const front = rect(0, 0, 5, 7), rear = rect(2, 14, 8, 6), wall = rect(0, 0, 12, 7);
+  const buildings = [{ poly: front, kind: 'house', parcel: 0 }];
+  const parcels = [{ poly: block, use: 'plot', block: 0 }];
+  const guard = footprintAccessGuard(buildings, parcels, [block], (p) => p.y < 0.1);
+  expect(guard(0, [wall])).toBe(true);
+  buildings.push({ poly: rear, kind: 'rear', parcel: 1 });
+  parcels.push({ poly: block, use: 'plot', block: 0 });
+  expect(guard(0, [wall]), 'newly appended peer was reachable before the wall').toBe(false);
+  buildings[1].poly = rect(2, 22, 8, 6);
+  expect(guard(0, [wall]), 'guard reads current peer geometry').toBe(false);
 });
