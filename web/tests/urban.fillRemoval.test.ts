@@ -107,6 +107,25 @@ describe('last-resort ordinary infill removal', () => {
     expect(result.changed).toEqual(new Set([44, 45]));
   }, 30_000);
 
+  it('reports an unrepaired later roof at its final index after an earlier removal', () => {
+    const f = cases[1];
+    const shift = (poly: Polygon): Polygon => poly.map((p) => ({ x: p.x + 100, y: p.y }));
+    const later = { poly: shift(f.roof as Polygon), kind: 'house' as const, parcel: 1 };
+    const peers = Array.from({ length: 50 }, (_, j) => ({
+      poly: rect(3000 + 20 * j, 0, 3010 + 20 * j, 10), kind: 'house' as const,
+    }));
+    const buildings = [{ poly: f.roof as Polygon, kind: 'house' as const, parcel: 0 }, later, ...peers];
+    const result = finalizeFootprints({ buildings,
+      parcels: [{ poly: f.owner as Polygon, use: 'plot', block: 44 },
+        { poly: shift(f.owner as Polygon), use: 'plot', block: 45 }], backLand: [],
+      placementClear: () => false, validateParts: () => false,
+      allowFillRemoval: true, validateRemoval: (i) => i === 0,
+    });
+    expect(result.removed).toEqual([0]);
+    expect(result.invalid).toEqual([0]);
+    expect(buildings[0]).toBe(later);
+  }, 30_000);
+
   it('refuses removal when it would breach the housing-area budget', () => {
     const f = cases[0];
     const peers = Array.from({ length: 49 }, (_, j) => ({

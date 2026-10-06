@@ -38,7 +38,9 @@ export interface FootprintFinalInput {
   validateRemoval?: (originalIndex: number, pendingRemoved: readonly number[]) => boolean;
 }
 export interface PrivatePassage { path: Vec2[]; width: number; parcel: number }
-export interface FootprintFinalResult { changed: Set<number>; invalid: number[]; cleaned: number; releasedArea: number;
+export interface FootprintFinalResult { changed: Set<number>;
+  /** Indices in the returned, compacted buildings array. */
+  invalid: number[]; cleaned: number; releasedArea: number;
   /** Original indices, before deferred removal and any array compaction. */
   removed: number[] }
 
@@ -684,5 +686,6 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
     invalid.splice(invalid.indexOf(i), 1);
   }
   for (const i of [...removed].reverse()) u.buildings.splice(i, 1);
-  return { changed, invalid, cleaned, releasedArea, removed };
+  const finalInvalid = invalid.map((i) => i - removed.filter((j) => j < i).length);
+  return { changed, invalid: finalInvalid, cleaned, releasedArea, removed };
 }
