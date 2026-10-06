@@ -134,7 +134,7 @@ export function classifyStreetTails(urban: UrbanLayer, context: StreetTailContex
     if (st.path.length < 2 || st.role === 'boundary' || st.role === 'wall-lane') continue;
     for (const end of ['start', 'end'] as const) {
       const point = st.path[end === 'start' ? 0 : st.path.length - 1];
-      if (!onExterior(point, owner, st.width)) continue;
+      if (!onExterior(point, owner, st.width) && (inside(point, owner) || !st.path.some((p) => inside(p, owner)))) continue;
       const L = pathLength(st.path);
       const served = servedDistance(st, end, urban);
       let kind: UrbanStreetTail['kind'];
@@ -145,7 +145,7 @@ export function classifyStreetTails(urban: UrbanLayer, context: StreetTailContex
       else if (context.barriers?.some((b) => inPolyH(point, b))) kind = 'physicalBarrier';
       else if (Number.isFinite(served) && served <= Math.max(12, st.width * 2)) kind = 'servedDeadEnd';
       else kind = 'unservedOpenEdge';
-      const preserved = kind !== 'unservedOpenEdge';
+      const preserved = (kind !== 'unservedOpenEdge' && kind !== 'servedDeadEnd') || st.role === 'close';
       const excess = Number.isFinite(served) ? Math.max(0, served - Math.max(3, st.width)) : L;
       tails.push({ street, end, kind, point, servedFromEnd: Number.isFinite(served) ? served : L, excess: preserved ? 0 : excess });
     }
@@ -163,7 +163,7 @@ export function servedStreetPath(source: UrbanLayer | UrbanStreet, ref: number |
   const path = street.path;
   if (path.length < 2) return path;
   const L = pathLength(path);
-  const trim = (end: 'start' | 'end') => tails.find((t) => t.end === end && t.kind === 'unservedOpenEdge')?.excess ?? 0;
+  const trim = (end: 'start' | 'end') => tails.find((t) => t.end === end && (t.kind === 'unservedOpenEdge' || t.kind === 'servedDeadEnd'))?.excess ?? 0;
   const lo = Math.min(L, trim('start')), hi = Math.max(0, L - trim('end'));
   if (hi - lo < 0.5) return [];
   const out: Vec2[] = [];
@@ -251,7 +251,7 @@ export function openTailGround(urban: UrbanLayer, tails: UrbanStreetTail[], cont
   if (!streetSpace.length) return [];
   const out: PolyH[] = openEdgeResidualGround(urban, tails, context);
   for (const tail of tails) {
-    if (tail.kind !== 'unservedOpenEdge' || tail.excess < 1) continue;
+    if ((tail.kind !== 'unservedOpenEdge' && tail.kind !== 'servedDeadEnd') || tail.excess < 1) continue;
     const st = urban.streets[tail.street];
     const stub = endStub(st.path, tail.end, tail.excess);
     if (stub.length < 2) continue;

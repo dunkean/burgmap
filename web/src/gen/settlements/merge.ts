@@ -14,14 +14,17 @@ export function mergeUrban(layers: UrbanLayer[]): UrbanLayer | undefined {
     ...layers[0],
     footprint: [], streets: [], blocks: [], parcels: [], buildings: [], walls: [], landmarks: [], squares: [],
     quarters: [], blockInfo: [], masses: [], backLand: [], footprintH: [], lines: [], trees: [], water: [], sites: [], quays: [],
+    openTails: [], openEdgeGround: [],
     ...(layers.some((u) => u.moats?.length) ? { moats: [] } : {}),
     ...(layers.some((u) => u.ruralReserve?.length) ? { ruralReserve: [] } : {}),
   };
   for (const u of layers) {
-    const b0 = m.blocks.length, p0 = m.parcels.length, q0 = m.quarters.length;
+    const b0 = m.blocks.length, p0 = m.parcels.length, q0 = m.quarters.length, s0 = m.streets.length;
     m.footprint.push(...u.footprint);
     m.footprintH.push(...u.footprintH);
     m.streets.push(...u.streets);
+    m.openTails!.push(...(u.openTails ?? []).map((tail) => ({ ...tail, street: tail.street + s0 })));
+    m.openEdgeGround!.push(...(u.openEdgeGround ?? []));
     m.blocks.push(...u.blocks);
     m.blockInfo.push(...u.blockInfo.map((bi) => (q0 ? { ...bi, quarter: bi.quarter + q0 } : bi)));
     m.parcels.push(...u.parcels.map((p) => (b0 && p.block >= 0 ? { ...p, block: p.block + b0 } : p)));

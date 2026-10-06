@@ -11,6 +11,8 @@ import { createGrid, D8, D8_DIST, FINITE_BOX } from '../core/grid';
 import { Vec2, Polygon, Polyline, dist, polygonCentroid } from '../core/geom';
 import { nearestOn, insertVertex } from '../core/pline';
 import { pointInRing } from '../geo/poly';
+import { tryIntersection, unionMany } from '../geo/bool';
+import { finishOpenEdges } from '../urban/edgeFinish';
 import { passability } from '../site/site';
 import { generateUrban } from '../urban';
 import { generateMega } from '../urban/mega/plan';
@@ -147,7 +149,7 @@ export function settlementSite(world: World, s: Settlement): SiteLayer {
 }
 
 /** Elements whose representative point lies in the region are kept; indices are remapped. */
-export function clipUrban(u: UrbanLayer, region: Polygon): UrbanLayer {
+export function clipUrban(u: UrbanLayer, region: Polygon, stats?: Record<string, number | string>): UrbanLayer {
   const inR = (p: Polygon): boolean => p.length > 0 && pointInRing(region, polygonCentroid(p));
   const inH = (ph: PolyH): boolean => inR(ph.outer);
   const blockKeep = u.blocks.map(inR);
@@ -158,19 +160,57 @@ export function clipUrban(u: UrbanLayer, region: Polygon): UrbanLayer {
   const pMap: number[] = [];
   let np = 0;
   pKeep.forEach((k, i) => { pMap[i] = k ? np++ : -1; });
-  return {
+  const keptBlocks = u.blocks.filter((_, i) => blockKeep[i]);
+  const buildings = u.buildings.filter((b) => inR(b.poly)).map((b) => (b.parcel !== undefined && b.parcel >= 0 ? { ...b, parcel: pMap[b.parcel] >= 0 ? pMap[b.parcel] : undefined } : b));
+  // Clip administrative ground, preserving whole retained blocks and houses across its edge. A failed boolean
+  // retains the previous frame and is reported rather than interpreting failure as empty land.
+  const constrain = (source: PolyH[], retained: Polygon[] = []): PolyH[] => {
+    const result = tryIntersection(source, region);
+    if (result.failed) {
+      if (stats) stats['clipUrban.failed'] = Number(stats['clipUrban.failed'] ?? 0) + 1;
+      return source;
+    }
+    return retained.length ? unionMany([...result.pieces, ...retained.map((outer) => ({ outer, holes: [] }))], 24, true) : result.pieces;
+  };
+  const quarters: UrbanLayer['quarters'] = [];
+  const quarterMap = new Map<number, number[]>();
+  u.quarters.forEach((q, qi) => {
+    const blocks = u.blocks.filter((_, bi) => blockKeep[bi] && u.blockInfo[bi]?.quarter === qi);
+    const pieces = constrain([q.poly], blocks);
+    const publicSpace = constrain(q.streetSpace);
+    const ids: number[] = [];
+    for (const poly of pieces) {
+      ids.push(quarters.length);
+      const space = tryIntersection(publicSpace, poly);
+      if (space.failed && stats) stats['clipUrban.failed'] = Number(stats['clipUrban.failed'] ?? 0) + 1;
+      quarters.push({ ...q, poly, streetSpace: space.failed ? publicSpace : space.pieces });
+    }
+    quarterMap.set(qi, ids);
+  });
+  const footprintH = constrain(u.footprintH, [...keptBlocks, ...buildings.map((b) => b.poly)]);
+  const layer: UrbanLayer = {
     ...u,
-    blocks: u.blocks.filter((_, i) => blockKeep[i]),
-    blockInfo: u.blockInfo.filter((_, i) => blockKeep[i]),
+    footprintH, footprint: footprintH.map((p) => p.outer), quarters,
+    phases: u.phases.map((phase) => ({ ...phase, region: constrain(phase.region,
+      u.blocks.filter((_, bi) => blockKeep[bi] && u.blockInfo[bi]?.phase === phase.id)) })),
+    openTails: undefined, openEdgeGround: undefined,
+    blocks: keptBlocks,
+    blockInfo: u.blockInfo.filter((_, i) => blockKeep[i]).map((info, bi) => {
+      const candidates = quarterMap.get(info.quarter) ?? [];
+      const center = polygonCentroid(keptBlocks[bi]);
+      const quarter = candidates.find((qi) => pointInRing(quarters[qi].poly.outer, center)) ?? candidates[0] ?? info.quarter;
+      return { ...info, quarter };
+    }),
     parcels: u.parcels.filter((_, i) => pKeep[i]).map((p) => ({ ...p, block: p.block >= 0 ? bMap[p.block] ?? -1 : p.block })),
-    buildings: u.buildings.filter((b) => inR(b.poly)).map((b) => (b.parcel !== undefined && b.parcel >= 0 ? { ...b, parcel: pMap[b.parcel] >= 0 ? pMap[b.parcel] : undefined } : b)),
-    masses: u.masses.filter(inH),
+    buildings,
+    masses: unionMany(buildings.map((b) => b.poly), 24, true),
     backLand: u.backLand.filter(inH),
     streets: u.streets.filter((st) => st.path.length > 0 && pointInRing(region, st.path[Math.floor(st.path.length / 2)])),
     landmarks: u.landmarks.filter((l) => inR(l.poly)),
     squares: u.squares.filter(inR),
     trees: u.trees?.filter((t) => pointInRing(region, t)),
   };
+  return layer;
 }
 
 export interface SettlementUrban { urban: UrbanLayer; bridges: Bridge[]; stats: Record<string, number | string> }
@@ -216,6 +256,7 @@ export function generateSettlementUrban(world: World, s: Settlement): Settlement
     sub.options = { ...options, population: s.population * k };
     res = generateUrban(sub, rng);
   }
-  const urban = clipUrban({ ...res.layer, population: s.population }, s.region);
+  const urban = clipUrban({ ...res.layer, population: s.population }, s.region, res.stats);
+  finishOpenEdges(urban, { regionalRoads: sub.roads, barriers: [...(urban.water ?? []), ...(urban.ruralReserve ?? [])] });
   return { urban, bridges: (sub.bridges ?? []).slice(n0), stats: res.stats };
 }

@@ -74,6 +74,8 @@ import { unionS } from '../geo/bool';
 import { servedFootprint } from './footprint';
 import { finishEdgeRoofs } from './edgeRoofs';
 import { repairResidentialDensity } from './densityRepair';
+import { finalizeFootprints } from './footprintFinal';
+import { finishOpenEdges, markPlannedTerminalPlots } from './edgeFinish';
 
 export interface UrbanResult { layer: UrbanLayer; stats: Record<string, number | string>; debug: UrbanDebug }
 export interface UrbanDebug { quarters: { poly: Polygon; phase: number; lab: number[] }[] }
@@ -824,6 +826,13 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   };
   const accessPlaces = (): Polygon[] => parcels.filter((p) => ['place', 'market', 'quay', 'green'].includes(String(p.use))).map((p) => p.poly);
   const plotBld: ArchBldg[][] = plots.map(() => []);
+  if (!eplan.walled && !plan.render.openGround && !plan.render.stilts) {
+    markPlannedTerminalPlots(plots, streets.list.filter((s) => s.ribbon).map((s) => ({
+      path: s.path, width: s.widths.reduce((a, b) => a + b, 0) / s.widths.length,
+      widths: s.widths, kind: s.rank <= 1 ? 'main' : s.rank <= 2 ? 'street' : 'alley',
+      rank: s.rank, role: s.role, phase: s.phase,
+    })), prim.footprint, { regionalRoads: world.roads, barriers: ctx.water });
+  }
   const tBo = performance.now();
   let openGardens = 0;
   plots.forEach((pl, pi) => {
@@ -839,7 +848,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     // Mature phases already express gardens through their configured burgage programme.
     // Whole-plot gaps belong to younger fabric, rather than independently emptying core/middle plots.
     const gap = !mature && plotMorph[pi].faubFade !== false && !onQuay && !first && !craft ? edgeFade(fm, false) : 0;
-    if (gap > 0 && pr.fork('openGap').chance(0.5 * gap)) {
+    if (gap > 0 && pr.fork('openGap').chance(0.5 * gap) && !pl.terminal) {
       plotGardens.push(pl.poly);
       openGardens++;
       return;
@@ -1098,6 +1107,11 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   // Dedicated programmes can change the remaining mature residential inputs. Restore the whole-block floor
   // inside existing plots after roof styling, preserving every planning frame and the seeded dwelling counts.
   const densityRepair = repairResidentialDensity({ ...edgePartition, morphology: (bi: number) => blockMorph[bi] });
+  const releasedFootprintLand: PolyH[] = [];
+  const footprintFinal = finalizeFootprints({ buildings, parcels, backLand: releasedFootprintLand });
+  stats['footprint.cleaned'] = footprintFinal.cleaned;
+  stats['footprint.invalid'] = footprintFinal.invalid.length;
+  stats['footprint.releasedArea'] = footprintFinal.releasedArea;
   if (densityRepair.enlarged) {
     stats['densityRepair.enlarged'] = densityRepair.enlarged;
     stats['densityRepair.addedArea'] = densityRepair.addedArea;
@@ -1106,7 +1120,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   if (densityShortfall > 1e-6) stats['densityRepair.shortfall'] = densityShortfall;
   if (edgeRoofs.constrained) stats['edgeRoofs.constrained'] = edgeRoofs.constrained;
   if (edgeRoofs.grown) { prim.footprint = edgePartition.footprint; eplan.enclosure = eplan.phases.at(-1)!.region; }
-  if (edgeRoofs.grown || edgeRoofs.fitted || densityRepair.changedBlocks.size) {
+  if (edgeRoofs.grown || edgeRoofs.fitted || densityRepair.changedBlocks.size || footprintFinal.changed.size) {
     stats['edgeRoofs.grown'] = edgeRoofs.grown; stats['edgeRoofs.fitted'] = edgeRoofs.fitted;
     perBlock.forEach((list) => { list.length = 0; });
     for (const b of buildings) if (b.parcel !== undefined) perBlock[parcels[b.parcel].block].push(b.poly);
@@ -1192,12 +1206,19 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     phases: eplan.phases.map((p) => ({ id: p.id, kind: p.kind, zone: p.zone, region: toPH(p.region), walled: p.walled, fossil: p.fossil })),
     quarters: keptQ.map((qi) => { const q = prim.quarters[qi]; return { poly: { outer: q.lp.pts, holes: [] }, phase: q.phase, zone: q.zone, streetSpace: toPH(streetSpace[qi]) }; }),
     blockInfo: carved.map((b, bi) => ({ quarter: qMap[b.quarter], phase: b.phase, zone: b.zone, kind: b.kind === 'market' && archetype !== 'town' ? 'green' : b.kind, compound: compoundOf[bi], culture: blockCulture[bi], morphology: blockMorph[bi].id })), masses,
-    backLand: parcels.filter((p) => p.use === 'garden').map((p) => p.poly).concat(plotGardens).map((p) => ({ outer: p, holes: [] })),
+    backLand: [...parcels.filter((p) => p.use === 'garden').map((p) => p.poly).concat(plotGardens).map((p): PolyH => ({ outer: p, holes: [] })), ...releasedFootprintLand],
     culture: culture.id, cultures: plan.cultures.map((c) => c.id), renderHints: { ...hints, towerShape },
     lines, trees, water: waterPieces,
     ...(prim.moat.length ? { moats: prim.moat } : {}),
     sites, quays,
   };
+  finishOpenEdges(layer, {
+    regionalRoads: world.roads,
+    barriers: [...ctx.water, ...defensiveReserve, ...(layer.walls ?? []).flatMap((w) => streetStrips(w.closed ? [...w.path, w.path[0]] : w.path, w.thickness + 2))],
+    protectedGround: lines.filter((l) => /wall|fence|palisade|rampart|barbican|hedge/.test(l.kind))
+      .flatMap((l) => streetStrips(l.closed && l.path.length ? [...l.path, l.path[0]] : l.path, l.width ?? 1)),
+  });
+  stats['openEdge.unserved'] = layer.openTails?.filter((t) => t.kind === 'unservedOpenEdge' && t.excess > 0.5).length ?? 0;
   const debug: UrbanDebug = { quarters: prim.quarters.map((q) => ({ poly: q.lp.pts, phase: q.phase, lab: q.lp.lab })) };
   stats['ms.urban'] = Math.round(performance.now() - t0);
   return { layer, stats, debug };

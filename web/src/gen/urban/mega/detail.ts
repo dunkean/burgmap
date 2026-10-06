@@ -24,6 +24,9 @@ import { cutCourtyards } from '../courtyards';
 import { buildOn, type ArchBldg } from '../bops';
 import { chamferPersianHouse } from '../persianhouse';
 import { finishEdgeRoofs } from '../edgeRoofs';
+import { finalizeFootprints } from '../footprintFinal';
+import { finishOpenEdges, markPlannedTerminalPlots } from '../edgeFinish';
+import { naturalGroundEligible } from '../../landuse/urbanGround';
 import { streetStrips } from '../openfringe';
 import { blockReach, carvePassage, makeStreetAt, splitLong, frontRangeDepth, shapeOkObb } from '../access';
 import { buildCompound, pickBlock, type ClaimBlock } from '../compounds';
@@ -295,6 +298,13 @@ export function megaQuarterDetail(world: World, key: number): UrbanLayer | null 
   };
   const port = mq.district === 'port', craft = mq.district === 'craft';
   const plotBld: ArchBldg[][] = plots.map(() => []);
+  if (naturalGroundEligible(host)) {
+    markPlannedTerminalPlots(plots, local.list.filter((s) => s.ribbon).map((s) => ({
+      path: s.path, width: s.widths.reduce((a, b) => a + b, 0) / s.widths.length,
+      widths: s.widths, kind: s.rank <= 1 ? 'main' : s.rank <= 2 ? 'street' : 'alley',
+      rank: s.rank, role: s.role, phase: s.phase,
+    })), host.footprintH, { regionalRoads: [...(world.roads ?? []), ...host.streets], barriers: ctx.water });
+  }
   plots.forEach((pl, pi) => {
     const pr = rng.fork('pl:' + pi);
     const cov = Math.max(0, Math.min(1, (blockInfill[pl.block] + pr.range(-0.03, 0.03)) * (1 - 0.4 * (pl.fade ?? 0))));
@@ -419,6 +429,8 @@ export function megaQuarterDetail(world: World, key: number): UrbanLayer | null 
     allowGrowth: false,
     eligible: (pi) => parcels[pi].use === 'plot' && ['streetFrontRow', 'detached', 'machiya', 'giebelhaus', 'yardHouse', 'shopRow'].includes(P.buildingOp),
   });
+  const releasedFootprintLand: PolyH[] = [];
+  finalizeFootprints({ buildings, parcels, backLand: releasedFootprintLand });
   const perBlock: Polygon[][] = carved.map(() => []);
   for (const b of buildings) if (b.parcel !== undefined) perBlock[parcels[b.parcel].block].push(b.poly);
   const masses: PolyH[] = [];
@@ -435,9 +447,20 @@ export function megaQuarterDetail(world: World, key: number): UrbanLayer | null 
     footprint: [], footprintH: [], streets, blocks: carved.map((b) => b.poly), parcels, buildings, walls, landmarks, squares: [],
     archetype: 'town', population: mq.pop, morphology: P.id, phases: [], quarters: [],
     blockInfo: carved.map((b, bi) => ({ quarter: id, phase: b.phase, zone: b.zone, kind: b.kind, compound: compoundOf[bi], culture: mq.culture, morphology: P.id })),
-    masses, backLand: parcels.filter((p) => p.use === 'garden').map((p) => p.poly).concat(plotGardens).map((p) => ({ outer: p, holes: [] })),
+    masses, backLand: [...parcels.filter((p) => p.use === 'garden').map((p) => p.poly).concat(plotGardens).map((p): PolyH => ({ outer: p, holes: [] })), ...releasedFootprintLand],
     lines, trees, water: waterPieces, sites,
   };
+  const groundView: UrbanLayer = { ...layer, quarters: [{ poly: { outer: q.lp.pts, holes: [] }, phase: q.phase, zone: q.zone, streetSpace: cr.streetSpace }] };
+  finishOpenEdges(groundView, {
+    owner: host.footprintH,
+    regionalRoads: [...(world.roads ?? []), ...host.streets],
+    barriers: [...ctx.water, ...(host.ruralReserve ?? [])],
+    protectedGround: [...host.streets.flatMap((s) => streetStrips(s.path, s.widths ?? s.width)),
+      ...[...(host.walls ?? []), ...walls].flatMap((w) => streetStrips(w.closed ? [...w.path, w.path[0]] : w.path, w.thickness + 2)),
+      ...lines.filter((l) => /wall|fence|palisade|rampart|barbican|hedge/.test(l.kind)).flatMap((l) => streetStrips(l.closed && l.path.length ? [...l.path, l.path[0]] : l.path, l.width ?? 1))],
+  }, host);
+  layer.openTails = groundView.openTails;
+  layer.openEdgeGround = groundView.openEdgeGround;
   void closes; void derbs; void pointInRing;
   return layer;
 }
