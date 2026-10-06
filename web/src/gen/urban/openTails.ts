@@ -115,6 +115,9 @@ function externalCrossing(path: Polyline, width: number, edge: Vec2, owner: Poly
       const before = at(a, b, Math.max(0, hit.t - eps));
       const after = at(a, b, Math.min(1, hit.t + eps));
       if (inside(before, owner) !== inside(after, owner)) return true;
+      // A regional road may be stored only on its exterior side and meet the urban street at an exact border node.
+      if ((hit.t <= 1e-8 || hit.t >= 1 - 1e-8) && !inside(a, owner) && !inside(b, owner)
+        && dist(edge, at(a, b, hit.t)) <= 0.5) return true;
     }
   }
   return false;
@@ -122,6 +125,8 @@ function externalCrossing(path: Polyline, width: number, edge: Vec2, owner: Poly
 
 /** Deterministic diagnosis. It does not mutate paths, lots or rural land use. */
 export function classifyStreetTails(urban: UrbanLayer, context: StreetTailContext = {}): UrbanStreetTail[] {
+  // The macro host has no detailed lots or public-space partition yet. Its arterials remain intact until detail arrives.
+  if (!urban.parcels.length && !urban.buildings.length && urban.quarters.every((q) => !q.streetSpace.length)) return [];
   const owner = context.owner ?? urban.footprintH;
   const tails: UrbanStreetTail[] = [];
   for (let street = 0; street < urban.streets.length; street++) {

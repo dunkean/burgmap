@@ -41,8 +41,18 @@ describe('open street tails', () => {
     const urban = base();
     const road = [{ path: [{ x: 80, y: 50 }, { x: 120, y: 50 }], width: 6 }];
     expect(classifyStreetTails(urban, { regionalRoads: road })[0].kind).toBe('regionalContinuation');
+    expect(classifyStreetTails(urban, { regionalRoads: [{ path: [{ x: 100, y: 50 }, { x: 120, y: 50 }], width: 6 }] })[0].kind).toBe('regionalContinuation');
     urban.streets.push({ path: [{ x: 100, y: 30 }, { x: 100, y: 70 }], width: 5, kind: 'street', rank: 2, role: 'street', phase: 0 });
     expect(classifyStreetTails(urban)[0].kind).toBe('urbanJunction');
+  });
+
+  it('keeps an undetailed macro host inert until its quarters and lots exist', () => {
+    const urban = base();
+    urban.parcels = [];
+    urban.buildings = [];
+    urban.quarters[0].streetSpace = [];
+    expect(classifyStreetTails(urban)).toEqual([]);
+    expect(servedStreetPath(urban, 0)).toEqual(urban.streets[0].path);
   });
 
   it('uses only the actual settlement exterior, and masks protected public ground', () => {
