@@ -41,11 +41,12 @@ function normalize(p: Polygon): Polygon | null {
 }
 
 /** Clip only a disproportionately sharp building tip; keep its land as open owner land. */
-function clipSharpTip(p: Polygon, owner: Polygon, constrained: (tip: Vec2, outward: Vec2) => boolean): { house: Polygon; tip: Polygon } | null {
+function clipSharpTip(p: Polygon, owner: Polygon, constrained: (tip: Vec2, outward: Vec2) => boolean,
+  maxAngle = 18, legFraction = 0.45): { house: Polygon; tip: Polygon } | null {
   if (p.length < 3 || !isSimple(p)) return null;
   for (let i = 0; i < p.length; i++) {
     const angle = interiorAngle(p, i);
-    if (angle >= 18 * Math.PI / 180) continue;
+    if (angle >= maxAngle * Math.PI / 180) continue;
     const v = p[i], a = p[(i - 1 + p.length) % p.length], b = p[(i + 1) % p.length];
     const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
     const vl = Math.hypot(v.x - mx, v.y - my) || 1;
@@ -53,7 +54,7 @@ function clipSharpTip(p: Polygon, owner: Polygon, constrained: (tip: Vec2, outwa
     if (!constrained(v, outward)) continue;
     const la = Math.hypot(a.x - v.x, a.y - v.y), lb = Math.hypot(b.x - v.x, b.y - v.y);
     if (la < 3 || lb < 3) continue;
-    let len = Math.min(0.45 * Math.min(la, lb), 1.2 / Math.max(0.05, Math.sin(angle / 2)));
+    let len = Math.min(legFraction * Math.min(la, lb), 1.2 / Math.max(0.05, Math.sin(angle / 2)));
     // Limit land released to 3% of the current building; the cut must remain visible.
     const maxLen = Math.sqrt(0.06 * area(p) / Math.max(1e-6, Math.sin(angle)));
     len = Math.min(len, maxLen);
@@ -139,6 +140,20 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
     if (q && q.length !== b.poly.length && (!owner || polyInside(owner.poly, q))) {
       b.poly = q; cleaned++;
       if (block !== undefined) changed.add(block);
+    }
+    // Keep the hall's intentional U-shaped court while blunting only a long
+    // convex needle at its perimeter. The ordinary room-width rule is not
+    // meaningful for the hall's open centre and remains disabled below.
+    if (b.kind === 'hall' && b.arch === 'courtyard-hall' && !isConvex(b.poly, 1e-3)
+      && owner && u.backLand) {
+      const tip = clipSharpTip(b.poly, owner.poly, (p, d) => !openExterior(owner, p, d)
+        || tipConstrained(b.parcel!, p, d), 55, 0.7);
+      if (tip && (!u.validateParts || u.validateParts(i, [tip.house]))) {
+        b.poly = tip.house;
+        u.backLand.push({ outer: tip.tip, holes: [] });
+        releasedArea += area(tip.tip);
+        if (block !== undefined) changed.add(block);
+      }
     }
     // Courtyard ranges are deliberately narrow rooms; their minimum is set by the builder's rd.
     if (b.courtyards?.length || /courtyard|souk|ring/.test(b.arch ?? '')
