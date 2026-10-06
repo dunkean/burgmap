@@ -253,7 +253,11 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
       if (!cut) return false;
       const parts = cut.map((p) => p.pts).sort((a, c) => area(c) - area(a));
       if (Math.abs(area(parts[0]) + area(parts[1]) - area(main)) > 1e-6
-        || !parts.every((p) => polyInside(owner.poly, p))) return false;
+        || !parts.every((p) => {
+          if (!polyInside(owner.poly, p)) return false;
+          const outside = tryDifference(p, owner.poly);
+          return !outside.failed && mpArea(outside.pieces) <= 1e-6;
+        })) return false;
       main = parts[0];
       const arm = parts[1];
       if (proper(arm)) extra.push(arm);
