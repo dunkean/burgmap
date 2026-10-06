@@ -271,7 +271,8 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
       } else if (area(arm) > 0.02 * area(original)) return false;
     }
     const rooms = [main, ...extra];
-    if (!rooms.every(proper) || rooms.reduce((s, p) => s + area(p), 0) < 0.95 * area(original)) return false;
+    if (!rooms.every((p) => proper(p) && u.placementClear!(p, original))
+      || rooms.reduce((s, p) => s + area(p), 0) < 0.95 * area(original)) return false;
     const proposed: PolyH[] = rooms.map((outer) => ({ outer, holes: [] }));
     for (let k = 0; k < rooms.length; k++) for (let j = k + 1; j < rooms.length; j++) {
       const hit = tryIntersection(rooms[k], rooms[j]);
