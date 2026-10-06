@@ -15,6 +15,7 @@ let nextPart = 1;
 
 function emptyUrban(u: UrbanLayer): UrbanLayer {
   return { ...u, macro: undefined, footprint: [], footprintH: [], streets: [], blocks: [], blockInfo: [],
+    openTails: [], openEdgeGround: [],
     parcels: [], buildings: [], landmarks: [], squares: [], quarters: [], masses: [], backLand: [],
     walls: [], lines: [], trees: [], water: [], moats: [], ruralReserve: [], sites: [], quays: [] };
 }

@@ -15,6 +15,8 @@ import { groundAppearance, earthCourt, type GroundAppearance } from '../gen/land
 import type { SvgBrushes } from './brushSvg';
 import { plotLines } from './plotLines';
 import { underdarkMarkSvg } from './underdark';
+import { servedStreetPath } from '../gen/urban/openTails';
+import type { UrbanStreet } from '../gen/types';
 
 const phD = (p: PolyH): string => pathD(p.outer, true) + p.holes.map((h) => pathD(h, true)).join('');
 
@@ -335,15 +337,19 @@ function openGroundSvg(ub: NonNullable<World['urban']>, pal: Palette, lw: (m: nu
   return s + openGroundPathsSvg(ub, pal);
 }
 
-function openGroundPathsSvg(ub: NonNullable<World['urban']>, pal: Palette, sand = false): string {
+function openGroundPathsSvg(ub: NonNullable<World['urban']>, pal: Palette, sand = false, sources: UrbanStreet[] = ub.streets): string {
   // paths: trampled earth along the street centrelines (wide causeways keep the street colour)
   const U = pal.urban;
   const ink = sand ? yardEarthTone(pal) : pathEarth(pal);
   const byW = new Map<string, string[]>();
-  for (const st of ub.streets) {
+  const indices = new Map(ub.streets.map((st, i) => [st, i]));
+  for (const st of sources) {
+    const i = indices.get(st);
+    const path = i === undefined ? st.path : servedStreetPath(ub, i);
+    if (path.length < 2) continue;
     const k = (!sand && st.width >= 6.5 && st.rank <= 1 ? 'c' : 'e') + (Math.round(st.width * 2) / 2);
     if (!byW.has(k)) byW.set(k, []);
-    byW.get(k)!.push(pathD(st.path, false));
+    byW.get(k)!.push(pathD(path, false));
   }
   let s = '<g class="u-paths" fill="none" stroke-linecap="round" stroke-linejoin="round">';
   for (const [k, ds] of byW) {
@@ -437,7 +443,7 @@ export function urbanLayer(world: World, pal: Palette, u: number, debug: boolean
     // Native paths were painted before the opaque landscape. Replay only their overwritten pixels under this
     // exact clip, so paths on dedicated plazas/yards retain their previous compositing and real material.
     if (open && !material.earthStreets && landscapeGround.length) s += openGroundPathsSvg(ub, pal);
-    if (material.earthStreets && landscapeGround.length) s += openGroundPathsSvg({ ...ub, streets: material.streetSources }, pal, true);
+    if (material.earthStreets && landscapeGround.length) s += openGroundPathsSvg(ub, pal, true, material.streetSources);
     s += '</g>';
   }
   if (!open) {
@@ -464,7 +470,8 @@ export function urbanLayer(world: World, pal: Palette, u: number, debug: boolean
   const wide = mains.filter((st) => st.width < minW && !earthSources.has(st));
   if (wide.length && !open) {
     if (!stilts) s += `<defs><clipPath id="urban-stroke-clip"><path d="${urbanStrokeSpace(ub).map(phD).join('')}" clip-rule="nonzero"/></clipPath></defs><g clip-path="url(#urban-stroke-clip)">`;
-    s += `<path class="u-main-streets"${stilts || !(world.terrain.coastline.length || world.terrain.lakes.some((l) => l.length >= 3)) ? '' : ' clip-path="url(#landclip)"'} d="${wide.map((st) => pathD(st.path, false)).join('')}" fill="none" stroke="${U.street}" stroke-width="${f1(minW)}" stroke-linecap="round" stroke-linejoin="round"/>`;
+    const indices = new Map(ub.streets.map((st, i) => [st, i]));
+    s += `<path class="u-main-streets"${stilts || !(world.terrain.coastline.length || world.terrain.lakes.some((l) => l.length >= 3)) ? '' : ' clip-path="url(#landclip)"'} d="${wide.map((st) => pathD(servedStreetPath(ub, indices.get(st)!), false)).join('')}" fill="none" stroke="${U.street}" stroke-width="${f1(minW)}" stroke-linecap="round" stroke-linejoin="round"/>`;
     if (!stilts) s += '</g>';
   }
   // small bridges over the streams (true size, by kind: footbridges, arches, fords), over the street space

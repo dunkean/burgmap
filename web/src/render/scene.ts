@@ -9,6 +9,7 @@ import type { World, LandKind, LandArea, Polygon, Polyline, Vec2, PolyH } from '
 import { contourSet } from './contours';
 import { countrysideFringe, fringeStreetWidth } from './countryside';
 import { currentLandscapeGround } from '../gen/landuse/landscapeGround';
+import { servedStreetPath } from '../gen/urban/openTails';
 import { worldGroundAppearance, earthCourt, type GroundAppearance } from '../gen/landuse/groundAppearance';
 import { plotLines } from './plotLines';
 import { worldCampCover } from './campCover';
@@ -410,11 +411,14 @@ export function buildScene(world0: World, tileSize = TILE_SIZE, build: SceneBuil
     for (const s of world0.settlements ?? []) if (!s.main) for (const st of s.urban?.streets ?? []) secondary.add(st);
     const byW = new Map<string, Polyline[]>();
     const earthSources = new Set(appearance.streetSources);
-    for (const st of ur.streets) {
+    for (let i = 0; i < ur.streets.length; i++) {
+      const st = ur.streets[i];
+      const path = servedStreetPath(ur, i);
+      if (path.length < 2) continue;
       const k = `${secondary.has(st) ? 'v' : ''}${st.rank}|${st.role === 'close' ? 'c' : ''}|${Math.round(st.width * 2) / 2}${earthSources.has(st) ? '|earth' : ''}`;
       let l = byW.get(k);
       if (!l) byW.set(k, (l = []));
-      l.push(st.path);
+      l.push(path);
     }
     const rankOf = (k: string): number => Number(k.split('|')[0].replace('v', ''));
     const sorted = [...byW.entries()].sort((a, b) => rankOf(b[0]) - rankOf(a[0]));

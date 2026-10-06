@@ -49,6 +49,9 @@ function layerGround(u: UrbanLayer, replaced: Set<number> = new Set(), appearanc
   if (appearance && u.renderHints?.openGround) source = source.concat(u.landmarks.filter((l) => l.kind === 'camp-ground').map((l) => piece(l.poly)));
   if (!source.length && !u.macro) source = u.parcels.filter((p) => p.use === 'plot' || p.use === 'hut-lot').map((p) => piece(p.poly));
   if (appearance) source = source.concat(material.natural);
+  // The cadastral street partition is unchanged. These exact public pieces have no remaining carriage or service
+  // function and may receive the same opaque terrain replay as neighbouring residential ground.
+  if (u.openEdgeGround?.length) source = source.concat(u.openEdgeGround);
   const protection = protectedGround(u, appearance, material).concat(owner ? protectedGround(owner, appearance) : []);
   if (!source.length || !finite(source) || !finite(protection)) return [];
   return differenceSafeS(unionMany(source, 24, true), unionMany(protection, 24, true));
@@ -109,7 +112,8 @@ export function urbanLandscapeGround(world: World, appearance = false): PolyH[] 
   }
   const signature = JSON.stringify([world.mapSize, appearance && [world.options.biome, world.site?.fields?.dWater, world.site?.fields?.hab,
     world.terrain.height.w, world.terrain.height.h, world.terrain.height.cell], hosts.map(({ u, si }) => [si, [...replaced.get(u)!]]), layers.map((u) => [u.blocks, u.blockInfo, u.parcels, u.backLand,
-    u.squares, u.landmarks, u.water, u.ruralReserve, u.renderHints, u.footprintH, u.macro?.quarters, u.streets, appearance && [u.culture, u.morphology, u.archetype, u.sites]]),
+    u.squares, u.landmarks, u.water, u.ruralReserve, u.renderHints, u.footprintH, u.macro?.quarters, u.streets,
+    u.openTails, u.openEdgeGround, appearance && [u.culture, u.morphology, u.archetype, u.sites]]),
     world.terrain && [world.terrain.coastline, world.terrain.islands, world.terrain.lakes, world.terrain.rivers],
     appearance && layers.some((u) => u.renderHints?.openGround) && [world.landuse?.areas, world.landuse?.farmsteads]]);
   const cached = CACHE.get(world);
@@ -155,7 +159,7 @@ export class LandscapeGroundCache {
   private terrainVersion = -1;
   private water: PolyH[] = [];
   private waterSafe = false;
-  private layers = new WeakMap<UrbanLayer, { version: number; footprint?: Polygon; owner?: UrbanLayer; ground: PolyH[] }>();
+  private layers = new WeakMap<UrbanLayer, { version: number; footprint?: Polygon; owner?: UrbanLayer; openEdgeGround?: PolyH[]; ground: PolyH[] }>();
   private quarters = new WeakMap<MacroQuarter, { owner: UrbanLayer; version: number; ground: PolyH[] }>();
   private protections = new WeakMap<UrbanLayer, { version: number; pieces: PolyH[] }>();
   private appearance: World | undefined;
@@ -194,9 +198,10 @@ export class LandscapeGroundCache {
 
   layer(u: UrbanLayer, version = 0, footprint?: Polygon, owner?: UrbanLayer): PolyH[] {
     const cached = this.layers.get(u);
-    if (cached?.version === version && cached.footprint === footprint && cached.owner === owner) return cached.ground;
+    if (cached?.version === version && cached.footprint === footprint && cached.owner === owner
+      && cached.openEdgeGround === u.openEdgeGround) return cached.ground;
     const ground = this.dry(layerGround(u, undefined, this.appearance, footprint, owner), []);
-    this.layers.set(u, { version, footprint, owner, ground });
+    this.layers.set(u, { version, footprint, owner, openEdgeGround: u.openEdgeGround, ground });
     return ground;
   }
 
