@@ -15,7 +15,7 @@ import { optionsForMainSettlement, optionsForSettlement } from '../../options';
 import type { World, UrbanLayer, UrbanBuilding, UrbanParcel, UrbanSite, UrbanLine, UrbanTree, UrbanWall, PolyH, UrbanStreet } from '../../types';
 import type { MorphologyParams } from '../morphology';
 import { makeCtx, type UrbanCtx } from '../context';
-import { Streets } from '../streets';
+import { Streets, LAB_OPEN } from '../streets';
 import { GuidanceField } from '../field';
 import { splitQuarter, addCloses, carveBlocks, buildRibbonIndex, type CarvedBlock } from '../blocks';
 import { culDeSacTree } from '../culdesac';
@@ -434,7 +434,7 @@ export function megaQuarterDetail(world: World, key: number): UrbanLayer | null 
     footprint: [{ outer: q.lp.pts, holes: [] }], gardens: plotGardens, streets: local,
     protectedLand: detailProtectedLand,
     growthLimit: quarterRoofCollar(mq.pts, 16),
-    allowGrowth: naturalGroundEligible(host),
+    allowGrowth: q.lp.lab.includes(LAB_OPEN),
     eligible: (pi: number) => parcels[pi].use === 'plot' && ['streetFrontRow', 'detached', 'machiya', 'giebelhaus', 'yardHouse', 'shopRow'].includes(P.buildingOp),
   };
   finishEdgeRoofs(detailPartition);

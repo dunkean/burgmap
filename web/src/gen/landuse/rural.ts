@@ -9,7 +9,8 @@ import { distanceField, forCellsNearPolyline, smoothstep } from '../core/field';
 import { marchingSquares } from '../terrain/contour';
 import { rasterizePolys } from '../geo/raster';
 import { differenceSafeS, intersectionS, mpArea, unionS } from '../geo/bool';
-import { naturalGroundEligible, urbanNaturalGround } from './urbanGround';
+import { urbanNaturalGround } from './urbanGround';
+import { LAB_OPEN } from '../urban/streets';
 import { urbanLandscapeGround, landscapeCoverGround } from './landscapeGround';
 import { partitionRegion, pruneWays, FieldCtx, FieldNet } from './fields';
 import type { World, LandArea, LandKind, Farmstead, LandUseLayer, PolyH } from '../types';
@@ -242,7 +243,7 @@ export function generateRural(world: World, root: Rng, mainRoads?: number, strip
   // Lazy detail must not depend on landuse: protect its possible roof growth before placing any farm lot.
   const farmReserve = farmGrowthReserve(reserve, n, cell,
     [world.urban, ...secondary.map((st) => st.urban)]
-      .filter((u): u is NonNullable<typeof u> => !!u?.macro && naturalGroundEligible(u))
+      .filter((u): u is NonNullable<typeof u> => !!u?.macro && u.macro.quarters.some(q => q.kind === 'quarter' && q.lab.includes(LAB_OPEN)))
       .map((u) => u.footprintH));
 
   // slope thresholds adapt to the relief: the best-drained/flattest ground near the town is always the arable
