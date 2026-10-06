@@ -81,28 +81,80 @@ function hash2(x: number, y: number): number {
 
 export interface RasterResult { png: Uint8Array; w: number; h: number; /** Raw 8-bit RGB pixels (w*h*3), used by the canvas renderer. */ rgb?: Uint8Array }
 export interface TerrainPixels { w: number; h: number; rgb: Uint8Array }
+export interface TerrainRasterOptions {
+  smooth?: boolean; pixels?: number;
+  /** Already sampled continuous surface and unit normals, aligned to output pixels. */
+  surface?: Float32Array;
+  normals?: { x: Float32Array; y: Float32Array; z: Float32Array };
+  heightRange?: { min: number; max: number };
+  exaggeration?: number;
+  /** Keep paper grain anchored in world coordinates across camera regions. */
+  grainCoordinates?: { x: number; y: number; cell: number };
+}
+
+/** Sample a positive, C2 cubic B-spline surface at output pixel centers.
+ * Separable sampling precomputes weights once per axis; no RGB blur or overshoot.
+ * This opt-in display surface leaves the generator's height samples untouched.
+ */
+export function resampleTerrainSurface(height: { w: number; data: Float32Array }, pixels: number): Float32Array {
+  const n = height.w, size = Math.max(2, Math.min(1024, Math.round(pixels)));
+  const indices = new Int32Array(size * 4), weights = new Float64Array(size * 4);
+  for (let x = 0; x < size; x++) {
+    const coordinate = (x + 0.5) * n / size - 0.5;
+    const base = Math.floor(coordinate), t = coordinate - base, u = 1 - t;
+    const offset = x * 4;
+    weights[offset] = u * u * u / 6;
+    weights[offset + 1] = (3 * t * t * t - 6 * t * t + 4) / 6;
+    weights[offset + 2] = (-3 * t * t * t + 3 * t * t + 3 * t + 1) / 6;
+    weights[offset + 3] = t * t * t / 6;
+    for (let k = 0; k < 4; k++) indices[offset + k] = Math.max(0, Math.min(n - 1, base + k - 1));
+  }
+  const rows = new Float64Array(n * size);
+  for (let y = 0; y < n; y++) {
+    const source = y * n, target = y * size;
+    for (let x = 0; x < size; x++) {
+      const i = x * 4;
+      rows[target + x] = height.data[source + indices[i]] * weights[i]
+        + height.data[source + indices[i + 1]] * weights[i + 1]
+        + height.data[source + indices[i + 2]] * weights[i + 2]
+        + height.data[source + indices[i + 3]] * weights[i + 3];
+    }
+  }
+  const output = new Float32Array(size * size);
+  for (let y = 0; y < size; y++) {
+    const i = y * 4, target = y * size;
+    const a = indices[i] * size, b = indices[i + 1] * size, c = indices[i + 2] * size, d = indices[i + 3] * size;
+    for (let x = 0; x < size; x++) {
+      output[target + x] = rows[a + x] * weights[i] + rows[b + x] * weights[i + 1]
+        + rows[c + x] * weights[i + 2] + rows[d + x] * weights[i + 3];
+    }
+  }
+  return output;
+}
 
 /** Hillshaded, hypsometric-tinted land image covering the whole map. */
-export function renderTerrainPixels(world: World, pal: Palette): TerrainPixels {
+export function renderTerrainPixels(world: World, pal: Palette, options: TerrainRasterOptions = {}): TerrainPixels {
   const hg = world.terrain.height;
   const n = hg.w;
   const up = pal.hatch > 0 ? Math.min(4, 1700 / n) : n >= 400 ? 1.5 : 2;
-  const W = Math.round(n * up);
+  const defaultWidth = Math.round(n * up);
+  const W = options.pixels === undefined ? (options.smooth ? Math.min(1024, defaultWidth) : defaultWidth) : Math.max(2, Math.min(1024, Math.round(options.pixels)));
   const H = W;
-  const hs = new Float32Array(W * H);
+  const hs = options.surface ?? (options.smooth ? resampleTerrainSurface(hg, W) : new Float32Array(W * H));
   const wt = world.terrain;
   let landMax = 1;
-  {
+  if (!options.heightRange) {
     const vals: number[] = [];
     for (let i = 0; i < hg.data.length; i += 7) if (wt.water[i] !== 1) vals.push(hg.data[i]);
     vals.sort((a, b) => a - b);
     landMax = vals.length ? Math.max(1, vals[Math.floor(vals.length * 0.99)]) : 1;
   }
-  for (let y = 0; y < H; y++) {
-    const fy = Math.min(n - 1.0001, Math.max(0, (y + 0.5) / up - 0.5));
+  const sampleUp = options.pixels === undefined ? up : W / n;
+  if (!options.smooth && !options.surface) for (let y = 0; y < H; y++) {
+    const fy = Math.min(n - 1.0001, Math.max(0, (y + 0.5) / sampleUp - 0.5));
     const y0 = Math.floor(fy), ty = fy - y0;
     for (let x = 0; x < W; x++) {
-      const fx = Math.min(n - 1.0001, Math.max(0, (x + 0.5) / up - 0.5));
+      const fx = Math.min(n - 1.0001, Math.max(0, (x + 0.5) / sampleUp - 0.5));
       const x0 = Math.floor(fx), tx = fx - x0;
       const a = hg.data[y0 * n + x0], b = hg.data[y0 * n + x0 + 1], c = hg.data[(y0 + 1) * n + x0], d = hg.data[(y0 + 1) * n + x0 + 1];
       hs[y * W + x] = (a * (1 - tx) + b * tx) * (1 - ty) + (c * (1 - tx) + d * tx) * ty;
@@ -110,14 +162,14 @@ export function renderTerrainPixels(world: World, pal: Palette): TerrainPixels {
   }
   const pxM = world.mapSize / W;
   const slopes: number[] = [];
-  for (let y = 1; y < H - 1; y += 3) for (let x = 1; x < W - 1; x += 3) {
+  if (options.exaggeration === undefined) for (let y = 1; y < H - 1; y += 3) for (let x = 1; x < W - 1; x += 3) {
     if (hs[y * W + x] <= 0) continue;
     const gx = (hs[y * W + x + 1] - hs[y * W + x - 1]) / (2 * pxM), gy = (hs[(y + 1) * W + x] - hs[(y - 1) * W + x]) / (2 * pxM);
     slopes.push(Math.hypot(gx, gy));
   }
   slopes.sort((a, b) => a - b);
   const p90 = slopes[Math.floor(slopes.length * 0.9)] || 0.01;
-  const exag = Math.max(1.2, Math.min(6, 0.3 / p90));
+  const exag = options.exaggeration ?? Math.max(1.2, Math.min(6, 0.3 / p90));
 
   const stops = pal.hypso.map(([t, hex]) => ({ t, c: hexToRgb(hex) }));
   const colorAt = (t: number): [number, number, number] => {
@@ -145,8 +197,9 @@ export function renderTerrainPixels(world: World, pal: Palette): TerrainPixels {
       const o = i * 3;
       if (hv <= 0) { out[o] = paper[0]; out[o + 1] = paper[1]; out[o + 2] = paper[2]; continue; }
       const xl = x > 0 ? x - 1 : x, xr = x < W - 1 ? x + 1 : x, yu = y > 0 ? y - 1 : y, yd = y < H - 1 ? y + 1 : y;
-      const gx = ((hs[y * W + xr] - hs[y * W + xl]) / ((xr - xl) * pxM)) * exag;
-      const gy = ((hs[yd * W + x] - hs[yu * W + x]) / ((yd - yu) * pxM)) * exag;
+      const normals = options.normals;
+      const gx = normals ? -normals.x[i] / Math.max(1e-8, normals.z[i]) * exag : ((hs[y * W + xr] - hs[y * W + xl]) / ((xr - xl) * pxM)) * exag;
+      const gy = normals ? -normals.y[i] / Math.max(1e-8, normals.z[i]) * exag : ((hs[yd * W + x] - hs[yu * W + x]) / ((yd - yu) * pxM)) * exag;
       const inv = 1 / Math.sqrt(gx * gx + gy * gy + 1);
       const nx = -gx * inv, ny = -gy * inv, nz = inv;
       const s1 = nx * L.x + ny * L.y + nz * L.z;
@@ -155,9 +208,12 @@ export function renderTerrainPixels(world: World, pal: Palette): TerrainPixels {
       const dd = sh - flat;
       let f = 1 + pal.shade * (dd > 0 ? 1.0 : 0.8) * dd * 1.15;
       f = f < 0.58 ? 0.58 : f > 1.25 ? 1.25 : f;
-      const t = Math.min(1, hv / landMax);
+      const t = options.heightRange ? Math.max(0, Math.min(1, (hv - options.heightRange.min) / Math.max(1, options.heightRange.max - options.heightRange.min))) : Math.min(1, hv / landMax);
       const c = colorAt(Math.pow(t, 0.85));
-      const g = pal.grain ? 1 + (hash2(x, y) - 0.5) * 2 * pal.grain : 1;
+      const grain = options.grainCoordinates;
+      const grainX = grain ? Math.floor((grain.x + (x + 0.5) * pxM) / grain.cell) : x;
+      const grainY = grain ? Math.floor((grain.y + (y + 0.5) * pxM) / grain.cell) : y;
+      const g = pal.grain ? 1 + (hash2(grainX, grainY) - 0.5) * 2 * pal.grain : 1;
       let k = f * g;
       let a = 0;
       if (pal.hatch > 0) {

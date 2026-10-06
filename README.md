@@ -4,6 +4,10 @@ Procedural generator of pre-modern settlements in their landscape. From a seed (
 
 **Live demo:** https://dunkean.github.io/burgmap/ · **Handoff / project state:** [HANDOFF.md](HANDOFF.md)
 
+**Rust terrain prototype:** [launch commands, terrain controls and WASM integration](rust/README.md).
+From `web/`, run `npm run dev:terrain` and open `/terrainbench.html`.
+This separate bench generates terrain in Rust/WASM; the TypeScript app remains independently buildable.
+
 ## House debug bench
 
 Run `npm run dev` from `web/` and open http://localhost:5173/testbench.html.

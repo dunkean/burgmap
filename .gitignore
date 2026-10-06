@@ -7,3 +7,7 @@ web/out/
 .claude/
 web/scratch/
 TownGeneratorOS/
+rust/target/
+rust/pkg/
+rust/out/
+rust/.cargo/config.toml

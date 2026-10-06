@@ -1,0 +1,16 @@
+[workspace]
+resolver = "3"
+members = ["crates/core", "crates/wasm"]
+
+[workspace.package]
+edition = "2024"
+license = "GPL-3.0-only"
+publish = false
+
+# Interactive prototype: optimize generated WASM even in the fast development build.
+[profile.dev]
+opt-level = 2
+
+[profile.release]
+opt-level = 3
+lto = "thin"

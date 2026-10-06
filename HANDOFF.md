@@ -5,6 +5,49 @@ bugs and their evidence are recorded in [ROADMAP.md](ROADMAP.md).
 
 ## Current status
 
+- Terrain WASM dev reload fix (2026-10-06): Vite retained an old inline WASM
+  asset while updating the JS bindings, causing `wasm.terrainengine_new is not
+  a function`. Terrain dev mode now explicitly watches the generated package,
+  invalidates module caches and reloads the binding/binary pair together.
+  Typecheck and local WASM/browser build pass. Chromium startup console checks
+  pass for dev, automatic reload after rebuilding WASM, and standalone HTML;
+  each reaches overview plus detailed terrain with no console/page errors.
+  User permits startup console checks; no unit suites or screenshots were run.
+
+- Terrain Rust map/detail follow-up (2026-10-06): map width now reaches 100 km
+  independently of physical motif size (default 3 km). Retained TerrainEngine
+  prepares a 512² physical source with 320² erosion; the UI requests a 512²
+  overview and actual 768² Rust samples of the camera region on pan/zoom.
+  Physical normals, a fixed global height range and world-anchored grain keep
+  shading consistent across views. Open caldera is a dedicated tenth relief;
+  volcano remains conical. Cavern ignores erosion, including its mask. Canyon
+  has multi-scale meanders and noisy slopes; plateau seeds vary lobes, terraces,
+  buttes and residual ridges. Regional source reuse is the current prototype,
+  not a global 100 km erosion simulation. This supersedes the previous fixed
+  output grid and random volcano/caldera choice below. Local compilation and
+  typecheck pass; user checks visuals. No CI, suites, screenshots or release.
+
+- Terrain Rust follow-up (2026-10-06): noise wavelengths now use meters, maximum erosion is stronger,
+  shape erosion uses multi-direction downhill drainage on an extended grid
+  and smooth cubic delta reconstruction; volcano seeds can produce a breached
+  collapsed caldera (45%). For stepped erosion gullies, the terrain bench now
+  derives hillshade and contours from the same continuous B-spline surface
+  (768² image / 512² contour grid), without changing Rust's 256² output or
+  historical renderer defaults. Rust/WASM compilation, Clippy and typecheck
+  pass; user will judge the visuals locally, without automated tests/captures.
+
+- Terrain Rust/WASM prototype (2026-10-06): separate `/terrainbench.html`
+  with width/seed, nine reliefs, adjustable erosion, Generate/Autogenerate,
+  three terrain styles, pan/zoom and editable pins with URL replay.
+  `rust/crates/core` owns generation; `crates/wasm` exposes batch typed-array
+  outputs; `bridge` temporarily reuses the existing terrain raster renderer.
+  From `web/`, `npm run dev:terrain` builds WASM and watches Rust changes;
+  `npm run build:terrain` writes standalone `rust/out/browser/terrainbench.html`.
+  Existing app/bench builds stay independent of Rust. Native Clippy/fmt, WASM
+  compilation, TypeScript typecheck and local builds pass. Per the user's
+  explicit request: no CI, no test suite, no screenshots; user checks visuals.
+  No push or release. Mixed reliefs and other engine stages remain future work.
+
 - Published house rollback / parcel bench (2026-10-06): source `3cd49a2` is
   integrated on master, pushed to remote main and released as
   `house-programme-rollback-2026-10-06`. GitHub Pages `bc2755e` built successfully;

@@ -6,6 +6,8 @@ Burgmap is a serverless TypeScript settlement generator. Active development live
 
 `town_generator/` and root `tests/` hold the earlier Python prototype and its tests; use them as references. Read `HANDOFF.md`, `BUGS.md`, and the relevant design documents in `web/` before changing generation behavior.
 
+The new Rust prototype lives independently in `rust/`. Read `rust/AGENTS.md` and `rust/README.md` before working there. `web/` stays the working application and reference testbench; its dev/build commands must not require Rust. The user will design the new engine: preparation does not authorize implementing algorithms or choosing its domain model. In the final architecture only the current UI is retained; the current renderer is a temporary integration aid.
+
 ## Build, Test, and Development Commands
 
 Run these from `web/`:

@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="fr">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Burgmap — terrain Rust</title></head>
+<body>
+  <header>
+    <strong class="brand">Terrainbench <small>Rust · WASM</small></strong>
+    <div class="control-group terrain-settings" role="group" aria-label="Paramètres du terrain">
+    <label title="Largeur de la carte en mètres">Carte m <input id="width" aria-label="Largeur de la carte en mètres" type="number" min="500" max="100000" step="100" value="2400"></label>
+    <label title="Taille physique des formes de relief, indépendante de la largeur de carte">Relief m <input id="motifSize" aria-label="Échelle du motif de relief en mètres" type="number" min="250" max="50000" step="250" value="3000"></label>
+    <label>Relief <select id="relief"><option value="flat">Plaine</option><option value="hills">Colline</option><option value="valley">Vallée</option><option value="canyon">Canyon</option><option value="mountains">Montagne</option><option value="plateau">Plateau</option><option value="high-mountains">Haute montagne</option><option value="volcano">Volcan · cône</option><option value="caldera">Caldeira ouverte</option><option value="cavern">Caverne</option></select></label>
+    <label>Érosion <input id="erosion" type="range" min="0" max="1" step="0.01" value="0.5"><output id="erosionValue" for="erosion">50 %</output></label>
+    <label>Graine <input id="seed" type="text" value="42" maxlength="120"></label>
+    </div>
+    <div class="control-group generation-actions" role="group" aria-label="Génération">
+    <button id="generate" title="Générer" aria-label="Générer"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7Z"/></svg></button><button id="randomSeed" title="Nouvelle graine et génération" aria-label="Nouvelle graine et génération"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 8h.01M16 8h.01M12 12h.01M8 16h.01M16 16h.01" stroke-width="3"/></svg></button>
+    <label title="Générer automatiquement"><input id="auto" type="checkbox" checked>Auto</label>
+    </div>
+  </header>
+  <nav aria-label="Vue de la carte">
+    <label>Rendu <select id="style"><option value="parchment">Parchemin</option><option value="atlas">Atlas</option><option value="topographic">Topographique</option></select></label>
+    <div class="control-group" role="group" aria-label="Navigation"><button id="fit" title="Recentrer" aria-label="Recentrer"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/><circle cx="12" cy="12" r="3"/></svg></button><button id="zoomIn" title="Zoom avant" aria-label="Zoom avant">+</button><button id="zoomOut" title="Zoom arrière" aria-label="Zoom arrière">−</button></div>
+    <div class="control-group" role="group" aria-label="Pins"><button id="pinMode" title="Poser des pins" aria-label="Poser des pins" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 10c0 5-7 11-7 11S5 15 5 10a7 7 0 0 1 14 0Z"/><circle cx="12" cy="10" r="2"/></svg></button><label title="Afficher les pins"><input id="showPins" type="checkbox" checked>Pins</label></div>
+    <div class="control-group share-actions" role="group" aria-label="Partager"><button id="copy" title="Copier l’URL" aria-label="Copier l’URL"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m10 13 4-4m-5 6-2 2a4 4 0 0 1-6-6l4-4a4 4 0 0 1 6 0m2 2 2-2a4 4 0 0 1 6 6l-4 4a4 4 0 0 1-6 0"/></svg></button><button id="copyReport" title="Copier le rapport" aria-label="Copier le rapport"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="5" width="14" height="16" rx="2"/><path d="M16 5V3H4v14m6-8h6m-6 4h6m-6 4h4"/></svg></button></div>
+  </nav>
+  <p id="status" role="status" aria-live="polite">Chargement du moteur Rust…</p>
+  <main>
+    <div id="viewport" tabindex="0" aria-label="Carte du terrain. Molette pour zoomer, glisser pour déplacer.">
+      <svg id="map" xmlns="http://www.w3.org/2000/svg" aria-label="Terrain généré"></svg>
+      <div id="pinLayer"></div><div id="pinPopover" hidden></div>
+      <output id="coordinates"></output><output id="scale"></output>
+    </div>
+    <aside><strong>Pins</strong><p><small>Alt-clic ou « Poser des pins » pour ajouter. Cliquez sur un pin pour modifier sa note. Les pins et la vue sont inclus dans le lien.</small></p><div id="pins"></div><details><summary>Aide</summary><p><small>Molette : zoom · glisser : déplacer · deux doigts : zoom et déplacement.<br>Clavier : + / − pour zoomer, 0 pour recentrer.<br><br>La largeur définit une carte carrée, jusqu’à 100 km. L’échelle du relief fixe la taille des formes en mètres : une vallée de 3 km garde cette taille sur une carte plus grande.<br><br>Le zoom demande au moteur Rust de nouveaux échantillons de la zone visible. L’érosion reste la même à toutes les échelles et ne s’applique pas aux cavernes. Changer le rendu conserve le terrain et ses pins.</small></p></details></aside>
+  </main>
+  <script type="module" src="./terrainbench.ts"></script>
+</body>
+</html>

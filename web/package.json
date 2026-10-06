@@ -5,6 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:terrain": "node ../rust/scripts/terrain.mjs dev",
+    "wasm:terrain": "node ../rust/scripts/terrain.mjs wasm",
+    "build:terrain": "node ../rust/scripts/terrain.mjs build",
+    "check:terrain": "node ../rust/scripts/terrain.mjs check",
     "build": "vite build && vite build --mode testbench",
     "test": "vitest run",
     "test:fast": "vitest run --project fast",
