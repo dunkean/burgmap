@@ -29,7 +29,7 @@ export interface FootprintFinalInput {
   /** Prove a proposed in-owner relocation misses water, roads, walls and other reserves. */
   placementClear?: (poly: Polygon, original?: Polygon) => boolean;
   /** Read-only proof of a real private path through a released, unusable roof arm. */
-  proposePrivatePassage?: (originalIndex: number, main: Polygon, path: Vec2[], width: number) => boolean;
+  proposePrivatePassage?: (originalIndex: number, main: Polygon, path: Vec2[], width: number) => boolean | Vec2[];
   /** Accepted paths are appended only when the corresponding roof transaction commits. */
   privatePassages?: PrivatePassage[];
 }
@@ -305,7 +305,7 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
       } else if (area(arm) > 0.02 * area(original)) return false;
     }
     const rooms = [main, ...extra];
-    if (!rooms.every((p) => proper(p) && u.placementClear!(p, original))
+    if (!rooms.every((p) => proper(p) && !overlapsRoof(i, p) && u.placementClear!(p, original))
       || rooms.reduce((s, p) => s + area(p), 0) < 0.95 * area(original)) return false;
     const proposed: PolyH[] = rooms.map((outer) => ({ outer, holes: [] }));
     for (let k = 0; k < rooms.length; k++) for (let j = k + 1; j < rooms.length; j++) {
@@ -341,7 +341,7 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
     const cut = splitByChord(lpoly(original, 0), [neck.a, neck.b], 0, 0.02);
     if (!cut) return false;
     const [main, arm] = cut.map((p) => p.pts).sort((a, c) => area(c) - area(a));
-    if (!proper(main) || proper(arm) || area(arm) < 1 || area(arm) > Math.min(20, 0.1 * area(original))
+    if (!proper(main) || overlapsRoof(i, main) || proper(arm) || area(arm) < 1 || area(arm) > Math.min(20, 0.1 * area(original))
       || Math.abs(area(main) + area(arm) - area(original)) > 1e-6) return false;
     const outside = tryDifference(main, owner.poly), oldOutside = tryDifference(original, owner.poly);
     const freed = tryDifference(original, main);
@@ -367,11 +367,14 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
     for (const shift of [0, 0.25, -0.25, 0.5, -0.5]) {
       const path = [{ x: far.x + shift * normal.x, y: far.y + shift * normal.y }, entry, root];
       const width = 0.8;
-      if (!u.proposePrivatePassage(i, main, path, width)) continue;
+      const accepted = u.proposePrivatePassage(i, main, path, width);
+      if (!accepted || (Array.isArray(accepted) && (accepted.length < 2
+        || accepted.some((p) => !Number.isFinite(p.x) || !Number.isFinite(p.y))))) continue;
+      const route = Array.isArray(accepted) ? accepted : path;
       b.poly = main;
       u.backLand.push(...freed.pieces);
       releasedArea += mpArea(freed.pieces);
-      u.privatePassages.push({ path, width, parcel: b.parcel });
+      u.privatePassages.push({ path: route.map((p) => ({ x: p.x, y: p.y })), width, parcel: b.parcel });
       if (owner.block !== undefined) changed.add(owner.block);
       return true;
     }
