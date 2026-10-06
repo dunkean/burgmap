@@ -156,6 +156,9 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
   const initialHousingArea = housingArea();
   const initialHousingCount = u.buildings.filter((b) => ['house', 'rear', 'back'].includes(b.kind)).length;
   let pendingRemovalArea = 0;
+  const housingBudget = (kind: string, before: number, after: number, floor = 0.98): boolean =>
+    !['house', 'rear', 'back'].includes(kind) || after >= before - 1e-6
+      || housingArea() - before + after >= floor * initialHousingArea - 1e-6;
   const parcelIndex = new GridIndex<number>(24);
   u.parcels.forEach((p, i) => { if (p.poly.length >= 3) parcelIndex.insertPts(p.poly, i); });
   const respectsOtherOwners = (i: number, after: Polygon): boolean => {
@@ -272,7 +275,8 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
           const hit = tryIntersection(candidate, u.buildings[j].poly);
           if (hit.failed || mpArea(hit.pieces) > 1e-6) { clear = false; break; }
         }
-        if (clear && u.validateParts(i, [candidate])) return candidate;
+        if (clear && housingBudget(b.kind, oldArea, area(candidate))
+          && u.validateParts(i, [candidate])) return candidate;
       }
     }
     return null;
@@ -343,8 +347,10 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
       } else if (area(arm) > 0.02 * area(original)) return false;
     }
     const rooms = [main, ...extra];
+    const roomsArea = rooms.reduce((s, p) => s + area(p), 0);
     if (!rooms.every((p) => proper(p) && !overlapsRoof(i, p) && u.placementClear!(p, original))
-      || rooms.reduce((s, p) => s + area(p), 0) < 0.95 * area(original)) return false;
+      || roomsArea < 0.95 * area(original)
+      || !housingBudget(b.kind, area(original), roomsArea)) return false;
     const proposed: PolyH[] = rooms.map((outer) => ({ outer, holes: [] }));
     for (let k = 0; k < rooms.length; k++) for (let j = k + 1; j < rooms.length; j++) {
       const hit = tryIntersection(rooms[k], rooms[j]);
@@ -380,6 +386,7 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
     if (!cut) return false;
     const [main, arm] = cut.map((p) => p.pts).sort((a, c) => area(c) - area(a));
     if (!proper(main) || overlapsRoof(i, main) || proper(arm) || area(arm) < 1 || area(arm) > Math.min(20, 0.1 * area(original))
+      || !housingBudget(b.kind, area(original), area(main))
       || Math.abs(area(main) + area(arm) - area(original)) > 1e-6) return false;
     const outside = tryDifference(main, owner.poly), oldOutside = tryDifference(original, owner.poly);
     const freed = tryDifference(original, main);
@@ -471,7 +478,8 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
       && owner && u.backLand) {
       const tip = clipSharpTip(b.poly, owner.poly, (p, d) => !openExterior(owner, p, d)
         || tipConstrained(b.parcel!, p, d), 55, 0.7);
-      if (tip && (!u.validateParts || u.validateParts(i, [tip.house]))) {
+      if (tip && housingBudget(b.kind, area(b.poly), area(tip.house))
+        && (!u.validateParts || u.validateParts(i, [tip.house]))) {
         b.poly = tip.house;
         u.backLand.push({ outer: tip.tip, holes: [] });
         releasedArea += area(tip.tip);
@@ -493,7 +501,8 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
     if (owner && u.backLand) {
       const tip = clipSharpTip(b.poly, owner.poly, (p, d) => !openExterior(owner, p, d)
         || tipConstrained(b.parcel!, p, d));
-      if (tip && (!u.validateParts || u.validateParts(i, [tip.house]))) {
+      if (tip && housingBudget(b.kind, area(b.poly), area(tip.house))
+        && (!u.validateParts || u.validateParts(i, [tip.house]))) {
         b.poly = tip.house;
         u.backLand.push({ outer: tip.tip, holes: [] });
         releasedArea += area(tip.tip);
@@ -513,6 +522,7 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
         const added = tryDifference(candidate, b.poly), freed = tryDifference(b.poly, candidate);
         if (added.failed || freed.failed || mpArea(added.pieces) > 1e-6
           || freed.pieces.some((p) => p.holes.length)
+          || !housingBudget(b.kind, area(b.poly), area(candidate))
           || Math.abs(area(candidate) + mpArea(freed.pieces) - area(b.poly)) > 1e-5
           || (u.validateParts && !u.validateParts(i, [candidate]))) continue;
         b.poly = candidate;
@@ -532,6 +542,7 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
         (candidate) => u.placementClear!(candidate, b.poly) && respectsOtherOwners(i, candidate)
           && !!planOpenLand(candidate),
         (candidate) => proper(candidate) && !overlapsRoof(i, candidate)
+          && housingBudget(b.kind, area(b.poly), area(candidate))
           && (!u.validateParts || u.validateParts(i, [candidate])));
       if (rebuilt) {
         const added = tryDifference(rebuilt, b.poly), freed = tryDifference(b.poly, rebuilt), land = planOpenLand(rebuilt);
@@ -554,8 +565,9 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
           (candidate) => u.placementClear!(candidate, b.poly) && respectsOtherOwners(i, candidate)
             && !!planOpenLand(candidate),
           (candidate) => proper(candidate) && !overlapsRoof(i, candidate)
+            && housingBudget(b.kind, area(b.poly), area(candidate))
             && u.validateParts!(i, [candidate]));
-        if (replanned && housingArea() - area(b.poly) + area(replanned) >= 0.98 * initialHousingArea) {
+        if (replanned && housingBudget(b.kind, area(b.poly), area(replanned))) {
           const freed = tryDifference(b.poly, replanned), added = tryDifference(replanned, b.poly);
           const land = planOpenLand(replanned);
           if (land && !freed.failed && !added.failed && freed.pieces.every((p) => !p.holes.length)
@@ -579,6 +591,7 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
           (candidate) => u.placementClear!(candidate, b.poly) && respectsOtherOwners(i, candidate)
             && !losesFreeExteriorWing(i, owner, candidate) && !!planOpenLand(candidate),
           (candidate) => proper(candidate) && !overlapsRoof(i, candidate)
+            && housingBudget(b.kind, area(b.poly), area(candidate))
             && u.validateParts!(i, [candidate]));
         if (compact) {
           const added = tryDifference(compact, b.poly), freed = tryDifference(b.poly, compact);
@@ -604,9 +617,9 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
           u.placementClear,
           (candidate) => proper(candidate) && !overlapsRoof(i, candidate) && respectsOtherOwners(i, candidate)
             && !losesFreeExteriorWing(i, owner, candidate)
+            && housingBudget(b.kind, area(b.poly), area(candidate))
             && !!planOpenLand(candidate) && u.validateParts!(i, [candidate]));
-        const currentHousingArea = housingArea();
-        if (small && currentHousingArea - area(b.poly) + area(small) >= 0.98 * initialHousingArea) {
+        if (small && housingBudget(b.kind, area(b.poly), area(small))) {
           const added = tryDifference(small, b.poly), freed = tryDifference(b.poly, small);
           const land = planOpenLand(small);
           if (land && !added.failed && !freed.failed
@@ -631,8 +644,7 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
             && !losesFreeExteriorWing(i, owner, candidate) && !!planOpenLand(candidate),
           (candidate) => proper(candidate) && !overlapsRoof(i, candidate)
             && u.validateParts!(i, [candidate]), [0.65, 0.50]);
-        if (compact && housingArea() - area(b.poly) + area(compact)
-          >= 0.98 * initialHousingArea) {
+        if (compact && housingBudget(b.kind, area(b.poly), area(compact))) {
           const added = tryDifference(compact, b.poly), freed = tryDifference(b.poly, compact);
           const land = planOpenLand(compact);
           if (land && !added.failed && !freed.failed && freed.pieces.every((p) => !p.holes.length)
@@ -697,6 +709,7 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
     if (!proper(main) || overlapsRoof(i, main)
       || keptExtra.some((p) => overlapsRoof(i, p))
       || area(main) + keptExtra.reduce((s, p) => s + area(p), 0) < 0.7 * area(b.poly)
+      || !housingBudget(b.kind, area(b.poly), area(main) + keptExtra.reduce((s, p) => s + area(p), 0))
       || (u.validateParts && !u.validateParts(i, [main, ...keptExtra]))) {
       const relocated = relocateNarrowAnnex(i, owner);
       if (relocated) {

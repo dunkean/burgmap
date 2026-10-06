@@ -170,7 +170,9 @@ describe('compact recovery on six pinned native blocks', () => {
     const streetAt = makeStreetAt(f.streets, f.places);
     const before = blockReach(f.block, f.peers.map((p) => p.poly), streetAt);
     const buildings = [{ poly: f.roof, kind: 'back', parcel: 0 },
-      ...f.peers.filter((p) => p.i !== f.i).map((p) => ({ poly: p.poly, kind: 'landmark', parcel: undefined }))];
+      ...f.peers.filter((p) => p.i !== f.i).map((p) => ({ poly: p.poly, kind: 'landmark', parcel: undefined })),
+      { poly: [{ x: 3000, y: 0 }, { x: 3032, y: 0 }, { x: 3032, y: 32 }, { x: 3000, y: 32 }],
+        kind: 'house', parcel: undefined }];
     const backLand: { outer: Polygon; holes: Polygon[] }[] = [];
     const result = finalizeFootprints({ buildings,
       parcels: [{ poly: f.owner, front: f.front, use: 'plot', block: 0 }], backLand,
@@ -194,7 +196,9 @@ describe('compact recovery on six pinned native blocks', () => {
     const streetAt = makeStreetAt(f.streets, f.places);
     const before = blockReach(f.block, f.peers.map((p) => p.poly), streetAt);
     const buildings = [{ poly: f.roof, kind: 'back', parcel: 0 },
-      ...f.peers.filter((p) => p.i !== f.i).map((p) => ({ poly: p.poly, kind: 'landmark', parcel: undefined }))];
+      ...f.peers.filter((p) => p.i !== f.i).map((p) => ({ poly: p.poly, kind: 'landmark', parcel: undefined })),
+      { poly: [{ x: 3000, y: 0 }, { x: 3032, y: 0 }, { x: 3032, y: 32 }, { x: 3000, y: 32 }],
+        kind: 'house', parcel: undefined }];
     const backLand: { outer: Polygon; holes: Polygon[] }[] = [];
     const result = finalizeFootprints({ buildings,
       parcels: [{ poly: f.owner, front: f.front, use: 'plot', block: 0 }], backLand,
@@ -210,7 +214,7 @@ describe('compact recovery on six pinned native blocks', () => {
     expect(area(buildings[0].poly) + mpArea(backLand)).toBeCloseTo(area(f.roof), 5);
     expect((minNeck(buildings[0].poly)?.w ?? Infinity)).toBeGreaterThanOrEqual(3.2);
     expect((minNeck(buildings[0].poly)?.w ?? Infinity)).toBeLessThan(3.59);
-    expect(buildings).toHaveLength(f.peers.length);
+    expect(buildings).toHaveLength(f.peers.length + 1);
   });
   it('repairs a small convex rear roof that overlaps its same-plot main roof by 9 m²', () => {
     const f = roofPeer as unknown as { main: Polygon; peer: Polygon; owner: Polygon; front: [Vec2, Vec2] };
@@ -300,7 +304,9 @@ describe('compact recovery on six pinned native blocks', () => {
     expect(area(buildings[0].poly) + result.releasedArea
       - mpArea(tryDifference(buildings[0].poly, f.roof).pieces)).toBeCloseTo(area(f.roof), 5);
     const pathBuildings = [{ poly: f.roof, kind: 'back', parcel: 0 },
-      ...f.occupied.map((poly) => ({ poly, kind: 'landmark', parcel: 0 }))];
+      ...f.occupied.map((poly) => ({ poly, kind: 'landmark', parcel: 0 })),
+      { poly: [{ x: 3000, y: 0 }, { x: 3032, y: 0 }, { x: 3032, y: 32 }, { x: 3000, y: 32 }],
+        kind: 'house', parcel: 0 }];
     const pathPassages: typeof privatePassages = [];
     const pathLand: typeof backLand = [];
     const pathResult = finalizeFootprints({ buildings: pathBuildings,
@@ -310,7 +316,7 @@ describe('compact recovery on six pinned native blocks', () => {
       // narrow arm to become a real public-apron-connected passage.
       placementClear: (p) => {
         const hit = tryIntersection(p, reserve);
-        return area(p) < 0.95 * area(f.roof) && !hit.failed && mpArea(hit.pieces) <= 1e-6;
+        return area(p) < 0.94 * area(f.roof) && !hit.failed && mpArea(hit.pieces) <= 1e-6;
       },
       proposePrivatePassage: (i, main, path, width) => {
         if (!validatePassage(i, main, path, width)) return false;
