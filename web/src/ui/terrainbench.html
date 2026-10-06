@@ -7,7 +7,8 @@
     <div class="control-group terrain-settings" role="group" aria-label="Paramètres du terrain">
     <label title="Largeur de la carte en mètres">Carte m <input id="width" aria-label="Largeur de la carte en mètres" type="number" min="500" max="100000" step="100" value="2400"></label>
     <label title="Taille physique des formes de relief, indépendante de la largeur de carte">Relief m <input id="motifSize" aria-label="Échelle du motif de relief en mètres" type="number" min="250" max="50000" step="250" value="3000"></label>
-    <label>Relief <select id="relief"><option value="flat">Plaine</option><option value="hills">Colline</option><option value="valley">Vallée</option><option value="canyon">Canyon</option><option value="mountains">Montagne</option><option value="plateau">Plateau</option><option value="high-mountains">Haute montagne</option><option value="volcano">Volcan · cône</option><option value="caldera">Caldeira ouverte</option><option value="cavern">Caverne</option></select></label>
+    <label>Relief <select id="relief"><option value="flat">Plaine</option><option value="hills">Colline</option><option value="valley">Vallée</option><option value="mountains">Montagne</option><option value="mixed">Collines et montagnes</option><option value="plateau">Plateau</option><option value="high-mountains">Haute montagne</option><option value="volcano">Volcan · cône</option><option value="caldera">Caldeira ouverte</option><option value="cavern">Caverne</option></select></label>
+    <label id="mountainMixControl" hidden>Montagnes <input id="mountainMix" type="range" min="0" max="1" step="0.01" value="0.5"><output id="mountainMixValue" for="mountainMix">50 %</output></label>
     <label>Érosion <input id="erosion" type="range" min="0" max="1" step="0.01" value="0.5"><output id="erosionValue" for="erosion">50 %</output></label>
     <label>Graine <input id="seed" type="text" value="42" maxlength="120"></label>
     </div>

@@ -10,7 +10,7 @@ declare module '*burgmap_wasm.js' {
   }
   export function generate_terrain(seed: string, width: number, relief: string, erosion: number, resolution: number): TerrainOutput;
   export class TerrainEngine {
-    constructor(seed: string, map_width: number, relief: string, erosion: number, motif_size: number);
+    constructor(seed: string, map_width: number, relief: string, erosion: number, motif_size: number, mountain_mix?: number);
     readonly min_height: number; readonly max_height: number;
     sample_region(x: number, y: number, extent: number, resolution: number): TerrainOutput;
     free(): void;

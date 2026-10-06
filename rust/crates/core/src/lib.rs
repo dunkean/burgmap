@@ -1,11 +1,13 @@
 //! First isolated Rust generation stage. World coordinates and elevations are meters.
 //! The square raster uses cell centers and has its origin at the upper left.
+mod canyon;
+mod channels;
 mod engine;
 mod erosion;
 mod noise;
 mod rng;
 
-use erosion::{MountainCfg, erode_shape, mountain};
+use erosion::{MountainCfg, erode_shape, erode_volcanic, mountain};
 use noise::Noise;
 use rng::Rng;
 use std::f64::consts::{PI, TAU};
@@ -34,6 +36,7 @@ enum Relief {
     Valley,
     Canyon,
     Mountains,
+    Mixed,
     Plateau,
     HighMountains,
     Volcano,
@@ -42,6 +45,15 @@ enum Relief {
 }
 
 impl Relief {
+    fn mixed_amplitude(self, motif: f64, mountain_mix: f64) -> f64 {
+        if self == Self::Mixed {
+            Self::Hills.amplitude(motif) * (1.0 - mountain_mix)
+                + Self::Mountains.amplitude(motif) * mountain_mix
+        } else {
+            self.amplitude(motif)
+        }
+    }
+
     fn parse(value: &str) -> Result<Self, String> {
         match value {
             "flat" => Ok(Self::Flat),
@@ -49,6 +61,7 @@ impl Relief {
             "valley" => Ok(Self::Valley),
             "canyon" => Ok(Self::Canyon),
             "mountains" => Ok(Self::Mountains),
+            "mixed" => Ok(Self::Mixed),
             "plateau" => Ok(Self::Plateau),
             "high-mountains" => Ok(Self::HighMountains),
             "volcano" => Ok(Self::Volcano),
@@ -65,7 +78,7 @@ impl Relief {
             Self::Hills => (80.0 * extent.powf(0.85)).min(380.0),
             Self::Valley => (110.0 * extent.powf(0.85)).min(1100.0),
             Self::Canyon => (260.0 * extent.powf(0.78)).min(1800.0),
-            Self::Mountains => (400.0 * extent.powf(0.78)).min(2600.0),
+            Self::Mountains | Self::Mixed => (400.0 * extent.powf(0.78)).min(2600.0),
             Self::Plateau => (240.0 * extent.powf(0.78)).min(1800.0),
             Self::HighMountains => (1050.0 * extent.powf(0.78)).min(5200.0),
             Self::Volcano | Self::Caldera => (720.0 * extent.powf(0.78)).min(3800.0),
@@ -86,15 +99,22 @@ fn fbm_length(noise: &Noise, x: f64, y: f64, wavelength: f64, min: f64, gain: f6
 
 /// Deterministic terrain generation. No browser state, JS objects, or rendering dependencies.
 /// Inputs are rejected rather than silently clamped. Seeds are UTF-16 hashed like the TS engine.
+#[derive(Default)]
+struct PreparedTerrain {
+    height: Vec<f32>,
+}
+
 fn generate_motif(
     seed: &str,
     width: f64,
     relief: &str,
     erosion: f64,
     resolution: usize,
-) -> Result<Terrain, String> {
-    if !width.is_finite() || !(250.0..=50000.0).contains(&width) {
-        return Err("Le motif doit être compris entre 250 et 50 000 mètres.".into());
+    motif: f64,
+    mountain_mix: f64,
+) -> Result<PreparedTerrain, String> {
+    if !width.is_finite() || !(250.0..=100000.0).contains(&width) {
+        return Err("La surface préparée doit être comprise entre 250 et 100 000 mètres.".into());
     }
     if !erosion.is_finite() || !(0.0..=1.0).contains(&erosion) {
         return Err("Le niveau d’érosion doit être compris entre 0 et 1.".into());
@@ -128,14 +148,13 @@ fn generate_motif(
     let offset = params.range(0.0, 1000.0);
     // Length scales are physical: widening the map reveals more geography,
     // instead of stretching the same noise pattern over a larger rectangle.
-    let k = width / 2400.0;
+    let k = motif / 2400.0;
     let valley_width = params.range(180.0, 320.0) * k;
     let valley_offset = params.range(-0.08, 0.08) * width;
-    let amp = relief.amplitude(width);
-    let mut cave_mask = Vec::new();
+    let amp = relief.mixed_amplitude(motif, mountain_mix);
     let mut height = if matches!(
         relief,
-        Relief::Hills | Relief::Valley | Relief::Mountains | Relief::HighMountains
+        Relief::Hills | Relief::Valley | Relief::Mountains | Relief::Mixed | Relief::HighMountains
     ) {
         let gentle = matches!(relief, Relief::Hills | Relief::Valley);
         let high = relief == Relief::HighMountains;
@@ -155,22 +174,35 @@ fn generate_motif(
             down,
             k,
             iterations: if gentle { 18 } else { 22 },
-            coarse: 320,
-            talus: if gentle {
+            coarse: if width > motif * 3.0 { 640 } else { 320 },
+            mountain_mix: if relief == Relief::Mixed {
+                mountain_mix
+            } else if gentle {
+                0.0
+            } else {
+                0.72
+            },
+            talus: if relief == Relief::Mixed {
+                0.2 + 0.65 * mountain_mix
+            } else if gentle {
                 0.2
             } else if high {
                 1.4
             } else {
                 0.85
             },
-            detail: if gentle {
+            detail: if relief == Relief::Mixed {
+                0.025 + 0.025 * mountain_mix
+            } else if gentle {
                 0.025
             } else if high {
                 0.085
             } else {
                 0.05
             },
-            diffusion: if gentle {
+            diffusion: if relief == Relief::Mixed {
+                0.7 - 0.4 * mountain_mix
+            } else if gentle {
                 0.7
             } else if high {
                 0.12
@@ -181,18 +213,13 @@ fn generate_motif(
             erosion,
         })
     } else if relief == Relief::Cavern {
-        let (h, mask) = cavern(n, width, amp, erosion, &noise, &noise2, root.fork("cavern"));
-        cave_mask = mask;
+        let (h, _) = cavern(n, width, amp, erosion, &noise, &noise2, root.fork("cavern"));
         h
     } else {
         vec![0.0; n * n]
     };
     let volcano = VolcanoShape::new(width, root.fork("volcano"), relief == Relief::Caldera);
-    let mut plateau_params = root.fork("plateau");
-    let mesa_level = plateau_params.range(0.38, 0.58);
-    let mesa_angle = plateau_params.range(0.0, TAU);
-    let mesa_axis = plateau_params.range(0.65, 1.25);
-    let mesa_phase = plateau_params.range(0.0, 100.0);
+    let plateau = PlateauShape::new(width, root.fork("plateau"));
     for y in 0..n {
         for x in 0..n {
             let i = y * n + x;
@@ -231,34 +258,7 @@ fn generate_motif(
                         - 0.07 * tributary * wall * (1.0 - 0.6 * wall)
                         + 0.014 * slope_texture * wall)
                 }
-                Relief::Plateau => {
-                    let dx = (px - width * 0.5) / (width * 0.48);
-                    let dy = (py - width * 0.5) / (width * 0.48);
-                    let rx = dx * mesa_angle.cos() + dy * mesa_angle.sin();
-                    let ry = (-dx * mesa_angle.sin() + dy * mesa_angle.cos()) / mesa_axis;
-                    let lobes = noise.fbm(px / (840.0 * k) + mesa_phase, py / (840.0 * k), 4);
-                    let boundary = rx.hypot(ry)
-                        + 0.32 * lobes
-                        + 0.09 * noise2.fbm(px / (330.0 * k), py / (330.0 * k), 3);
-                    let apron = 1.0 - smooth((boundary - 0.70) / (0.12 + erosion * 0.12));
-                    let upper = 1.0 - smooth((boundary - mesa_level) / (0.08 + erosion * 0.06));
-                    let upper_lobe = smooth(
-                        (noise2.fbm(px / (650.0 * k) + mesa_phase, py / (650.0 * k), 3) - 0.03)
-                            / 0.22,
-                    );
-                    let buttes = smooth(
-                        (noise.fbm(px / (510.0 * k) - mesa_phase, py / (510.0 * k), 3) - 0.16)
-                            / 0.22,
-                    ) * (1.0 - smooth((rx.hypot(ry) - 1.0) / 0.22));
-                    let remnant = noise2.ridged(px / (250.0 * k), py / (250.0 * k), 4);
-                    amp * (0.06
-                        + 0.46 * apron
-                        + 0.31 * upper
-                        + 0.13 * upper_lobe * apron
-                        + 0.25 * buttes * (1.0 - apron)
-                        + 0.055 * remnant * upper
-                        + 0.025 * rough)
-                }
+                Relief::Plateau => amp * plateau.elevation(px, py, erosion, rough, &noise, &noise2),
                 Relief::Volcano | Relief::Caldera => {
                     amp * volcano.elevation(px, py, rough, &noise, &noise2)
                 }
@@ -271,13 +271,17 @@ fn generate_motif(
         relief,
         Relief::Flat | Relief::Canyon | Relief::Plateau | Relief::Volcano | Relief::Caldera
     ) {
-        erode_shape(
-            &mut height,
-            n,
-            cell,
-            erosion,
-            if relief == Relief::Flat { 0.03 } else { 0.95 },
-        );
+        if matches!(relief, Relief::Volcano | Relief::Caldera) {
+            erode_volcanic(&mut height, n, cell, erosion);
+        } else {
+            erode_shape(
+                &mut height,
+                n,
+                cell,
+                erosion,
+                if relief == Relief::Flat { 0.03 } else { 0.95 },
+            );
+        }
     }
     // Historical relief normalization: shift p1 to 1m without changing physical slope.
     // Rock height and cave floor remain a separate, explicitly marked raster.
@@ -290,21 +294,7 @@ fn generate_motif(
     if height.iter().any(|h| !h.is_finite()) {
         return Err("La génération a produit une altitude non finie.".into());
     }
-    let min_height = height.iter().copied().fold(f32::INFINITY, f32::min);
-    let max_height = height.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-    Ok(Terrain {
-        x: 0.0,
-        y: 0.0,
-        width,
-        resolution: n,
-        min_height,
-        max_height,
-        height,
-        cave_mask,
-        normal_x: Vec::new(),
-        normal_y: Vec::new(),
-        normal_z: Vec::new(),
-    })
+    Ok(PreparedTerrain { height })
 }
 
 /// Compatibility entry point. New clients retain TerrainGenerator and request regions.
@@ -353,12 +343,10 @@ impl CavernShape {
         Self { chambers, links }
     }
 
-    fn rock(&self, px: f64, py: f64, motif: f64, erosion: f64, noise: &Noise) -> u8 {
+    fn distance(&self, px: f64, py: f64, noise: &Noise) -> f64 {
         let mut distance = f64::INFINITY;
         for chamber in &self.chambers {
-            distance = distance.min(
-                (px - chamber.x).hypot(py - chamber.y) - chamber.radius * (1.0 + erosion * 0.5),
-            );
+            distance = distance.min((px - chamber.x).hypot(py - chamber.y) - chamber.radius);
         }
         for &(a, b, radius) in &self.links {
             let dx = self.chambers[b].x - self.chambers[a].x;
@@ -371,17 +359,103 @@ impl CavernShape {
             }
             .clamp(0.0, 1.0);
             let d = (px - self.chambers[a].x - t * dx).hypot(py - self.chambers[a].y - t * dy);
-            distance = distance.min(d - radius * (1.0 + erosion * 0.8));
+            distance = distance.min(d - radius);
         }
-        let scale = motif / 2400.0;
-        let roughness = 0.009
-            * (1.0 - erosion * 0.65)
-            * noise.fbm(
-                px * motif / (110.0 * scale),
-                py * motif / (110.0 * scale),
-                3,
-            );
-        u8::from(distance + roughness >= 0.0)
+        distance + 0.009 * noise.fbm(px * (2400.0 / 110.0), py * (2400.0 / 110.0), 3)
+    }
+}
+
+struct PlateauShape {
+    width: f64,
+    level: f64,
+    angle: f64,
+    axis: f64,
+    phase: f64,
+}
+
+impl PlateauShape {
+    fn new(width: f64, mut rng: Rng) -> Self {
+        Self {
+            width,
+            level: rng.range(0.38, 0.58),
+            angle: rng.range(0.0, TAU),
+            axis: rng.range(0.65, 1.25),
+            phase: rng.range(0.0, 100.0),
+        }
+    }
+
+    fn boundary(&self, px: f64, py: f64, noise: &Noise, noise2: &Noise) -> (f64, f64) {
+        let k = self.width / 2400.0;
+        let dx = (px - self.width * 0.5) / (self.width * 0.48);
+        let dy = (py - self.width * 0.5) / (self.width * 0.48);
+        let rx = dx * self.angle.cos() + dy * self.angle.sin();
+        let ry = (-dx * self.angle.sin() + dy * self.angle.cos()) / self.axis;
+        let radial = rx.hypot(ry);
+        let boundary = radial
+            + 0.12 * noise.fbm(px / (840.0 * k) + self.phase, py / (840.0 * k), 4)
+            + 0.025 * noise2.fbm(px / (500.0 * k), py / (500.0 * k), 2);
+        (radial, boundary)
+    }
+
+    fn protection(&self, px: f64, py: f64, erosion: f64, noise: &Noise, noise2: &Noise) -> f64 {
+        let (_, boundary) = self.boundary(px, py, noise, noise2);
+        1.0 - smooth((boundary - 0.70) / (0.12 + erosion * 0.12))
+    }
+
+    fn elevation(
+        &self,
+        px: f64,
+        py: f64,
+        erosion: f64,
+        rough: f64,
+        noise: &Noise,
+        noise2: &Noise,
+    ) -> f64 {
+        let k = self.width / 2400.0;
+        let (radial, boundary) = self.boundary(px, py, noise, noise2);
+        let apron = 1.0 - smooth((boundary - 0.70) / (0.12 + erosion * 0.12));
+        let upper = 1.0 - smooth((boundary - self.level) / (0.08 + erosion * 0.06));
+        let upper_lobe =
+            smooth((noise2.fbm(px / (650.0 * k) + self.phase, py / (650.0 * k), 3) - 0.03) / 0.22);
+        let buttes =
+            smooth((noise.fbm(px / (510.0 * k) - self.phase, py / (510.0 * k), 3) - 0.16) / 0.22)
+                * (1.0 - smooth((radial - 1.0) / 0.22));
+        let remnant = noise2.ridged(px / (250.0 * k), py / (250.0 * k), 4);
+        0.06 + 0.60 * apron
+            + 0.20 * upper
+            + 0.035 * upper_lobe * apron
+            + 0.08 * buttes * (1.0 - apron)
+            + 0.012 * remnant * upper
+            + 0.010 * rough
+    }
+}
+
+enum FiniteShape {
+    Plateau(PlateauShape),
+    Volcano(VolcanoShape),
+}
+
+impl FiniteShape {
+    fn new(relief: Relief, motif: f64, root: &Rng) -> Option<Self> {
+        match relief {
+            Relief::Plateau => Some(Self::Plateau(PlateauShape::new(
+                motif,
+                root.fork("plateau"),
+            ))),
+            Relief::Volcano | Relief::Caldera => Some(Self::Volcano(VolcanoShape::new(
+                motif,
+                root.fork("volcano"),
+                relief == Relief::Caldera,
+            ))),
+            _ => None,
+        }
+    }
+
+    fn protection(&self, x: f64, y: f64, erosion: f64, noise: &Noise, noise2: &Noise) -> f64 {
+        match self {
+            Self::Plateau(shape) => shape.protection(x, y, erosion, noise, noise2),
+            Self::Volcano(shape) => shape.protection(x, y, noise, noise2),
+        }
     }
 }
 
@@ -412,15 +486,17 @@ impl VolcanoShape {
         }
     }
 
-    fn elevation(&self, px: f64, py: f64, rough: f64, noise: &Noise, noise2: &Noise) -> f64 {
+    fn geometry(&self, px: f64, py: f64, noise: &Noise, noise2: &Noise) -> (f64, f64, f64) {
         let dx = px - self.center.0;
         let dy = py - self.center.1;
         let x = dx * self.rotation.cos() + dy * self.rotation.sin();
         let y = (-dx * self.rotation.sin() + dy * self.rotation.cos()) / self.axis;
         let azimuth = y.atan2(x);
-        let angular = noise.fbm(
-            azimuth.cos() * 2.0 + self.phase,
-            azimuth.sin() * 2.0 - 2.3,
+        // Cartesian variation avoids extending every rim irregularity into a
+        // radial construction line across the crater floor and interior wall.
+        let outline = noise.fbm(
+            px / (900.0 * self.scale) + self.phase,
+            py / (900.0 * self.scale) - 2.3,
             3,
         );
         let geographic = noise2.fbm(
@@ -429,112 +505,95 @@ impl VolcanoShape {
             3,
         );
         let wobble =
-            1.0 + (if self.collapsed { 0.14 } else { 0.075 }) * angular + 0.035 * geographic;
+            1.0 + (if self.collapsed { 0.18 } else { 0.12 }) * outline + 0.055 * geographic;
         let radius = x.hypot(y) / (self.radius * wobble);
         let rim = (if self.collapsed { 0.55 } else { 0.255 })
-            + (if self.collapsed { 0.07 } else { 0.028 })
-                * noise2.fbm(azimuth.cos() * 3.0, azimuth.sin() * 3.0 + self.phase, 2);
-        let mut cone = if self.collapsed {
-            // Broad low basin, steep irregular interior wall, then the outer apron.
-            if radius <= rim {
-                0.06 + 0.90 * smooth((radius / rim - 0.58) / 0.42)
-            } else {
-                0.96 * (1.0 - (radius - rim) / (1.18 - rim)).max(0.0).powf(1.45)
-            }
-        } else if radius <= rim {
-            0.36 + 0.62 * smooth((radius / rim - 0.36) / 0.64)
+            + (if self.collapsed { 0.045 } else { 0.030 })
+                * noise2.fbm(
+                    px / (420.0 * self.scale) + self.phase,
+                    py / (420.0 * self.scale),
+                    3,
+                );
+        (radius, rim, azimuth)
+    }
+
+    fn opening(&self, radius: f64, rim: f64, azimuth: f64) -> f64 {
+        if !self.collapsed {
+            return 0.0;
+        }
+        let angle_distance = ((azimuth - self.breach_angle + PI).rem_euclid(TAU) - PI).abs();
+        let breach =
+            1.0 - smooth((angle_distance - self.breach_width * 0.40) / (self.breach_width * 0.60));
+        breach * smooth((radius / rim - 0.30) / 0.30)
+    }
+
+    fn protection(&self, px: f64, py: f64, noise: &Noise, noise2: &Noise) -> f64 {
+        let (radius, rim, azimuth) = self.geometry(px, py, noise, noise2);
+        let crater = 1.0 - smooth((radius - rim) / (rim * 0.12));
+        if !self.collapsed {
+            return crater;
+        }
+        // The collapsed sector receives the same max-height surroundings as the
+        // exterior, while the intact basin retains its own depression.
+        crater * (1.0 - self.opening(radius, rim, azimuth))
+    }
+
+    fn elevation(&self, px: f64, py: f64, rough: f64, noise: &Noise, noise2: &Noise) -> f64 {
+        let (radius, rim, azimuth) = self.geometry(px, py, noise, noise2);
+        let (floor, start, crest, apron, exponent) = if self.collapsed {
+            (0.06, 0.58, 0.96, 1.18, 1.45)
         } else {
-            (1.0 - (radius - rim) / (1.05 - rim)).max(0.0).powf(1.6)
+            (0.36, 0.36, 0.98, 1.05, 1.6)
         };
-        let mut opening = 0.0;
+        let t = ((radius / rim - start) / (1.0 - start)).clamp(0.0, 1.0);
+        let bowl = floor + (crest - floor) * t.powi(3) * (t * (6.0 * t - 15.0) + 10.0);
+        let outer = crest
+            * (1.0 - (radius - rim) / (apron - rim))
+                .max(0.0)
+                .powf(exponent);
+        // Round the crest instead of meeting two profiles at a hard slope break.
+        let crown = smooth((radius / rim - 0.94) / 0.12);
+        let mut cone = bowl * (1.0 - crown) + outer * crown;
+        let opening = self.opening(radius, rim, azimuth);
         if self.collapsed {
-            let angle_distance = ((azimuth - self.breach_angle + PI).rem_euclid(TAU) - PI).abs();
             // A full-width sector reaches exactly the basin floor, then falls to the apron.
             // Multiplying the rim by a percentage left a closed barrier at the outlet.
-            let breach = 1.0
-                - smooth((angle_distance - self.breach_width * 0.40) / (self.breach_width * 0.60));
-            let rim_weight = smooth((radius / rim - 0.30) / 0.30);
-            opening = breach * rim_weight;
             let outlet = 0.06 * (1.0 - smooth((radius - rim * 0.65) / (1.18 - rim * 0.65)));
             cone = cone * (1.0 - opening) + outlet * opening;
-            cone *= 1.0 + 0.10 * angular * (1.0 - opening);
         }
         let flutes = noise2.ridged(px / (360.0 * self.scale), py / (360.0 * self.scale), 3) - 0.5;
-        0.035 + cone + (0.04 * rough + 0.05 * flutes * cone) * (1.0 - opening)
+        let wall_noise = noise.fbm(px / (150.0 * self.scale), py / (150.0 * self.scale), 3);
+        let interior = 1.0 - smooth((radius / rim - 0.82) / 0.18);
+        let crater_noise = noise2.fbm(px / (380.0 * self.scale), py / (380.0 * self.scale), 3);
+        let texture = (0.018 * rough + (0.055 * flutes + 0.025 * wall_noise) * cone)
+            * (1.0 - interior)
+            + 0.012 * crater_noise * interior;
+        0.035 + cone + texture * (1.0 - opening)
     }
 }
 
 fn cavern(
     n: usize,
-    width: f64,
+    _width: f64,
     amp: f64,
-    erosion: f64,
+    _erosion: f64,
     noise: &Noise,
     noise2: &Noise,
-    mut rng: Rng,
+    rng: Rng,
 ) -> (Vec<f32>, Vec<u8>) {
-    // Connected network: every added chamber has an explicit tunnel to an earlier chamber.
-    let count = 14;
-    let mut chambers = vec![Chamber {
-        x: 0.5,
-        y: 0.5,
-        radius: 0.12,
-    }];
-    let mut links = Vec::with_capacity(count);
-    for index in 1..count {
-        let parent = (rng.float() * index as f64).floor() as usize;
-        let angle = rng.range(0.0, TAU);
-        let step = rng.range(0.13, 0.27);
-        chambers.push(Chamber {
-            x: (chambers[parent].x + angle.cos() * step).clamp(0.12, 0.88),
-            y: (chambers[parent].y + angle.sin() * step).clamp(0.12, 0.88),
-            radius: rng.range(0.045, 0.10),
-        });
-        links.push((parent, index, rng.range(0.018, 0.035)));
-    }
-    let cell = width / n as f64;
+    let shape = CavernShape::new(rng);
     let mut height = vec![0.0; n * n];
     let mut mask = vec![1; n * n];
     for y in 0..n {
         for x in 0..n {
             let px = (x as f64 + 0.5) / n as f64;
             let py = (y as f64 + 0.5) / n as f64;
-            let wx = px * width;
-            let wy = py * width;
-            let mut distance = f64::INFINITY;
-            for chamber in &chambers {
-                distance = distance.min(
-                    (px - chamber.x).hypot(py - chamber.y) - chamber.radius * (1.0 + erosion * 0.5),
-                );
-            }
-            for &(a, b, radius) in &links {
-                let dx = chambers[b].x - chambers[a].x;
-                let dy = chambers[b].y - chambers[a].y;
-                let length2 = dx * dx + dy * dy;
-                let t = if length2 > 0.0 {
-                    ((px - chambers[a].x) * dx + (py - chambers[a].y) * dy) / length2
-                } else {
-                    0.0
-                };
-                let t = t.clamp(0.0, 1.0);
-                let d = (px - chambers[a].x - t * dx).hypot(py - chambers[a].y - t * dy);
-                distance = distance.min(d - radius * (1.0 + erosion * 0.8));
-            }
-            let k = width / 2400.0;
-            let roughness =
-                0.009 * (1.0 - erosion * 0.65) * noise.fbm(wx / (110.0 * k), wy / (110.0 * k), 3);
-            let d = distance + roughness;
+            let distance = shape.distance(px, py, noise);
+            let floor = amp * (0.08 + 0.035 * noise2.fbm(px * 5.0, py * 5.0, 3));
             let i = y * n + x;
-            mask[i] = u8::from(d >= 0.0);
-            let floor = amp * (0.08 + 0.065 * noise2.fbm(wx / (480.0 * k), wy / (480.0 * k), 3));
-            height[i] = floor as f32;
-        }
-    }
-    // Floor erosion precedes the rock mask; walls never become artificial drainage channels.
-    erode_shape(&mut height, n, cell, erosion, 0.12);
-    for (i, value) in height.iter_mut().enumerate() {
-        if mask[i] == 1 {
-            *value += amp as f32;
+            mask[i] = u8::from(distance >= 0.0);
+            // Rock falls continuously toward each opening, rather than a raised mask.
+            height[i] = (floor + amp * smooth(distance / 0.035)) as f32;
         }
     }
     (height, mask)

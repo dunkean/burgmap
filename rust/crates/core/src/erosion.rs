@@ -376,6 +376,7 @@ pub(crate) struct MountainCfg<'a> {
     pub k: f64,
     pub iterations: usize,
     pub coarse: usize,
+    pub mountain_mix: f64,
     pub talus: f64,
     pub detail: f64,
     pub diffusion: f64,
@@ -405,7 +406,13 @@ pub(crate) fn mountain(cfg: &MountainCfg<'_>) -> Vec<f32> {
             let q = ((px - cfg.width * 0.5) * cfg.down.0 + (py - cfg.width * 0.5) * cfg.down.1)
                 / cfg.width;
             let edge = x.min(y).min(nc - 1 - x).min(nc - 1 - y) as f64 / (0.1 * nc as f64);
-            let u = (0.7 + 0.5 * env - 0.55 * q).max(0.12);
+            // Broad regions vary uplift continuously between hills and mountain ranges.
+            let distribution =
+                cfg.noise2
+                    .fbm(px / (2700.0 * cfg.k) + 8.4, py / (2700.0 * cfg.k), 3);
+            let mountains = smooth((distribution + (cfg.mountain_mix - 0.5) * 1.4 + 0.28) / 0.56);
+            let regional_amp = 0.20 + 0.80 * mountains;
+            let u = (0.7 + 0.5 * env - 0.25 * q).max(0.12) * regional_amp;
             let mut corridor = 1.0;
             if let Some((width, offset, noise_offset)) = cfg.valley {
                 let along = q * cfg.width;
@@ -618,12 +625,65 @@ fn sample_extended(h: &[f32], n: usize, fx: f64, fy: f64) -> f64 {
 
 /// Incise pre-shaped canyon/plateau/volcano without regional uplift or p99 rescaling.
 pub(crate) fn erode_shape(h: &mut [f32], n: usize, cell: f64, erosion: f64, talus: f64) {
+    erode_with(
+        h,
+        n,
+        cell,
+        erosion,
+        talus,
+        &ShapeErosion {
+            gain: 1.0,
+            coarse: 320,
+            iterations: 12,
+        },
+    );
+}
+
+/// Stronger, physically sampled wall weathering, with the same continuous squared onset.
+pub(crate) fn erode_walls(h: &mut [f32], n: usize, cell: f64, erosion: f64, talus: f64) {
+    erode_with(
+        h,
+        n,
+        cell,
+        erosion,
+        talus,
+        &ShapeErosion {
+            gain: 5.0,
+            coarse: 640,
+            iterations: 24,
+        },
+    );
+}
+
+/// Resolve volcanic wall gullies without the canyon's amplified erosion dose.
+pub(crate) fn erode_volcanic(h: &mut [f32], n: usize, cell: f64, erosion: f64) {
+    erode_with(
+        h,
+        n,
+        cell,
+        erosion,
+        0.55,
+        &ShapeErosion {
+            gain: 1.0,
+            coarse: 640,
+            iterations: 12,
+        },
+    );
+}
+
+struct ShapeErosion {
+    gain: f64,
+    coarse: usize,
+    iterations: usize,
+}
+
+fn erode_with(h: &mut [f32], n: usize, cell: f64, erosion: f64, talus: f64, tuning: &ShapeErosion) {
     if erosion == 0.0 {
         return;
     }
     // Move the fixed simulation border outside the displayed map. Extrapolate its
     // slope rather than adding a raised/lowered rim that would divert drainage.
-    let coarse_n = n.min(320);
+    let coarse_n = n.min(tuning.coarse);
     let padding = 12;
     let padded_n = coarse_n + padding * 2;
     let ratio = n as f64 / coarse_n as f64;
@@ -639,7 +699,7 @@ pub(crate) fn erode_shape(h: &mut [f32], n: usize, cell: f64, erosion: f64, talu
         }
     }
     let original = coarse.clone();
-    erode_shape_coarse(&mut coarse, padded_n, cell * ratio, erosion, talus);
+    erode_shape_coarse(&mut coarse, padded_n, cell * ratio, erosion, talus, tuning);
     for (value, baseline) in coarse.iter_mut().zip(original) {
         *value -= baseline;
     }
@@ -656,10 +716,17 @@ pub(crate) fn erode_shape(h: &mut [f32], n: usize, cell: f64, erosion: f64, talu
     }
 }
 
-fn erode_shape_coarse(h: &mut [f32], n: usize, cell: f64, erosion: f64, talus: f64) {
-    let strength = erosion_strength(erosion);
+fn erode_shape_coarse(
+    h: &mut [f32],
+    n: usize,
+    cell: f64,
+    erosion: f64,
+    talus: f64,
+    tuning: &ShapeErosion,
+) {
+    let strength = erosion_strength(erosion) * tuning.gain;
     // Fixed steps with a continuous dose avoid a whole extra pass at 1%, 9%, etc.
-    let iterations = 12;
+    let iterations = tuning.iterations;
     let mut order: Vec<_> = (0..h.len()).collect();
     let mut fractions = vec![[0.0_f32; 8]; h.len()];
     let mut acc = vec![1.0_f32; h.len()];

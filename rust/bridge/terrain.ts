@@ -1,9 +1,9 @@
 import init, { TerrainEngine } from '../pkg/wasm/burgmap_wasm.js';
 import wasmUrl from '../pkg/wasm/burgmap_wasm_bg.wasm?url&inline';
 
-export const RELIEFS = ['flat', 'hills', 'valley', 'canyon', 'mountains', 'plateau', 'high-mountains', 'volcano', 'caldera', 'cavern'] as const;
+export const RELIEFS = ['flat', 'hills', 'valley', 'mountains', 'mixed', 'plateau', 'high-mountains', 'volcano', 'caldera', 'cavern'] as const;
 export type TerrainRelief = typeof RELIEFS[number];
-export interface TerrainSettings { seed: string; width: number; motifSize: number; relief: TerrainRelief; erosion: number; resolution: number }
+export interface TerrainSettings { seed: string; width: number; motifSize: number; relief: TerrainRelief; erosion: number; mountainMix: number; resolution: number }
 export interface TerrainRegion { x: number; y: number; extent: number; resolution: number }
 export interface TerrainData {
   x: number; y: number; width: number; resolution: number; minHeight: number; maxHeight: number;
@@ -21,10 +21,10 @@ export async function sampleRustTerrain({ settings, region }: TerrainRequest): P
   ready ??= (async () => init({ module_or_path: await (await fetch(wasmUrl)).arrayBuffer() }))();
   await ready;
   const started = performance.now();
-  const key = JSON.stringify([settings.seed, settings.width, settings.relief, settings.relief === 'cavern' ? 0 : settings.erosion, settings.motifSize]);
+  const key = JSON.stringify([settings.seed, settings.width, settings.relief, settings.relief === 'cavern' ? 0 : settings.erosion, settings.motifSize, settings.relief === 'mixed' ? settings.mountainMix : 0.5]);
   if (!engine || engineKey !== key) {
     engine?.free(); engine = undefined; engineKey = '';
-    engine = new TerrainEngine(settings.seed, settings.width, settings.relief, settings.erosion, settings.motifSize);
+    engine = new TerrainEngine(settings.seed, settings.width, settings.relief, settings.erosion, settings.motifSize, settings.relief === 'mixed' ? settings.mountainMix : 0.5);
     engineKey = key;
   }
   const result = engine.sample_region(region.x, region.y, region.extent, region.resolution);

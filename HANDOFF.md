@@ -5,6 +5,74 @@ bugs and their evidence are recorded in [ROADMAP.md](ROADMAP.md).
 
 ## Current status
 
+- Terrain zoom blink follow-up (2026-10-06): removed all appended ridge octaves
+  and their refinement-mask cache; zoom now reveals only the prepared mountain
+  raster. Bench paper grain is disabled. Regional PNGs are decoded, then loaded
+  in a hidden SVG group before presentation. The preceding tile remains visible
+  during sampling/loading and a 240ms fade; only afterward is it removed. Camera,
+  generation and style checks discard stale presentations. One-off probes find
+  identical fixed-point heights at 2/1/0.5m for mountain/mixed/volcano/caldera.
+  Exact supplied valley URL and standalone offline zoom audits report zero empty
+  detail frames, old/new overlap and no console errors; style changes during queued
+  sampling also pass. Native fmt/Clippy, WASM checks, typecheck, standalone terrain
+  and independent app/bench builds pass. No suites/screenshots or publication.
+
+- Volcanic relief follow-up (2026-10-06): volcano/caldera wall erosion now uses
+  a dedicated normal gain / 12-pass setting, retaining the 640-cell grid for
+  wall gullies instead of the canyon's gain 5 / 24 passes. Mountains unchanged.
+  Seed 1a72a9n / map8km / motif3km at 38%: local RMS height change drops from
+  24.1m to 5.7m (volcano) and 35.4m to 5.5m (caldera). The collapsed sector also
+  receives max(local, surrounding mountains), with the intact basin protected.
+  Crater geometry uses Cartesian noise instead of angular variations, a smooth
+  bowl, rounded crown and restrained floor texture; volcano rim height is now
+  continuous across its inner/outer profile. Native fmt/Clippy, WASM check,
+  typecheck and standalone build pass. Data probes cover 0/5/38/50/100% erosion
+  and confirm unchanged exterior surroundings with a retained caldera depression.
+  Dev port 5174 and standalone offline startup/zoom pass for both volcanic types,
+  without console errors. No suites/screenshots; visual assessment remains with user.
+
+- Terrain bench (2026-10-06): canyon removed from the relief selector and bridge
+  choices at the user's request. Old canyon URLs use the existing invalid-choice
+  fallback to plain. Rust implementation retained internally.
+
+- Terrain Rust corrections (2026-10-06, local follow-up): finite relief now uses
+  max(local, surrounding mountain height), with shared seeded geometry protecting
+  plateau tops, volcanic craters and the caldera outlet. Canyon is a separate spline
+  network with true downstream reversals/hairpins, two tributary levels, irregular
+  ledges and rock chaos. Its actual geographic surface receives cached wall erosion;
+  canyon and volcanic walls use 24 passes / 640 coarse cells with a stronger continuous
+  dose. Mountains retain their previous evolution rules. Plain dose is fourth-power
+  and its display range is dose-independent (seed 1a72a9n / 8km / motif3km at 5%:
+  RMS ~3.4e-6m from zero erosion). Regional zoom extends the prepared ridge octaves
+  with identical coordinates/phases, parent weights and the original slope/drainage
+  amplitude mask; independent zoom weathering is removed. Valley junctions blend
+  smoothly and no longer clip affluents at a half-plane; empty shoulders remain neutral.
+  Current native fmt/Clippy, WASM check, typecheck, standalone terrain and independent
+  app/bench builds pass. One-off diagnostics cover erosion onset/endpoints, max-height
+  surroundings and octave refinement. The exact supplied 1a72a9n valley link plus
+  offline canyon/volcano reach 768² detail and four zoom steps without console errors.
+  No suites/screenshots; visual assessment remains with the user. No commit/publish.
+
+- Terrain Rust relief follow-up (2026-10-06, local changes): valleys and canyons
+  share a geographically anchored curved trunk with connected tributaries. Canyon
+  topology is independent of erosion; its surrounding terrain erodes at a bounded
+  reduced dose. Regional mountain erosion is now prepared in real map coordinates,
+  replacing the noise projection that folded drainage valleys. Regional rasters are
+  1024² (320/640 coarse evolution grids); their resolution still limits the smallest
+  erosion valleys on large maps. A separate `mixed` relief has its own mountain
+  proportion slider and URL `mix=` replay. Mountain/high-mountain uplift varies
+  continuously between higher and lower regions. Plateau outline/summit noise is
+  reduced; plateau, volcano and caldera blend with regional hills and mountains.
+  Volcanic edges/walls have restrained irregularities. Cavern rock slopes descend
+  continuously toward openings; normals include those slopes. Rock is black with
+  continuous wall shading, with no cavern contours. Terrainbench hatching is disabled.
+  Native fmt/Clippy, WASM checks, TS typecheck, standalone terrain and independent
+  app/bench builds pass. One-off WASM diagnostics cover seed42/map60km/motif3km,
+  erosion onset/endpoints, mix endpoints and cave erosion invariance/unit normals.
+  Current dev (port 5174, terrain mode) and offline startup reach 768² detail without
+  console errors; mix visibility/replay and regeneration pass. No suites or
+  screenshots were run; visual assessment remains with the user. No commit/publish.
+
 - Terrain erosion / zoom filtering repair (2026-10-06): erosion uses a bounded
   squared dose; pit breach depth and application now scale with that dose,
   and drainage detail masking fades continuously from zero. Shape erosion

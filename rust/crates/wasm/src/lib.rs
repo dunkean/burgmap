@@ -75,10 +75,18 @@ impl TerrainEngine {
         relief: &str,
         erosion: f64,
         motif_size: f64,
+        mountain_mix: Option<f64>,
     ) -> Result<TerrainEngine, JsValue> {
-        burgmap_core::TerrainGenerator::new(seed, width, relief, erosion, motif_size)
-            .map(|generator| TerrainEngine { generator })
-            .map_err(|error| JsValue::from_str(&error))
+        burgmap_core::TerrainGenerator::new_mixed(
+            seed,
+            width,
+            relief,
+            erosion,
+            motif_size,
+            mountain_mix.unwrap_or(0.5),
+        )
+        .map(|generator| TerrainEngine { generator })
+        .map_err(|error| JsValue::from_str(&error))
     }
     #[wasm_bindgen(getter)]
     pub fn width(&self) -> f64 {

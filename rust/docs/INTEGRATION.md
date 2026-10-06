@@ -15,8 +15,27 @@ Les appels `sample_region` transportent des grilles d'altitudes et de normales
 est complété par des régions de 768² au déplacement et au zoom ; ces appels
 réutilisent le relief préparé et ne relancent pas l'érosion. Le bruit et le relief
 préparé filtrent les détails sous la résolution demandée ; normales et courbes
-suivent la même surface. La projection régionale est apériodique. La caldeira ouverte
-est un type dédié et la caverne ignore l'érosion.
+suivent la même surface. L'érosion régionale utilise désormais les coordonnées
+réelles de la carte, avec une finesse limitée par son raster de 1024². Les vallées
+et canyons ont un réseau courbe d'affluents fixe. La catégorie `mixed` possède
+un curseur de proportion de montagnes, transmis comme sixième argument facultatif
+du constructeur WASM. La caldeira ouverte est un type dédié et la caverne ignore
+l'érosion ; ses parois descendent vers les ouvertures et le banc les rend en noir
+ombré sans bandes.
+Le canyon a désormais ses propres lacets avec retours en arrière, corniches et
+chaos ; l'érosion renforcée évolue sur ce réseau réel. Les confluences des vallées
+sont fusionnées sans découpe droite. Plateau et reliefs volcaniques se raccordent
+aux montagnes par un maximum de hauteur, sauf sur les surfaces protégées.
+Le détail régional au zoom révèle la surface préparée sans octave supplémentaire
+ni texture indépendante. Le grain du banc est désactivé. La nouvelle image régionale
+est décodée et chargée avant un court fondu, en conservant l'ancienne jusque-là. La dose
+de la plaine est plus douce au départ et son échelle de rendu reste fixe.
+Les volcans et caldeiras conservent la finesse des ravines sur une grille de
+640 cellules, avec une dose normale et 12 passes, sans l'amplification du canyon.
+Le secteur effondré de la caldeira reçoit le maximum avec les montagnes, y compris
+à son entrée dans le bassin. Le cratère intact reste protégé. La lèvre est arrondie
+et les irrégularités suivent un bruit géographique plutôt qu'un bruit angulaire
+projeté en rayons ; le fond reçoit un bruit doux.
 `bridge/` adapte ces données au rendu de terrain actuel. Le modèle `World`
 n'est pas le modèle du moteur Rust. Voir [README](../README.md) pour le
 contrat, les commandes et les limites de cette première étape.

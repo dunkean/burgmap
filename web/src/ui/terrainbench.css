@@ -27,8 +27,8 @@ small { font-size: 12px; line-height: 1.6; color: #657670; }
 [hidden] { display: none !important; }
 header input[type=number] { width: 68px; }
 header input[type=text] { width: 58px; }
-#erosion { width: 65px; padding: 0; }
-#erosionValue { min-width: 33px; font-variant-numeric: tabular-nums; }
+#erosion, #mountainMix { width: 65px; padding: 0; }
+#erosionValue, #mountainMixValue { min-width: 33px; font-variant-numeric: tabular-nums; }
 nav { gap: 4px 8px; padding: 4px 8px; background: #f6f8f5; }
 nav .control-group { border-left: 1px solid #dce3df; padding-left: 8px; }
 .share-actions { margin-left: 0; }

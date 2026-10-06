@@ -44,16 +44,25 @@ vérification de compilation pour `wasm32-unknown-unknown`.
 - Taille du motif : **250 à 50 000 mètres**, par défaut **3 000 m**, indépendante
   de la largeur de la carte. Elle règle les dimensions des formes et leur détail.
 - Graine : chaîne reproductible ; bouton pour tirer une nouvelle graine.
-- Relief : **plaine, colline, vallée, canyon, montagne, plateau, haute montagne,
+- Relief : **plaine, colline, vallée, montagne, collines et montagnes, plateau, haute montagne,
   volcan, caldeira ouverte, caverne**.
+  Le canyon est retiré des choix du banc ; les anciens liens `relief=canyon`
+  ouvrent une plaine. Son implémentation reste interne au moteur.
+- **Collines et montagnes** possède son propre curseur de proportion de montagnes,
+  de 0 à 100 %. Le mélange forme des régions continues et reste inclus dans le lien (`mix=`).
 - Érosion : **0 à 100 %**. À 0 %, le relief initial est conservé ; la dose augmente
-  progressivement avec le carré du curseur, jusqu’à une érosion maximale bornée.
+  progressivement avec le carré du curseur pour les montagnes. La plaine utilise
+  une dose à la puissance quatre, plus douce au départ, avec une échelle de rendu
+  indépendante de la dose. Les volcans et caldeiras utilisent une érosion dédiée
+  à dose normale sur 12 passes, avec une grille fine pour les ravines des parois.
+  L'amplification et les 24 passes du canyon interne ne leur sont plus appliquées.
   Le passage de 0 à 1 % ne déclenche plus une incision complète des cuvettes. Ce réglage agit sur
   l'évolution du terrain, sans ajouter de rivières rendues à cette étape.
   La caverne ignore l'érosion, aussi bien pour le sol que pour ses parois.
 - Générer et Autogénérer : la case active une génération après modification
   des paramètres, avec une courte temporisation pour les curseurs.
-- Parchemin, Atlas et Topographique : changement de rendu du même terrain.
+- Parchemin, Atlas et Topographique : changement de rendu du même terrain,
+  avec un ombrage continu sans les anciennes hachures noires ni grain haute fréquence.
 - Molette, glisser, zoom tactile, recentrer ; coordonnées sous la souris.
 - Pins : Alt-clic ou mode de pose, notes, suppression, visibilité, copie du
   lien et du rapport. Le lien conserve le terrain affiché, les pins et la vue.
@@ -63,11 +72,28 @@ Une vallée réglée à environ 3 km garde sa largeur sur une carte de 40 ou 100
 Le volcan et le plateau occupent une emprise physique limitée ; agrandir la
 carte révèle leurs alentours. Les amplitudes suivent l'échelle du relief avec
 des bornes physiques et ne grossissent pas avec la seule taille de la carte.
-La caldeira ouverte est un type distinct : grand bassin bas et anneau effondré
-avec une brèche. La graine fait varier le tracé et les pentes du canyon, et
-la complexité, les niveaux et les reliefs résiduels du plateau.
+Les vallées suivent un tronc courbe à plusieurs échelles, avec des affluents
+raccordés aux deux versants. Leurs confluences sont fusionnées progressivement,
+sans coupe à angle droit à l'entrée des affluents. Le canyon possède un réseau
+distinct de lacets et retours en arrière, des affluents et leurs branches,
+des corniches irrégulières et des chaos rocheux. Son tracé ne dépend pas du
+curseur d'érosion, qui use et creuse ses véritables parois. Les alentours mêlent collines et
+montagnes, comme autour du plateau, du volcan et de la caldeira. La haute montagne
+varie aussi entre massifs élevés et régions plus basses, avec des vallées érodées.
+Le plateau a un sommet plus calme et un contour moins bruité. Les parois et les
+bords volcaniques ont des irrégularités légères. Le raccord du plateau, du volcan
+et de la caldeira prend le maximum de leur hauteur et des montagnes environnantes.
+Le dessus du plateau et les parties intactes des cratères conservent leur
+propre hauteur, avec des masques tirés de la même géométrie que leur relief.
+La partie effondrée de la caldeira reçoit aussi le maximum avec les montagnes
+environnantes, pour éviter une ouverture plate. Les cratères ont une lèvre arrondie
+et un léger bruit géographique continu ; les variations angulaires qui dessinaient
+des traits en étoile sont supprimées.
+La caldeira ouverte reste un type distinct avec un bassin bas et un anneau
+effondré muni d'une brèche.
 
-Rust conserve un terrain préparé à une résolution physique liée au motif.
+Rust conserve un terrain régional préparé dans les coordonnées réelles de la carte.
+Les formes isolées sont préparées séparément à l'échelle du motif.
 Le banc demande une vue d'ensemble puis des échantillons détaillés de la zone
 visible quand on zoome ou déplace la carte. Il ne grossit pas seulement une
 image couvrant les 100 km et ne relance pas l'érosion à chaque déplacement.
@@ -77,19 +103,26 @@ renormaliser les basses fréquences. Une pyramide filtrée applique le même
 principe aux reliefs préparés et aux corrections d’érosion. L’ombrage et les
 courbes utilisent cette même surface filtrée ; les normales sont calculées
 avec un pas adapté à la résolution physique demandée. Le détail revient au
-zoom, avec des coordonnées de terrain fixes et sans relancer l’érosion.
+zoom, avec des coordonnées de terrain fixes et sans relancer l’érosion. Il révèle
+le relief déjà préparé ; aucun bruit haute fréquence ni octave supplémentaire
+n'est ajouté au zoom. Le détail précédent reste affiché jusqu'au décodage et au
+chargement de la nouvelle image, puis un court fondu accompagne son remplacement.
 Le statut indique la taille des échantillons et les temps de calcul. Ces durées
 ne sont pas une comparaison Rust/TypeScript ni une mesure complète des frames.
 
-Pour ce prototype, les reliefs régionaux réemploient une source d’érosion
-continue via des coordonnées de bruit mondial fixes et apériodiques.
-La source n’est plus répétée par modulo ni mélangée sur une grille de motifs.
-Cette projection peut réemployer des formes locales ; il ne s'agit pas encore
-d'une simulation hydrologique intégrale d'un territoire de 100 km.
+Les reliefs régionaux ne projettent plus un petit terrain érodé au travers d'un
+champ de bruit : cette projection déformait les vallées de drainage. L'érosion
+est préparée sur la région complète, puis échantillonnée directement. Le raster
+régional de 1024² borne la finesse de ces vallées sur les grandes cartes ; le zoom
+retrouve les formes analytiques et le détail de surface, mais ne relance pas une
+simulation hydraulique locale. Cela reste un prototype de relief, sans hydrologie
+intégrale ni réseau de rivières.
 
-Le mélange de plusieurs reliefs, l'hydrologie, les villes et le futur moteur
-de rendu restent des étapes ultérieures. La caverne fournit pour l'instant un
-sol et un masque roche / ouvert, sans construction ni simulation souterraine.
+Les autres mélanges de reliefs, l'hydrologie, les villes et le futur moteur
+de rendu restent des étapes ultérieures. La caverne fournit un sol et un masque
+roche / ouvert, sans construction ni simulation souterraine. La pierre descend
+continûment vers les ouvertures ; ses normales incluent cette pente. Le banc
+affiche une roche noire ombrée, sans hachures ni courbes d'altitude en caverne.
 
 ## Organisation et frontière temporaire
 
@@ -108,7 +141,8 @@ rust/crates/render/        réservé, technologie future non choisie
 La façade expose un appel complet :
 
 ```ts
-const engine = new TerrainEngine(seed, mapWidth, relief, erosion, motifSize);
+const engine = new TerrainEngine(seed, mapWidth, relief, erosion, motifSize, mountainMix);
+// mountainMix : 0 à 1, facultatif (0.5 par défaut), utilisé pour relief="mixed".
 const region = engine.sample_region(x, y, extent, resolution);
 // getters : x, y, width (= extent), resolution, min_height, max_height,
 //           height: Float32Array, cave_mask: Uint8Array,
@@ -117,7 +151,7 @@ const region = engine.sample_region(x, y, extent, resolution);
 ```
 
 Identifiants relief : `flat`, `hills`, `valley`, `canyon`, `mountains`,
-`plateau`, `high-mountains`, `volcano`, `caldera`, `cavern`. L'API accepte des résolutions
+`mixed`, `plateau`, `high-mountains`, `volcano`, `caldera`, `cavern`. L'API accepte des résolutions
 entières entre 64 et 1024 pour les régions. Les entrées invalides
 produisent une erreur explicite. Pas de substitution silencieuse par le
 générateur TypeScript.
