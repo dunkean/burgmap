@@ -15,7 +15,8 @@ const cases = [
     settlements: { counts: { city: 0, town: 0, village: 1, hamlet: 0, farmstead: 0 } } } },
 ].filter((testCase) => !selected || testCase.name === selected);
 const styles = ['parchment', 'night', 'illuminated', 'atlas'];
-const server = await createServer({ configFile: false, root: process.cwd(), server: { host: '127.0.0.1', port: 0 },
+const server = await createServer({ configFile: false, root: process.cwd(), cacheDir: resolve(out, 'vite-cache'),
+  server: { host: '127.0.0.1', port: 0 },
   plugins: [{ name: 'open-edge-qa', configureServer(s) { s.middlewares.use('/__qa', (_req, res) => {
     res.setHeader('Content-Type', 'text/html');
     res.end('<!doctype html><html><body style="margin:0"><div id="target" style="width:900px;height:900px"></div></body></html>');
