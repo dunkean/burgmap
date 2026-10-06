@@ -100,5 +100,18 @@ describe('Chinese hutong access', () => {
     expect(r.bldgOutside, msg).toBe(0);
     expect(r.orphanMain, msg).toBe(0);
     expect(plots.every((p) => !p.front || dist(p.front[0], p.front[1]) >= 3)).toBe(true);
+    // A narrow hutong endpoint is nearer than the wide radial's centerline here.
+    // It must not replace the surviving radial frontage with a 2.45 m sliver.
+    const served = plots.find((p) => p.block === 35 && p.poly.some((q) =>
+      Math.abs(q.x - 2102.461) < 0.001 && Math.abs(q.y - 2249.046) < 0.001))!;
+    expect(served.front).toBeDefined();
+    expect(dist(served.front![0], served.front![1])).toBeGreaterThan(16);
+    const radial = u.streets[8];
+    for (let i = 0; i <= 8; i++) {
+      const [a, b] = served.front!;
+      const q = { x: a.x + (b.x - a.x) * i / 8, y: a.y + (b.y - a.y) * i / 8 };
+      expect(distToSeg(q, radial.path[0], radial.path[1])).toBeCloseTo(radial.widths![0] / 2, 2);
+    }
+    expect(u.buildings.filter((b) => b.parcel === u.parcels.indexOf(served)).length).toBeGreaterThanOrEqual(6);
   }, 120000);
 });

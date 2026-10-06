@@ -67,6 +67,32 @@ function turnAt(a: Vec2, b: Vec2, c: Vec2): number {
 const unit = (a: Vec2, b: Vec2): Vec2 => { const l = dist(a, b) || 1; return { x: (b.x - a.x) / l, y: (b.y - a.y) / l }; };
 const leftN = (d: Vec2): Vec2 => ({ x: -d.y, y: d.x });
 
+/** A nearer narrow lane must not hide contact with a wider street's ribbon. */
+export function plotFrontOnStreet(streets: Streets, a: Vec2, b: Vec2): boolean {
+  const m = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  const contact = (d: number, hw: number): boolean => d < 14 &&
+    (Math.abs(d - hw) < Math.max(0.8, 0.3 * hw) || (d < hw * 1.3 && d > hw * 0.7));
+  const nearest = streets.nearest(m, 14);
+  if (nearest && contact(nearest.d, nearest.hw)) return true;
+  let served = false;
+  streets.forEachSeg(m.x - 14, m.y - 14, m.x + 14, m.y + 14, (st, i) => {
+    if (served || !st.ribbon) return;
+    const p = st.path[i], q = st.path[i + 1];
+    const dx = q.x - p.x, dy = q.y - p.y, l2 = dx * dx + dy * dy;
+    // Only broaden the old nearest-centerline check for contact along the frontage,
+    // rather than accepting an unrelated wide street's terminal near its midpoint.
+    for (let k = 0; k <= 4; k++) {
+      const v = { x: a.x + (b.x - a.x) * k / 4, y: a.y + (b.y - a.y) * k / 4 };
+      const t = l2 ? Math.max(0, Math.min(1, ((v.x - p.x) * dx + (v.y - p.y) * dy) / l2)) : 0;
+      const d = Math.hypot(v.x - p.x - t * dx, v.y - p.y - t * dy);
+      const hw = (st.widths[i] * (1 - t) + st.widths[i + 1] * t) / 2;
+      if (!contact(d, hw)) return;
+    }
+    served = true;
+  });
+  return served;
+}
+
 /** Rebuild a merged plot's geometric frame from its actual boundary. No random draw or plot reordering. */
 export function refreshPlotFrame(pl: Plot, streetFront?: (a: Vec2, b: Vec2) => boolean): void {
   const poly = pl.poly;
@@ -101,13 +127,29 @@ export function refreshPlotFrame(pl: Plot, streetFront?: (a: Vec2, b: Vec2) => b
   const n = leftN(t);
   pl.nrm = n.x * pl.nrm.x + n.y * pl.nrm.y >= 0 ? n : { x: -n.x, y: -n.y };
   const side = (p: Vec2, fallback: Vec2): { p: Vec2; d: Vec2 } => {
-    let direction = fallback, bestScore = -Infinity;
+    let direction = fallback.x * pl.nrm.x + fallback.y * pl.nrm.y > 0.05 ? fallback : pl.nrm;
+    let bestScore = -Infinity;
     for (let i = 0; i < poly.length; i++) {
       const v = poly[i], w = poly[(i + 1) % poly.length];
-      if (dist(v, p) > 0.02 && dist(w, p) > 0.02) continue;
-      const other = dist(v, p) <= dist(w, p) ? w : v;
-      const d = unit(p, other), inward = d.x * pl.nrm.x + d.y * pl.nrm.y;
-      if (inward > bestScore) { bestScore = inward; direction = d; }
+      if (distToSeg(p, v, w) > 0.02) continue;
+      for (const step of [-1, 1]) {
+        let from = p, k = step > 0 ? (i + 1) % poly.length : i;
+        for (let walk = 0; walk < poly.length; walk++) {
+          const to = poly[k];
+          if (dist(from, to) > 0.02) {
+            const d = unit(from, to), inward = d.x * pl.nrm.x + d.y * pl.nrm.y;
+            if (inward > 0.05) {
+              if (inward > bestScore) { bestScore = inward; direction = d; }
+              break;
+            }
+            // Fragmented frontage edges are not side lines. Follow them to the
+            // actual inward turn, including when the anchor lies inside an edge.
+            if (Math.abs(inward) > 0.05) break;
+          }
+          from = to;
+          k = (k + step + poly.length) % poly.length;
+        }
+      }
     }
     return { p, d: direction };
   };
@@ -519,12 +561,7 @@ export function cutPlots(
   }
   const merged: Plot[] = [];
   const keepBack: Polygon[] = [];
-  const servesStreet = (a: Vec2, b: Vec2): boolean => {
-    const m = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-    const ns = streets.nearest(m, 14);
-    return !!ns && (Math.abs(ns.d - ns.hw) < Math.max(0.8, 0.3 * ns.hw)
-      || (ns.d < ns.hw * 1.3 && ns.d > ns.hw * 0.7));
-  };
+  const servesStreet = (a: Vec2, b: Vec2): boolean => plotFrontOnStreet(streets, a, b);
   for (const c of cells) {
     if (!c) continue;
     const poly = cleanRing(c.poly, 0.005, 0.5, 0.002, false);
