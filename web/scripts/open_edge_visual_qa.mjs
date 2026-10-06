@@ -8,11 +8,12 @@ import { resolve } from 'node:path';
 const args = process.argv.slice(2);
 const out = resolve(args[args.indexOf('--out') + 1] || 'out/open-edge-visual-qa');
 mkdirSync(out, { recursive: true });
+const selected = args.includes('--case') ? args[args.indexOf('--case') + 1] : null;
 const cases = [
   { name: 'open-p4uefz', options: { seed: 'p4uefz', size: 'city', culture: 'european-organic', walls: 'none', settlements: 'none' } },
   { name: 'walled-open-p4uefz', options: { seed: 'p4uefz', size: 'town', culture: 'european-organic', walls: 'single', suburbs: 'some',
     settlements: { counts: { city: 0, town: 0, village: 1, hamlet: 0, farmstead: 0 } } } },
-];
+].filter((testCase) => !selected || testCase.name === selected);
 const styles = ['parchment', 'night', 'illuminated', 'atlas'];
 const server = await createServer({ configFile: false, root: process.cwd(), server: { host: '127.0.0.1', port: 0 },
   plugins: [{ name: 'open-edge-qa', configureServer(s) { s.middlewares.use('/__qa', (_req, res) => {
@@ -38,15 +39,16 @@ try {
         const world = generate(makeOptions(options));
         window.qaWorld = world;
         const u = world.urban, view = renderView(world).urban;
-        const tails = u?.openTails ?? [];
-        const focus = tails.find((t) => t.kind === 'unservedOpenEdge' && t.excess > 10)
-          ?? tails.find((t) => t.kind === 'servedDeadEnd' && t.excess > 10)
-          ?? tails.find((t) => t.excess > 0);
+        const tails = u?.openTails ?? [], visibleTails = view?.openTails ?? [];
+        const focus = visibleTails.find((t) => t.kind === 'unservedOpenEdge' && t.excess > 10)
+          ?? visibleTails.find((t) => t.kind === 'servedDeadEnd' && t.excess > 10)
+          ?? visibleTails.find((t) => t.excess > 0);
         const center = focus?.point ?? world.site?.center ?? { x: world.mapSize / 2, y: world.mapSize / 2 };
         window.qaFocus = { cx: center.x, cy: center.y, span: Math.min(760, world.mapSize * 0.4) };
-        const kinds = Object.fromEntries([...new Set(tails.map((t) => t.kind))].map((kind) => [kind, tails.filter((t) => t.kind === kind).length]));
+        const kinds = Object.fromEntries([...new Set(visibleTails.map((t) => t.kind))].map((kind) => [kind, visibleTails.filter((t) => t.kind === kind).length]));
         return { seed: world.seed, mapSize: world.mapSize, requestedWalls: world.options.walls,
           requestedSettlements: JSON.stringify(world.options.settlements), walls: u?.walls?.length ?? 0,
+          townWalls: u?.walls?.filter((w) => w.role === 'town' || w.role === 'outer' || !w.role).length ?? 0,
           openQuarters: u?.quarters?.filter((q) => q.zone === 'faubourg' || q.zone === 'edge').length ?? 0,
           secondaryCount: world.settlements?.filter((s) => !s.main && s.urban).length ?? 0,
           streetCount: u?.streets.length ?? 0, viewStreetCount: view?.streets.length ?? 0,
@@ -60,8 +62,8 @@ try {
       if (metadata.requestedWalls !== testCase.options.walls
         || metadata.requestedSettlements !== JSON.stringify(testCase.options.settlements)
         || metadata.invalidTailIndices || metadata.invalidViewTailIndices
-        || (testCase.name.startsWith('open-') && metadata.walls !== 0)
-        || (testCase.name.startsWith('walled-') && (metadata.walls === 0 || metadata.secondaryCount === 0 || metadata.openGroundCount === 0))) {
+        || (testCase.name.startsWith('open-') && metadata.townWalls !== 0)
+        || (testCase.name.startsWith('walled-') && (metadata.townWalls === 0 || metadata.secondaryCount === 0 || metadata.viewOpenGroundCount === 0))) {
         throw new Error(`Invalid QA fixture or merged metadata: ${testCase.name} ${JSON.stringify(metadata)}`);
       }
       for (const style of styles) {
@@ -99,7 +101,7 @@ try {
     }
   }
 } finally {
-  writeFileSync(resolve(out, 'results.json'), JSON.stringify(results, null, 2));
+  writeFileSync(resolve(out, selected ? `results-${selected}.json` : 'results.json'), JSON.stringify(results, null, 2));
   await browser.close();
   await server.close();
 }
