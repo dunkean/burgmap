@@ -11,7 +11,7 @@ import { checkWorld } from './urbanCheck';
 const query = 'id=1zvAFj4K0oKrM0T2dSYrHg5M4uSkzM4eI0AiYabicJBmnB4sS84uyizBJFTkNTAwOVILWpTNHRIGlg0sdIeOD0YmpuoWNibKATDUrdeVBBigklRWDSUVQCZo-QxLzEMmDiVoqNBQA';
 
 describe('the two pinned curved town regressions', () => {
-  it('keeps served, disjoint roofs and a real private entrance on the native town', () => {
+  it('keeps served, disjoint whole roofs on the native town', () => {
     const world = generate(fromQuery(query)), urban = world.urban!;
     const audit = auditUrban(world);
     expect(audit.malformed).toEqual([]);
@@ -28,8 +28,14 @@ describe('the two pinned curved town regressions', () => {
     // Measured with the old producer on this exact query, before the footprint pass.
     expect(housingArea).toBeGreaterThanOrEqual(0.98 * 80502.38129396425);
     const privateWays = urban.streets.filter(s => s.private);
-    expect(privateWays.length).toBeGreaterThan(0);
     expect(privateWays.every(s => s.width >= 0.8 && s.kind === 'alley')).toBe(true);
+    // The former narrow river-side arm now fits as a whole room in the free
+    // western pocket of the same plot, without requiring a synthetic alley.
+    const replanned = urban.buildings.find(b => b.parcel === 445 && b.kind === 'back'
+      && b.poly.every(p => p.x < 880));
+    expect(replanned).toBeDefined();
+    expect(area(replanned!.poly)).toBeGreaterThanOrEqual(105.5);
+    expect(replanned!.poly.length).toBe(4);
     for (const parcel of [59, 106, 293, 445, 456]) {
       const roofs = urban.buildings.filter(b => b.parcel === parcel && ['house', 'rear', 'back'].includes(b.kind));
       expect(roofs.length, 'a repaired plot still contains its dwelling').toBeGreaterThan(0);
