@@ -3,6 +3,7 @@ import type { Polygon } from '../src/gen/core/geom';
 import { area, minNeck } from '../src/gen/geo/poly';
 import { finalizeFootprints } from '../src/gen/urban/footprintFinal';
 import { splitLong } from '../src/gen/urban/access';
+import { blockReach, makeStreetAt } from '../src/gen/urban/access';
 
 const rect = (x0: number, y0: number, x1: number, y1: number): Polygon => [
   { x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 },
@@ -155,5 +156,56 @@ describe('last footprint pass', () => {
     expect(area(u.buildings[0].poly)).toBeGreaterThanOrEqual(0.95 * area(roof));
     expect(minNeck(u.buildings[0].poly)?.w ?? Infinity).toBeGreaterThanOrEqual(3.6);
     expect(area(u.buildings[0].poly) + backLand.reduce((s, p) => s + area(p.outer), 0)).toBeCloseTo(area(roof), 5);
+  });
+
+  it('blunts pinned courtyard-hall needles while preserving their U-shaped court', () => {
+    const halls: Polygon[] = [
+      [
+        { x: 555.3520269788362, y: 611.9927584470759 }, { x: 557.795, y: 601.828 },
+        { x: 560.136, y: 602.549 }, { x: 558.148, y: 600.806 },
+        { x: 576.5732647064406, y: 586.6399804020078 }, { x: 578.4713703035104, y: 590.471299330912 },
+        { x: 565.489, y: 601.042 }, { x: 565.8547563874106, y: 601.5872971109694 },
+        { x: 580.4067878323797, y: 594.3779322522503 }, { x: 582.4761655139228, y: 598.55496323229 },
+      ],
+      [
+        { x: 575.9663826814734, y: 576.3208745858894 }, { x: 590.1337055719733, y: 569.3021232438691 },
+        { x: 600.6920075177587, y: 589.530501342162 }, { x: 582.4761655139228, y: 598.55496323229 },
+        { x: 580.4067878323797, y: 594.3779322522503 }, { x: 595.073, y: 587.112 },
+        { x: 591.35241057427, y: 579.9831051240459 }, { x: 578.4713703035104, y: 590.471299330912 },
+        { x: 576.5732647064406, y: 586.6399804020078 }, { x: 591.527, y: 575.143 },
+      ],
+    ];
+    const owner: Polygon = [
+      { x: 557.795, y: 601.828 }, { x: 560.136, y: 602.549 }, { x: 558.148, y: 600.806 },
+      { x: 591.527, y: 575.143 }, { x: 573.6, y: 576.5 },
+      { x: 590.4388103726571, y: 568.1577448107457 }, { x: 609.6848106088646, y: 605.0306597602223 },
+      { x: 604.5644188837042, y: 607.9327869993749 }, { x: 606.962351888121, y: 613.1895370675534 },
+      { x: 547.75, y: 640.2 }, { x: 543.751, y: 638.846 }, { x: 543.916, y: 636.223 },
+      { x: 549.45, y: 636.6 }, { x: 549.45, y: 636.55 },
+    ];
+    const streetAt = makeStreetAt([{ path: [{ x: 573.6, y: 573.5 }, { x: 590.4388, y: 565.16 }], width: 6 }], []);
+    const reached = blockReach(owner, halls, streetAt);
+    let accessChecks = 0;
+    const u = { buildings: halls.map((poly) => ({ poly, kind: 'hall', arch: 'courtyard-hall', parcel: 0 })),
+      parcels: [{ poly: owner, use: 'plot', block: 28 }],
+      backLand: [] as { outer: Polygon; holes: Polygon[] }[], openQuarterEdge: () => false,
+      tipConstrained: () => true,
+      validateParts: (i: number, parts: Polygon[]) => {
+        accessChecks++;
+        const now = blockReach(owner, halls.map((poly, j) => j === i ? parts[0] : poly), streetAt);
+        return now.every((v, j) => v || !reached[j]);
+      } };
+    const oldArea = halls.reduce((s, p) => s + area(p), 0);
+    const result = finalizeFootprints(u);
+    expect(result.invalid).toEqual([]);
+    expect(u.buildings).toHaveLength(2);
+    expect(u.backLand).toHaveLength(2);
+    expect(accessChecks).toBe(2);
+    u.buildings.forEach((b, i) => {
+      expect(area(b.poly)).toBeGreaterThan(0.97 * area(halls[i]));
+      expect(minNeck(b.poly)?.w ?? Infinity).toBeLessThan(3.6);
+    });
+    expect(u.buildings.reduce((s, b) => s + area(b.poly), 0)
+      + u.backLand.reduce((s, p) => s + area(p.outer), 0)).toBeCloseTo(oldArea, 5);
   });
 });
