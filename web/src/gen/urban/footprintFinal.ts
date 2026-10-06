@@ -5,13 +5,14 @@ import type { PolyH } from '../geo/bool';
 import { area, bboxOf, cleanRing, isSimple, interiorAngle, minAngle, minNeck, inscribed, obb } from '../geo/poly';
 import { isConvex, lpoly, polyInside, splitByChord } from '../geo/split';
 import { GridIndex } from '../geo/spatial';
-import { distToRing, pointInRing } from '../geo/poly';
+import { distToRing, distToSeg, pointInRing } from '../geo/poly';
 import { shapeOkObb } from './access';
 import { splitLong } from './access';
 import { mpArea, tryDifference, tryIntersection } from '../geo/bool';
 import { reconstructRoom, replanWholeRoom } from './roomReconstruct';
 import { reconstructCompactRoom } from './compactRoom';
 import { reconstructSmallPlotRoom } from './smallPlotRoom';
+import { terminalTapers, replaceTerminalCap } from './terminalTaper';
 
 export interface FootprintFinalInput {
   buildings: UrbanBuilding[];
@@ -313,7 +314,7 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
     const tip = arm.reduce((best, p) => (p.x * outward.x + p.y * outward.y > best.x * outward.x + best.y * outward.y ? p : best));
     return { tip, outward };
   };
-  const losesFreeExteriorWing = (i: number, owner: UrbanParcel, candidate: Polygon): boolean => {
+  const losesFreeExteriorWing = (i: number, owner: UrbanParcel, candidate: Polygon, terminal = false): boolean => {
     // The owner edge alone does not identify an open quarter edge: in a
     // fused plot it can be an internal planning seam. Require the caller's
     // actual quarter-edge oracle for this additional compact-room guard.
@@ -324,8 +325,77 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
       if (mpArea([piece]) <= 1 || mpArea([piece]) <= 0.005 * area(u.buildings[i].poly)) continue;
       const { tip, outward } = armEdge(candidate, piece.outer);
       if (openExterior(owner, tip, outward) && !tipConstrained(u.buildings[i].parcel!, tip, outward)) return true;
+      // A cap can run along an open edge rather than point across it. Test the
+      // owner's actual outward normals so an unobstructed exterior strip stays whole.
+      if (terminal) {
+        const signed = owner.poly.reduce((s, p, j) => {
+          const q = owner.poly[(j + 1) % owner.poly.length]; return s + p.x * q.y - p.y * q.x;
+        }, 0);
+        for (const p of piece.outer) for (let j = 0; j < owner.poly.length; j++) {
+          const a = owner.poly[j], c = owner.poly[(j + 1) % owner.poly.length];
+          if (distToSeg(p, a, c) > 2) continue;
+          const length = Math.hypot(c.x - a.x, c.y - a.y);
+          if (length < 1e-6) continue;
+          const sign = signed >= 0 ? 1 : -1;
+          const normal = { x: sign * (c.y - a.y) / length, y: -sign * (c.x - a.x) / length };
+          const beyond = { x: p.x + 1.5 * normal.x, y: p.y + 1.5 * normal.y };
+          if ((openExterior(owner, p, normal) || !pointInRing(owner.poly, beyond))
+            && !tipConstrained(u.buildings[i].parcel!, p, normal)) return true;
+        }
+      }
     }
     return false;
+  };
+  const commitTerminalRoom = (i: number, owner: UrbanParcel, raw: Polygon, lossless: boolean): boolean => {
+    if (!u.backLand || !u.placementClear || !u.validateParts) return false;
+    const b = u.buildings[i], oldArea = area(b.poly), candidate = normalize(raw);
+    if (!candidate || !proper(candidate) || terminalTapers(candidate).length || !polyInside(owner.poly, candidate)
+      || !respectsOtherOwners(i, candidate) || overlapsRoof(i, candidate)
+      || !u.placementClear(candidate, b.poly) || !u.validateParts(i, [candidate])
+      || area(candidate) > 1.1 * oldArea || area(candidate) < 0.7 * oldArea
+      || !housingBudget(b.kind, oldArea, area(candidate))) return false;
+    const freed = tryDifference(b.poly, candidate), added = tryDifference(candidate, b.poly);
+    if (freed.failed || added.failed || freed.pieces.some(p => p.holes.length)
+      || (lossless && mpArea(freed.pieces) > 1e-6)
+      || Math.abs(oldArea + mpArea(added.pieces) - area(candidate) - mpArea(freed.pieces)) > 1e-5) return false;
+    // Preserve inherited seams, but never create a new overlap in the newly occupied land.
+    for (const piece of added.pieces) {
+      const bounds = bboxOf(piece.outer);
+      for (const j of roofIndex.query(bounds.x0, bounds.y0, bounds.x1, bounds.y1)) {
+        if (j === i) continue;
+        const hit = tryIntersection(piece, u.buildings[j].poly);
+        if (hit.failed || mpArea(hit.pieces) > 1e-6) return false;
+      }
+    }
+    const land = planOpenLand(candidate);
+    if (!land || (!lossless && losesFreeExteriorWing(i, owner, candidate, true))) return false;
+    commitOpenLand(land);
+    u.backLand.push(...freed.pieces); releasedArea += mpArea(freed.pieces);
+    b.poly = candidate; roofIndex.insertPts(candidate, i);
+    if (owner.block !== undefined) changed.add(owner.block);
+    return true;
+  };
+  const widenTerminalRoom = (i: number, owner: UrbanParcel): boolean => {
+    const poly = u.buildings[i].poly;
+    for (const taper of terminalTapers(poly)) {
+      if (commitTerminalRoom(i, owner, replaceTerminalCap(poly, taper, taper.widened), true)) return true;
+    }
+    return false;
+  };
+  const trimTerminalRoom = (i: number, owner: UrbanParcel): boolean => {
+    const original = u.buildings[i].poly;
+    let candidate = original;
+    // At most three proven terminal wedges; substantial rooms and all building counts survive.
+    for (let pass = 0; pass < 3; pass++) {
+      const taper = terminalTapers(candidate)[0];
+      if (!taper) break;
+      if (openExterior(owner, taper.tip, taper.outward)
+        && !tipConstrained(u.buildings[i].parcel!, taper.tip, taper.outward)) return false;
+      const next = normalize(replaceTerminalCap(candidate, taper, taper.cut));
+      if (!next || area(next) < 0.7 * area(original)) return false;
+      candidate = next;
+    }
+    return candidate !== original && commitTerminalRoom(i, owner, candidate, false);
   };
   const splitIntoServedRooms = (i: number, owner: UrbanParcel): boolean => {
     if (!u.backLand || !u.validateParts || !u.placementClear) return false;
@@ -767,6 +837,31 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
       const block = b.parcel === undefined ? undefined : u.parcels[b.parcel]?.block;
       if (block !== undefined) changed.add(block);
     }
+  }
+  // Preserve established core/neck repairs first. Local cap quality must not
+  // prevent a useful earlier repair merely because that intermediate room still tapers.
+  for (let i = 0; i < u.buildings.length; i++) {
+    const b = u.buildings[i], owner = b.parcel === undefined ? undefined : u.parcels[b.parcel];
+    if (!owner || !terminalTapers(b.poly).length || b.ring || b.courtyards?.length
+      || /courtyard|souk|ring/.test(b.arch ?? '')
+      || /(?:^|-)longhouse(?:-|$)|^pueblo-room$|^roundhouse$|^wigwam$|^hogan$|^tipi$|^yurt$|^tree-(house|pod)$|^fungal-/.test(b.arch ?? '')
+      || (!['house', 'rear', 'back'].includes(b.kind)
+        && !(['barn', 'shed'].includes(b.kind) && area(b.poly) <= 150
+          && ['gable', 'hip', 'flat'].includes(b.roof ?? '')))) continue;
+    if (widenTerminalRoom(i, owner)) continue;
+    if (u.placementClear && u.validateParts) {
+      const bounds = bboxOf(owner.poly);
+      const occupied = roofIndex.query(bounds.x0, bounds.y0, bounds.x1, bounds.y1)
+        .filter((j) => j !== i).map((j) => u.buildings[j].poly);
+      const clear = (p: Polygon) => u.placementClear!(p, b.poly) && respectsOtherOwners(i, p);
+      const valid = (p: Polygon) => proper(p) && !terminalTapers(p).length
+        && !losesFreeExteriorWing(i, owner, p, true) && !overlapsRoof(i, p)
+        && housingBudget(b.kind, area(b.poly), area(p)) && u.validateParts!(i, [p]);
+      const rebuilt = reconstructRoom(b.poly, owner.poly, occupied, clear, valid)
+        ?? replanWholeRoom(b.poly, owner.poly, owner.front, occupied, clear, valid);
+      if (rebuilt && commitTerminalRoom(i, owner, rebuilt, false)) continue;
+    }
+    trimTerminalRoom(i, owner);
   }
   for (const i of removalCandidates) {
     const b = u.buildings[i];
