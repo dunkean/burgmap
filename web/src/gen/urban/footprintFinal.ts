@@ -2,13 +2,13 @@
 import type { Polygon, Vec2 } from '../core/geom';
 import type { UrbanBuilding, UrbanParcel } from '../types';
 import type { PolyH } from '../geo/bool';
-import { area, cleanRing, isSimple, interiorAngle, minAngle, minNeck, inscribed } from '../geo/poly';
+import { area, bboxOf, cleanRing, isSimple, interiorAngle, minAngle, minNeck, inscribed } from '../geo/poly';
 import { isConvex, lpoly, polyInside, splitByChord } from '../geo/split';
 import { GridIndex } from '../geo/spatial';
 import { distToRing, pointInRing } from '../geo/poly';
 import { shapeOkObb } from './access';
 import { splitLong } from './access';
-import { tryDifference } from '../geo/bool';
+import { mpArea, tryDifference, tryIntersection } from '../geo/bool';
 
 export interface FootprintFinalInput {
   buildings: UrbanBuilding[];
@@ -21,6 +21,8 @@ export interface FootprintFinalInput {
   openQuarterEdge?: (tip: Vec2, outward: Vec2) => boolean;
   /** Prove all proposed rooms retain street access and do not disconnect block peers. */
   validateParts?: (originalIndex: number, parts: Polygon[]) => boolean;
+  /** Prove a proposed in-owner relocation misses water, roads, walls and other reserves. */
+  placementClear?: (poly: Polygon) => boolean;
 }
 export interface FootprintFinalResult { changed: Set<number>; invalid: number[]; cleaned: number; releasedArea: number }
 
@@ -71,6 +73,45 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
   let cleaned = 0, releasedArea = 0;
   const parcelIndex = new GridIndex<number>(24);
   u.parcels.forEach((p, i) => { if (p.poly.length >= 3) parcelIndex.insertPts(p.poly, i); });
+  const roofIndex = new GridIndex<number>(24);
+  u.buildings.forEach((b, i) => { if (b.poly.length >= 3) roofIndex.insertPts(b.poly, i); });
+  const relocateNarrowAnnex = (i: number, owner: UrbanParcel): Polygon | null => {
+    const b = u.buildings[i], oldArea = area(b.poly);
+    if (!u.placementClear || !u.validateParts || !owner.front || owner.use !== 'plot'
+      || !['rear', 'back'].includes(b.kind) || oldArea < 20 || oldArea > 65) return null;
+    const dx = owner.front[1].x - owner.front[0].x, dy = owner.front[1].y - owner.front[0].y;
+    const length = Math.hypot(dx, dy);
+    if (length < 4.5) return null;
+    const ux = dx / length, uy = dy / length, vx = -uy, vy = ux;
+    const center = { x: b.poly.reduce((s, p) => s + p.x, 0) / b.poly.length,
+      y: b.poly.reduce((s, p) => s + p.y, 0) / b.poly.length };
+    const shifts: { x: number; y: number }[] = [];
+    for (let x = -18; x <= 18; x += 2) for (let y = -18; y <= 18; y += 2) {
+      if (x * x + y * y <= 18 * 18) shifts.push({ x, y });
+    }
+    shifts.sort((a, c) => a.x * a.x + a.y * a.y - c.x * c.x - c.y * c.y || a.y - c.y || a.x - c.x);
+    for (const width of [5.2, 4.5, 6]) {
+      const depth = Math.max(4.5, oldArea / width);
+      if (depth / width > 3 || width * depth > 1.08 * oldArea) continue;
+      for (const shift of shifts) {
+        const cx = center.x + shift.x, cy = center.y + shift.y;
+        const rectangle = ([-1, 1] as const).flatMap((z) => ([-1, 1] as const).map((a) =>
+          ({ x: cx + a * width / 2 * ux + z * depth / 2 * vx,
+            y: cy + a * width / 2 * uy + z * depth / 2 * vy })));
+        const candidate = [rectangle[0], rectangle[1], rectangle[3], rectangle[2]];
+        if (!polyInside(owner.poly, candidate) || !u.placementClear(candidate)) continue;
+        let clear = true;
+        const bounds = bboxOf(candidate);
+        for (const j of roofIndex.query(bounds.x0, bounds.y0, bounds.x1, bounds.y1)) {
+          if (j === i) continue;
+          const hit = tryIntersection(candidate, u.buildings[j].poly);
+          if (hit.failed || mpArea(hit.pieces) > 1e-6) { clear = false; break; }
+        }
+        if (clear && u.validateParts(i, [candidate])) return candidate;
+      }
+    }
+    return null;
+  };
   const tipConstrained = (owner: number, tip: Vec2, outward: Vec2): boolean => {
     const beyond = { x: tip.x + 1.5 * outward.x, y: tip.y + 1.5 * outward.y };
     if (u.tipConstrained?.(tip, outward)) return true;
@@ -157,6 +198,14 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
     }
     if (!proper(main) || area(main) + keptExtra.reduce((s, p) => s + area(p), 0) < 0.7 * area(b.poly)
       || (u.validateParts && !u.validateParts(i, [main, ...keptExtra]))) {
+      const relocated = relocateNarrowAnnex(i, owner);
+      if (relocated) {
+        u.backLand.push({ outer: b.poly, holes: [] });
+        releasedArea += area(b.poly);
+        b.poly = relocated; roofIndex.insertPts(relocated, i);
+        if (block !== undefined) changed.add(block);
+        continue;
+      }
       invalid.push(i); continue;
     }
     b.poly = main;
