@@ -5,6 +5,9 @@ import { mpArea, tryDifference, tryIntersection } from '../src/gen/geo/bool';
 import { polyInside } from '../src/gen/geo/split';
 import { terminalTapers } from '../src/gen/urban/terminalTaper';
 import { finalizeFootprints } from '../src/gen/urban/footprintFinal';
+import { footprintPlacementGuard, physicalTipConstraint } from '../src/gen/urban/edgeFinish';
+import { blockReach, makeStreetAt } from '../src/gen/urban/access';
+import type { PolyH, UrbanStreet } from '../src/gen/types';
 import native from './fixtures/medieval-terminal-tapers.json';
 
 const rect = (x: number, y: number, w: number, h: number): Polygon => [
@@ -90,5 +93,32 @@ describe('useful terminal room widths', () => {
       placementClear: () => true, validateParts: () => true,
       openQuarterEdge: () => false, tipConstrained: () => false });
     expect(JSON.stringify(building.poly)).toBe(source);
+  });
+
+  it('fills the seeded arrow corner inside its owner without entering the actual road ribbons', () => {
+    const f = native.cases.find(c => c.id === 560)! as unknown as {
+      building: UrbanBuilding; owner: UrbanParcel; peers: UrbanBuilding[];
+      block: Polygon; streets: UrbanStreet[]; protectedLand: PolyH[];
+    };
+    const original = f.building.poly, building: UrbanBuilding = { ...f.building, parcel: 0 };
+    const peers = f.peers.map(b => ({ ...b, parcel: undefined }));
+    const streetAt = makeStreetAt(f.streets, []);
+    const before = blockReach(f.block, [original, ...peers.map(b => b.poly)], streetAt);
+    const constrained = physicalTipConstraint(f.protectedLand, () => false);
+    expect(constrained(terminalTapers(original)[0].tip, terminalTapers(original)[0].outward)).toBe(true);
+    const result = finalizeFootprints({ buildings: [building, ...peers], parcels: [f.owner], backLand: [], gardens: [],
+      placementClear: footprintPlacementGuard(f.protectedLand, () => false),
+      tipConstrained: constrained, openQuarterEdge: () => false,
+      validateParts: (_i, parts) => {
+        const after = blockReach(f.block, [...parts, ...peers.map(b => b.poly)], streetAt);
+        return after.every((reached, j) => reached || !before[j]);
+      } });
+    expect(result.removed).toEqual([]);
+    expect(terminalTapers(building.poly)).toEqual([]);
+    expect(area(building.poly)).toBeGreaterThan(area(original));
+    expect(mpArea(tryDifference(original, building.poly).pieces)).toBeLessThanOrEqual(1e-6);
+    expect(mpArea(tryDifference(building.poly, f.owner.poly).pieces)).toBeLessThanOrEqual(1e-6);
+    const added = tryDifference(building.poly, original);
+    expect(mpArea(tryIntersection(added.pieces, f.protectedLand).pieces)).toBeLessThanOrEqual(1e-6);
   });
 });

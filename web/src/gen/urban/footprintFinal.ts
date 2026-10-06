@@ -379,6 +379,34 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
     const poly = u.buildings[i].poly;
     for (const taper of terminalTapers(poly)) {
       if (commitTerminalRoom(i, owner, replaceTerminalCap(poly, taper, taper.widened), true)) return true;
+      if (!taper.vertex) continue;
+      // Symmetric widening may cross a road although the missing corner lies
+      // inside this owner. Complete that local corner from a nearby real owner
+      // vertex, with small inward offsets to preserve physical edge reserves.
+      // Require two broad turns, rather than hiding the same arrow behind a tiny step.
+      const near = owner.poly.map((p, index) => ({ p, index, distance: Math.hypot(p.x - taper.tip.x, p.y - taper.tip.y) }))
+        .filter(p => p.distance >= 0.5 && p.distance <= 6)
+        .sort((a, b) => a.distance - b.distance || a.index - b.index);
+      for (const corner of near) for (const inset of [0, 0.05, 0.1, 0.2]) for (const before of [false, true]) {
+        const a = poly[(taper.edge - 1 + poly.length) % poly.length], b = poly[(taper.edge + 1) % poly.length];
+        const p = { x: corner.p.x + inset * ((a.x + b.x) / 2 - corner.p.x),
+          y: corner.p.y + inset * ((a.y + b.y) / 2 - corner.p.y) };
+        const candidate = poly.flatMap((q, j) => j === taper.edge ? (before ? [p, q] : [q, p]) : [q]);
+        const tipIndex = taper.edge + (before ? 1 : 0), cornerIndex = taper.edge + (before ? 0 : 1);
+        if (interiorAngle(candidate, tipIndex) < 75 * Math.PI / 180
+          || interiorAngle(candidate, cornerIndex) < 75 * Math.PI / 180) continue;
+        if (commitTerminalRoom(i, owner, candidate, true)) return true;
+        // Real owner vertices can leave a sub-square-metre drafting return.
+        // Remove it only from the added corner; the lossless transaction still
+        // independently proves that every point of the original roof survives.
+        const neck = minNeck(candidate);
+        if (neck && neck.w < 3.59) {
+          const cut = splitByChord(lpoly(candidate, 0), [neck.a, neck.b], 0, 0.02);
+          const parts = cut?.map(p => p.pts).sort((a, b) => area(b) - area(a));
+          if (parts && area(parts[1]) <= 1 && area(parts[1]) <= 0.005 * area(candidate)
+            && commitTerminalRoom(i, owner, parts[0], true)) return true;
+        }
+      }
     }
     return false;
   };
