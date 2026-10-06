@@ -7,6 +7,7 @@ import { shapeOkObb, blockReach, makeStreetAt } from '../src/gen/urban/access';
 import { streetStrips } from '../src/gen/urban/openfringe';
 import { polyInside } from '../src/gen/geo/split';
 import { reconstructCompactRoom } from '../src/gen/urban/compactRoom';
+import { reconstructSmallPlotRoom } from '../src/gen/urban/smallPlotRoom';
 import { finalizeFootprints } from '../src/gen/urban/footprintFinal';
 import native from './fixtures/compact-pins-v11.json';
 import roofPeer from './fixtures/urban-roof-peer-v13.json';

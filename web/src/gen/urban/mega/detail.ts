@@ -25,7 +25,8 @@ import { buildOn, type ArchBldg } from '../bops';
 import { chamferPersianHouse } from '../persianhouse';
 import { finishEdgeRoofs } from '../edgeRoofs';
 import { finalizeFootprints } from '../footprintFinal';
-import { finishOpenEdges, markPlannedTerminalPlots, physicalTipConstraint, openQuarterEdge, footprintAccessGuard, footprintPlacementGuard, quarterRoofCollar } from '../edgeFinish';
+import { privatePassageAccess, type PrivatePassage } from '../privatePassage';
+import { finishOpenEdges, markPlannedTerminalPlots, physicalTipConstraint, openQuarterEdge, footprintPlacementGuard, quarterRoofCollar } from '../edgeFinish';
 import { naturalGroundEligible } from '../../landuse/urbanGround';
 import { streetStrips } from '../openfringe';
 import { blockReach, carvePassage, makeStreetAt, splitLong, frontRangeDepth, shapeOkObb } from '../access';
@@ -439,13 +440,23 @@ export function megaQuarterDetail(world: World, key: number): UrbanLayer | null 
   };
   finishEdgeRoofs(detailPartition);
   const releasedFootprintLand: PolyH[] = [];
+  const privatePassages: PrivatePassage[] = [];
+  const placementClear = footprintPlacementGuard(detailProtectedLand, p => ctx.isWater(p) || ctx.slopeAt(p) > 0.28);
+  const privateAccess = privatePassageAccess({ buildings, parcels, blocks: carved.map(b => b.poly),
+    streets: local.list.filter(s => s.ribbon).map(s => ({ path: s.path, widths: s.widths, width: s.widths[0] })),
+    places: parcels.filter(p => ['place', 'market', 'quay', 'green'].includes(String(p.use))).map(p => p.poly),
+    publicGround: detailPartition.streetSpace.flat(), footprint: detailPartition.footprint,
+    passages: privatePassages, placementClear });
   finalizeFootprints({ buildings, parcels, backLand: releasedFootprintLand, gardens: plotGardens,
-    placementClear: footprintPlacementGuard(detailProtectedLand, p => ctx.isWater(p) || ctx.slopeAt(p) > 0.28),
+    placementClear, privatePassages, ...privateAccess,
     tipConstrained: physicalTipConstraint(detailProtectedLand, ctx.isWater),
-    openQuarterEdge: openQuarterEdge(M.quarters),
-    validateParts: footprintAccessGuard(buildings, parcels, carved.map((b) => b.poly), makeStreetAt(
-      local.list.filter((s) => s.ribbon).map((s) => ({ path: s.path, widths: s.widths, width: s.widths[0] })),
-      parcels.filter((p) => ['place', 'market', 'quay', 'green'].includes(String(p.use))).map((p) => p.poly))) });
+    openQuarterEdge: openQuarterEdge(M.quarters) });
+  for (const passage of privatePassages) {
+    const phase = carved[parcels[passage.parcel].block]?.phase ?? mq.phase;
+    const sid = local.add(passage.path, passage.width, 4, 'close', phase);
+    local.list[sid].private = true;
+    local.connected.add(sid);
+  }
   const perBlock: Polygon[][] = carved.map(() => []);
   for (const b of buildings) if (b.parcel !== undefined) perBlock[parcels[b.parcel].block].push(b.poly);
   const masses: PolyH[] = [];
@@ -453,6 +464,7 @@ export function megaQuarterDetail(world: World, key: number): UrbanLayer | null 
   const streets: UrbanStreet[] = local.list.slice(nMacro).filter((s) => s.ribbon).map((s) => ({
     path: s.path, width: s.widths.reduce((a, b) => a + b, 0) / s.widths.length, widths: s.widths,
     kind: s.rank <= 1 ? 'main' : s.rank <= 2 ? 'street' : 'alley', rank: s.rank, role: s.role, phase: s.phase,
+    ...(s.private ? { private: true } : {}),
   }));
   if (host.renderHints?.carvedDoors) lines.push(...swahiliDoorLines(buildings, parcels));
   if (host.renderHints?.primitive) lines.push(...primitiveGardenLines(mq.culture, parcels));

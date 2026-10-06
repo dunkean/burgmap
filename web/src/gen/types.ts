@@ -166,6 +166,8 @@ export interface UrbanStreet {
   rank: number;
   role: StreetRole;
   phase: number;
+  /** A proved pedestrian entrance inside a private plot, rendered as an alley. */
+  private?: boolean;
 }
 export type UrbanStreetTailKind = 'regionalContinuation' | 'urbanJunction' | 'servedDeadEnd' | 'fieldOrFarmAccess' | 'physicalBarrier' | 'unservedOpenEdge';
 /** A classification of one physical street end; distances are metres along its original path. */

@@ -19,6 +19,8 @@ export interface StreetRec {
   phase: number;
   /** false for zero-width guide lines (e.g. none yet). */
   ribbon: boolean;
+  /** Private pedestrian access does not alter the public cadastral partition. */
+  private?: boolean;
 }
 
 export class Streets {

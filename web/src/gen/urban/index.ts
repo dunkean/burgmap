@@ -75,7 +75,8 @@ import { servedFootprint } from './footprint';
 import { finishEdgeRoofs } from './edgeRoofs';
 import { repairResidentialDensity } from './densityRepair';
 import { finalizeFootprints } from './footprintFinal';
-import { finishOpenEdges, markPlannedTerminalPlots, physicalTipConstraint, openQuarterEdge, footprintAccessGuard, footprintPlacementGuard } from './edgeFinish';
+import { privatePassageAccess, type PrivatePassage } from './privatePassage';
+import { finishOpenEdges, markPlannedTerminalPlots, physicalTipConstraint, openQuarterEdge, footprintPlacementGuard } from './edgeFinish';
 
 export interface UrbanResult { layer: UrbanLayer; stats: Record<string, number | string>; debug: UrbanDebug }
 export interface UrbanDebug { quarters: { poly: Polygon; phase: number; lab: number[] }[] }
@@ -1108,12 +1109,22 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   // inside existing plots after roof styling, preserving every planning frame and the seeded dwelling counts.
   const densityRepair = repairResidentialDensity({ ...edgePartition, morphology: (bi: number) => blockMorph[bi] });
   const releasedFootprintLand: PolyH[] = [];
+  const privatePassages: PrivatePassage[] = [];
+  const placementClear = footprintPlacementGuard(edgePartition.protectedLand, p => ctx.isWater(p) || ctx.slopeAt(p) > 0.28);
+  const privateAccess = privatePassageAccess({ buildings, parcels, blocks: carved.map(b => b.poly),
+    streets: streets.list.filter(s => s.ribbon).map(s => ({ path: s.path, widths: s.widths, width: s.widths[0] })),
+    places: accessPlaces(), publicGround: streetSpace.flat(), footprint: edgePartition.footprint,
+    passages: privatePassages, placementClear });
   const footprintFinal = finalizeFootprints({ buildings, parcels, backLand: releasedFootprintLand, gardens: plotGardens,
-    placementClear: footprintPlacementGuard(edgePartition.protectedLand, p => ctx.isWater(p) || ctx.slopeAt(p) > 0.28),
+    placementClear, privatePassages, ...privateAccess,
     tipConstrained: physicalTipConstraint(edgePartition.protectedLand, ctx.isWater),
-    openQuarterEdge: openQuarterEdge(prim.quarters.map((q) => q.lp)),
-    validateParts: footprintAccessGuard(buildings, parcels, carved.map((b) => b.poly), makeStreetAt(
-      streets.list.filter((s) => s.ribbon).map((s) => ({ path: s.path, widths: s.widths, width: s.widths[0] })), accessPlaces())) });
+    openQuarterEdge: openQuarterEdge(prim.quarters.map((q) => q.lp)) });
+  for (const passage of privatePassages) {
+    const phase = carved[parcels[passage.parcel].block]?.phase ?? 0;
+    const id = streets.add(passage.path, passage.width, 4, 'close', phase);
+    streets.list[id].private = true;
+    streets.connected.add(id);
+  }
   stats['footprint.cleaned'] = footprintFinal.cleaned;
   stats['footprint.invalid'] = footprintFinal.invalid.length;
   stats['footprint.releasedArea'] = footprintFinal.releasedArea;
@@ -1140,6 +1151,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
   const layerStreets: UrbanStreet[] = streets.list.filter((s) => s.ribbon).map((s) => ({
     path: s.path, width: s.widths.reduce((a, b) => a + b, 0) / s.widths.length, widths: s.widths,
     kind: s.rank <= 1 ? 'main' : s.rank <= 2 ? 'street' : 'alley', rank: s.rank, role: s.role, phase: s.phase,
+    ...(s.private ? { private: true } : {}),
   }));
   // A retained coarse footprint component may still contain districts that never got connected
   // quarters. Resolve only the exported footprint here, after all seeded urban work is complete.

@@ -31,7 +31,7 @@ export function protectedGround(u: UrbanLayer, appearance?: World, material: Gro
     ...u.landmarks.filter((l) => l.kind !== 'camp-ground').map((l) => piece(l.poly)),
     // A macro quarter extends to arterial centre lines. Keep the host's real street ribbons paved until the
     // quarter's exact blocks take over; ordinary eager/detail blocks already exclude their street space.
-    ...(u.macro && !material.earthStreets ? u.streets.filter((st) => st.path.length >= 2).map((st) => piece(
+    ...(!material.earthStreets ? u.streets.filter((st) => (u.macro || st.private) && st.path.length >= 2).map((st) => piece(
       offsetRibbon(st.path, st.widths ?? st.path.map(() => st.width)))) : []),
   ];
 }
