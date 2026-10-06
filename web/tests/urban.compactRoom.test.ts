@@ -37,6 +37,40 @@ const proper = (p: Polygon): boolean => p.length >= 3 && isSimple(p) && area(p) 
   && (minNeck(p)?.w ?? Infinity) >= 3.59;
 
 describe('compact recovery on six pinned native blocks', () => {
+  for (const id of [180, 845]) it(`refuses a retained room overlapping a live peer in pinned roof ${id}`, () => {
+    const f = fixture.cases.find((c) => c.i === id)!;
+    const baseline = [{ poly: f.roof, kind: id === 180 ? 'rear' : 'back', parcel: 0 }];
+    finalizeFootprints({ buildings: baseline,
+      parcels: [{ poly: f.owner, front: f.front, use: 'plot', block: 0 }], backLand: [],
+      placementClear: () => true, validateParts: () => true,
+      privatePassages: [], proposePrivatePassage: () => true });
+    const main = baseline[0].poly;
+    const center = inscribed(main, [], 0.05).c;
+    const intruder: Polygon = [{ x: center.x - 0.8, y: center.y - 0.8 },
+      { x: center.x + 0.8, y: center.y - 0.8 },
+      { x: center.x + 0.8, y: center.y + 0.8 },
+      { x: center.x - 0.8, y: center.y + 0.8 }];
+    expect(mpArea(tryIntersection(main, intruder).pieces)).toBeGreaterThan(2);
+    const buildings = [{ poly: f.roof, kind: id === 180 ? 'rear' : 'back', parcel: 0 },
+      { poly: intruder, kind: 'landmark' }];
+    const backLand: { outer: Polygon; holes: Polygon[] }[] = [];
+    const privatePassages: { path: Vec2[]; width: number; parcel: number }[] = [];
+    const original = JSON.stringify(buildings[0].poly);
+    const result = finalizeFootprints({ buildings,
+      parcels: [{ poly: f.owner, front: f.front, use: 'plot', block: 0 }],
+      backLand, privatePassages,
+      placementClear: (poly) => {
+        const added = tryDifference(poly, f.roof);
+        return !added.failed && mpArea(added.pieces) <= 1e-6;
+      },
+      validateParts: () => true,
+      proposePrivatePassage: () => true });
+    expect(result.invalid).toContain(0);
+    expect(JSON.stringify(buildings[0].poly)).toBe(original);
+    expect(buildings).toHaveLength(2);
+    expect(backLand).toEqual([]);
+    expect(privatePassages).toEqual([]);
+  });
   it('replaces a narrow craft wing with a physical-clear served workshop in the same plot', () => {
     const f = workshop as unknown as { i: number; roof: Polygon; owner: Polygon; front: [Vec2, Vec2];
       block: Polygon; peers: { i: number; poly: Polygon }[];
@@ -175,6 +209,7 @@ describe('compact recovery on six pinned native blocks', () => {
       ...f.occupied.map((poly) => ({ poly, kind: 'landmark', parcel: 0 }))];
     const backLand: { outer: Polygon; holes: Polygon[] }[] = [];
     const privatePassages: { path: Vec2[]; width: number; parcel: number }[] = [];
+    let approvedPath: Vec2[] | undefined;
     const before = blockReach(f.block, f.peers.map((p) => p.poly), streetAt);
     const validatePassage = (_: number, main: Polygon, path: Vec2[], width: number): boolean => {
       const corridor = streetStrips(path, width);
@@ -194,7 +229,11 @@ describe('compact recovery on six pinned native blocks', () => {
     const result = finalizeFootprints({ buildings,
       parcels: [{ poly: f.owner, front: f.front, use: 'plot', block: 0 }], backLand, privatePassages,
       placementClear: (p) => !tryIntersection(p, reserve).failed && mpArea(tryIntersection(p, reserve).pieces) <= 1e-6,
-      proposePrivatePassage: validatePassage,
+      proposePrivatePassage: (i, main, path, width) => {
+        if (!validatePassage(i, main, path, width)) return false;
+        approvedPath = path.map((p) => ({ ...p }));
+        return approvedPath;
+      },
       validateParts: (_, parts) => {
         const proposed = f.peers.flatMap((peer) => peer.i === f.i ? parts : [peer.poly]);
         const after = blockReach(f.block, proposed, streetAt);
@@ -204,6 +243,8 @@ describe('compact recovery on six pinned native blocks', () => {
     expect(result.invalid).not.toContain(0);
     expect(privatePassages).toHaveLength(1);
     expect(privatePassages[0].width).toBe(0.8);
+    expect(privatePassages[0].path).toEqual(approvedPath);
+    expect(privatePassages[0].path).not.toBe(approvedPath);
     expect(area(buildings[0].poly)).toBeGreaterThan(100);
     expect(area(buildings[0].poly) + mpArea(backLand)).toBeCloseTo(area(f.roof), 5);
     const denied = [{ poly: f.roof, kind: 'back', parcel: 0 }];
