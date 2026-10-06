@@ -13,6 +13,7 @@ import { servedStreetPath } from '../gen/urban/openTails';
 import { worldGroundAppearance, earthCourt, type GroundAppearance } from '../gen/landuse/groundAppearance';
 import { plotLines } from './plotLines';
 import { worldCampCover } from './campCover';
+import { worldForestClearings } from './forestClearings';
 import { renderView } from '../gen/settlements/merge';
 import { seaWithIslands } from './util';
 import { farmPlots, farmRidges, treePolys } from './farms';
@@ -174,6 +175,7 @@ export interface SceneBuildOptions {
   appearance?: GroundAppearance;
   plotBoundary?: PolyH[];
   cover?: LandArea[];
+  forestClearings?: PolyH[];
   /** Geometry-only parts use one compact index; polyline chunk lengths remain unchanged. */
   indexTileSize?: number;
 }
@@ -302,6 +304,7 @@ export function buildScene(world0: World, tileSize = TILE_SIZE, build: SceneBuil
   const ur = world.urban;
   if (ur && build.scope !== 'static') {
     const addH = (name: string, l: PolyH[]): void => addPoly(name, l.map((p) => p.outer), l.map((p) => (p.holes.length ? p.holes : undefined)));
+    addH('u-forest-clearings', build.forestClearings ?? worldForestClearings(world0));
     const fringe = !build.skipGround && world0.landuse?.landscapeGround === undefined ? countrysideFringe(world0) : { bands: [], ground: [], streets: [] };
     fringe.bands.forEach((pieces, i) => addH('u-country-fringe-' + i, pieces));
     addH('u-country-fringe', fringe.ground);

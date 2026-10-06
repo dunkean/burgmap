@@ -50,6 +50,12 @@ describe('incremental urban scene', () => {
     expect(after.poly.get('lu-meadow')).toBe(before.poly.get('lu-meadow')); expect(after.textures).toBe(before.textures);
     expect(after.poly.get('u-masses')!.tileKeys![nearOther]).toBe(otherKey);
     for (const [name, layer] of legacy.poly) if (name !== 'u-landscape-ground' && name !== 'u-stroke-space') {
+      if (name === 'u-forest-clearings') {
+        // Exclusions are a union; retained parts group quarters by owner.
+        const shapes = (l: typeof layer) => l.polys.map((outer, i) => JSON.stringify({ outer, holes: l.holes?.[i] ?? [] })).sort();
+        expect(shapes(after.poly.get(name)!)).toEqual(shapes(layer));
+        continue;
+      }
       expect(after.poly.get(name)?.polys, name).toEqual(layer.polys);
       expect(after.poly.get(name)?.polys.map((_, i) => after.poly.get(name)?.holes?.[i]), name).toEqual(layer.polys.map((_, i) => layer.holes?.[i]));
     }

@@ -4,6 +4,7 @@ import type { World, UrbanLayer, PolyH } from '../gen/types';
 import { LandscapeGroundCache } from '../gen/landuse/landscapeGround';
 import { groundAppearance } from '../gen/landuse/groundAppearance';
 import { campCover } from './campCover';
+import { forestClearings, forestBase } from './forestClearings';
 import { megaView, placeholderUrban, mergeUrban } from '../gen/settlements/merge';
 import { fabricBudget } from '../gen/urban/mega/standin';
 import { MEGA_KEY } from '../gen/urban/mega/types';
@@ -115,7 +116,7 @@ export class SceneBuilder {
     const variant = `${budget.blocks},${budget.masses}`;
     const coverOwners = [...hosts.map((h) => h.urban), ...Object.values(world.megaDetail ?? {})].filter((u): u is UrbanLayer => !!u);
     const hasQuarters = hosts.some((h) => h.urban?.quarters.length) || Object.values(world.megaDetail ?? {}).some((u) => u.quarters.length);
-    const add = (key: string, source: unknown, make: () => UrbanLayer, ground: () => PolyH[], suffix = '', dependencyOwner?: UrbanLayer): Part => {
+    const add = (key: string, source: unknown, make: () => UrbanLayer, ground: () => PolyH[], suffix = '', dependencyOwner?: UrbanLayer, forestExtent?: PolyH[]): Part => {
       const shape = variant + '|' + hasQuarters + '|' + suffix;
       const old = this.parts.get(key);
       let part = old;
@@ -126,7 +127,8 @@ export class SceneBuilder {
         // Parts need geometry preparation, not a map-wide dense grid each. The joined scene indexes them once.
         const scene = buildScene(world, this.tileSize, { scope: 'urban', indexTileSize: world.mapSize, rendered: input, skipGround: true, ground: ground(),
           strokeSpace: hasQuarters && !u.quarters.length ? [] : undefined, appearance: groundAppearance(sourceUrban, world),
-          plotBoundary: dependencyOwner?.footprintH ?? sourceUrban.footprintH, cover: campCover(world, sourceUrban) });
+          plotBoundary: dependencyOwner?.footprintH ?? sourceUrban.footprintH, cover: campCover(world, sourceUrban),
+          forestClearings: forestClearings(sourceUrban, world, forestExtent) });
         part = { source, owner: dependencyOwner, coverOwners: sourceUrban.renderHints?.openGround ? coverOwners : undefined,
           variant: shape, scene, urban: u, id: nextPart++, bounds: bounds(scene) }; this.stats.partBuilds++;
         if (old?.bounds) dirty.push(old.bounds); if (part.bounds) dirty.push(part.bounds);
@@ -146,17 +148,19 @@ export class SceneBuilder {
       const owner = u, M = u.macro;
       if (!M) renderedHosts.push(add(`s:${host.index}`, u, () => owner, () => this.ground.layer(owner), host.index ? 'secondary' : 'main').urban);
       else {
-        add(`s:${host.index}`, u, () => ({ ...owner, macro: undefined, blocks: [], blockInfo: [], parcels: [], masses: [] }), () => [], 'base');
+        add(`s:${host.index}`, u, () => ({ ...owner, macro: undefined, blocks: [], blockInfo: [], parcels: [], masses: [] }), () => [], 'base', undefined, forestBase(owner));
         const standins: UrbanLayer[] = [], details: UrbanLayer[] = [];
         for (const q of M.quarters) {
           const key = host.index * MEGA_KEY + q.id;
           if (world.megaDetail?.[key]) continue;
-          standins.push(add(`q:${key}`, q, () => megaView({ ...emptyUrban(owner), macro: { ...M, quarters: [q] } }, undefined, budget), () => this.ground.quarter(owner, q), '', owner).urban);
+          standins.push(add(`q:${key}`, q, () => megaView({ ...emptyUrban(owner), macro: { ...M, quarters: [q] } }, undefined, budget), () => this.ground.quarter(owner, q), '', owner,
+            q.district === 'gardens' ? [] : [{ outer: q.pts, holes: [] }]).urban);
         }
         for (const key of Object.keys(world.megaDetail ?? {}).map(Number).filter((k) => Math.floor(k / MEGA_KEY) === host.index).sort((a, b) => a - b)) {
           const detail = world.megaDetail![key];
           const q = M.quarters.find((q) => q.id === key % MEGA_KEY);
-          details.push(add(`q:${key}`, detail, () => detail, () => this.ground.layer(detail, 0, q?.pts, owner), 'detail', owner).urban);
+          details.push(add(`q:${key}`, detail, () => detail, () => this.ground.layer(detail, 0, q?.pts, owner), 'detail', owner,
+            q ? q.district === 'gardens' ? [] : [{ outer: q.pts, holes: [] }] : undefined).urban);
         }
         // Reconstruct megaView's base with retained stand-ins. Keep its original quarter metadata;
         // mergeUrban on each stand-in would incorrectly offset the macro quarter ids.

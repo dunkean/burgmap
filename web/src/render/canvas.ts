@@ -21,6 +21,7 @@ import { biomePalette } from './biomes';
 import { fieldHedgeStyle } from './hedges';
 import { furrowLines, furrowSpacing } from './furrows';
 import { orientPos } from '../gen/geo/poly';
+import { unionMany } from '../gen/geo/bool';
 import { CANVAS_MAP_STROKES as MAP_STROKES, mapStrokeWidth } from './strokes';
 import { NATURAL_LAND_KINDS, countryKind, FRINGE_ORDER, FRINGE_PAINT } from './countryside';
 import { TERRACE_STROKES as TS, terraceDetailAlpha } from './terraces';
@@ -268,6 +269,28 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
       for (const t of tiles) for (const i of l.index.itemsOf(t)) ids.push(i);
       ids.push(...big);
       return polyPath(P, l, ids, 0);
+    });
+  }
+
+  /** Quarter masks preserve explicit park/garden holes; their union remains exact across retained parts. */
+  function forestClip(rect: Rect4): Path2D | null {
+    const l = polyL('u-forest-clearings');
+    if (!l) return null;
+    const view = { minX: rect.minX - 20, minY: rect.minY - 20, maxX: rect.maxX + 20, maxY: rect.maxY + 20 };
+    const tiles = l.index.tilesInRect(view), big = l.index.bigInRect(view);
+    const stamp = tiles.map((t) => `${t}:${l.tileKeys?.[t] ?? ''}`).join(';') + '|' + big.map((i) =>
+      `${i}:${l.bigKeys?.[Array.prototype.indexOf.call(l.index.big, i)] ?? ''}`).join(';');
+    return cached(`u-forest-clearings|clip|${stamp}`, () => {
+      const ids = new Set<number>(big);
+      for (const t of tiles) for (const i of l.index.itemsOf(t)) ids.add(i);
+      const excluded = unionMany([...ids].map((i) => ({ outer: l.polys[i], holes: l.holes?.[i] ?? [] })), 24, true);
+      const p = new P();
+      addRing(p, [{ x: 0, y: 0 }, { x: S, y: 0 }, { x: S, y: S }, { x: 0, y: S }]);
+      for (const shape of excluded) {
+        addRing(p, orientPos(shape.outer).slice().reverse());
+        for (const h of shape.holes) addRing(p, orientPos(h));
+      }
+      return p;
     });
   }
 
@@ -622,6 +645,7 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
       if (!luOn) break;
       const name = 'lu-' + kind;
       if (!polyL(name)) continue;
+      if (kind === 'forest') { ctx.save(); const clip = forestClip(rect); if (clip) ctx.clip(clip, 'nonzero'); }
       multiply(true);
       fillPolys(name, pal.land[kind], kind === 'forest' ? 0.7 : luAlpha);
       multiply(false);
@@ -660,6 +684,7 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
       if (kind === 'forest' && lod.strips) strokePolys(name, pal.treeInk, lw(0.7, 0.8), pal.tex.forest ? 0.5 : 0.35);
       if (brushes && lod.textures && (kind === 'field' || (kind === 'garden' && brushTextureOn(kind, pal, world.options.biome)))) brushFill(name, kind, sc);
       if ((kind === 'orchard' || kind === 'garden') && lod.strips) strokePolys(name, pal.hedge, lw(0.8, 0.8), 0.7);
+      if (kind === 'forest') ctx.restore();
     }
     const fu = Math.max(1, u);
     // field network: ways, headlands, hedgerows (+ trees near). Ways and headlands are subtle earth-toned hairlines
@@ -924,9 +949,11 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
           if (luOn) {
             for (const kind of NATURAL_LAND_KINDS) {
               const name = 'lu-' + kind;
+              if (kind === 'forest') { ctx.save(); const clip = forestClip(rect); if (clip) ctx.clip(clip, 'nonzero'); }
               multiply(true); fillPolys(name, pal.land[kind], kind === 'forest' ? 0.7 : luAlpha); multiply(false);
               multiply(true); fillPolys('u-cover-' + kind, pal.land[kind], kind === 'forest' ? 0.7 : luAlpha); multiply(false);
               if (kind === 'forest' && lod.strips) strokePolys(name, pal.treeInk, lw(0.7, 0.8), pal.tex.forest ? 0.5 : 0.35);
+              if (kind === 'forest') ctx.restore();
             }
             if (lod.textures) for (const tl of scene.textures) {
               if ((NATURAL_LAND_KINDS as readonly string[]).includes(tl.kind) && (pal.tex[tl.kind] || (brushes && isBrushKind(tl.kind) && brushTextureOn(tl.kind, pal, world.options.biome)))) fs.textureTiles += drawTexture(ctx, tl, rect, band, lw, budgetRect);
@@ -1278,6 +1305,13 @@ export function createCanvasRenderer(canvas: CanvasLike, world0: World, style: M
   }
 
   function drawTexture(ctx: CanvasRenderingContext2D, tl: TextureLayer, rect: Rect4, band: number, lw: (w: number, m: number) => number, budgetRect: Rect4 = rect): number {
+    if (tl.kind !== 'forest') return drawTextureMarks(ctx, tl, rect, band, lw, budgetRect);
+    ctx.save(); const clip = forestClip(rect); if (clip) ctx.clip(clip, 'nonzero');
+    try { return drawTextureMarks(ctx, tl, rect, band, lw, budgetRect); }
+    finally { ctx.restore(); }
+  }
+
+  function drawTextureMarks(ctx: CanvasRenderingContext2D, tl: TextureLayer, rect: Rect4, band: number, lw: (w: number, m: number) => number, budgetRect: Rect4): number {
     if (brushes && isBrushKind(tl.kind) && tl.index.tilesInRect(budgetRect).length <= 500) {
       const k = tl.kind, sc = ctx.getTransform().a / (deps.dpr ?? 1);
       const pattern = brushes.pattern(ctx, k, sc, deps.dpr ?? 1);

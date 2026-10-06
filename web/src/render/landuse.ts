@@ -96,7 +96,7 @@ function patterns(world: World, pal: Palette, s: number, scale: number): string 
   return `<defs>${out.join('')}</defs>`;
 }
 
-export function landuseLayer(world: World, pal: Palette, u: number, scale = 1600 / world.mapSize, brushes?: SvgBrushes): string {
+export function landuseLayer(world: World, pal: Palette, u: number, scale = 1600 / world.mapSize, brushes?: SvgBrushes, forestMask = ''): string {
   const lu = world.landuse;
   if (!lu) return '';
   const s = Math.max(1, u);
@@ -106,7 +106,7 @@ export function landuseLayer(world: World, pal: Palette, u: number, scale = 1600
   for (const kind of order) {
     const list = lu.areas.filter((a) => a.kind === kind);
     if (!list.length) continue;
-    out += `<g class="lu-${kind}">`;
+    out += `<g class="lu-${kind}"${kind === 'forest' ? forestMask : ''}>`;
     if (kind === 'field' && !isUnderdarkBiome(world.options.biome)) {
       out += `<g fill="${pal.land.field}" fill-opacity="${pal.landOpacity}" fill-rule="evenodd"${mul(pal)}>${list.map((a) => `<path d="${ringsD(a)}"/>`).join('')}</g>`;
       // strips: each holder's strip has its own tone; one furrow-textured path per furlong (its own direction)
@@ -148,7 +148,7 @@ function coverAreasSvg(kind: LandKind, list: LandArea[], pal: Palette, s: number
 }
 
 /** Replays actual natural areas under a caller's occupation clip; it never invents forest or draws agriculture. */
-export function naturalLanduseLayer(world: World, pal: Palette, u: number, ground?: PolyH[], cover: LandArea[] = [], brushes?: SvgBrushes): string {
+export function naturalLanduseLayer(world: World, pal: Palette, u: number, ground?: PolyH[], cover: LandArea[] = [], brushes?: SvgBrushes, forestMask = ''): string {
   const s = Math.max(1, u), boxes = ground?.map((p) => bboxOf(p.outer));
   const relevant = (a: LandArea): boolean => {
     if (!boxes) return true;
@@ -158,9 +158,9 @@ export function naturalLanduseLayer(world: World, pal: Palette, u: number, groun
   let out = '<g class="u-natural-cover" stroke-linejoin="round">';
   for (const kind of NATURAL_LAND_KINDS) {
     const areas = (world.landuse?.areas ?? []).filter((a) => a.kind === kind && relevant(a));
-    if (areas.length) out += `<g class="lu-${kind}">${coverAreasSvg(kind, areas, pal, s, true, brushes, world.options.biome)}</g>`;
+    if (areas.length) out += `<g class="lu-${kind}"${kind === 'forest' ? forestMask : ''}>${coverAreasSvg(kind, areas, pal, s, true, brushes, world.options.biome)}</g>`;
     const added = cover.filter((a) => a.kind === kind && relevant(a));
-    if (added.length) out += `<g class="u-cover-${kind}">${coverAreasSvg(kind, added, pal, s, false, brushes, world.options.biome)}</g>`;
+    if (added.length) out += `<g class="u-cover-${kind}"${kind === 'forest' ? forestMask : ''}>${coverAreasSvg(kind, added, pal, s, false, brushes, world.options.biome)}</g>`;
   }
   return out + '</g>';
 }

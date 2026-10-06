@@ -62,7 +62,7 @@ describe('natural cover in unoccupied urban plots', () => {
     expect(svg).toContain('<use href="#regional-road-ground"');
   });
 
-  it('rasterizes real forest over an empty interior more than 80 m from the settlement edge', () => {
+  it('keeps continuous soil in an empty urban interior without replaying forest there', () => {
     const w = world(), before = JSON.stringify(w);
     const open = new Resvg(renderSvg(w, { ...options, raster: false })).render();
     const closed = { ...w, landuse: { ...w.landuse!, naturalGround: [] }, urban: { ...w.urban!, phases: [{ id: 0, kind: 'core' as const, zone: 'core' as const,
@@ -71,11 +71,9 @@ describe('natural cover in unoccupied urban plots', () => {
     const pal = biomePalette('parchment', w.options.biome);
     expect(pal.landBlend).toBe('multiply');
     const channels = (hex: string): number[] => [1, 3, 5].map((at) => Number.parseInt(hex.slice(at, at + 2), 16));
-    // Observed in Resvg: the unmasked global group uses simple alpha, while this clip uses real multiply.
-    // Verify the actual palette over restored paper, rather than the urban yard or a different blending context.
     const paper = channels(pal.paper), forest = channels(pal.land.forest);
-    const expected = paper.map((channel, i) => Math.round(channel * (0.3 + 0.7 * forest[i] / 255)));
-    expect(distance(pixel(open, 600, 600), expected)).toBeLessThan(4);
+    expect(distance(pixel(open, 600, 600), paper)).toBeLessThan(4);
+    expect(distance(pixel(open, 600, 600), forest)).toBeGreaterThan(8);
     expect(distance(pixel(open, 600, 600), pixel(opaque, 600, 600))).toBeGreaterThan(8);
     for (const [x, y] of [[415, 415], [300, 500], [665, 345]]) {
       expect(pixel(open, x, y)).toEqual(pixel(opaque, x, y));
@@ -125,7 +123,7 @@ describe('natural cover in unoccupied urban plots', () => {
     expect(distance(pixel(image, 600, 600), pixel(noRaster, 600, 600))).toBeGreaterThan(4);
   });
 
-  it('replays forest in Canvas only under the common occupation clip', () => {
+  it('excludes Canvas forest throughout the quarter while keeping exterior forest eligible', () => {
     const w = world(), m = mockCanvas(900, 700), ctx = m.canvas.getContext('2d') as Record<string, unknown>;
     let clip: RecordingPath | undefined;
     const stack: (RecordingPath | undefined)[] = [], replays: RecordingPath[] = [];
@@ -140,7 +138,9 @@ describe('natural cover in unoccupied urban plots', () => {
     };
     const r = createCanvasRenderer(m.canvas as unknown as CanvasLike, w, 'parchment', { Path2D: RecordingPath as never, dpr: 1, terrain: () => null });
     r.draw({ cx: 500, cy: 500, scale: 0.6 });
-    expect(replays.some((p) => p.contains(600, 600))).toBe(true);
+    expect(replays.length).toBeGreaterThan(0);
+    expect(replays.every((p) => !p.contains(600, 600))).toBe(true);
+    expect(replays.some((p) => p.contains(900, 900))).toBe(true);
     for (const p of replays) for (const [x, y] of [[415, 415], [300, 500], [665, 345]]) expect(p.contains(x, y)).toBe(false);
   });
 

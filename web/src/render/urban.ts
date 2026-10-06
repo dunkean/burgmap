@@ -360,7 +360,7 @@ function openGroundPathsSvg(ub: NonNullable<World['urban']>, pal: Palette, sand 
   return s;
 }
 
-export function urbanLayer(world: World, pal: Palette, u: number, debug: boolean, fringe: CountryFringe = { bands: [], ground: [], streets: [] }, raster = true, landuse = world.options.landuse, naturalGround: PolyH[] = [], contours = world.options.contours, landscapeGround: PolyH[] = [], appearance?: GroundAppearance, cover: LandArea[] = [], brushes?: SvgBrushes): string {
+export function urbanLayer(world: World, pal: Palette, u: number, debug: boolean, fringe: CountryFringe = { bands: [], ground: [], streets: [] }, raster = true, landuse = world.options.landuse, naturalGround: PolyH[] = [], contours = world.options.contours, landscapeGround: PolyH[] = [], appearance?: GroundAppearance, cover: LandArea[] = [], brushes?: SvgBrushes, forestMask = ''): string {
   if (debug) return urbanDebugLayer(world, u);
   const ub = world.urban;
   if (!ub) return '';
@@ -437,7 +437,7 @@ export function urbanLayer(world: World, pal: Palette, u: number, debug: boolean
     s += `<defs><clipPath id="urban-${name}"><path d="${d}" clip-rule="nonzero"/></clipPath></defs><g class="u-${name}" clip-path="url(#urban-${name})">`;
     s += raster ? '<use href="#terrain-ground" xlink:href="#terrain-ground"/>' : `<path d="${d}" fill="${pal.paper}" fill-rule="nonzero"/>`;
     if (contours) s += '<use href="#terrain-contour-ground" xlink:href="#terrain-contour-ground"/>';
-    if (landuse) s += naturalLanduseLayer(world, pal, u, restoredGround, cover, brushes);
+    if (landuse) s += naturalLanduseLayer(world, pal, u, restoredGround, cover, brushes, forestMask);
     // Regional roads retain their exact style/export width where it exceeds the physical occupation guard.
     s += '<use href="#regional-road-ground" xlink:href="#regional-road-ground"/>';
     // Native paths were painted before the opaque landscape. Replay only their overwritten pixels under this

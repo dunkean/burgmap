@@ -156,19 +156,24 @@ describe('opaque landscape ground across settlement models', () => {
     expect(pixel(townNoRaster, 480, 500)).toEqual(pixel(outsideNoRaster, 480, 500));
   });
 
-  it('uses the same nonzero ground clip for Canvas vegetation and excludes actual paving', () => {
+  it('combines the ground clip with the quarter forest exclusion, including empty plots', () => {
     const w = fixture(), m = mockCanvas(900, 700), ctx = m.canvas.getContext('2d') as Record<string, unknown>;
-    let clip: RecordingPath | undefined;
-    const stack: (RecordingPath | undefined)[] = [], clips: RecordingPath[] = [];
+    let clip: RecordingPath[] = [];
+    const stack: RecordingPath[][] = [], clips: RecordingPath[][] = [];
     const fill = ctx.fill as (...args: unknown[]) => void, pal = biomePalette('parchment', w.options.biome);
-    ctx.save = () => { stack.push(clip); }; ctx.restore = () => { clip = stack.pop(); };
-    ctx.clip = (p: RecordingPath) => { clip = p; };
-    ctx.fill = (...args: unknown[]) => { if (clip && ctx.fillStyle === pal.land.forest && ctx.globalAlpha === 0.7) clips.push(clip); fill(...args); };
+    ctx.save = () => { stack.push(clip.slice()); }; ctx.restore = () => { clip = stack.pop() ?? []; };
+    ctx.clip = (p: RecordingPath) => { if (p) clip.push(p); };
+    ctx.fill = (...args: unknown[]) => { if (clip.length >= 2 && ctx.fillStyle === pal.land.forest && ctx.globalAlpha === 0.7) clips.push(clip.slice()); fill(...args); };
     const r = createCanvasRenderer(m.canvas as unknown as CanvasLike, w, 'parchment',
       { Path2D: RecordingPath as never, dpr: 1, terrain: () => null });
     r.draw({ cx: 500, cy: 500, scale: 0.6 });
-    expect(clips.some((p) => p.contains(480, 500))).toBe(true);
-    for (const p of clips) { expect(p.contains(500, 500)).toBe(false); expect(p.contains(650, 330)).toBe(false); }
+    const contains = (ps: RecordingPath[], x: number, y: number) => ps.every((p) => p.contains(x, y));
+    expect(clips.length).toBeGreaterThan(0);
+    for (const ps of clips) {
+      expect(contains(ps, 480, 500)).toBe(false);
+      expect(contains(ps, 550, 500)).toBe(false);
+      expect(contains(ps, 500, 500)).toBe(false); expect(contains(ps, 650, 330)).toBe(false);
+    }
   });
 
   it('keeps the full visible river ribbon and sea/lake interiors protected while admitting a real dry bank and island', () => {
