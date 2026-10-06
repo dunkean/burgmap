@@ -257,6 +257,6 @@ export function generateSettlementUrban(world: World, s: Settlement): Settlement
     res = generateUrban(sub, rng);
   }
   const urban = clipUrban({ ...res.layer, population: s.population }, s.region, res.stats);
-  finishOpenEdges(urban, { regionalRoads: sub.roads, barriers: [...(urban.water ?? []), ...(urban.ruralReserve ?? [])] });
+  finishOpenEdges(urban, { seed: world.seed, regionalRoads: sub.roads, barriers: [...(urban.water ?? []), ...(urban.ruralReserve ?? [])] });
   return { urban, bridges: (sub.bridges ?? []).slice(n0), stats: res.stats };
 }

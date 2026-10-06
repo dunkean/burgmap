@@ -466,6 +466,7 @@ export function megaQuarterDetail(world: World, key: number): UrbanLayer | null 
   };
   const groundView: UrbanLayer = { ...layer, quarters: [{ poly: { outer: q.lp.pts, holes: [] }, phase: q.phase, zone: q.zone, streetSpace: detailPartition.streetSpace[0] }] };
   finishOpenEdges(groundView, {
+    seed: world.seed,
     owner: host.footprintH,
     regionalRoads: [...(world.roads ?? []), ...host.streets],
     barriers: [...ctx.water, ...(host.ruralReserve ?? [])],

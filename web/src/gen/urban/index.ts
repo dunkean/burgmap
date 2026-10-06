@@ -1217,6 +1217,7 @@ export function generateUrban(world: World, root: Rng): UrbanResult {
     sites, quays,
   };
   finishOpenEdges(layer, {
+    seed: world.seed,
     regionalRoads: world.roads,
     barriers: [...ctx.water, ...defensiveReserve, ...(layer.walls ?? []).flatMap((w) => streetStrips(w.closed ? [...w.path, w.path[0]] : w.path, w.thickness + 2))],
     protectedGround: lines.filter((l) => /wall|fence|palisade|rampart|barbican|hedge/.test(l.kind))
