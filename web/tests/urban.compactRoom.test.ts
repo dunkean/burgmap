@@ -7,6 +7,7 @@ import { shapeOkObb, blockReach, makeStreetAt } from '../src/gen/urban/access';
 import { streetStrips } from '../src/gen/urban/openfringe';
 import { polyInside } from '../src/gen/geo/split';
 import { reconstructCompactRoom } from '../src/gen/urban/compactRoom';
+import { reconstructSmallPlotRoom } from '../src/gen/urban/smallPlotRoom';
 import { finalizeFootprints } from '../src/gen/urban/footprintFinal';
 import native from './fixtures/compact-pins-v11.json';
 
@@ -32,6 +33,10 @@ const proper = (p: Polygon): boolean => p.length >= 3 && isSimple(p) && area(p) 
   && (minNeck(p)?.w ?? Infinity) >= 3.59;
 
 describe('compact recovery on six pinned native blocks', () => {
+  it('does not classify a 7 m by 2 m matchstick as a tiny dwelling', () => {
+    const matchstick: Polygon = [{ x: 0, y: 0 }, { x: 7, y: 0 }, { x: 7, y: 2 }, { x: 0, y: 2 }];
+    expect(reconstructSmallPlotRoom(matchstick, matchstick, undefined, [], () => true, () => true)).toBeNull();
+  });
   for (const id of [104, 576]) it(`commits a small served dwelling in bent native plot ${id}`, () => {
     const f = fixture.cases.find((c) => c.i === id)!;
     const before = blockReach(f.block, f.peers.map((p) => p.poly), streetAt);
