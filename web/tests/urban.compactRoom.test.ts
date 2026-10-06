@@ -10,6 +10,7 @@ import { reconstructCompactRoom } from '../src/gen/urban/compactRoom';
 import { reconstructSmallPlotRoom } from '../src/gen/urban/smallPlotRoom';
 import { finalizeFootprints } from '../src/gen/urban/footprintFinal';
 import native from './fixtures/compact-pins-v11.json';
+import roofPeer from './fixtures/urban-roof-peer-v13.json';
 
 interface NativeCase {
   i: number; roof: Polygon; owner: Polygon; front: [Vec2, Vec2]; block: Polygon;
@@ -33,6 +34,20 @@ const proper = (p: Polygon): boolean => p.length >= 3 && isSimple(p) && area(p) 
   && (minNeck(p)?.w ?? Infinity) >= 3.59;
 
 describe('compact recovery on six pinned native blocks', () => {
+  it('repairs a small convex rear roof that overlaps its same-plot main roof by 9 m²', () => {
+    const f = roofPeer as unknown as { main: Polygon; peer: Polygon; owner: Polygon; front: [Vec2, Vec2] };
+    expect(mpArea(tryIntersection(f.main, f.peer).pieces)).toBeGreaterThan(9);
+    const buildings = [{ poly: f.peer, kind: 'house', parcel: 0 },
+      { poly: f.main, kind: 'rear', parcel: 0 },
+      { poly: [{ x: 0, y: 0 }, { x: 40, y: 0 }, { x: 40, y: 40 }, { x: 0, y: 40 }],
+        kind: 'house', parcel: undefined as number | undefined }];
+    const result = finalizeFootprints({ buildings,
+      parcels: [{ poly: f.owner, front: f.front, use: 'plot', block: 0 }], backLand: [],
+      placementClear: () => true, validateParts: () => true });
+    expect(result.invalid).not.toContain(1);
+    expect(mpArea(tryIntersection(buildings[0].poly, buildings[1].poly).pieces)).toBeLessThanOrEqual(1e-6);
+    expect(area(buildings[1].poly)).toBeGreaterThanOrEqual(12);
+  });
   it('does not classify a 7 m by 2 m matchstick as a tiny dwelling', () => {
     const matchstick: Polygon = [{ x: 0, y: 0 }, { x: 7, y: 0 }, { x: 7, y: 2 }, { x: 0, y: 2 }];
     expect(reconstructSmallPlotRoom(matchstick, matchstick, undefined, [], () => true, () => true)).toBeNull();

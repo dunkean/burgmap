@@ -139,6 +139,16 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
   };
   const roofIndex = new GridIndex<number>(24);
   u.buildings.forEach((b, i) => { if (b.poly.length >= 3) roofIndex.insertPts(b.poly, i); });
+  const overlapsRoof = (i: number, candidate: Polygon): boolean => {
+    const bounds = bboxOf(candidate);
+    for (const j of roofIndex.query(bounds.x0, bounds.y0, bounds.x1, bounds.y1)) {
+      if (j === i) continue;
+      const hit = tryIntersection(candidate, u.buildings[j].poly);
+      if (hit.failed || hit.pieces.some((piece) => mpArea([piece]) > 1e-6
+        && 2 * inscribed(piece.outer, piece.holes, 0.0005, 0.015).r > 0.03)) return true;
+    }
+    return false;
+  };
   const indexGardens = (): GridIndex<number> => {
     const index = new GridIndex<number>(24);
     u.gardens?.forEach((p, i) => { if (p.length >= 3) index.insertPts(p, i); });
@@ -401,7 +411,7 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
         if (block !== undefined) changed.add(block);
       }
     }
-    if (proper(b.poly)) continue;
+    if (proper(b.poly) && !overlapsRoof(i, b.poly)) continue;
     if (!owner || !u.backLand) { invalid.push(i); continue; }
     // A vertex can touch a distant edge exactly at a neighbouring roof seam.
     // Filling the loop would claim that neighbour; remove only a small existing
@@ -433,7 +443,8 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
       const rebuilt = reconstructRoom(b.poly, owner.poly, occupied,
         (candidate) => u.placementClear!(candidate, b.poly) && respectsOtherOwners(i, candidate)
           && !!planOpenLand(candidate),
-        (candidate) => proper(candidate) && (!u.validateParts || u.validateParts(i, [candidate])));
+        (candidate) => proper(candidate) && !overlapsRoof(i, candidate)
+          && (!u.validateParts || u.validateParts(i, [candidate])));
       if (rebuilt) {
         const added = tryDifference(rebuilt, b.poly), freed = tryDifference(b.poly, rebuilt), land = planOpenLand(rebuilt);
         if (land && !added.failed && !freed.failed && freed.pieces.every((p) => !p.holes.length)
@@ -450,11 +461,12 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
       // An unusable sub-2 m connector can join substantial but uninhabitable
       // wings. Search a compact replacement only after every ≥95% candidate
       // failed, and only with the same physical, ownership and access proofs.
-      if (u.validateParts && (minNeck(b.poly)?.w ?? Infinity) < 2) {
+      if (u.validateParts && ((minNeck(b.poly)?.w ?? Infinity) < 2 || overlapsRoof(i, b.poly))) {
         const compact = reconstructCompactRoom(b.poly, owner.poly, occupied, owner.front,
           (candidate) => u.placementClear!(candidate, b.poly) && respectsOtherOwners(i, candidate)
             && !!planOpenLand(candidate),
-          (candidate) => proper(candidate) && u.validateParts!(i, [candidate]));
+          (candidate) => proper(candidate) && !overlapsRoof(i, candidate)
+            && u.validateParts!(i, [candidate]));
         if (compact) {
           const added = tryDifference(compact, b.poly), freed = tryDifference(b.poly, compact);
           const land = planOpenLand(compact);
@@ -473,10 +485,11 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
       // A tiny, bent plot can contain a believable compact dwelling even when
       // no 70%-area rectangle fits. Require a true convex room and cap the
       // cumulative loss of roof area to 2% of this layer's starting programme.
-      if (u.validateParts && area(b.poly) <= 60 && (minNeck(b.poly)?.w ?? Infinity) < 2) {
+      if (u.validateParts && area(b.poly) <= 60
+        && ((minNeck(b.poly)?.w ?? Infinity) < 2 || overlapsRoof(i, b.poly))) {
         const small = reconstructSmallPlotRoom(b.poly, owner.poly, owner.front, occupied,
           u.placementClear,
-          (candidate) => proper(candidate) && respectsOtherOwners(i, candidate)
+          (candidate) => proper(candidate) && !overlapsRoof(i, candidate) && respectsOtherOwners(i, candidate)
             && !!planOpenLand(candidate) && u.validateParts!(i, [candidate]));
         const currentHousingArea = housingArea();
         if (small && currentHousingArea - area(b.poly) + area(small) >= 0.98 * initialHousingArea) {
@@ -541,7 +554,9 @@ export function finalizeFootprints(u: FootprintFinalInput): FootprintFinalResult
       keptExtra = [];
       freed = [...released, ...extra];
     }
-    if (!proper(main) || area(main) + keptExtra.reduce((s, p) => s + area(p), 0) < 0.7 * area(b.poly)
+    if (!proper(main) || overlapsRoof(i, main)
+      || keptExtra.some((p) => overlapsRoof(i, p))
+      || area(main) + keptExtra.reduce((s, p) => s + area(p), 0) < 0.7 * area(b.poly)
       || (u.validateParts && !u.validateParts(i, [main, ...keptExtra]))) {
       const relocated = relocateNarrowAnnex(i, owner);
       if (relocated) {
