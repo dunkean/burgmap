@@ -499,6 +499,8 @@ export interface EdgeRoofPartition {
   protectedLand: MultiPoly;
   phases?: { id: number; region: MultiPoly; band: MultiPoly }[];
   allowGrowth: boolean;
+  /** Optional allowed claim area for lazy detail; every grown envelope must remain inside it. */
+  growthLimit?: MultiPoly;
   eligible: (parcel: number) => boolean;
 }
 
@@ -506,6 +508,11 @@ export interface EdgeRoofPartition {
 export function finishEdgeRoofs(input: EdgeRoofPartition): { grown: number; fitted: number; constrained: number; changedBlocks: Set<number>; growth: Map<number, Polygon[]> } {
   const changedBlocks = new Set<number>(), growth = new Map<number, Polygon[]>();
   let grown = 0, fitted = 0, constrained = 0;
+  const withinGrowthLimit = (poly: Polygon): boolean => {
+    if (!input.growthLimit) return true;
+    const outside = tryDifference(poly, input.growthLimit);
+    return !outside.failed && mpArea(outside.pieces) <= 1e-6;
+  };
   const unresolved: number[] = [];
   const initialRoofs = input.buildings.map((b) => b.poly);
   const protectedNear = makeObstacleSelection(input.protectedLand);
@@ -576,7 +583,7 @@ export function finishEdgeRoofs(input: EdgeRoofPartition): { grown: number; fitt
     for (const candidate of input.allowGrowth ? [env, roofEnvelope(b.poly, dominantAxis)] : []) {
       const env = candidate, delta = area(env) - area(b.poly);
       const width = Math.hypot(env[1].x - env[0].x, env[1].y - env[0].y), depth = Math.hypot(env[2].x - env[1].x, env[2].y - env[1].y);
-      if (input.allowGrowth && delta <= area(b.poly) && Math.min(width, depth) >= MIN_BW && Math.max(width, depth) / Math.min(width, depth) <= MAX_ASPECT && contacts.some((e) => e.lab === LAB_OPEN)) {
+      if (input.allowGrowth && delta <= area(b.poly) && Math.min(width, depth) >= MIN_BW && Math.max(width, depth) / Math.min(width, depth) <= MAX_ASPECT && contacts.some((e) => e.lab === LAB_OPEN) && withinGrowthLimit(env)) {
         const claim = tryDifference(env, parcel.poly);
         const safe = (p: Vec2) => p.x >= Math.max(3, input.ctx.win.x0) && p.y >= Math.max(3, input.ctx.win.y0) && p.x <= Math.min(input.ctx.mapSize - 3, input.ctx.win.x1) && p.y <= Math.min(input.ctx.mapSize - 3, input.ctx.win.y1) && !input.ctx.isWater(p) && input.ctx.slopeAt(p) <= 0.28;
         let dry = env.every(safe);
@@ -776,6 +783,7 @@ export function finishEdgeRoofs(input: EdgeRoofPartition): { grown: number; fitt
       return rounded ? [envelope, rounded] : [envelope];
     });
     for (const roof of [...envelopes, ...rounded, ...edgeEnvelopes]) {
+      if (!withinGrowthLimit(roof)) continue;
       const oldArea = area(b.poly), delta = area(roof) - oldArea;
       const width = Math.hypot(roof[1].x - roof[0].x, roof[1].y - roof[0].y);
       const depth = Math.hypot(roof[2].x - roof[1].x, roof[2].y - roof[1].y);
