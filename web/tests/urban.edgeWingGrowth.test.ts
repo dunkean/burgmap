@@ -15,23 +15,28 @@ it('keeps the complete xrv97g outer house while thickening only free open-edge l
   });
   const urban = generate(options).urban!;
   const old = native.poly;
-  const b = urban.buildings[native.id];
+  // The fixture id belongs to the old producer. Earlier rejected infills can
+  // disappear, so find the retained original roof by geometry, not array slot.
+  const b = urban.buildings.find(candidate => {
+    const lost = tryDifference(old, candidate.poly);
+    return !lost.failed && mpArea(lost.pieces) <= 1e-6;
+  });
   expect(b).toBeDefined();
-  const added = tryDifference(b.poly, old), lost = tryDifference(old, b.poly);
+  const added = tryDifference(b!.poly, old), lost = tryDifference(old, b!.poly);
   expect(added.failed || lost.failed).toBe(false);
   expect(mpArea(lost.pieces)).toBeLessThanOrEqual(1e-6);
   expect(mpArea(added.pieces)).toBeGreaterThan(45);
   expect(mpArea(added.pieces)).toBeLessThanOrEqual(0.1 * area(old) + 1e-6);
-  expect(minNeck(b.poly)?.w ?? 0).toBeGreaterThanOrEqual(3.59);
-  const parcel = urban.parcels[b.parcel!];
-  expect(mpArea(tryDifference(b.poly, parcel.poly).pieces)).toBeLessThanOrEqual(1e-6);
+  expect(minNeck(b!.poly)?.w ?? 0).toBeGreaterThanOrEqual(3.59);
+  const parcel = urban.parcels[b!.parcel!];
+  expect(mpArea(tryDifference(b!.poly, parcel.poly).pieces)).toBeLessThanOrEqual(1e-6);
   expect(mpArea(tryDifference(added.pieces, urban.blocks[parcel.block]).pieces)).toBeLessThanOrEqual(1e-6);
-  for (let i = 0; i < urban.buildings.length; i++) if (i !== native.id) {
+  for (let i = 0; i < urban.buildings.length; i++) if (urban.buildings[i] !== b) {
     const hit = tryIntersection(added.pieces, urban.buildings[i].poly);
     expect(hit.failed).toBe(false);
     expect(mpArea(hit.pieces)).toBeLessThanOrEqual(1e-6);
   }
-  for (let i = 0; i < urban.parcels.length; i++) if (i !== b.parcel) {
+  for (let i = 0; i < urban.parcels.length; i++) if (i !== b!.parcel) {
     const hit = tryIntersection(added.pieces, urban.parcels[i].poly);
     expect(hit.failed).toBe(false);
     expect(mpArea(hit.pieces)).toBeLessThanOrEqual(1e-6);
