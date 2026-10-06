@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Polygon, Vec2 } from '../src/gen/core/geom';
+import { polygonCentroid, type Polygon, type Vec2 } from '../src/gen/core/geom';
 import { area, inscribed, isSimple, minNeck } from '../src/gen/geo/poly';
 import { mpArea, tryIntersection } from '../src/gen/geo/bool';
 import { tryDifference } from '../src/gen/geo/bool';
@@ -8,6 +8,7 @@ import { streetStrips } from '../src/gen/urban/openfringe';
 import { polyInside } from '../src/gen/geo/split';
 import { reconstructCompactRoom } from '../src/gen/urban/compactRoom';
 import { reconstructSmallPlotRoom } from '../src/gen/urban/smallPlotRoom';
+import { replanWholeRoom } from '../src/gen/urban/roomReconstruct';
 import { finalizeFootprints } from '../src/gen/urban/footprintFinal';
 import native from './fixtures/compact-pins-v11.json';
 import roofPeer from './fixtures/urban-roof-peer-v13.json';
@@ -37,6 +38,59 @@ const proper = (p: Polygon): boolean => p.length >= 3 && isSimple(p) && area(p) 
   && (minNeck(p)?.w ?? Infinity) >= 3.59;
 
 describe('compact recovery on six pinned native blocks', () => {
+  it('finds a whole served room in the distant empty pocket of pinned plot 845', () => {
+    const f = fixture.cases.find((c) => c.i === 845)!;
+    const before = blockReach(f.block, f.peers.map((p) => p.poly), streetAt);
+    const room = replanWholeRoom(f.roof, f.owner, f.front, f.occupied,
+      (candidate) => {
+        const hit = tryIntersection(candidate, reserve);
+        return !hit.failed && mpArea(hit.pieces) <= 1e-6;
+      },
+      (candidate) => {
+        if (!proper(candidate)) return false;
+        const after = blockReach(f.block, f.peers.map((peer) => peer.i === f.i ? candidate : peer.poly), streetAt);
+        return after.every((served, j) => served || !before[j]);
+      });
+    expect(room).not.toBeNull();
+    expect(area(room!)).toBeGreaterThanOrEqual(0.95 * area(f.roof));
+    expect(area(room!)).toBeLessThanOrEqual(1.08 * area(f.roof));
+    const oldCenter = polygonCentroid(f.roof), newCenter = polygonCentroid(room!);
+    expect(Math.hypot(oldCenter.x - newCenter.x, oldCenter.y - newCenter.y)).toBeGreaterThan(18);
+    expect(Math.hypot(oldCenter.x - newCenter.x, oldCenter.y - newCenter.y)).toBeLessThanOrEqual(64);
+    expect(mpArea(tryDifference(room!, f.owner).pieces)).toBeLessThanOrEqual(1e-6);
+    expect(mpArea(tryIntersection(room!, f.occupied.map((outer) => ({ outer, holes: [] }))).pieces))
+      .toBeLessThanOrEqual(1e-6);
+  }, 30_000);
+  it('commits the whole distant room without losing its block peers or anonymous yard accounting', () => {
+    const f = fixture.cases.find((c) => c.i === 845)!;
+    const before = blockReach(f.block, f.peers.map((p) => p.poly), streetAt);
+    const buildings = [{ poly: f.roof, kind: 'back', parcel: 0 },
+      ...f.occupied.map((poly) => ({ poly, kind: 'landmark', parcel: 0 }))];
+    const backLand: { outer: Polygon; holes: Polygon[] }[] = [];
+    const gardens: Polygon[] = [f.owner];
+    const result = finalizeFootprints({ buildings,
+      parcels: [{ poly: f.owner, front: f.front, use: 'plot', block: 0 }], backLand, gardens,
+      placementClear: (candidate) => {
+        const hit = tryIntersection(candidate, reserve);
+        return !hit.failed && mpArea(hit.pieces) <= 1e-6;
+      },
+      validateParts: (_, parts) => {
+        const after = blockReach(f.block,
+          f.peers.flatMap((peer) => peer.i === f.i ? parts : [peer.poly]), streetAt);
+        return after.every((served, j) => served || !before[j]);
+      },
+    });
+    expect(result.invalid).not.toContain(0);
+    expect(result.removed).toEqual([]);
+    expect(area(buildings[0].poly)).toBeGreaterThanOrEqual(0.95 * area(f.roof));
+    expect(mpArea(tryDifference(buildings[0].poly, f.owner).pieces)).toBeLessThanOrEqual(1e-6);
+    expect(mpArea(tryIntersection(buildings[0].poly, f.occupied.map((outer) => ({ outer, holes: [] }))).pieces))
+      .toBeLessThanOrEqual(1e-6);
+    expect(mpArea(tryIntersection(buildings[0].poly, gardens.map((outer) => ({ outer, holes: [] }))).pieces))
+      .toBeLessThanOrEqual(1e-6);
+    expect(area(buildings[0].poly) + result.releasedArea
+      - mpArea(tryDifference(buildings[0].poly, f.roof).pieces)).toBeCloseTo(area(f.roof), 5);
+  }, 30_000);
   for (const id of [180, 845]) it(`refuses a retained room overlapping a live peer in pinned roof ${id}`, () => {
     const f = fixture.cases.find((c) => c.i === id)!;
     const baseline = [{ poly: f.roof, kind: id === 180 ? 'rear' : 'back', parcel: 0 }];
