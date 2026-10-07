@@ -5,6 +5,22 @@ bugs and their evidence are recorded in [ROADMAP.md](ROADMAP.md).
 
 ## Current status
 
+- Integration and cleanup (2026-10-07): hydrology and the shared display-only
+  map ruler are committed in `389921b`. Native fmt/strict Clippy/WASM checks,
+  TS typecheck, independent app/testbench and standalone terrain builds pass;
+  seven existing PNG export tests pass. Offline app startup and standalone
+  CPU startup with WebGPU/Worker unavailable have no page errors.
+  Cleanup removed approximately 2.17 GiB of obsolete probes, candidate
+  packages, browser logs and the unused local Rust target. Current app/bench
+  builds, `rust/pkg/wasm`, `rust/out/browser`, npm dependencies and the active
+  external Cargo cache remain available. Older ignored diagnostic paths below
+  are historical evidence and have been removed. The three old unintegrated
+  branches are preserved as annotated `archive/building-fabric-20261006`,
+  `archive/estuary-water-20261006` and `archive/secondary-triangles-20261006`
+  tags; their rejected/obsolete code is not reintroduced. Only the primary
+  worktree and local master branch remain. The cleanup script defaults to
+  preview and preserves the current builds and active Rust cache.
+
 - Hydrology follow-up completed (2026-10-07): the user's 3.5 km `1ryr6kq`
   replay exposed an initiation threshold tied to map area and false contacts
   between actual river banks. Physical source thresholds, real slope capture,

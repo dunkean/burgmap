@@ -383,11 +383,18 @@ conservant une compilation incrémentale. Le build utilise le profil release
 (`opt-level=3`, LTO). wasm-opt est désactivé pour éviter une étape supplémentaire
 dans ce prototype.
 
-Sur cette machine, `D:` manque d'espace. Le cache Cargo est redirigé vers
+Sur cette machine, le cache Cargo est redirigé vers
 `E:/CodexArtifacts/city-generator-rust-2026-10-06/target` par
-`rust/.cargo/config.toml`, ignoré par Git. `rust/out/` est une jonction vers
-le dossier `out` voisin sur `E:`. Sur une autre machine ces sorties utilisent
-normalement `rust/target/` et `rust/out/`.
+`rust/.cargo/config.toml`, ignoré par Git. Sur une autre machine ces sorties
+utilisent normalement `rust/target/` et `rust/out/`.
+
+Le nettoyage du 7 octobre a supprimé les anciens diagnostics et le cache
+local inutilisé `rust/target/`. `rust/out/` est désormais un dossier local,
+avec la page autonome courante dans `browser/` ; le cache Cargo sur `E:` et
+le package WASM courant sont conservés. Depuis la racine du dépôt,
+`./web/scripts/cleanup-local-artifacts.ps1` prévisualise les anciens artefacts
+à retirer ; `-Apply` effectue le nettoyage en préservant ces sorties actives
+et les dépendances installées.
 
 Voir aussi [le parcours d'intégration](docs/INTEGRATION.md) pour les étapes
 futures et les décisions qui restent à concevoir avec l'utilisateur.
