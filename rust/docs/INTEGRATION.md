@@ -117,6 +117,128 @@ placées et du continent ; une cible trop grande rétrécit progressivement si
 les secteurs maritimes n'offrent pas assez de place. CPU/GPU consomment le même
 plan de formes et de tailles.
 
+### Extension hydrologie (7 octobre 2026)
+
+Le design a été validé pour le banc Rust : **Relief → Côtes → Hydrologie**,
+avec une séparation des réglages généraux, des étapes et de l'affichage.
+L'utilisateur demande plusieurs agents Sol, une implémentation compacte et
+une validation principalement visuelle par ses soins, sans matrice de tests.
+
+`HydrologyEngine` conserve un échantillon de la surface finale en mètres,
+son drainage CPU ou GPU et ses bassins versants. Le GPU utilise FP32 pour
+les niveaux/potentiels et un comptage entier pour l'accumulation, reconvertie
+en m². Seule la mer connectée au bord sert d'exutoire marin. Le potentiel
+d'écoulement est distinct des altitudes physiques. Les sorties WASM sont des
+tableaux groupés indépendants de `World` : récepteurs, surfaces drainées,
+labels de bassins/lacs, surface physique avant incision, niveaux remplis,
+profondeurs des lacs, surface ajustée, axes/largeurs/profils, nœuds et
+contours avec trous. Les offsets comptent des sommets ; le récepteur terminal
+vaut `u32::MAX`. Les commentaires Rust décrivent les enregistrements vectoriels.
+
+Les lacs naturels suivent les cuvettes et les seuils de débordement. Le mode
+« quelques lacs » peut créer des cuvettes bornées et recalculer leur drainage
+en Rust, même lorsque le drainage initial utilise le GPU ; le diagnostic
+mentionne cette étape CPU. Les grands cours reçoivent un apport extérieur
+uniquement si une entrée terrestre descendante est disponible. Sinon, le
+cours principal reste limité au bassin local avec une indication dans le banc.
+Les lacs sont classés par profondeur moyenne et alimentation ; leur quantité,
+leur budget total et leur taille individuelle sont indépendamment réglables.
+Les plafonds par défaut sont 5 % des terres pour l'ensemble et 2 % par lac.
+On conserve ou écarte des cuvettes entières, sans abaisser artificiellement
+leur niveau d'eau sous l'exutoire. Ces plafonds s'appliquent aussi aux lacs aménagés.
+Les méandres ajoutés sont bornés par la pente et le confinement de la surface
+physique, en laissant de la mobilité dans les cuvettes comblées. Un obstacle
+local atténue le coude concerné sans annuler les méandres de tout le cours.
+Le tracé intègre une variation continue de fréquence, amplitude et asymétrie
+seedée par cours, à une longueur d'onde proportionnelle à sa largeur. Les petites
+inflexions pentues sont bornées en mètres selon la largeur ; elles ne sont
+pas supprimées par un seuil global de pente ou de facteur de déformation.
+Le profil fractionnaire suit le terrain physique entre centres de cellules,
+avec les niveaux des nœuds conservés et une descente monotone. L'accumulation
+diagnostique reste complète ; la sélection des sources utilise séparément
+les apports des terrains non enterrés pour éviter les branches artificielles
+parallèles dans les cuvettes comblées.
+Le routage final identifie les composantes exactement plates de F, naturelles
+ou remplies, et leurs vraies sorties. Un parcours métrique à coûts positifs
+favorise les creux du terrain enterré sans modifier les altitudes. Une seconde
+passe bornée consolide les corridors déjà alimentés des grandes cuvettes
+comblées. L'ordre de finalisation fournit un rang entier strictement descendant.
+Les pentes nettes gardent un drainage descendant. Les lacs retenus sont ensuite
+agrégés vers un exutoire stable, en évitant de croiser les entrées sèches.
+Le rang exporté décrit le masque avant cette
+agrégation, pas un ordre de drainage intérieur aux lacs.
+Un seul graphe autoritatif alimente accumulation, bassins et vecteurs ; les
+récepteurs/accumulations/bassins bruts restent disponibles séparément. L'apport
+extérieur en m² équivalents est inclus dans l'accumulation finale. Les anciens
+Dijkstra de capture par arrivée sont supprimés. Les voisins de la simplification
+restent indexés spatialement, même sans nœud partagé.
+Les cours dominants sont vectorisés en continu puis divisés
+aux nœuds du graphe ; les affluents se raccordent vers l'aval sous contraintes
+topographiques et spatiales, avec des nœuds fixes et un raccord terminal court.
+Les courbes C1 sont subdivisées selon leur erreur géométrique et leur profil
+vertical, à une précision liée à leur largeur physique. Les portions droites
+ne sont plus subdivisées uniformément. La simplification conserve les nœuds
+et restaure localement les points nécessaires si un raccourci croise un voisin.
+Les contrôles redondants sont retirés avant le calcul des tangentes C1 : des
+stations de courbure presque confondues avec les stations de grille ne doivent
+pas resserrer artificiellement l'arrondi. La reparamétrisation suit les distances
+métriques originales, avec les nœuds conservés exactement. La phase ne
+redémarre pas à chaque confluence ; une correction locale maintient chaque
+nœud fixe. Le travail reste borné par le nombre de stations par cours et la
+subdivision adaptative. Un régime calme conserve une amplitude visible dans
+une plaine ouverte, tandis que pente et confinement peuvent la réduire.
+Une courbe qui resserre un coude existant sous un rayon compatible avec la
+largeur est atténuée localement. Les raccords d'affluents gardent une
+approche bornée sous contraintes de terrain et de voisinage. Les corrections
+spécifiques aux longues jambes droites et les retries de queue sont supprimés.
+Le contrôle final ne se limite plus aux raccourcis de simplification : une
+portion détaillée qui croise un voisin reprend localement sa référence de
+drainage D8, avec les mêmes nœuds et profils. Voir
+[le modèle hydrique et ses limites](HYDROLOGY.md).
+Le remplissage des eaux reprend la palette marine.
+Pour les cuvettes non retenues, le mode automatique recherche une ouverture
+bornée par composante, avec un budget global de visites. Les limites par défaut
+sont 12 m de coupe et 1 000 m de longueur ; le volume de coupe doit être au plus
+10 % du remblai évité. Les composantes contenant un lac retenu sont protégées.
+Un drainage complet du terrain proposé vérifie ensuite les niveaux des lacs :
+tout changement annule le plan. En présence de mer, une ouverture ne descend
+pas sous le datum marin. Le mode `fill` garde le comblement seul, également
+utilisé comme repli. Le comblement résiduel précède l'incision ; le relief GPU
+amont reste intact. Les champs physiques et F initiaux sont conservés séparément,
+ainsi que le nombre d'ouvertures, le volume coupé et le remblai réellement évité.
+Les variantes d'embouchures donnent un aspect simple/élargi/entonnoir/tidal ;
+la simulation des marées, des sédiments et des deltas reste ultérieure.
+
+`bridge/hydrology.ts` conserve drainage et sorties ; une modification hydrique
+réutilise le relief. La surface avant incision est conservée séparément.
+`hydrologySurface.ts` interpole le comblement large par une B-spline cubique
+et échantillonne le lit directement depuis les axes/largeurs/profils vectoriels.
+Les coupes physiques des seuils utilisent séparément des corridors continus
+entre centres D8 à cote absolue, avec des raccords doux : le lissage du remblai
+ne rebouche pas leur ouverture, même lorsque l'incision est nulle.
+Un index spatial conservé borne le travail aux segments proches de la tuile.
+Le rayon de creusement est physique, indépendant de la résolution du drainage ;
+les segments utilisent une enveloppe commune plutôt qu'un creusement additif.
+Le cœur conserve la même formule sur sa grille de diagnostic. Les tuiles
+parcourent la bande du lit par ligne plutôt que le rectangle entier des longues
+diagonales. Le comblement cubique est évalué de manière séparable, avec la même
+surface. Les PNG de caméra utilisent une compression sans perte plus rapide.
+Les chemins de contours sont conservés pour une même surface, calculés à la
+demande lorsqu'ils sont visibles ; leur précision ne change pas. Les tuiles
+caméra ne recalculent pas le réseau. `hydrologyRender.ts` adapte les vecteurs
+au SVG temporaire et rend les diagnostics conservés ; leurs rasters servent
+uniquement à l'affichage. Le worker garde ses grilles intactes et les transmet
+sur les réponses d'aperçu, pas sur chaque demande caméra. Il prépare aussi PNG
+et contours pour les demandes de génération/caméra ; le thread principal garde
+le décodage et l'insertion. Le repli sans worker et les changements de style
+peuvent encore préparer la scène sur le thread principal. Les berges vectorielles
+emploient des intersections d'offset bornées, avec biseau aux angles extrêmes.
+
+La pose d'une source et le remplissage animé restent différés. Les liens v3
+incluent hydrologie et diagnostic ; les liens Rust v2 sans options d'eau
+conservent leur affichage historique. Le build TypeScript ordinaire reste
+indépendant de Rust. Voir le README pour les commandes et contrôles.
+
 ## 1. Design puis moteur natif
 
 L'utilisateur définit les étapes, les entrées/sorties et les règles du nouveau

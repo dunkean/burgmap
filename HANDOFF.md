@@ -5,6 +5,191 @@ bugs and their evidence are recorded in [ROADMAP.md](ROADMAP.md).
 
 ## Current status
 
+- Hydrology follow-up completed (2026-10-07): the user's 3.5 km `1ryr6kq`
+  replay exposed an initiation threshold tied to map area and false contacts
+  between actual river banks. Physical source thresholds, real slope capture,
+  first-contact capture around an externally fed principal, and bank-aware
+  geometry are now implemented. The exact river/major/width×2 cases retain six
+  natural sources and thirteen graph reaches; all three pins pass checks of
+  the actual SVG water polygons. Three seeded C2 spline bands replace regular
+  sinusoidal bends, with terrain/width/radius constraints retained. Physical
+  diagonal conditioning and a downstream profile fit prevent river guides
+  crossing bilinear saddles above their incision budget; compaction and repairs
+  repeat the analytic terrain check. A confluence allowance now ends at the
+  first bank separation, removing the secondary contact found at intensity2.
+  Eleven exact optimized WASM replays pass graph/area/profile checks, with no
+  terrain-cut excess above 1 cm (maximum numerical residual 2.1 mm). Eight
+  compact native probes, fmt/strict Clippy/WASM, TS typecheck, independent app
+  builds and standalone CPU fallback with no WebGPU/Worker/external resources
+  pass. Final Playwright captures cover the three pins and steep reliefs.
+  The `1ds1473` false estuary came from three negative boundary samples being
+  classified as ocean. CPU/GPU sea components now require resolved 2×2 marine
+  support; its south map exit stays 80.826 m wide, without an estuary, while
+  the true north ocean remains. Initial drainage stays GPU-capable; final
+  routing/geometry are CPU/WASM. At512², warm finalization measures roughly
+  0.35–0.75 s on the original small variants and 0.41–1.44 s on the larger
+  frozen cases, excluding terrain/rendering. Verified WASM SHA256:
+  `7192693559C1671351431701534D4AA6C43BE4D0422E5242078F80091FB8621A`.
+  The earlier completed audit below is historical and superseded by this work.
+  Current ignored diagnostics: `rust/out/river-realism-replay.mjs`,
+  `river-terrain-audit.mjs`, `river-render-bank-audit.*` and `river-small-pins-*`.
+
+- Hydrology visual correction (2026-10-07): the user rejected the previous
+  audit's flat routing and requested actual Playwright exploration. The final
+  flat solver now uses metric positive travel costs guided by buried valleys,
+  followed by one bounded consolidation pass in broad filled basins. H/F and
+  raw diagnostic arrays stay separate. Lake aggregation avoids diagonal
+  crossings with dry entries and preserves a single outlet. Dominant courses
+  use continuous seeded width-scaled curvature; phase crosses graph junctions,
+  with exact shared nodes and local terrain constraints. The long straight
+  `1ijwjgy` reach was under-dosed, rather than rejected by terrain: 3–11m bends
+  at 27–31m width become approximately23–60m on the measured reach. Full
+  details and model limits: [rust/docs/HYDROLOGY.md](rust/docs/HYDROLOGY.md).
+  The perceived three-inlet/two-outlet confluence was four inlets/one outlet;
+  the graph diagnostic now adds downstream arrows. GPU still prepares initial
+  drainage; final routing and geometry remain Rust/CPU/WASM, not a new GPU
+  hydrology solver. Ignored replays and images use the `river-realism-*` prefix.
+  Exact segment indexing prevents intersections during construction; the final
+  compactor refreshes neighbours and rejects any unresolved crossing before
+  export. Sea entries have independent clipped terminals. Mountain guide
+  rounding uses the actual incision budget and bounded shorter corner steps;
+  XY control selection is independent of width/height profile refinement.
+  Six exact512² WASM replays and eight existing native probes pass: no axis/D8
+  crossings, downstream splits, XY/Z node gaps, rising profiles or changed raw
+  diagnostics; contributing area is conserved within FP32 precision. Native
+  fmt/strict Clippy/WASM, TS typecheck, independent app/bench builds and standalone
+  build pass. Sequential Playwright screenshots cover flat/hills, inland/coastal
+  mountains, canyon and valley, with finite detail and no page errors. Standalone
+  startup works with GPU/Worker unavailable and external resource requests
+  blocked. Warm isolated WASM finalization is189–703ms across these cases;
+  Chrome reports271–907ms excluding prepared drainage, terrain and rendering.
+  Final local release WASM SHA256:
+  `7632BD6A583D0A4914BF85AD204CA80C3473285BAF7876AD38E7DF48F0B20FA7`.
+  The user's Chrome view on5173 remains5705.2/18472/.2603 and reports498 reaches,
+  35237 vertices, finite detail, GPU drainage98ms/Rust finalization791ms.
+
+- Hydrology strategy replacement (2026-10-07): following the user's Astra
+  audit, the now superseded flat approach kept GPU terrain erosion and used exact-F
+  components with integer distances from high edges and to outlets. One final
+  receiver tree now feeds vectors, contributing areas and watershed diagnostics;
+  raw receivers/areas/basins and pre-conditioning H/F remain separately retained.
+  Retained lakes aggregate to one stable outlet, and final contributing area
+  includes identified external inflow. Earlier capture and straight-leg rescue
+  implementations described below are superseded. A single metric bend budget
+  covers eligible reaches; quiet regimes modulate shape without vetoing courses.
+  Rejected depressions can use bounded openings (auto12m/1000m, configurable,
+  fill-only comparison), with limited search/cut volume and protected lake levels.
+  The exact `1c9fqdw` GPU input, density1.6/width1/no coasts, accepts four cuts,
+  about455397m³ cut and559.6Mm³ avoided fill; eight retained lake levels unchanged.
+  Its three pins share initial F27.31m, reduced to21.93/21.31/22.53m. Upstream
+  physical terrain is unchanged. Packed final output has509 reaches/27594
+  vertices, no detected rank failure, rising water profile, endpoint gap or D8 X.
+  Eight tiny ignored native probes check routing, lake aggregation and inflows;
+  no tracked tests added. Main generation/camera PNG/contour preparation moves
+  to the worker; style changes and the worker-free fallback may still run on main.
+  CPU coastal valley, offline CPU mountains and legacy v2 dry startup pass.
+  Native fmt/strict Clippy/WASM, TS typecheck and independent app/bench builds pass.
+  Final Astra medium review against the initial audit found a P2: cubic camera
+  filtering partially closed narrow spill cuts. Separate absolute-profile D8
+  corridors fix it, independent of incision; three targeted camera probes pass.
+  The reviewer reread the fix and eligible-reach budget: no unresolved P1/P2.
+  Review: ignored `rust/out/hydro-strategy-review.md`; visual assessment remains
+  the user's. One sequential cold browser pair to final image reports5.54s
+  baseline/4.46s candidate, with overview/detail main tasks769/1051ms versus
+  candidate overview88ms and no long detail task. This is not a stable speed
+  ratio: GPU initialization/terrain times vary. Core B redrain costs more than
+  fill-only; total paint latency and responsiveness must remain separate.
+  Final release WASM SHA25683E13355B644EAE1544A0DE1E3423467798170031A65968D3DBA19826A6DDDEB
+  is served by Vite-only on5173; no5174–5190 listener remains. Exact live startup
+  reports509/27594, four openings, no browser error and finite detail data.
+  Final standalone offline startup with Worker deliberately unavailable passes.
+
+- Hydrology edge cases (2026-10-07): reviewed the five `48702y` user replays,
+  30km/motif10km, island with all coasts, flat/hills/valley/mountains/high-mountains.
+  Large fed coastal filled pools now participate in collective capture from
+  2cm depth; source filtering and raw drainage/basin diagnostics stay intact.
+  Long quiet straight legs in open terrain can receive a modest independent
+  bend. Redundant controls are compacted before C1 tangent calculation, with
+  original metric stations and exact graph anchors retained. Events that tighten
+  an existing corner are attenuated locally; tight tributary joins can extend
+  their validated approach. This removes the pinned shallow coastal parallel
+  comb and softens the pinned tight joins/corners without changing lake counts.
+  The five exact retained GPU inputs have no rising profiles, endpoint gaps,
+  strict axis crossings or changed raw diagnostic arrays. Earlier `1almmdy`
+  and three `ikzivr` inputs also retain continuity and lake caps. Native
+  fmt/strict Clippy/WASM, TS typecheck and standalone bench build pass. All five
+  exact browser URLs start without errors and with finite detail data; offline
+  CPU fallback and legacy v2 replay also pass. Isolated warm generation takes
+  20–26ms versus 19–25ms for the previous package, excluding rendering/startup.
+  The reviewed package is rebuilt locally on port5173, with 5180 closed.
+  Visual plots and small replay probes remain in ignored rust/out; no tracked
+  tests added. User visual assessment remains primary.
+
+- Hydrology regression follow-up (2026-10-07): the user rejected the previous
+  curve pass as slower and visually worse on `1almmdy`, flat 30km/motif20km,
+  GPU drainage512, no coasts, pins12935/15791,14458/16919,15981/17446.
+  That replay had 26,326 vertices and three independent parallel corridors
+  inside one filled pool of about 130km². The correction uses incremental
+  capture into a shared derived drainage tree outside retained lakes, preserving
+  raw diagnostic grids, slope drainage and actual exits. Diagonal capture edges
+  cannot cross existing D8 edges without a junction. Curve subdivision is
+  adaptive in XY and water profile instead of uniform; graph anchors stay exact.
+  Continuous incision visits scanline strips of the bed, not whole diagonal
+  rectangles. Camera PNG compression is faster but lossless; contours are lazy
+  and cached per retained surface; cubic fill interpolation is separable with
+  the same values. Final replay: 371 reaches / 12,765 vertices, water SVG
+  about 527k characters versus about 995k before. Browser startup has no errors;
+  one idle replay reports scene preparation 417ms (earlier regression 465–546ms),
+  cold vector finalization223ms. These are not stable end-to-end speed ratios;
+  contour-heavy zooms can still cost more where the resulting beds differ.
+  Three prior ikzivr inputs (flat/mountains/volcano) retain raw diagnostic
+  arrays, monotone water profiles and shared endpoints, with no strict axis
+  crossings and lake caps5% total /2% each. Native fmt/Clippy/WASM, TS typecheck,
+  app/bench/standalone builds, both earlier zoom startups, offline CPU fallback
+  and legacy v2 dry replay pass. No tracked tests added.
+  Numeric continuity/crossing checks do not establish visual realism; the
+  user's visual assessment remains primary. Candidate packages and small
+  replay probes stay in ignored rust/out. The reviewed release is rebuilt into
+  pkg/wasm and the standalone bench; only port5173 is listening. Vite-only
+  serving prevents intermediate Rust writes from automatically replacing it.
+
+- Rust hydrology feedback refinements (2026-10-07): lake quantity, total land
+  coverage and individual area caps now default to 0.5 / 5% / 2%, keeping whole
+  natural cuvettes and their outlets. Filled-pool source selection is separate
+  from retained diagnostic accumulation. Vector courses use varied bend events,
+  physical profiles on steep reaches, fixed confluence nodes and short terminal
+  joins. The camera samples continuous vector incision instead of enlarging a
+  coarse erosion raster; overlapping beds use a common envelope. Water fills
+  share the sea palette. User replays: 27mhjp flat 2400m and ikzivr 30000m /
+  motif 20000m, flat/mountains, plus a volcanic flank check. Tiny ignored vector
+  illustrations/probes in rust/out support inspection; no tracked tests added.
+  Final checks: native fmt/strict Clippy/WASM, TS typecheck and app/bench/terrain
+  builds pass. Exact GPU input probes find no axis crossings, node gaps or
+  rising water profiles in the three 30km cases. Both user zoom views start
+  with finite detail/surface data and no browser errors. Standalone offline
+  CPU fallback and legacy v2 dry replay pass. The bench is served on port 5173.
+
+- Rust hydrology bench (2026-10-07, local): approved terrain → coasts → hydrology
+  stage, implemented with parallel Sol agents as requested. Native CPU/WASM and
+  WebGPU FP32 drainage/accumulation feed retained vector river axes, widths,
+  profiles, graph nodes, lake contours/holes and spill streams. Intermediates
+  remain available as display-only watershed/accumulation/flow/depression/lake/
+  network overlays with cursor values. Main classes, tributary density,
+  alimentation, constrained meanders, estuary aspects, widths, incision and
+  lake filtering have independent controls. Unretained depressions are filled
+  in the derived hydrological surface before incision; upstream relief is kept.
+  Explicit large courses require a feasible downhill dry-edge inflow, otherwise
+  remain naturally basin-limited with a diagnostic. General/stage/display UI is
+  separated; stage recalculation keeps upstream settings and caches. URL v3
+  retains options; old Rust v2 links without hydrology remain dry. Native fmt,
+  strict Clippy/WASM check, TS typecheck, independent app/bench and standalone
+  terrain builds pass. Browser CPU/GPU, cached hydrology reruns, overlay toggles,
+  offline main-thread/CPU fallback and old replay start without console errors.
+  Tiny ignored GPU probes cover 256/512/1024 grids; no test suites/screenshots
+  were added. Visual assessment remains with the user. Manual source placement,
+  animated lake filling and deltas remain deferred. Evidence in ignored
+  rust/out/hydrology-{smoke.json,gpu-check.mjs,offline.mjs,pool-check.mjs}.
+
 - Simpler secondary-island relief (2026-10-07): user rejected the added Perlin /
   salt-like interior texture at pins2879.7/1329.1 and903.6/2977.9 on12fu8j0
   (canyon, map10km/motif8km, erosion1.37, N/SW/W/NW). Remove the optional

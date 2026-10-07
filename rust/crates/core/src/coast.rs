@@ -235,6 +235,13 @@ impl Coast {
             rng.range(1.5, 2.4)
         };
         let lean = rng.range(0.45, 0.85);
+        // One broad, barely raised mound for larger plain islets. Reuse the
+        // existing phase so neither the silhouette nor RNG sequence changes.
+        let relief_center = if rocky {
+            (0.0, 0.0)
+        } else {
+            (x + r * 0.3 * phase.cos(), y + r * 0.3 * phase.sin())
+        };
         let point = |a: (f64, f64)| {
             (
                 x + r * (a.0 * turn.cos() - a.1 * turn.sin()),
@@ -244,7 +251,12 @@ impl Coast {
         let mut segment = |a, b, ra: f64, rb: f64| {
             self.capsule(point(a), point(b), r * ra, r * rb, r * 3.0, phase);
             let start = self.parameters.len() - 4;
-            self.parameters[start..].copy_from_slice(&[peak as f32, 0.0, 0.0, apron as f32]);
+            self.parameters[start..].copy_from_slice(&[
+                peak as f32,
+                relief_center.0 as f32,
+                relief_center.1 as f32,
+                apron as f32,
+            ]);
         };
         match shape {
             // Compact asymmetric rock; no repeated long capsule.
@@ -358,10 +370,16 @@ impl Coast {
             if base + detail > distance {
                 distance = base + detail;
                 scale = s;
-                // A simple shared elevation per islet. Shore taper and physical
-                // erosion provide its slopes; no fBm or ridged interior texture.
+                // Branches share one broad plain-islet rise, only a few meters high.
+                // Tiny islets and rocky outcrops keep their simple elevation.
                 islet_height = at(j + 8);
                 apron = at(j + 11);
+                if apron > 1.0 {
+                    let size = smooth((s / 3.0 - 0.009) / 0.016);
+                    let radial = (x - at(j + 9)).hypot(y - at(j + 10)) / (s * 0.6);
+                    let rise = 8.0 * (0.75 + 0.25 * phase.cos());
+                    islet_height += rise * size * (1.0 - smooth(radial));
+                }
             }
         }
         (distance, scale, islet_height, apron)

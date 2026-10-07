@@ -11,7 +11,7 @@ export interface Context { device: GPUDevice; pipelines: Map<string, Promise<GPU
 let contextPromise: Promise<Context | undefined> | undefined;
 export const GPU_RELIEFS = ['flat', 'hills', 'mountains', 'mixed', 'high-mountains', 'valley', 'volcano', 'caldera', 'plateau', 'canyon'];
 
-async function context(): Promise<Context | undefined> {
+export async function gpuContext(): Promise<Context | undefined> {
   contextPromise ??= (async () => {
     const adapter = await navigator.gpu?.requestAdapter({ powerPreference: 'high-performance' });
     if (!adapter) return;
@@ -25,7 +25,7 @@ async function context(): Promise<Context | undefined> {
 
 export async function prepareGpu(mode: TerrainCompute, relief: string): Promise<{ context: Context; pipeline: Promise<GPUComputePipeline> } | undefined> {
   if (mode === 'wasm') return;
-  const state = await context();
+  const state = await gpuContext();
   if (!state || state.lost) return;
   const family = relief === 'flat' ? 0 : relief === 'valley' ? 2 : relief === 'volcano' || relief === 'caldera' || relief === 'plateau' ? 3 : 1;
   const key = `${mode}:${family}`;

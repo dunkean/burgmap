@@ -8,6 +8,7 @@ import { renderSvg } from '../render/svg';
 // CANVAS-VIEWER (begin imports)
 import { createCanvasRenderer, CanvasRenderer } from '../render/canvas';
 import { createViewer } from './viewer';
+import { createRuler } from './ruler';
 import type { World } from '../gen/types';
 // CANVAS-VIEWER (end imports)
 import GenWorker from './worker?worker&inline';
@@ -780,7 +781,7 @@ const canvasEl = $<HTMLCanvasElement>('view');
 const hudEl = $('hud');
 const viewer = createViewer({
   container: map, canvas: canvasEl, minimap: $<HTMLCanvasElement>('minimap'),
-  onView: (v, w, h) => { pinsUI.update(v, w, h); marks.update(v, w, h); developer?.update(v, w, h); renderCoords(); if (viewReady) syncUrl(); },
+  onView: (v, w, h) => { pinsUI.update(v, w, h); marks.update(v, w, h); developer?.update(v, w, h); ruler.update(); renderCoords(); if (viewReady) syncUrl(); },
   onError: (error) => {
     if (pendingMain?.id === reqId) backendEvents.onRenderError?.(reqId, String(error.message));
     else console.error('canvas draw:', error);
@@ -851,7 +852,9 @@ const pinsUI = createPins({
   onFocus: (p) => viewer.setView({ cx: p.x, cy: p.y, scale: Math.max(viewer.getView().scale, 0.3) }),
 });
 let pinMode = false;
+const ruler = createRuler({ container: map, surface: canvasEl, controlsHost: $('corner'), getView: () => viewer.getView(), onEnable: () => setPinMode(false) });
 function setPinMode(on: boolean): void {
+  if (on) ruler.setEnabled(false);
   pinMode = on;
   map.classList.toggle('pinning', on);
   $('pinMode').classList.toggle('on', on);

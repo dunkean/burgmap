@@ -1,6 +1,6 @@
 # Burgmap — prototype terrain Rust / WASM
 
-Première étape du nouveau moteur : le terrain uniquement, dans un banc séparé
+Prototype du nouveau moteur : relief, côtes et hydrologie, dans un banc séparé
 de l'application TypeScript. Le développement et les builds se font localement.
 Aucune CI ni publication Rust n'est configurée pour cette étape.
 
@@ -34,11 +34,98 @@ des releases de l'application. `npm run dev` et `npm run build` habituels ne
 compilent pas Rust. Le typecheck TypeScript fonctionne aussi sans `rust/pkg/`
 grâce à la déclaration de la frontière WASM.
 
-Les tests et les étapes suivantes du moteur sont reportés à la demande de
+Les suites de tests et les autres étapes du moteur sont reportées à la demande de
 l'utilisateur. `check:terrain` exécute seulement rustfmt, Clippy et la
 vérification de compilation pour `wasm32-unknown-unknown`.
 
 ## Contrôles
+
+Le banc sépare les options **Général**, les étapes **Relief**, **Côtes**,
+**Hydrologie** et l'**Affichage**. Chaque bouton d'étape applique ses propres
+réglages en conservant les réglages amont déjà générés. Les changements amont
+recalculent leurs étapes dépendantes ; les modifications en attente sont indiquées.
+Les variantes de calcul du terrain sont regroupées à part.
+
+### Hydrologie
+
+- Le réseau est calculé sur la surface finale après les côtes. Les grilles
+  intermédiaires sont conservées : récepteurs, surface drainée en m², bassins
+  versants, surface de débordement, profondeur et identifiants des lacs.
+- Les sorties sont vectorielles : axes avec largeurs/profil d'eau, connexions et
+  contours des lacs. Le drainage utilise une grille physique interne de 256²,
+  512² ou 1024². Cette grille borne la précision topographique, même au zoom.
+- Cours principal : Auto, sans principal, ruisseau, rivière ou grand fleuve.
+  Les grands cours peuvent recevoir un apport extérieur à la carte. La densité
+  des affluents est indépendante ; leur alimentation et les largeurs sont réglables.
+- Lacs naturels, aucun ou quelques lacs aménagés ; surface minimale réglable.
+  Les lacs suivent les cuvettes et leurs seuils de débordement.
+  La quantité est réglable ; les plafonds par défaut sont **5 % des terres au
+  total** et **2 % des terres par lac**, ajustables dans les options avancées.
+  La sélection privilégie les cuvettes profondes et alimentées, en gardant
+  chaque cuvette entière avec son exutoire. Le statut indique la surface retenue.
+  Les cuvettes écartées peuvent être ouvertes par une brèche bornée avant le
+  comblement résiduel. Les limites par défaut sont **12 m de profondeur** et
+  **1 000 m de longueur**, réglables dans les options avancées. La coupe doit
+  rester petite par rapport au remblai évité et préserver les niveaux des lacs
+  retenus ; sinon le comblement est conservé. **Comblement seul** permet de
+  comparer. Le relief GPU amont reste intact ; la modification appartient à
+  la surface hydrique dérivée, avant incision.
+- Méandres naturels, atténués ou aucun ajout : les courbes du relief restent
+  présentes. Les courbes sont continues le long des cours dominants, malgré
+  leurs subdivisions aux confluences, et guidées par la pente et les berges
+  physiques. Dans les cuvettes comblées, le relief enterré ne bloque plus les courbes.
+  Leur longueur d'onde suit la largeur physique du cours. Une variation continue
+  seedée module fréquence, amplitude et asymétrie ; elle ne redémarre pas à
+  chaque confluence. Les petits cours pentus reçoivent des inflexions
+  bornées par leur largeur. Leur profil suit la surface physique entre les
+  cellules, en conservant la descente et les niveaux des nœuds partagés.
+  La sélection des sources écarte les branches créées par le seul comblement
+  d'une cuvette, en gardant les apports venus des versants et le drainage diagnostic.
+  Les surfaces plates sont routées par distances métriques aux vraies sorties,
+  avec des coûts positifs guidés par les creux du terrain enterré. Une passe
+  de consolidation favorise les corridors déjà alimentés dans les grandes
+  cuvettes comblées. Aucun bruit n'est ajouté aux altitudes. Réseau,
+  accumulation et bassins utilisent ce même drainage. Une contrainte locale
+  atténue les courbes concernées sans supprimer les courbes de tout un cours.
+  Les affluents s'incurvent vers l'aval du cours rejoint lorsque le terrain le
+  permet, avec un élargissement local modéré. Intensité et incision sont
+  réglables. Les boucles serrées sont limitées selon la largeur du cours ; les
+  raccords évitent les croisements avec le cours rejoint et les autres affluents.
+  Les embouchures proposent
+  Auto, simple, élargie, entonnoir ou aspect tidal, sans simulation de marées.
+- CPU Rust reste le chemin complet de référence. WebGPU FP32 accélère le
+  drainage initial et accumulation ; Rust résout les plats, conditionne les
+  cuvettes et reconstruit le drainage final avant les vecteurs. Les arrondis
+  et choix de drainage peuvent différer entre CPU et GPU. Un repli CPU indique
+  sa raison ; les temps de drainage préparé et de finalisation sont séparés.
+- Les changements hydriques réutilisent le relief préparé. Le zoom réutilise
+  les vecteurs conservés pour échantillonner un lit continu à la précision de
+  la caméra ; il n'agrandit pas les pixels d'incision de la grille hydrique.
+  Le rayon du lit dépend de la largeur physique du cours, et les raccords
+  utilisent une enveloppe de creusement sans additionner les incisions.
+  Le comblement large est interpolé en douceur ; le zoom ne relance pas la simulation.
+  Les courbes sont subdivisées selon leur courbure et leur profil, et le
+  creusement ne parcourt que la bande du lit. Les contours visibles sont
+  calculés à la demande puis conservés pour la même surface ; les PNG de
+  caméra utilisent une compression sans perte plus rapide.
+  La préparation des images et des contours lors de la génération et des
+  déplacements est exécutée dans le worker lorsqu'il est disponible.
+- **Diagnostic** affiche les bassins versants, l'accumulation, les directions
+  d'écoulement, les cuvettes, les profondeurs des lacs ou le graphe des cours d'eau.
+  Le drainage initial est conservé séparément du réseau final ; les plats,
+  leur rang avant agrégation des lacs et les cuvettes initiales sont aussi
+  visualisables. Le choix du diagnostic et la visibilité des eaux ne régénèrent rien.
+- Les liens v3 conservent les options hydriques et l'affichage. Les anciens
+  liens Rust v2 sans hydrologie restent sans eaux. L'hydrologie est désactivée
+  en caverne, avec conservation des réglages pour revenir en surface.
+
+La pose d'une source et le remplissage animé des lacs sont prévus pour une étape
+ultérieure. La validation de cette étape reste principalement visuelle par
+l'utilisateur ; aucune nouvelle suite exhaustive n'est requise.
+Le [détail du modèle hydrique](docs/HYDROLOGY.md) distingue le réseau de drainage,
+la géométrie des cours et les limites physiques du prototype.
+
+### Relief, côtes et vue
 
 - **Échantillonnage** compare CPU Rust et GPU FP32 (`compute=wasm|gpu-f32`).
   **Génération** compare la référence CPU (`generation=cpu`), les bruits fins GPU

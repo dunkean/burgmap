@@ -5,6 +5,7 @@ mod coast;
 mod engine;
 mod erosion;
 mod generation_noise;
+mod hydrology;
 mod noise;
 mod rng;
 
@@ -15,6 +16,7 @@ use std::f64::consts::{PI, TAU};
 
 pub use engine::TerrainGenerator;
 pub use generation_noise::{GenerationNoise, GenerationNoisePlan};
+pub use hydrology::{HydrologyConfig, HydrologyEngine, HydrologyOutput};
 
 pub struct Terrain {
     pub x: f64,

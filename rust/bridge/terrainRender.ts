@@ -10,6 +10,7 @@ import type { TerrainData, TerrainSettings } from './terrain';
 export type TerrainStyle = 'parchment' | 'atlas' | 'topographic' | 'copernicus';
 export interface TerrainScene { svg: string; imageUrl: string; contourStep: number }
 let coastClipId = 0;
+const contourPaths = new WeakMap<TerrainData, { relief: string; mapWidth: number; step: number; thin: string; index: string }>();
 
 /** Close land outside the tile, including mainland edges and holes, then smooth
  * the sub-cell contour. SVG antialiases this boundary at the actual screen zoom. */
@@ -30,8 +31,8 @@ export function terrainLandClip(terrain: TerrainData): string {
   }).join('');
 }
 
-function coastImage(terrain: TerrainData, imageUrl: string, sea: string): string {
-  const width = terrain.width, id = `terrain-land-${++coastClipId}`;
+function coastImage(terrain: TerrainData, imageUrl: string, sea: string, clipNamespace: string): string {
+  const width = terrain.width, id = `terrain-land-${clipNamespace}-${++coastClipId}`;
   return `<defs><clipPath id="${id}"><path d="${terrainLandClip(terrain)}" clip-rule="evenodd"/></clipPath></defs>${sea}<image width="${width}" height="${width}" href="${imageUrl}" clip-path="url(#${id})"/>`;
 }
 
@@ -68,7 +69,7 @@ const elevationColors = [
   [128, 128, 128], [255, 255, 255],
 ] as const;
 
-function renderElevation(terrain: TerrainData, frame: boolean): TerrainScene {
+function renderElevation(terrain: TerrainData, frame: boolean, clipNamespace: string): TerrainScene {
   const n = terrain.resolution, width = terrain.width;
   const rgb = new Uint8Array(n * n * 3);
   const coastal = terrain.globalMinHeight < 0;
@@ -91,18 +92,18 @@ function renderElevation(terrain: TerrainData, frame: boolean): TerrainScene {
   if (coastal) {
     const water = rgb.slice();
     for (let i = 0; i < terrain.height.length; i++) if (terrain.height[i] > 0) water.set([35, 125, 175], i * 3);
-    sea = `<image width="${width}" height="${width}" href="${pngDataUrl(encodePng(water, n, n))}"/>`;
+    sea = `<image width="${width}" height="${width}" href="${pngDataUrl(encodePng(water, n, n, 3, 1))}"/>`;
     extendLandColors(rgb, terrain);
   }
-  const imageUrl = pngDataUrl(encodePng(rgb, n, n));
-  let svg = coastal ? coastImage(terrain, imageUrl, sea) : `<image width="${width}" height="${width}" href="${imageUrl}"/>`;
+  const imageUrl = pngDataUrl(encodePng(rgb, n, n, 3, 1));
+  let svg = coastal ? coastImage(terrain, imageUrl, sea, clipNamespace) : `<image width="${width}" height="${width}" href="${imageUrl}"/>`;
   if (frame) svg += `<rect width="${width}" height="${width}" fill="none" stroke="#333333" stroke-width="1.2" vector-effect="non-scaling-stroke"/>`;
   return { svg, imageUrl, contourStep: 0 };
 }
 
 /** Transitional renderer adapter. Rust never depends on the legacy World schema. */
-export function renderRustTerrain(terrain: TerrainData, style: TerrainStyle, frame = true, settings: Pick<TerrainSettings, 'relief' | 'width'> = { relief: 'mountains', width: terrain.width }): TerrainScene {
-  if (style === 'copernicus') return renderElevation(terrain, frame);
+export function renderRustTerrain(terrain: TerrainData, style: TerrainStyle, frame = true, settings: Pick<TerrainSettings, 'relief' | 'width'> = { relief: 'mountains', width: terrain.width }, showContours = true, clipNamespace = 'main'): TerrainScene {
+  if (style === 'copernicus') return renderElevation(terrain, frame, clipNamespace);
   const n = terrain.resolution, width = terrain.width, cell = width / n;
   const cavern = terrain.caveMask.length > 0;
   // Stable continuous shading, without engraved bands or high-frequency paper grain.
@@ -129,23 +130,27 @@ export function renderRustTerrain(terrain: TerrainData, style: TerrainStyle, fra
       pixels.rgb[i * 3] = shade; pixels.rgb[i * 3 + 1] = shade; pixels.rgb[i * 3 + 2] = shade;
     }
   }
-  const background = pngDataUrl(encodePng(pixels.rgb, pixels.w, pixels.h));
+  // Camera PNGs are transient: fast, lossless compression keeps their pixels
+  // identical while avoiding export-grade compression on the UI thread.
+  const background = pngDataUrl(encodePng(pixels.rgb, pixels.w, pixels.h, 3, 1));
   // The engine samples a continuous physical surface for each camera region.
   // Contours use those same samples; their levels remain fixed across cameras.
   // Wider mountain spacing avoids tinting steep slopes with dense ink.
   // Keep the shared smoothing and small/near-flat loop filtering.
   const relief = settings.relief === 'flat' || settings.relief === 'hills' || settings.relief === 'valley' ? settings.relief : 'mountains';
   const step = CONTOUR_INTERVAL[relief] * (relief === 'mountains' ? 2 : 1);
-  const height = legacyRasterInput.terrain.height;
-  const contours = cavern ? { thin: [], index: [] } : contourSet({
-    terrain: { height, slope: slopeGrid(height) }, options: { relief },
-  } as unknown as World, settings.width / 1600, step);
-  const pathData = (paths: typeof contours.thin): string => paths.map(path => path.pts.map((point, i) => `${i ? 'L' : 'M'}${point.x.toFixed(2)},${point.y.toFixed(2)}`).join('') + (path.closed ? 'Z' : '')).join('');
-  const thin = pathData(contours.thin), index = pathData(contours.index);
+  let paths = contourPaths.get(terrain);
+  if (!cavern && showContours && (!paths || paths.relief !== relief || paths.mapWidth !== settings.width)) {
+    const height = legacyRasterInput.terrain.height;
+    const contours = contourSet({ terrain: { height, slope: slopeGrid(height) }, options: { relief } } as unknown as World, settings.width / 1600, step);
+    const pathData = (lines: typeof contours.thin): string => lines.map(path => path.pts.map((point, i) => `${i ? 'L' : 'M'}${point.x.toFixed(2)},${point.y.toFixed(2)}`).join('') + (path.closed ? 'Z' : '')).join('');
+    paths = { relief, mapWidth: settings.width, step, thin: pathData(contours.thin), index: pathData(contours.index) };
+    contourPaths.set(terrain, paths);
+  }
   const weights = terrainContourWidths(style, 1e-6);
   let svg = `<rect width="${width}" height="${width}" fill="${pal.paper}"/>`;
-  svg += coastal ? coastImage(terrain, background, `<rect width="${width}" height="${width}" fill="${pal.seaFill}"/>`) : `<image width="${width}" height="${width}" href="${background}"/>`;
-  if (!cavern) svg += `<g class="layer-contours" fill="none" stroke="${pal.contour}" stroke-linejoin="round" stroke-linecap="round"><path d="${thin}" style="stroke-width:var(--terrain-contour-width,${weights.thin}px)" vector-effect="non-scaling-stroke" opacity="${pal.contourOpacity * 0.5}"/><path d="${index}" style="stroke-width:var(--terrain-contour-index-width,${weights.index}px)" vector-effect="non-scaling-stroke" opacity="${pal.contourOpacity * 0.75}"/></g>`;
+  svg += coastal ? coastImage(terrain, background, `<rect width="${width}" height="${width}" fill="${pal.seaFill}"/>`, clipNamespace) : `<image width="${width}" height="${width}" href="${background}"/>`;
+  if (!cavern && showContours) svg += `<g class="layer-contours" fill="none" stroke="${pal.contour}" stroke-linejoin="round" stroke-linecap="round"><path d="${paths!.thin}" style="stroke-width:var(--terrain-contour-width,${weights.thin}px)" vector-effect="non-scaling-stroke" opacity="${pal.contourOpacity * 0.5}"/><path d="${paths!.index}" style="stroke-width:var(--terrain-contour-index-width,${weights.index}px)" vector-effect="non-scaling-stroke" opacity="${pal.contourOpacity * 0.75}"/></g>`;
   if (frame) svg += `<rect x="0" y="0" width="${width}" height="${width}" fill="none" stroke="${pal.frame}" stroke-width="1.2" vector-effect="non-scaling-stroke"/>`;
   return { svg, imageUrl: background, contourStep: cavern ? 0 : step };
 }

@@ -1,6 +1,28 @@
 // Keep the ordinary TypeScript build independent of the generated Rust package.
 declare module '*burgmap_wasm.js' {
   export default function init(options: { module_or_path: ArrayBuffer }): Promise<unknown>;
+  export interface HydrologyOutput {
+    readonly width: number; readonly resolution: number;
+    readonly receivers: Uint32Array; readonly accumulation: Float32Array; readonly basins: Uint32Array;
+    readonly raw_receivers: Uint32Array; readonly raw_accumulation: Float32Array; readonly raw_basins: Uint32Array;
+    readonly flat_labels: Uint32Array; readonly flat_rank: Uint32Array; readonly external_inflow_area: number;
+    readonly raw_filled: Float32Array; readonly raw_drainage_height: Float32Array;
+    readonly breach_count: number; readonly breach_cut_volume_m3: number; readonly avoided_fill_volume_m3: number;
+    readonly filled: Float32Array; readonly lake_depth: Float32Array; readonly lake_labels: Uint32Array;
+    readonly drainage_height: Float32Array; readonly surface_height: Float32Array; readonly adjusted_height: Float32Array;
+    readonly river_points: Float32Array; readonly river_offsets: Uint32Array; readonly river_meta: Uint32Array;
+    readonly node_points: Float32Array; readonly node_meta: Uint32Array;
+    readonly lake_points: Float32Array; readonly lake_offsets: Uint32Array;
+    readonly lake_ring_meta: Uint32Array; readonly lake_meta: Float32Array;
+    free(): void;
+  }
+  export class HydrologyEngine {
+    constructor(seed: string, width: number, resolution: number, height: Float32Array, seaEnabled: boolean);
+    static with_drainage(seed: string, width: number, resolution: number, height: Float32Array, seaEnabled: boolean, filled: Float32Array, receivers: Uint32Array, accumulation: Float32Array): HydrologyEngine;
+    filled(): Float32Array; receivers(): Uint32Array; accumulation(): Float32Array;
+    generate(main: string, density: number, wetness: number, lakes: string, meanders: string, meanderIntensity: number, estuary: string, widthScale: number, incision: number, minLakeArea: number, lakeAbundance?: number, lakeCoverage?: number, maxLakeArea?: number, depressionPolicy?: string, maxBreachDepth?: number, maxBreachLength?: number): HydrologyOutput;
+    free(): void;
+  }
   export interface TerrainOutput {
     readonly x: number; readonly y: number; readonly width: number; readonly resolution: number;
     readonly min_height: number; readonly max_height: number;

@@ -2,7 +2,10 @@ import './terrainbench.css';
 import TerrainWorker from './terrainWorker?worker&inline';
 import { sampleRustTerrain, RELIEFS, GEOLOGICAL_RELIEFS, ENVIRONMENT_RELIEFS, COMPUTE_MODES, type TerrainEnvironment, type TerrainCompute, type TerrainData, type TerrainSettings, type TerrainRequest, type TerrainResponse, type TerrainRelief, type TerrainRegion } from '../../../rust/bridge/terrain';
 import { renderRustTerrain, terrainContourWidths, type TerrainStyle, type TerrainScene } from '../../../rust/bridge/terrainRender';
+import { DEFAULT_HYDROLOGY, type HydrologySettings, type HydrologyOverlay } from '../../../rust/bridge/hydrology';
+import { renderHydrology, HYDROLOGY_LEGENDS } from '../../../rust/bridge/hydrologyRender';
 import { createPins } from './pins';
+import { createRuler } from './ruler';
 import { pinsFromString, pinsToString, viewFromString, viewToString } from './share';
 import { clampView, fitView, panBy, screenToWorld, zoomAt, type View } from '../render/view';
 import { COAST_DIRECTIONS, ISLAND_MODES, type IslandMode } from '../../../rust/bridge/terrain';
@@ -34,6 +37,57 @@ let settings: TerrainSettings = {
   compute: COMPUTE_MODES.includes(query.get('compute') as TerrainCompute) ? query.get('compute') as TerrainCompute : 'gpu-f32',
   generationCompute: query.get('generation') === 'cpu' ? 'cpu' : query.get('generation') === 'gpu-all' ? 'gpu-all' : query.get('generation') === 'gpu' ? 'gpu' : 'gpu-erosion',
 };
+const hydroFields = {
+  enabled: 'hydroEnabled', main: 'hydroMain', density: 'hydroDensity', wetness: 'hydroWetness', lakes: 'hydroLakes',
+  meanders: 'hydroMeanders', meanderIntensity: 'hydroMeanderIntensity', estuary: 'hydroEstuary', widthScale: 'hydroWidthScale',
+  incision: 'hydroIncision', minLakeArea: 'hydroMinLakeArea', resolution: 'hydroResolution', compute: 'hydroCompute',
+  lakeAbundance: 'hydroLakeAbundance', lakeCoverage: 'hydroLakeCoverage', maxLakeArea: 'hydroMaxLakeArea',
+  depressionPolicy: 'hydroDepressionPolicy', maxBreachDepth: 'hydroMaxBreachDepth', maxBreachLength: 'hydroMaxBreachLength',
+} as const;
+const hydroPercentFields = new Set(['lakeCoverage', 'maxLakeArea']);
+function readHydrology(): HydrologySettings {
+  const values = Object.fromEntries(Object.entries(hydroFields).map(([key, id]) => {
+    const control = el<HTMLInputElement | HTMLSelectElement>(id);
+    const fallback = DEFAULT_HYDROLOGY[key as keyof HydrologySettings];
+    let value: boolean | number | string = key === 'enabled' ? input(id).checked : control.value;
+    if (typeof fallback === 'number') {
+      const scale = hydroPercentFields.has(key) ? 100 : 1;
+      const numeric = finite(control.value, fallback * scale);
+      value = control instanceof HTMLInputElement
+        ? bounded(numeric, control.min === '' ? 0 : Number(control.min), control.max === '' ? Number.MAX_SAFE_INTEGER : Number(control.max))
+        : numeric;
+      value = Number(value) / scale;
+    }
+    return [key, value];
+  }));
+  return values as unknown as HydrologySettings;
+}
+const initialHydrology = { ...DEFAULT_HYDROLOGY };
+for (const [key, id] of Object.entries(hydroFields)) {
+  const property = key as keyof HydrologySettings;
+  const fallback = DEFAULT_HYDROLOGY[property];
+  const raw = query.get(`hydro_${key}`);
+  const control = el<HTMLInputElement | HTMLSelectElement>(id);
+  if (typeof fallback === 'boolean') input(id).checked = raw === null ? query.get('engine') === 'rust' && query.get('v') === '2' ? false : fallback : raw !== '0';
+  else if (typeof fallback === 'number') {
+    const scale = hydroPercentFields.has(key) ? 100 : 1;
+    const numeric = finite(raw, fallback) * scale;
+    control.value = String(numeric);
+    if (control instanceof HTMLInputElement) {
+      control.value = String(bounded(numeric, control.min === '' ? 0 : Number(control.min), control.max === '' ? Number.MAX_SAFE_INTEGER : Number(control.max)));
+    }
+    if (!control.value) control.value = String(fallback * scale);
+  } else {
+    control.value = raw ?? fallback;
+    if (!control.value) control.value = fallback;
+  }
+}
+Object.assign(initialHydrology, readHydrology());
+settings.hydrology = initialHydrology;
+const overlays: HydrologyOverlay[] = ['none', 'basins', 'accumulation', 'flow', 'depressions', 'lakes', 'channels', 'raw-basins', 'raw-accumulation', 'raw-flow', 'raw-depressions', 'flats', 'flat-rank'];
+let hydroOverlay: HydrologyOverlay = overlays.includes(query.get('overlay') as HydrologyOverlay) ? query.get('overlay') as HydrologyOverlay : 'none';
+el<HTMLSelectElement>('hydroOverlay').value = hydroOverlay;
+input('showWater').checked = query.get('water') !== '0';
 let style: TerrainStyle = ['parchment', 'atlas', 'topographic', 'copernicus'].includes(query.get('style') || '') ? query.get('style') as TerrainStyle : 'parchment';
 let view: View = viewFromString(query.get('view')) || fitView(settings.width, viewport.clientWidth, viewport.clientHeight);
 let terrain: TerrainData | undefined;
@@ -43,12 +97,52 @@ let generationTimer: ReturnType<typeof setTimeout> | undefined, detailTimer: Ret
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
 let renderingMs = 0, contourStep = 0, detailSamplingMs = 0;
 interface DetailTile {
-  terrain: Pick<TerrainData, 'x' | 'y' | 'width' | 'resolution' | 'generationMs' | 'backend' | 'backendReason' | 'prepareMs' | 'samplingMs' | 'gpuSetupMs'>;
+  terrain: Pick<TerrainData, 'x' | 'y' | 'width' | 'resolution' | 'height' | 'generationMs' | 'backend' | 'backendReason' | 'prepareMs' | 'samplingMs' | 'gpuSetupMs'>;
   style: TerrainStyle; scene: TerrainScene; key: string;
   image: HTMLImageElement; ready: Promise<void>;
 }
 const detailCache = new Map<string, DetailTile>();
 let displayedDetail: DetailTile | undefined;
+let cursor: [number, number] | undefined;
+
+function updateCoordinates(): void {
+  if (!cursor) return;
+  const [x, y] = screenToWorld(view, viewport.clientWidth, viewport.clientHeight, ...cursor);
+  const contains = (data: DetailTile['terrain']): boolean => x >= data.x && y >= data.y && x <= data.x + data.width && y <= data.y + data.width;
+  const data = displayedDetail && contains(displayedDetail.terrain) ? displayedDetail.terrain : terrain;
+  let z = '—';
+  if (data && contains(data)) {
+    // Samples lie at cell centers; interpolate the displayed elevation grid.
+    const n = data.resolution;
+    const gx = bounded((x - data.x) / data.width * n - 0.5, 0, n - 1);
+    const gy = bounded((y - data.y) / data.width * n - 0.5, 0, n - 1);
+    const x0 = Math.floor(gx), y0 = Math.floor(gy);
+    const x1 = Math.min(x0 + 1, n - 1), y1 = Math.min(y0 + 1, n - 1);
+    const tx = gx - x0, ty = gy - y0;
+    const top = data.height[y0 * n + x0] * (1 - tx) + data.height[y0 * n + x1] * tx;
+    const bottom = data.height[y1 * n + x0] * (1 - tx) + data.height[y1 * n + x1] * tx;
+    z = (top * (1 - ty) + bottom * ty).toFixed(1);
+  }
+  let diagnostic = '';
+  const hydro = terrain?.hydrology;
+  if (hydro && hydroOverlay !== 'none' && x >= 0 && y >= 0 && x < hydro.width && y < hydro.width) {
+    const n = hydro.resolution, i = Math.floor(y / hydro.width * n) * n + Math.floor(x / hydro.width * n);
+    if (hydroOverlay === 'basins') diagnostic = ` · bassin ${hydro.basins[i]}`;
+    else if (hydroOverlay === 'raw-basins') diagnostic = ` · bassin brut ${hydro.rawBasins[i]}`;
+    else if (hydroOverlay === 'raw-accumulation') diagnostic = ` · surface drainée brute ${(hydro.rawAccumulation[i] / 1e6).toFixed(3)} km²`;
+    else if (hydroOverlay === 'flats' || hydroOverlay === 'flat-rank') diagnostic = hydro.flatLabels[i] ? ` · zone plate ${hydro.flatLabels[i]} · rang ${hydro.flatRank[i]}` : ' · hors zone plate';
+    else if (hydroOverlay === 'accumulation' || hydroOverlay === 'channels') diagnostic = ` · bassin drainé ${(hydro.accumulation[i] / 1e6).toFixed(3)} km²`;
+    else if (hydroOverlay === 'depressions') diagnostic = ` · cuvette ${Math.max(0, hydro.filled[i] - hydro.drainageHeight[i]).toFixed(2)} m`;
+    else if (hydroOverlay === 'raw-depressions') diagnostic = ` · cuvette brute ${Math.max(0, hydro.rawFilled[i] - hydro.rawDrainageHeight[i]).toFixed(2)} m`;
+    else if (hydroOverlay === 'lakes') diagnostic = ` · lac ${hydro.lakeLabels[i]} · profondeur ${hydro.lakeDepth[i].toFixed(2)} m`;
+    else if (hydroOverlay === 'flow' || hydroOverlay === 'raw-flow') {
+      const receiver = (hydroOverlay === 'raw-flow' ? hydro.rawReceivers : hydro.receivers)[i];
+      const dx = receiver % n - i % n, dy = Math.floor(receiver / n) - Math.floor(i / n);
+      diagnostic = receiver >= n * n ? ' · exutoire' : ` · écoulement ${dy < 0 ? 'N' : dy > 0 ? 'S' : ''}${dx < 0 ? 'O' : dx > 0 ? 'E' : ''}${dx === 0 && dy === 0 ? 'stationnaire' : ''}`;
+    }
+  }
+  el('coordinates').textContent = `x ${x.toFixed(1)} · y ${y.toFixed(1)} · z ${z} m${diagnostic}`;
+}
 
 input('width').value = String(settings.width); input('motifSize').value = String(settings.motifSize);
 input('mountainMix').value = String(settings.mountainMix);
@@ -79,8 +173,20 @@ function updateCoastControl(): void {
   el('coastControl').title = cavern ? 'Sans côtes en caverne' : 'Choisir les directions couvertes par la mer';
   el('islandControl').hidden = cavern || draftCoastMask !== 255;
 }
+function updateHydrologyControl(): void {
+  const cavern = el<HTMLSelectElement>('relief').value === 'cavern';
+  for (const id of Object.values(hydroFields)) {
+    el<HTMLInputElement | HTMLSelectElement>(id).disabled = cavern || (id !== 'hydroEnabled' && !input('hydroEnabled').checked);
+  }
+  el<HTMLButtonElement>('generateHydrology').disabled = cavern;
+  el<HTMLButtonElement>('generateCoasts').disabled = cavern;
+  el('hydroControls').title = cavern ? 'Hydrologie désactivée en caverne ; réglages conservés.' : '';
+  el('hydroDensityValue').textContent = `${Math.round(Number(input('hydroDensity').value) * 100)} %`;
+  el('hydroLakeAbundanceValue').textContent = `× ${Number(input('hydroLakeAbundance').value).toFixed(2)}`;
+}
 function updateErosionControl(): void {
   updateCoastControl();
+  updateHydrologyControl();
   el('environmentControl').hidden = !geological(el<HTMLSelectElement>('relief').value);
   el('mountainMixControl').hidden = el<HTMLSelectElement>('relief').value !== 'mixed';
   el('mountainMixValue').textContent = `${Math.round(Number(input('mountainMix').value) * 100)} %`;
@@ -95,7 +201,9 @@ function status(message: string, error = false): void {
   el('status').textContent = message; el('status').dataset.error = String(error);
 }
 function shareQuery(): string {
-  const params = new URLSearchParams({ engine: 'rust', v: '2', seed: settings.seed, width: String(settings.width), motif: String(settings.motifSize), relief: settings.relief, erosion: String(settings.erosion), style, auto: input('auto').checked ? '1' : '0' });
+  const params = new URLSearchParams({ engine: 'rust', v: '3', seed: settings.seed, width: String(settings.width), motif: String(settings.motifSize), relief: settings.relief, erosion: String(settings.erosion), style, auto: input('auto').checked ? '1' : '0' });
+  for (const [key, value] of Object.entries(settings.hydrology ?? DEFAULT_HYDROLOGY)) params.set(`hydro_${key}`, typeof value === 'boolean' ? value ? '1' : '0' : String(value));
+  params.set('overlay', hydroOverlay); params.set('water', input('showWater').checked ? '1' : '0');
   params.set('contours', input('showContours').checked ? '1' : '0');
   if (settings.relief === 'mixed') params.set('mix', String(settings.mountainMix));
   if (geological(settings.relief)) params.set('environment', settings.environment ?? 'mixed');
@@ -123,6 +231,10 @@ pins.set(pinsFromString(query.get('pins')));
 const pinInput = el('pinPopover').querySelector('input')!; pinInput.placeholder = 'Note du pin'; pinInput.setAttribute('aria-label', 'Note du pin');
 const pinDelete = el('pinPopover').querySelector('button')!; pinDelete.textContent = 'Supprimer'; pinDelete.title = 'Supprimer ce pin';
 
+const ruler = createRuler({ container: viewport, surface: map, getView: () => view, onEnable: () => {
+  pinMode = false; el('pinMode').setAttribute('aria-pressed', 'false'); viewport.classList.remove('pin-mode');
+} });
+
 function updateView(): void {
   const w = viewport.clientWidth, h = viewport.clientHeight;
   view = clampView(view, terrain?.width ?? settings.width, w, h);
@@ -131,8 +243,10 @@ function updateView(): void {
   map.style.setProperty('--terrain-contour-index-width', `${contourWidths.index}px`);
   map.setAttribute('viewBox', `${view.cx - w / (2 * view.scale)} ${view.cy - h / (2 * view.scale)} ${w / view.scale} ${h / view.scale}`);
   pins.update(view, w, h);
+  ruler.update();
   const sampling = displayedDetail ? `${(displayedDetail.terrain.width / displayedDetail.terrain.resolution).toFixed(2)} m / échantillon` : 'aperçu';
   el('scale').textContent = `${(1 / view.scale).toFixed(1)} m / px · ${sampling}`;
+  updateCoordinates();
   scheduleDetail();
 }
 function setView(next: View): void { view = next; updateView(); deferSave(); }
@@ -162,14 +276,27 @@ function renderedStatus(): void {
   const preparation = terrain.prepareMs === undefined ? '' : ` · préparation ${terrain.prepareMs.toFixed(0)} ms (${generationBackend}${terrain.gpuSimulationMs ? `, simulation GPU ${terrain.gpuSimulationMs.toFixed(0)} ms` : ''}${terrain.nativeEnvironmentMs ? `, alentours CPU ${terrain.nativeEnvironmentMs.toFixed(0)} ms` : ''}${terrain.noiseMs ? `, bruits ${terrain.noiseMs.toFixed(0)} ms, suite Rust ${terrain.erosionMs!.toFixed(0)} ms` : ''})${terrain.generationReason ? ` · ${terrain.generationReason}` : ''}`;
   const setup = terrain.gpuSetupMs ? ` · initialisation GPU ${terrain.gpuSetupMs.toFixed(0)} ms` : '';
   const coast = terrain.coastBackend ? ` · littoral + érosion ${terrain.coastBackend === 'gpu-f32' ? 'GPU FP32' : 'CPU Rust'}${terrain.coastMs ? ` ${terrain.coastMs.toFixed(0)} ms` : ''}${terrain.coastReason ? ` (${terrain.coastReason})` : ''}` : '';
+  const hydro = terrain.hydrology;
+  const hydroStatus = el('hydrologyStatus');
+  hydroStatus.hidden = !hydro;
+  if (hydro) hydroStatus.textContent = `Hydrologie · ${hydro.backend === 'gpu-f32' ? 'GPU FP32 + finalisation Rust' : 'CPU Rust'} · ${hydro.riverCount} tronçons · ${hydro.lakeCount} lacs (${(hydro.lakeFraction * 100).toFixed(1)} % des terres) · ${hydro.basinCount} bassins · grille ${hydro.resolution}² · ${hydro.breachCount} ouvertures bornées · drainage préparé ${hydro.drainageMs.toFixed(0)} ms · finalisation ${hydro.vectorMs.toFixed(0)} ms${hydro.backendReason ? ` · ${hydro.backendReason}` : ''}`;
   status(`${name}${environment} · ${backend} · carte ${settings.width.toLocaleString('fr-FR')} m · relief ${settings.motifSize.toLocaleString('fr-FR')} m · aperçu ${terrain.resolution}² · ${contourStep && map.dataset.contours === 'true' ? `courbes ${contourStep} m` : 'sans courbes'}${preparation}${coast}${setup} · génération + aperçu ${terrain.generationMs.toFixed(0)} ms${detail} · rendu ${renderingMs.toFixed(0)} ms`);
 }
-function render(): void {
+function renderWater(): void {
+  const layer = document.getElementById('hydrologyOverlay');
+  if (!layer) return;
+  layer.innerHTML = terrain?.hydrology ? renderHydrology(terrain.hydrology, hydroOverlay, input('showWater').checked, style) : '';
+  const legend = el('hydrologyLegend');
+  legend.hidden = !terrain?.hydrology || hydroOverlay === 'none';
+  legend.textContent = HYDROLOGY_LEGENDS[hydroOverlay];
+}
+function render(preparedScene?: TerrainScene, preparationMs = 0): void {
   if (!terrain) return;
   updateContourControl();
-  const start = performance.now(), scene = renderRustTerrain(terrain, style, true, settings);
-  map.innerHTML = `<g id="terrainOverview">${scene.svg}</g><g id="terrainDetail"></g>`;
-  contourStep = scene.contourStep; renderingMs = performance.now() - start;
+  const start = performance.now(), scene = preparedScene ?? renderRustTerrain(terrain, style, true, settings, input('showContours').checked);
+  map.innerHTML = `<g id="terrainOverview">${scene.svg}</g><g id="terrainDetail"></g><g id="hydrologyOverlay"></g>`;
+  renderWater();
+  contourStep = scene.contourStep; renderingMs = preparationMs + performance.now() - start;
   displayedDetail = undefined;
   viewport.style.background = style === 'parchment' ? '#f1f0e9' : '#e7e8e2';
   updateView(); renderedStatus();
@@ -184,7 +311,7 @@ function regionForView(): TerrainRegion {
   const y = bounded(Math.round((view.cy - extent / 2) / step) * step, 0, width - extent);
   return { x, y, extent, resolution: 768 };
 }
-function detailKey(region: TerrainRegion): string { return `${generation}:${region.x}:${region.y}:${region.extent}:${region.resolution}:${style}`; }
+function detailKey(region: TerrainRegion): string { return `${generation}:${region.x}:${region.y}:${region.extent}:${region.resolution}:${style}:${input('showContours').checked ? 1 : 0}`; }
 async function applyDetail(tile: DetailTile): Promise<void> {
   try { await tile.ready; }
   catch {
@@ -214,6 +341,7 @@ async function applyDetail(tile: DetailTile): Promise<void> {
   const cleanup = (): void => { previous.forEach(node => node.remove()); };
   void fade.finished.then(cleanup, cleanup);
   displayedDetail = tile; detailSamplingMs = tile.terrain.generationMs;
+  updateCoordinates();
   // Only replace the regional scene: no fit, new generation or camera callback.
   const sampling = (tile.terrain.width / tile.terrain.resolution).toFixed(2);
   el('scale').textContent = `${(1 / view.scale).toFixed(1)} m / px · ${sampling} m / échantillon`;
@@ -249,13 +377,14 @@ function receive(response: TerrainResponse): void {
     try {
       const start = performance.now();
       const data = response.terrain;
-      const scene = renderRustTerrain(data, style, false, settings), image = new Image();
+      const prepared = request.scene?.style === style && request.scene.showContours === input('showContours').checked;
+      const scene = prepared && response.scene ? response.scene : renderRustTerrain(data, style, false, settings, input('showContours').checked), image = new Image();
       image.src = scene.imageUrl;
       const tile: DetailTile = {
-        terrain: { x: data.x, y: data.y, width: data.width, resolution: data.resolution, generationMs: data.generationMs, backend: data.backend, backendReason: data.backendReason, prepareMs: data.prepareMs, samplingMs: data.samplingMs, gpuSetupMs: data.gpuSetupMs },
+        terrain: { x: data.x, y: data.y, width: data.width, resolution: data.resolution, height: data.height, generationMs: data.generationMs, backend: data.backend, backendReason: data.backendReason, prepareMs: data.prepareMs, samplingMs: data.samplingMs, gpuSetupMs: data.gpuSetupMs },
         style, scene, image, ready: image.decode(), key: detailKey(request.region),
       };
-      renderingMs = performance.now() - start; cacheDetail(tile); void applyDetail(tile);
+      renderingMs = (prepared ? response.scenePreparationMs ?? 0 : 0) + performance.now() - start; cacheDetail(tile); void applyDetail(tile);
     } catch (error) { status(`Erreur du rendu détaillé : ${error instanceof Error ? error.message : error}`, true); }
     return;
   }
@@ -265,7 +394,9 @@ function receive(response: TerrainResponse): void {
   const previousWidth = terrain?.width;
   terrain = response.terrain; settings = overviewRequest.settings; terrainGeneration = generation;
   if (previousWidth !== undefined && previousWidth !== terrain.width) view = fitView(terrain.width, viewport.clientWidth, viewport.clientHeight);
-  try { render(); save(); } catch (error) { status(`Erreur du rendu : ${error instanceof Error ? error.message : error}`, true); }
+  updateStageStates();
+  const prepared = overviewRequest.scene?.style === style && overviewRequest.scene.showContours === input('showContours').checked;
+  try { render(prepared ? response.scene : undefined, prepared ? response.scenePreparationMs : 0); save(); } catch (error) { status(`Erreur du rendu : ${error instanceof Error ? error.message : error}`, true); }
 }
 let worker: Worker | undefined;
 async function runOnMain(request: TerrainRequest): Promise<void> {
@@ -273,7 +404,10 @@ async function runOnMain(request: TerrainRequest): Promise<void> {
   try { receive({ ...meta, terrain: await sampleRustTerrain(request) }); }
   catch (error) { receive({ ...meta, error: error instanceof Error ? error.message : String(error) }); }
 }
-function dispatch(request: TerrainRequest): void { if (worker) worker.postMessage(request); else void runOnMain(request); }
+function dispatch(request: TerrainRequest): void {
+  request.scene = { style, showContours: input('showContours').checked };
+  if (worker) worker.postMessage(request); else void runOnMain(request);
+}
 try {
   worker = new TerrainWorker(); worker.onmessage = (event: MessageEvent<TerrainResponse>) => receive(event.data);
   worker.onerror = event => {
@@ -283,41 +417,67 @@ try {
   };
 } catch { worker = undefined; }
 
-function readSettings(): TerrainSettings | undefined {
+function readSettings(stage: GenerationStage = 'all', reportError = true): TerrainSettings | undefined {
+  if (stage === 'hydrology') return { ...settings, hydrology: readHydrology() };
+  if (stage === 'coasts') return { ...settings, coastMask: settings.relief === 'cavern' ? 0 : draftCoastMask, islandMode: el<HTMLSelectElement>('islandMode').value as IslandMode };
   const width = Number(input('width').value), motifSize = Number(input('motifSize').value), seed = input('seed').value.trim();
   if (!Number.isFinite(width) || width < 500 || width > 100000 || !seed) {
-    status('Saisissez une largeur entre 500 et 100 000 m et une graine.', true); return;
+    if (reportError) status('Saisissez une largeur entre 500 et 100 000 m et une graine.', true); return;
   }
   if (!Number.isFinite(motifSize) || motifSize < 250 || motifSize > 50000) {
-    status('Saisissez une échelle du relief entre 250 et 50 000 m.', true); return;
+    if (reportError) status('Saisissez une échelle du relief entre 250 et 50 000 m.', true); return;
   }
   const relief = el<HTMLSelectElement>('relief').value as TerrainRelief;
-  if (!RELIEFS.includes(relief)) { status('Choisissez un relief dans le menu.', true); return; }
+  if (!RELIEFS.includes(relief)) { if (reportError) status('Choisissez un relief dans le menu.', true); return; }
   const environment = el<HTMLSelectElement>('environment').value as TerrainEnvironment;
-  if (!ENVIRONMENT_RELIEFS.includes(environment)) { status('Choisissez un relief environnant dans le menu.', true); return; }
-  return { seed, width, motifSize, relief, environment, coastMask: relief === 'cavern' ? 0 : draftCoastMask, islandMode: el<HTMLSelectElement>('islandMode').value as IslandMode, erosion: Number(input('erosion').value), mountainMix: Number(input('mountainMix').value), resolution: 512, compute: el<HTMLSelectElement>('compute').value as TerrainCompute, generationCompute: el<HTMLSelectElement>('generationCompute').value as TerrainSettings['generationCompute'] };
+  if (!ENVIRONMENT_RELIEFS.includes(environment)) { if (reportError) status('Choisissez un relief environnant dans le menu.', true); return; }
+  return { seed, width, motifSize, relief, environment, coastMask: relief === 'cavern' ? 0 : draftCoastMask, islandMode: el<HTMLSelectElement>('islandMode').value as IslandMode, erosion: Number(input('erosion').value), mountainMix: Number(input('mountainMix').value), resolution: 512, hydrology: readHydrology(), compute: el<HTMLSelectElement>('compute').value as TerrainCompute, generationCompute: el<HTMLSelectElement>('generationCompute').value as TerrainSettings['generationCompute'] };
 }
-function generate(): void {
+type GenerationStage = 'all' | 'relief' | 'coasts' | 'hydrology';
+function generate(stage: GenerationStage = 'all'): void {
   clearTimeout(generationTimer);
-  const next = readSettings(); if (!next) return;
+  const draft = readSettings(stage); if (!draft) return;
+  const next = stage === 'hydrology' ? { ...settings, hydrology: draft.hydrology }
+    : stage === 'coasts' ? { ...settings, coastMask: draft.coastMask, islandMode: draft.islandMode }
+    : stage === 'relief' ? { ...settings, seed: draft.seed, width: draft.width, motifSize: draft.motifSize, relief: draft.relief, environment: draft.environment, erosion: draft.erosion, mountainMix: draft.mountainMix, compute: draft.compute, generationCompute: draft.generationCompute }
+    : draft;
   generation++; clearTimeout(detailTimer); detailRequest = undefined; detailCache.clear();
   overviewRequest = { id: ++requestId, generation, kind: 'overview', settings: next, region: { x: 0, y: 0, extent: next.width, resolution: 512 } };
-  el('generate').setAttribute('aria-busy', 'true'); status('Génération du terrain en Rust…'); dispatch(overviewRequest);
+  el('generate').setAttribute('aria-busy', 'true'); status(stage === 'hydrology' ? 'Recalcul des eaux… relief et côtes conservés.' : stage === 'coasts' ? 'Recalcul des côtes et des eaux… relief conservé.' : 'Génération du terrain et du réseau hydrique en Rust…'); dispatch(overviewRequest);
+}
+function updateStageStates(): void {
+  const draft = readSettings('all', false);
+  if (!draft) {
+    el('reliefState').textContent = 'paramètres incomplets';
+    el('coastState').textContent = 'à recalculer après relief';
+    el('hydroState').textContent = 'à recalculer après amont';
+    return;
+  }
+  const reliefChanged = ['seed', 'width', 'motifSize', 'relief', 'environment', 'mountainMix', 'erosion', 'compute', 'generationCompute'].some(key => draft[key as keyof TerrainSettings] !== settings[key as keyof TerrainSettings]);
+  const coastChanged = draft.coastMask !== settings.coastMask || draft.islandMode !== settings.islandMode;
+  const hydroChanged = JSON.stringify(draft.hydrology) !== JSON.stringify(settings.hydrology);
+  el('reliefState').textContent = reliefChanged ? 'modifié' : '';
+  el('coastState').textContent = reliefChanged ? 'à recalculer après relief' : coastChanged ? 'modifiées' : '';
+  el('hydroState').textContent = reliefChanged || coastChanged ? 'à recalculer après amont' : hydroChanged ? 'modifiée' : '';
 }
 function parameterChanged(): void {
-  updateErosionControl(); clearTimeout(generationTimer);
-  if (input('auto').checked) generationTimer = setTimeout(generate, 220);
-  else status('Paramètres modifiés · cliquez sur Générer pour les appliquer.');
+  updateErosionControl(); updateStageStates(); clearTimeout(generationTimer);
+  if (input('auto').checked) generationTimer = setTimeout(() => generate(), 220);
+  else status('Paramètres modifiés · recalculer une étape conserve les réglages amont ; Générer applique tout.');
 }
 for (const id of ['width', 'motifSize', 'relief', 'environment', 'mountainMix', 'erosion', 'seed', 'islandMode']) el(id).addEventListener('input', parameterChanged);
+for (const id of Object.values(hydroFields)) el(id).addEventListener('input', parameterChanged);
 coastButtons.forEach(button => { button.onclick = () => {
   draftCoastMask ^= 1 << (COAST_DIRECTIONS as readonly string[]).indexOf(button.dataset.coast!);
   parameterChanged();
 }; });
 el('coastAll').onclick = () => { draftCoastMask = draftCoastMask === 255 ? 0 : 255; parameterChanged(); };
-el('generate').onclick = generate;
-el<HTMLSelectElement>('compute').onchange = generate;
-el<HTMLSelectElement>('generationCompute').onchange = generate;
+el('generate').onclick = () => generate();
+el('generateRelief').onclick = () => generate('relief');
+el('generateCoasts').onclick = () => generate('coasts');
+el('generateHydrology').onclick = () => generate('hydrology');
+el<HTMLSelectElement>('compute').onchange = parameterChanged;
+el<HTMLSelectElement>('generationCompute').onchange = parameterChanged;
 input('auto').onchange = () => { clearTimeout(generationTimer); save(); if (input('auto').checked) generate(); };
 el('randomSeed').onclick = () => { input('seed').value = crypto.getRandomValues(new Uint32Array(1))[0].toString(36); generate(); };
 el<HTMLSelectElement>('style').onchange = () => {
@@ -325,9 +485,15 @@ el<HTMLSelectElement>('style').onchange = () => {
   detailRequest = undefined; render(); save();
 };
 el('fit').onclick = fit; el('zoomIn').onclick = () => zoom(1.4); el('zoomOut').onclick = () => zoom(1 / 1.4);
-el('pinMode').onclick = () => { pinMode = !pinMode; el('pinMode').setAttribute('aria-pressed', String(pinMode)); viewport.classList.toggle('pin-mode', pinMode); };
+el('pinMode').onclick = () => { pinMode = !pinMode; if (pinMode) ruler.setEnabled(false); el('pinMode').setAttribute('aria-pressed', String(pinMode)); viewport.classList.toggle('pin-mode', pinMode); };
 input('showPins').onchange = () => { showPins(); save(); };
-input('showContours').onchange = () => { updateContourControl(); renderedStatus(); save(); };
+input('showWater').onchange = () => { renderWater(); save(); };
+el<HTMLSelectElement>('hydroOverlay').onchange = () => { hydroOverlay = el<HTMLSelectElement>('hydroOverlay').value as HydrologyOverlay; renderWater(); updateCoordinates(); save(); };
+input('showContours').onchange = () => {
+  updateContourControl();
+  if (input('showContours').checked && terrain && (!map.querySelector('#terrainOverview .layer-contours') || (displayedDetail && !map.querySelector('#terrainDetail .layer-contours')))) render();
+  renderedStatus(); save();
+};
 
 function link(): string { save(); const url = new URL(location.href); url.search = shareQuery(); return url.href; }
 async function copy(text: string): Promise<void> {
@@ -337,8 +503,9 @@ async function copy(text: string): Promise<void> {
 el('copy').onclick = () => void copy(link());
 el('copyReport').onclick = () => {
   const erosion = settings.relief === 'cavern' ? 'sans objet (caverne)' : `${Math.round(settings.erosion * 100)} %`;
-  const lines = ['Burgmap · prototype terrain Rust/WASM v2', link(), '', `Graine : ${settings.seed}`, `Largeur carte : ${settings.width} m · échelle relief : ${settings.motifSize} m · relief : ${settings.relief} · érosion : ${erosion}`, `Rendu : ${style} · vue : ${viewToString(view)}`, '', ...pins.pins.map((pin, i) => `Pin ${i + 1} : ${pin.x.toFixed(1)}, ${pin.y.toFixed(1)} m — ${pin.note || '(sans note)'}`)];
+  const lines = ['Burgmap · prototype terrain et eaux Rust/WASM v3', link(), '', `Graine : ${settings.seed}`, `Largeur carte : ${settings.width} m · échelle relief : ${settings.motifSize} m · relief : ${settings.relief} · érosion : ${erosion}`, `Rendu : ${style} · vue : ${viewToString(view)}`, '', ...pins.pins.map((pin, i) => `Pin ${i + 1} : ${pin.x.toFixed(1)}, ${pin.y.toFixed(1)} m — ${pin.note || '(sans note)'}`)];
   if (geological(settings.relief)) lines.splice(5, 0, `Relief environnant : ${settings.environment ?? 'mixed'}`);
+  lines.push(`Hydrologie : ${JSON.stringify(settings.hydrology)} · diagnostic : ${hydroOverlay} · eaux : ${input('showWater').checked ? 'visibles' : 'masquées'}`);
   lines.push(`Courbes de niveau : ${map.dataset.contours === 'true' ? 'visibles' : 'masquées'}`);
   if (settings.coastMask) lines.push(`Côtes : ${COAST_DIRECTIONS.filter((_, i) => settings.coastMask! & (1 << i)).join(', ')} · îles : ${settings.islandMode}`);
   if (terrain) lines.push('', `Source physique : 1024² · aperçu : ${terrain.resolution}² · génération : ${terrain.generationMs.toFixed(1)} ms · rendu : ${renderingMs.toFixed(1)} ms`);
@@ -355,8 +522,8 @@ map.addEventListener('pointerdown', event => {
   pointers.set(event.pointerId, local(event)); map.setPointerCapture(event.pointerId); dragging = true; map.classList.add('drag');
 });
 map.addEventListener('pointermove', event => {
-  const [wx, wy] = point(event);
-  el('coordinates').textContent = `x ${wx.toFixed(1)} · y ${wy.toFixed(1)} m`;
+  cursor = local(event);
+  updateCoordinates();
   const previous = pointers.get(event.pointerId); if (!previous) return;
   const current = local(event), oldGesture = pointers.size === 2 ? gesture() : undefined;
   const dx = current[0] - previous[0], dy = current[1] - previous[1];

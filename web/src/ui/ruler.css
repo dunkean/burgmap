@@ -1,0 +1,13 @@
+.ruler-layer { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 3; pointer-events: none; overflow: hidden; }
+.ruler-layer.active { pointer-events: auto; cursor: crosshair; touch-action: none; }
+.ruler-layer line { stroke: #24596b; stroke-width: 2; stroke-dasharray: 7 4; }
+.ruler-layer .ruler-halo { stroke: #fff; stroke-width: 5; stroke-dasharray: none; }
+.ruler-layer circle { fill: #24596b; stroke: #fff; stroke-width: 2; }
+.ruler-controls { position: absolute; bottom: 10px; right: 10px; z-index: 4; display: flex; flex-direction: column; align-items: flex-end; gap: 5px; }
+.ruler-controls button, .ruler-distance { padding: 5px 8px; border: 1px solid #bac9c5; border-radius: 5px; background: #fffdf2ed; color: #253b38; font: 12px/1.4 system-ui, sans-serif; }
+.ruler-controls button { cursor: pointer; height: auto; }
+.ruler-controls button[aria-pressed=true] { background: #dceee2; border-color: #75a48b; }
+.ruler-distance { font-variant-numeric: tabular-nums; pointer-events: none; }
+.ruler-distance[hidden] { display: none; }
+#corner > .ruler-controls { position: static; }
+#viewport #scale { bottom: 80px; }

@@ -2,6 +2,8 @@ import init, { TerrainEngine } from '../pkg/wasm/burgmap_wasm.js';
 import wasmUrl from '../pkg/wasm/burgmap_wasm_bg.wasm?url&inline';
 import { GpuTerrainSampler, prepareGpu, generateGpuNoise, GPU_RELIEFS, GPU_GENERATION_RELIEFS } from './terrainGpu';
 import { generateGpuTerrain, erodeGpuCoast } from './terrainErosion';
+import { PreparedHydrology, applyHydrologySurface, type HydrologyData, type HydrologySettings } from './hydrology';
+import type { TerrainScene, TerrainStyle } from './terrainRender';
 
 export const RELIEFS = ['flat', 'hills', 'valley', 'canyon', 'mountains', 'mixed', 'plateau', 'high-mountains', 'volcano', 'caldera', 'cavern'] as const;
 export type TerrainRelief = typeof RELIEFS[number];
@@ -13,7 +15,7 @@ export type TerrainCompute = typeof COMPUTE_MODES[number];
 export const COAST_DIRECTIONS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'] as const;
 export const ISLAND_MODES = ['island', 'archipelago', 'random'] as const;
 export type IslandMode = typeof ISLAND_MODES[number];
-export interface TerrainSettings { seed: string; width: number; motifSize: number; relief: TerrainRelief; environment?: TerrainEnvironment; coastMask?: number; islandMode?: IslandMode; erosion: number; mountainMix: number; resolution: number; compute?: TerrainCompute; generationCompute?: 'cpu' | 'gpu' | 'gpu-all' | 'gpu-erosion' }
+export interface TerrainSettings { seed: string; width: number; motifSize: number; relief: TerrainRelief; environment?: TerrainEnvironment; coastMask?: number; islandMode?: IslandMode; erosion: number; mountainMix: number; resolution: number; compute?: TerrainCompute; generationCompute?: 'cpu' | 'gpu' | 'gpu-all' | 'gpu-erosion'; hydrology?: HydrologySettings }
 export interface TerrainRegion { x: number; y: number; extent: number; resolution: number }
 export interface TerrainData {
   x: number; y: number; width: number; resolution: number; minHeight: number; maxHeight: number;
@@ -23,9 +25,11 @@ export interface TerrainData {
   backend?: TerrainCompute; backendReason?: string; prepareMs?: number; samplingMs?: number; gpuSetupMs?: number;
   generationBackend?: 'cpu' | 'gpu-noise-f32' | 'gpu-noise-all-f32' | 'gpu-erosion-f32'; generationReason?: string; noiseMs?: number; erosionMs?: number; gpuSimulationMs?: number; nativeEnvironmentMs?: number;
   coastBackend?: 'cpu' | 'gpu-f32'; coastMs?: number; coastReason?: string;
+  hydrology?: HydrologyData;
+  hydrologySurfaceMs?: number;
 }
-export interface TerrainRequest { id: number; generation: number; kind: 'overview' | 'detail'; settings: TerrainSettings; region: TerrainRegion }
-export type TerrainResponse = Pick<TerrainRequest, 'id' | 'generation' | 'kind'> & ({ terrain: TerrainData } | { error: string });
+export interface TerrainRequest { id: number; generation: number; kind: 'overview' | 'detail'; settings: TerrainSettings; region: TerrainRegion; scene?: { style: TerrainStyle; showContours: boolean } }
+export type TerrainResponse = Pick<TerrainRequest, 'id' | 'generation' | 'kind'> & ({ terrain: TerrainData; scene?: TerrainScene; scenePreparationMs?: number } | { error: string });
 
 let ready: Promise<unknown> | undefined;
 let engine: TerrainEngine | undefined, engineKey = '';
@@ -34,12 +38,14 @@ let coastBackend: TerrainData['coastBackend'], coastReason: string | undefined;
 let sampler: GpuTerrainSampler | undefined, samplerMode: TerrainCompute | undefined;
 let generationBackend: TerrainData['generationBackend'] = 'cpu', generationReason: string | undefined;
 let queue: Promise<unknown> = Promise.resolve();
+let preparedHydrology: PreparedHydrology | undefined, hydrologyKey = '', hydrologyVectorKey = '';
+let hydrology: HydrologyData | undefined;
 export function sampleRustTerrain(request: TerrainRequest): Promise<TerrainData> {
   const result = queue.then(() => sampleTerrain(request));
   queue = result.catch(() => undefined);
   return result;
 }
-async function sampleTerrain({ settings, region }: TerrainRequest): Promise<TerrainData> {
+async function sampleTerrain({ settings, region, kind }: TerrainRequest): Promise<TerrainData> {
   const mode = settings.compute === 'wasm' ? 'wasm' : 'gpu-f32';
   const generationMode = settings.generationCompute ?? 'gpu-erosion';
   const environment = (GEOLOGICAL_RELIEFS as readonly string[]).includes(settings.relief) ? settings.environment ?? 'mixed' : 'mixed';
@@ -122,8 +128,43 @@ async function sampleTerrain({ settings, region }: TerrainRequest): Promise<Terr
     coastMs = coastMask ? performance.now() - coastStarted : 0;
     prepareMs += coastMs;
   }
+  async function finish(data: TerrainData): Promise<TerrainData> {
+    const config = settings.hydrology;
+    if (config?.enabled && settings.relief !== 'cavern') {
+      const inputKey = JSON.stringify([engineKey, engineCoastKey, config.resolution, config.compute]);
+      if (!preparedHydrology || hydrologyKey !== inputKey) {
+        preparedHydrology?.dispose(); preparedHydrology = undefined; hydrology = undefined;
+        hydrologyVectorKey = '';
+        const n = config.resolution;
+        let height: Float32Array;
+        if (data.x === 0 && data.y === 0 && data.width === settings.width && data.resolution === n) {
+          height = data.height.slice();
+        } else if (sampler && !sampler.lost) {
+          height = (await sampler.sample({ x: 0, y: 0, extent: settings.width, resolution: n }, settings, engine!.min_height, engine!.max_height)).height;
+        } else {
+          const source = engine!.sample_region(0, 0, settings.width, n);
+          try { height = source.height; } finally { source.free(); }
+        }
+        preparedHydrology = await PreparedHydrology.create(settings.seed, settings.width, n, height, config.compute, coastMask !== 0);
+        hydrologyKey = inputKey;
+      }
+      const vectorKey = JSON.stringify(config);
+      if (!hydrology || hydrologyVectorKey !== vectorKey) {
+        hydrology = preparedHydrology.generate(config); hydrologyVectorKey = vectorKey;
+      }
+      const surfaceStarted = performance.now();
+      applyHydrologySurface(data, hydrology);
+      data.hydrologySurfaceMs = performance.now() - surfaceStarted;
+      // Intermediate grids stay in the worker cache. Only overview replies clone
+      // them for inspection; camera requests carry just their terrain region.
+      if (kind === 'overview') data.hydrology = hydrology;
+    }
+    data.generationMs = performance.now() - started;
+    return data;
+  }
   let backendReason: string | undefined;
   let gpuSetupMs = 0;
+  let gpuSampled: TerrainData | undefined;
   if (mode !== 'wasm' && supported) {
     const setupStarted = performance.now();
     try {
@@ -136,18 +177,19 @@ async function sampleTerrain({ settings, region }: TerrainRequest): Promise<Terr
         }
         gpuSetupMs = performance.now() - setupStarted;
         const data = await sampler.sample(region, settings, engine.min_height, engine.max_height);
-        return { ...data, generationMs: performance.now() - started, prepareMs, gpuSetupMs, generationBackend, generationReason, noiseMs, erosionMs, gpuSimulationMs, nativeEnvironmentMs, coastBackend, coastMs, coastReason };
+        gpuSampled = { ...data, generationMs: performance.now() - started, prepareMs, gpuSetupMs, generationBackend, generationReason, noiseMs, erosionMs, gpuSimulationMs, nativeEnvironmentMs, coastBackend, coastMs, coastReason };
       }
-      backendReason = 'WebGPU indisponible';
+      if (!gpuSampled) backendReason = 'WebGPU indisponible';
     } catch (error) {
       backendReason = `GPU indisponible : ${error instanceof Error ? error.message : String(error)}`;
       sampler?.dispose(); sampler = undefined; samplerMode = undefined;
     }
   } else if (mode !== 'wasm') backendReason = 'relief actuellement échantillonné en WASM';
+  if (gpuSampled) return finish(gpuSampled);
   const samplingStarted = performance.now();
   const result = engine.sample_region(region.x, region.y, region.extent, region.resolution);
   try {
-    return {
+    return await finish({
       x: result.x, y: result.y, width: result.width, resolution: result.resolution,
       minHeight: result.min_height, maxHeight: result.max_height,
       globalMinHeight: engine.min_height, globalMaxHeight: engine.max_height, motifSize: settings.motifSize,
@@ -157,6 +199,6 @@ async function sampleTerrain({ settings, region }: TerrainRequest): Promise<Terr
       backend: 'wasm', backendReason, prepareMs, samplingMs: performance.now() - samplingStarted, gpuSetupMs,
       generationBackend, generationReason, noiseMs, erosionMs, gpuSimulationMs, nativeEnvironmentMs,
       coastBackend, coastMs, coastReason,
-    };
+    });
   } finally { result.free(); }
 }

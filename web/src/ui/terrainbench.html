@@ -1,18 +1,22 @@
 <!doctype html>
 <html lang="fr">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Burgmap — terrain Rust</title></head>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Burgmap — terrain et eaux Rust</title></head>
 <body>
   <header>
-    <strong class="brand">Terrainbench <small>Rust · WASM</small></strong>
-    <div class="control-group terrain-settings" role="group" aria-label="Paramètres du terrain">
+<strong class="brand">Terrainbench <small>Rust · WASM</small></strong><span class="section-label">Général</span>
     <label title="Largeur de la carte en mètres">Carte m <input id="width" aria-label="Largeur de la carte en mètres" type="number" min="500" max="100000" step="100" value="2400"></label>
-    <label title="Taille physique des formes et massifs, indépendante de la carte ; 10 000 m pour des massifs à l’échelle de 10 km">Relief m <input id="motifSize" aria-label="Échelle du motif de relief en mètres" type="number" min="250" max="50000" step="250" value="3000"></label>
+    <label>Graine <input id="seed" type="text" value="42" maxlength="120"></label>
+<div class="control-group generation-actions">    <button id="generate" title="Générer" aria-label="Générer"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7Z"/></svg></button><button id="randomSeed" title="Nouvelle graine et génération" aria-label="Nouvelle graine et génération"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 8h.01M16 8h.01M12 12h.01M8 16h.01M16 16h.01" stroke-width="3"/></svg></button>
+    <label title="Générer automatiquement"><input id="auto" type="checkbox" checked>Auto</label>
+</div>
+</header>
+<section class="stages" aria-label="Étapes de génération">
+<details class="stage"><summary>1 · Relief <span id="reliefState"></span></summary><div class="stage-controls">    <label title="Taille physique des formes et massifs, indépendante de la carte ; 10 000 m pour des massifs à l’échelle de 10 km">Relief m <input id="motifSize" aria-label="Échelle du motif de relief en mètres" type="number" min="250" max="50000" step="250" value="3000"></label>
     <label>Relief <select id="relief"><option value="flat">Plaine</option><option value="hills">Colline</option><option value="valley">Vallée</option><option value="canyon">Canyon</option><option value="mountains" title="Montagne aux sommets plus doux">Montagne</option><option value="mixed">Collines et montagnes</option><option value="plateau">Plateau</option><option value="high-mountains" title="Chaînes de montagnes">Haute montagne</option><option value="volcano">Volcan</option><option value="caldera">Caldeira</option><option value="cavern">Caverne</option></select></label>
     <label id="environmentControl" hidden>Alentours <select id="environment" aria-label="Relief environnant"><option value="flat">Plaine</option><option value="hills">Collines</option><option value="mixed" selected>Collines et montagnes</option><option value="mountains" title="Montagne aux sommets plus doux">Montagne</option><option value="high-mountains" title="Chaînes de montagnes">Montagnes</option></select></label>
     <label id="mountainMixControl" hidden>Montagnes <input id="mountainMix" type="range" min="0" max="1" step="0.01" value="0.5"><output id="mountainMixValue" for="mountainMix">50 %</output></label>
-    <label>Érosion <input id="erosion" type="range" min="0" max="2" step="0.01" value="1"><output id="erosionValue" for="erosion">100 %</output></label>
-    <label>Graine <input id="seed" type="text" value="42" maxlength="120"></label>
-    <div id="coastControl" class="control-group" role="group" aria-label="Côtes">
+    <label>Érosion <input id="erosion" type="range" min="0" max="2" step="0.01" value="1"><output id="erosionValue" for="erosion">100 %</output></label><button id="generateRelief" class="stage-action">Recalculer le relief</button></div></details>
+<details class="stage"><summary>2 · Côtes <span id="coastState"></span></summary><div class="stage-controls">    <div id="coastControl" class="control-group" role="group" aria-label="Côtes">
       <span>Côtes</span><div class="coast-grid" role="group" aria-label="Directions de la mer">
         <button data-coast="NW" title="Côte nord-ouest" aria-label="Côte nord-ouest" aria-pressed="false">↖</button><button data-coast="N" title="Côte nord" aria-label="Côte nord" aria-pressed="false">↑</button><button data-coast="NE" title="Côte nord-est" aria-label="Côte nord-est" aria-pressed="false">↗</button>
         <button data-coast="W" title="Côte ouest" aria-label="Côte ouest" aria-pressed="false">←</button><button id="coastAll" title="Activer ou désactiver toutes les côtes" aria-label="Toutes les côtes" aria-pressed="false">●</button><button data-coast="E" title="Côte est" aria-label="Côte est" aria-pressed="false">→</button>
@@ -20,28 +24,47 @@
       </div>
       <label id="islandControl" hidden>Îles <select id="islandMode"><option value="island">Île</option><option value="archipelago">Archipel</option><option value="random">Aléatoire</option></select></label>
     </div>
-    </div>
-    <div class="control-group generation-actions" role="group" aria-label="Génération">
-    <button id="generate" title="Générer" aria-label="Générer"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7Z"/></svg></button><button id="randomSeed" title="Nouvelle graine et génération" aria-label="Nouvelle graine et génération"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 8h.01M16 8h.01M12 12h.01M8 16h.01M16 16h.01" stroke-width="3"/></svg></button>
-    <label title="Générer automatiquement"><input id="auto" type="checkbox" checked>Auto</label>
-    </div>
-  </header>
-  <nav aria-label="Vue de la carte">
-    <label>Échantillonnage <select id="compute"><option value="wasm">CPU · référence Rust</option><option value="gpu-f32" selected>GPU · FP32</option></select></label>
-    <label>Génération <select id="generationCompute" title="Même résolution et mêmes itérations d’érosion"><option value="cpu">CPU · référence</option><option value="gpu">GPU · bruits fins FP32</option><option value="gpu-all">GPU · tous bruits FP32</option><option value="gpu-erosion" selected>GPU · érosion FP32</option></select></label>
-    <div class="control-group" role="group" aria-label="Rendu"><label>Rendu <select id="style"><option value="parchment">Parchemin</option><option value="atlas">Atlas</option><option value="topographic">Topographique</option><option value="copernicus">MNE · Copernicus</option></select></label><label title="Afficher les lignes de niveau"><input id="showContours" type="checkbox" checked>Courbes de niveau</label></div>
+<button id="generateCoasts" class="stage-action">Recalculer les côtes</button></div></details>
+<details class="stage" open><summary>3 · Hydrologie <span id="hydroState"></span></summary><div id="hydroControls" class="stage-controls"><label><input id="hydroEnabled" type="checkbox" checked>Activer</label>
+<label>Cours principal <select id="hydroMain"><option value="auto">Auto</option><option value="none">Sans principal</option><option value="stream">Ruisseau</option><option value="river">Rivière</option><option value="major">Grand fleuve</option></select></label>
+<label>Affluents <input id="hydroDensity" type="range" min="0" max="2" step="0.05"><output id="hydroDensityValue"></output></label>
+<label>Lacs <select id="hydroLakes"><option value="auto">Naturels</option><option value="none" title="Combler les cuvettes dans la surface hydrique dérivée pour permettre l’écoulement sans lac.">Aucun</option><option value="some">Quelques lacs</option></select></label>
+<label title="0 : aucun lac ; 2 : toutes les cuvettes admissibles, sous les plafonds de surface">Quantité de lacs <input id="hydroLakeAbundance" type="range" min="0" max="2" step="0.05"><output id="hydroLakeAbundanceValue"></output></label>
+<label>Méandres <select id="hydroMeanders"><option value="natural">Naturels</option><option value="reduced">Atténués</option><option value="none">Aucun ajout</option></select></label>
+<label>Embouchures <select id="hydroEstuary"><option value="auto">Auto</option><option value="simple">Simples</option><option value="widening">Élargies</option><option value="funnel">Entonnoir</option><option value="tidal">Aspect tidal</option></select></label>
+<button id="generateHydrology" class="stage-action">Recalculer les eaux</button>
+<details class="advanced"><summary>Hydrologie avancée</summary><div class="control-group">
+<label>Alimentation <input id="hydroWetness" type="number" min="0.1" max="2" step="0.1"></label>
+<label>Largeurs × <input id="hydroWidthScale" type="number" min="0.5" max="2" step="0.05"></label>
+<label>Incision <input id="hydroIncision" type="number" min="0" max="2" step="0.1"></label>
+<label>Intensité méandres <input id="hydroMeanderIntensity" type="number" min="0" max="2" step="0.1"></label>
+<label>Lac minimum m² <input id="hydroMinLakeArea" type="number" min="0" max="100000000" step="100"></label>
+<label title="Plafond de surface occupée par tous les lacs, rapporté aux terres">Lacs · surface totale max % <input id="hydroLakeCoverage" type="number" min="0" max="100" step="0.5"></label>
+<label title="Plafond de surface d’un lac, rapporté aux terres">Un lac · taille max % <input id="hydroMaxLakeArea" type="number" min="0" max="100" step="0.5"></label>
+<label title="Ouvrir un seuil seulement si les limites physiques et les lacs le permettent ; sinon combler">Cuvettes sans lac <select id="hydroDepressionPolicy"><option value="auto">Ouverture bornée ou comblement</option><option value="fill">Comblement seul</option></select></label>
+<label>Ouverture · profondeur max m <input id="hydroMaxBreachDepth" type="number" min="0" max="200" step="1"></label>
+<label>Ouverture · longueur max m <input id="hydroMaxBreachLength" type="number" min="0" max="100000" step="50"></label>
+<label>Grille <select id="hydroResolution"><option value="256">256²</option><option value="512">512²</option><option value="1024">1024²</option></select></label>
+<label>Calcul <select id="hydroCompute"><option value="auto">Auto</option><option value="cpu">CPU Rust</option><option value="gpu">GPU FP32</option></select></label>
+</div></details></div></details>
+<details class="stage backend"><summary>Calcul du terrain</summary><div class="stage-controls">    <label>Échantillonnage <select id="compute"><option value="wasm">CPU · référence Rust</option><option value="gpu-f32" selected>GPU · FP32</option></select></label>
+    <label>Génération <select id="generationCompute" title="Même résolution et mêmes itérations d’érosion"><option value="cpu">CPU · référence</option><option value="gpu">GPU · bruits fins FP32</option><option value="gpu-all">GPU · tous bruits FP32</option><option value="gpu-erosion" selected>GPU · érosion FP32</option></select></label></div></details>
+</section>
+<nav aria-label="Affichage"><span class="section-label">Affichage</span>    <div class="control-group" role="group" aria-label="Rendu"><label>Rendu <select id="style"><option value="parchment">Parchemin</option><option value="atlas">Atlas</option><option value="topographic">Topographique</option><option value="copernicus">MNE · Copernicus</option></select></label><label title="Afficher les lignes de niveau"><input id="showContours" type="checkbox" checked>Courbes de niveau</label></div>
     <div class="control-group" role="group" aria-label="Navigation"><button id="fit" title="Recentrer" aria-label="Recentrer"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/><circle cx="12" cy="12" r="3"/></svg></button><button id="zoomIn" title="Zoom avant" aria-label="Zoom avant">+</button><button id="zoomOut" title="Zoom arrière" aria-label="Zoom arrière">−</button></div>
     <div class="control-group" role="group" aria-label="Pins"><button id="pinMode" title="Poser des pins" aria-label="Poser des pins" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 10c0 5-7 11-7 11S5 15 5 10a7 7 0 0 1 14 0Z"/><circle cx="12" cy="10" r="2"/></svg></button><label title="Afficher les pins"><input id="showPins" type="checkbox" checked>Pins</label></div>
     <div class="control-group share-actions" role="group" aria-label="Partager"><button id="copy" title="Copier l’URL" aria-label="Copier l’URL"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m10 13 4-4m-5 6-2 2a4 4 0 0 1-6-6l4-4a4 4 0 0 1 6 0m2 2 2-2a4 4 0 0 1 6 6l-4 4a4 4 0 0 1-6 0"/></svg></button><button id="copyReport" title="Copier le rapport" aria-label="Copier le rapport"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="5" width="14" height="16" rx="2"/><path d="M16 5V3H4v14m6-8h6m-6 4h6m-6 4h4"/></svg></button></div>
-  </nav>
+<label><input id="showWater" type="checkbox" checked>Eaux</label><label>Diagnostic <select id="hydroOverlay"><option value="none">Aucun</option><optgroup label="Réseau final"><option value="basins">Bassins versants</option><option value="accumulation">Accumulation</option><option value="flow">Écoulements</option><option value="channels">Réseau</option></optgroup><optgroup label="Terrain et traitement"><option value="depressions">Cuvettes</option><option value="lakes">Lacs</option><option value="flats">Zones plates</option><option value="flat-rank">Rangs des zones plates</option></optgroup><optgroup label="Drainage initial"><option value="raw-basins">Bassins bruts</option><option value="raw-accumulation">Accumulation brute</option><option value="raw-flow">Écoulements bruts</option><option value="raw-depressions">Cuvettes brutes</option></optgroup></select></label>
+</nav>
+<p id="hydrologyStatus" role="status" hidden></p>
   <p id="status" role="status" aria-live="polite">Chargement du moteur Rust…</p>
   <main>
     <div id="viewport" tabindex="0" aria-label="Carte du terrain. Molette pour zoomer, glisser pour déplacer.">
       <svg id="map" xmlns="http://www.w3.org/2000/svg" aria-label="Terrain généré"></svg>
       <div id="pinLayer"></div><div id="pinPopover" hidden></div>
-      <output id="coordinates"></output><output id="scale"></output>
+      <output id="hydrologyLegend" hidden></output><output id="coordinates"></output><output id="scale"></output>
     </div>
-    <aside><strong>Pins</strong><p><small>Alt-clic ou « Poser des pins » pour ajouter. Cliquez sur un pin pour modifier sa note. Les pins et la vue sont inclus dans le lien.</small></p><div id="pins"></div><details><summary>Aide</summary><p><small>Molette : zoom · glisser : déplacer · deux doigts : zoom et déplacement.<br>Clavier : + / − pour zoomer, 0 pour recentrer.<br><br>La largeur définit une carte carrée, jusqu’à 100 km. L’échelle du relief fixe la taille des formes en mètres : une vallée de 3 km garde cette taille sur une carte plus grande.<br><br>Le zoom demande au moteur Rust de nouveaux échantillons de la zone visible. L’érosion reste la même à toutes les échelles et ne s’applique pas aux cavernes. Changer le rendu conserve le terrain et ses pins.</small></p></details></aside>
+    <aside><strong>Pins</strong><p><small>Alt-clic ou « Poser des pins » pour ajouter. Cliquez sur un pin pour modifier sa note. Les pins et la vue sont inclus dans le lien.</small></p><div id="pins"></div><details><summary>Aide</summary><p><small>Molette : zoom · glisser : déplacer · deux doigts : zoom et déplacement.<br>Clavier : + / − pour zoomer, 0 pour recentrer.<br><br>La largeur définit une carte carrée, jusqu’à 100 km. L’échelle du relief fixe la taille des formes en mètres : une vallée de 3 km garde cette taille sur une carte plus grande.<br><br>Le zoom demande au moteur Rust de nouveaux échantillons de la zone visible. L’érosion reste la même à toutes les échelles et ne s’applique pas aux cavernes. Changer l’affichage conserve le terrain et ses pins. Les diagnostics montrent les données conservées par l’étape Hydrologie. Chaque bouton de recalcul conserve les réglages des étapes précédentes ; Générer applique tous les réglages.</small></p></details></aside>
   </main>
   <script type="module" src="./terrainbench.ts"></script>
 </body>

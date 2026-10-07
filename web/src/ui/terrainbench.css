@@ -70,3 +70,22 @@ summary { cursor: pointer; font-size: 12px; font-weight: 600; }
   #viewport { flex: none; height: 65vh; min-height: 360px; }
   aside { flex: auto; width: 100%; max-height: 300px; border-left: 0; border-top: 1px solid #dce3df; }
 }
+
+.section-label { color: #285849; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; }
+.stages { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 8px; background: #eef3ee; border-bottom: 1px solid #dce3df; max-height: 35vh; overflow: auto; }
+.stage { background: #fff; border: 1px solid #d3ddd7; border-radius: 5px; align-self: flex-start; }
+.stage > summary { padding: 5px 8px; color: #285849; }
+.stage > summary span { color: #9a6b2e; font-size: 10px; font-weight: 500; }
+.stage-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 7px 12px; padding: 5px 8px 9px; max-width: 700px; }
+.stage input[type=number] { width: 80px; }
+.stage input[type=range] { width: 70px; }
+.stage select { max-width: 160px; }
+.stage .coast-grid button { width: 20px; height: 18px; padding: 0; }
+.stage-action { background: #edf3ef; border-color: #9aafa1; }
+.advanced { flex-basis: 100%; }
+.advanced > summary { font-weight: 500; font-size: 11px; color: #657670; }
+.advanced .control-group { padding-top: 7px; gap: 7px 12px; }
+#hydrologyStatus { margin: 0; padding: 4px 8px; color: #315e70; background: #e9f3f6; border-bottom: 1px solid #d3e3e8; font-size: 11px; }
+#hydrologyOverlay { pointer-events: none; }
+
+#hydrologyLegend { position: absolute; top: 10px; left: 10px; max-width: min(430px, 85%); background: #fffef4e8; color: #34535a; border: 1px solid #d3e3e8; padding: 6px 9px; border-radius: 4px; font-size: 11px; pointer-events: none; }

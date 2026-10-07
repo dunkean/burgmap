@@ -29,7 +29,7 @@ function chunk(type: string, data: Uint8Array): Uint8Array {
 }
 
 /** Encode 8-bit RGB (channels=3) or RGBA (channels=4) pixels as PNG. */
-export function encodePng(pixels: Uint8Array | Uint8ClampedArray, w: number, h: number, channels: 3 | 4 = 3): Uint8Array {
+export function encodePng(pixels: Uint8Array | Uint8ClampedArray, w: number, h: number, channels: 3 | 4 = 3, compression: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 = 6): Uint8Array {
   const stride = w * channels;
   const raw = new Uint8Array((stride + 1) * h);
   for (let y = 0; y < h; y++) {
@@ -41,7 +41,7 @@ export function encodePng(pixels: Uint8Array | Uint8ClampedArray, w: number, h: 
       raw[ro + 1 + x] = (pixels[po + x] - left) & 255;
     }
   }
-  const idat = zlibSync(raw, { level: 6 });
+  const idat = zlibSync(raw, { level: compression });
   const ihdr = new Uint8Array(13);
   const dv = new DataView(ihdr.buffer);
   dv.setUint32(0, w); dv.setUint32(4, h);

@@ -1,5 +1,5 @@
 // The dedicated third simplex stream matches Rust's shore-noise fork.
-// Each capsule is three vec4s: endpoints; radii/scale/phase; islet relief/apron.
+// Each capsule is three vec4s: endpoints; radii/scale/phase; islet height/center/apron.
 @group(0) @binding(6) var<storage, read> coast: array<vec4<f32>>;
 fn mainlandReach(mask:u32, direction:u32)->f32 {
   return select(0.64,1.50,(mask&(1u<<(direction&7u)))==0u);
@@ -40,8 +40,14 @@ fn coastalHeight(xy:vec2<f32>, terrainHeight:f32)->f32 {
     }
     if(base+detail>distance){
       distance=base+detail;scale=s;apron=geology.w;
-      // Same simple elevation as Rust; shore taper and erosion provide slopes.
+      // Same shared rise as Rust: a few meters, no tiny-islet or rocky relief.
       isletHeight=geology.x;
+      if(apron>1.0){
+        let size=smooth01((s/3.0-0.009)/0.016);
+        let radial=length(uv-geology.yz)/(s*0.6);
+        let rise=8.0*(0.75+0.25*cos(shape.w));
+        isletHeight+=rise*size*(1.0-smooth01(radial));
+      }
     }
   }
   if(isletHeight>0.0){height=isletHeight;}

@@ -1,5 +1,244 @@
 use wasm_bindgen::prelude::*;
 
+/// Cached terrain drainage. Vector regeneration does not repeat terrain/coast preparation.
+#[wasm_bindgen]
+pub struct HydrologyEngine {
+    engine: burgmap_core::HydrologyEngine,
+}
+
+#[wasm_bindgen]
+impl HydrologyEngine {
+    #[wasm_bindgen(constructor)]
+    pub fn new(
+        seed: &str,
+        width: f64,
+        resolution: f64,
+        height: &[f32],
+        sea_enabled: bool,
+    ) -> Result<HydrologyEngine, JsValue> {
+        burgmap_core::HydrologyEngine::new(
+            seed,
+            width,
+            raster_resolution(resolution)?,
+            height,
+            sea_enabled,
+        )
+        .map(|engine| Self { engine })
+        .map_err(|e| JsValue::from_str(&e))
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_drainage(
+        seed: &str,
+        width: f64,
+        resolution: f64,
+        height: &[f32],
+        sea_enabled: bool,
+        filled: &[f32],
+        receivers: &[u32],
+        accumulation: &[f32],
+    ) -> Result<HydrologyEngine, JsValue> {
+        burgmap_core::HydrologyEngine::with_drainage(
+            seed,
+            width,
+            raster_resolution(resolution)?,
+            height,
+            sea_enabled,
+            filled,
+            receivers,
+            accumulation,
+        )
+        .map(|engine| Self { engine })
+        .map_err(|e| JsValue::from_str(&e))
+    }
+    pub fn filled(&self) -> Vec<f32> {
+        self.engine.filled().to_vec()
+    }
+    pub fn receivers(&self) -> Vec<u32> {
+        self.engine.receivers().to_vec()
+    }
+    pub fn accumulation(&self) -> Vec<f32> {
+        self.engine.accumulation().to_vec()
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub fn generate(
+        &self,
+        main: &str,
+        density: f32,
+        wetness: f32,
+        lakes: &str,
+        meanders: &str,
+        meander_intensity: f32,
+        estuary: &str,
+        width_scale: f32,
+        incision: f32,
+        min_lake_area: f32,
+        lake_abundance: Option<f32>,
+        lake_coverage: Option<f32>,
+        max_lake_area: Option<f32>,
+        depression_policy: Option<String>,
+        max_breach_depth: Option<f32>,
+        max_breach_length: Option<f32>,
+    ) -> Result<HydrologyOutput, JsValue> {
+        let defaults = burgmap_core::HydrologyConfig::default();
+        let cfg = burgmap_core::HydrologyConfig {
+            main: main.into(),
+            density,
+            wetness,
+            lakes: lakes.into(),
+            meanders: meanders.into(),
+            meander_intensity,
+            estuary: estuary.into(),
+            width_scale,
+            incision,
+            min_lake_area,
+            lake_abundance: lake_abundance.unwrap_or(defaults.lake_abundance),
+            lake_coverage: lake_coverage.unwrap_or(defaults.lake_coverage),
+            max_lake_area: max_lake_area.unwrap_or(defaults.max_lake_area),
+            depression_policy: depression_policy.unwrap_or(defaults.depression_policy),
+            max_breach_depth: max_breach_depth.unwrap_or(defaults.max_breach_depth),
+            max_breach_length: max_breach_length.unwrap_or(defaults.max_breach_length),
+        };
+        self.engine
+            .generate(&cfg)
+            .map(|output| HydrologyOutput { output })
+            .map_err(|e| JsValue::from_str(&e))
+    }
+}
+
+/// Batch-copy getters; JS owns arrays independently of this wrapper's lifetime.
+#[wasm_bindgen]
+pub struct HydrologyOutput {
+    output: burgmap_core::HydrologyOutput,
+}
+
+#[wasm_bindgen]
+impl HydrologyOutput {
+    #[wasm_bindgen(getter)]
+    pub fn width(&self) -> f32 {
+        self.output.width
+    }
+    #[wasm_bindgen(getter)]
+    pub fn resolution(&self) -> u32 {
+        self.output.resolution as u32
+    }
+    #[wasm_bindgen(getter)]
+    pub fn receivers(&self) -> Vec<u32> {
+        self.output.receivers.clone()
+    }
+    #[wasm_bindgen(getter)]
+    pub fn accumulation(&self) -> Vec<f32> {
+        self.output.accumulation.clone()
+    }
+    #[wasm_bindgen(getter)]
+    pub fn basins(&self) -> Vec<u32> {
+        self.output.basins.clone()
+    }
+    #[wasm_bindgen(getter)]
+    pub fn filled(&self) -> Vec<f32> {
+        self.output.filled.clone()
+    }
+    #[wasm_bindgen(getter)]
+    pub fn raw_receivers(&self) -> Vec<u32> {
+        self.output.raw_receivers.clone()
+    }
+    #[wasm_bindgen(getter)]
+    pub fn raw_accumulation(&self) -> Vec<f32> {
+        self.output.raw_accumulation.clone()
+    }
+    #[wasm_bindgen(getter)]
+    pub fn raw_basins(&self) -> Vec<u32> {
+        self.output.raw_basins.clone()
+    }
+    #[wasm_bindgen(getter)]
+    pub fn flat_labels(&self) -> Vec<u32> {
+        self.output.flat_labels.clone()
+    }
+    #[wasm_bindgen(getter)]
+    pub fn flat_rank(&self) -> Vec<u32> {
+        self.output.flat_rank.clone()
+    }
+    #[wasm_bindgen(getter)]
+    pub fn external_inflow_area(&self) -> f32 {
+        self.output.external_inflow_area
+    }
+    #[wasm_bindgen(getter)]
+    pub fn raw_filled(&self) -> Vec<f32> {
+        self.output.raw_filled.clone()
+    }
+    #[wasm_bindgen(getter)]
+    pub fn raw_drainage_height(&self) -> Vec<f32> {
+        self.output.raw_drainage_height.clone()
+    }
+    #[wasm_bindgen(getter)]
+    pub fn breach_count(&self) -> u32 {
+        self.output.breach_count
+    }
+    #[wasm_bindgen(getter)]
+    pub fn breach_cut_volume_m3(&self) -> f32 {
+        self.output.breach_cut_volume_m3
+    }
+    #[wasm_bindgen(getter)]
+    pub fn avoided_fill_volume_m3(&self) -> f32 {
+        self.output.avoided_fill_volume_m3
+    }
+    #[wasm_bindgen(getter)]
+    pub fn lake_depth(&self) -> Vec<f32> {
+        self.output.lake_depth.clone()
+    }
+    #[wasm_bindgen(getter)]
+    pub fn lake_labels(&self) -> Vec<u32> {
+        self.output.lake_labels.clone()
+    }
+    #[wasm_bindgen(getter)]
+    pub fn drainage_height(&self) -> Vec<f32> {
+        self.output.drainage_height.clone()
+    }
+    #[wasm_bindgen(getter)]
+    pub fn surface_height(&self) -> Vec<f32> {
+        self.output.surface_height.clone()
+    }
+    #[wasm_bindgen(getter)]
+    pub fn adjusted_height(&self) -> Vec<f32> {
+        self.output.adjusted_height.clone()
+    }
+    #[wasm_bindgen(getter)]
+    pub fn river_points(&self) -> Vec<f32> {
+        self.output.river_points.clone()
+    }
+    #[wasm_bindgen(getter)]
+    pub fn river_offsets(&self) -> Vec<u32> {
+        self.output.river_offsets.clone()
+    }
+    #[wasm_bindgen(getter)]
+    pub fn river_meta(&self) -> Vec<u32> {
+        self.output.river_meta.clone()
+    }
+    #[wasm_bindgen(getter)]
+    pub fn node_points(&self) -> Vec<f32> {
+        self.output.node_points.clone()
+    }
+    #[wasm_bindgen(getter)]
+    pub fn node_meta(&self) -> Vec<u32> {
+        self.output.node_meta.clone()
+    }
+    #[wasm_bindgen(getter)]
+    pub fn lake_points(&self) -> Vec<f32> {
+        self.output.lake_points.clone()
+    }
+    #[wasm_bindgen(getter)]
+    pub fn lake_offsets(&self) -> Vec<u32> {
+        self.output.lake_offsets.clone()
+    }
+    #[wasm_bindgen(getter)]
+    pub fn lake_ring_meta(&self) -> Vec<u32> {
+        self.output.lake_ring_meta.clone()
+    }
+    #[wasm_bindgen(getter)]
+    pub fn lake_meta(&self) -> Vec<f32> {
+        self.output.lake_meta.clone()
+    }
+}
+
 /// A square raster in meters. Cell centers are ((x + .5) * width / resolution, ...).
 /// Array getters copy in a single batch: JS owns them independently of free().
 #[wasm_bindgen]
