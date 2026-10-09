@@ -1,54 +1,54 @@
 # Magna Urbis
 
-**Magna Urbis est inspiré de [TownGeneratorOS de Watabou (Oleg Dolya)](https://github.com/watabou/TownGeneratorOS) et de son [Medieval Fantasy City Generator](https://watabou.itch.io/medieval-fantasy-city-generator).** Le premier prototype Python est issu d'un port de TownGeneratorOS ; les implémentations TypeScript et Rust poursuivent cette exploration.
+**Magna Urbis is inspired by [TownGeneratorOS by Watabou (Oleg Dolya)](https://github.com/watabou/TownGeneratorOS) and his [Medieval Fantasy City Generator](https://watabou.itch.io/medieval-fantasy-city-generator).** The original Python prototype began as a port of TownGeneratorOS; the TypeScript and Rust implementations continue that exploration.
 
-**Projet en cours de développement · alpha · prototype.** Magna Urbis génère des implantations pré-modernes et leurs paysages pour la cartographie et le jeu de rôle. Les résultats, les performances et les interfaces évoluent encore : le projet n'est pas un logiciel achevé.
+**Work in progress. Alpha. Prototype.** Magna Urbis generates pre-modern settlements and their surrounding landscapes for maps and tabletop role-playing games. Its output, performance and interfaces are still evolving. This is an experimental project, not a finished application.
 
-Deux implémentations sont en développement : **TypeScript**, aujourd'hui la plus complète, et **Rust / WebAssembly**, encore en retard sur son périmètre fonctionnel mais qui le rattrape progressivement.
+There are two implementations: **TypeScript**, currently the most complete, and **Rust / WebAssembly**, which is still behind in features but is gradually catching up.
 
-À terme, **Magna Urbis sera intégré à [Neural Earth](https://github.com/dunkean/neural-earth)**, le projet de monde procédural développé dans Infinite Map, pour inscrire les villes et villages dans un paysage régional et planétaire. Cette intégration est un objectif futur ; elle n'est pas encore livrée.
+The long-term goal is to **integrate Magna Urbis into [Neural Earth](https://github.com/dunkean/neural-earth)**, the procedural world project developed in Infinite Map, placing cities and villages within a regional and planetary landscape. This integration is planned for the future and has not been delivered yet.
 
-## Aperçus du prototype
+## Prototype screenshots
 
-Captures réelles de l'application TypeScript : trois villes de 30 000 habitants et un village de 600 habitants. Elles illustrent différentes morphologies urbaines et les rendus **Parchemin** et **Atlas**, avec les imperfections actuelles du prototype.
+Actual captures from the TypeScript application: three cities of 30,000 inhabitants and a village of 600. They show different urban layouts and the **Parchment** and **Atlas** map styles, including the prototype's current imperfections.
 
-### Ville médiévale · Parchemin
+### Medieval city - Parchment
 
-![Ville médiévale et rivière, rendu Parchemin](docs/images/medieval-city.png)
+![Medieval city and river in the Parchment map style](docs/images/medieval-city.png)
 
-### Médina dans le désert · Atlas
+### Desert medina - Atlas
 
-![Médina dans un paysage désertique, rendu Atlas](docs/images/desert-medina.png)
+![Medina in a desert landscape in the Atlas map style](docs/images/desert-medina.png)
 
-### Ville chinoise planifiée · Atlas
+### Planned Chinese city - Atlas
 
-![Ville chinoise planifiée, rendu Atlas](docs/images/chinese-city.png)
+![Planned Chinese city in the Atlas map style](docs/images/chinese-city.png)
 
-### Village et campagne · Parchemin
+### Village and countryside - Parchment
 
-![Village entouré de campagne, rendu Parchemin](docs/images/village.png)
+![Village surrounded by countryside in the Parchment map style](docs/images/village.png)
 
-Les [graines, réglages et vues des captures](docs/images/screenshots.json) permettent de reproduire ces exemples avec la version correspondante. Rust ne génère pas encore ces villes.
+The [capture seeds, settings and views](docs/images/screenshots.json) let you reproduce these examples with the corresponding version. Rust does not generate these cities yet.
 
-## TypeScript et Rust
+## TypeScript and Rust
 
-| | TypeScript · `web/` | Rust / WASM · `rust/` |
+| | TypeScript - `web/` | Rust / WASM - `rust/` |
 | --- | --- | --- |
-| État | Prototype le plus complet, application de référence | Nouveau moteur en cours de développement |
-| Paysage | Relief, biomes, côtes, cours d'eau, lacs et occupation rurale | Relief, érosion, côtes, lacs et réseaux de rivières |
-| Implantations | Hameaux, villages, villes ; quartiers, rues, parcelles, bâtiments et monuments | Génération urbaine encore à développer |
-| Interface | Carte interactive, paramètres, graines, partage et exports SVG / PNG / JSON | Intégration navigateur en cours |
-| Calcul | TypeScript dans le navigateur, sans serveur de génération | Rust compilé en WebAssembly, avec des chemins WebGPU selon les étapes |
+| Status | Most complete prototype and reference application | New engine under development |
+| Landscape | Relief, biomes, coasts, rivers, lakes and rural land use | Relief, erosion, coasts, lakes and river networks |
+| Settlements | Hamlets, villages and cities; quarters, streets, plots, buildings and landmarks | Urban generation still to come |
+| Interface | Interactive map, settings, seeds, sharing and SVG / PNG / JSON exports | Browser integration in progress |
+| Computation | TypeScript in the browser, without a generation server | Rust compiled to WebAssembly, with WebGPU paths for selected stages |
 
-TypeScript explore les tracés organiques, les bastides, les médinas, les plans chinois et japonais, ainsi que des cultures fantastiques. Plusieurs cultures peuvent se combiner au fil des phases de croissance. Les grandes populations et leur détail progressif restent expérimentaux.
+TypeScript explores organic street patterns, bastides, medinas, Chinese and Japanese plans, and fantasy cultures. Cultures can be combined through successive growth phases. Large populations and progressive detail remain experimental.
 
-Rust porte progressivement la génération vers un nouveau moteur. Les performances et la précision dépendent encore des grilles de calcul, du relief et des capacités CPU/GPU du navigateur. Il n'est pas encore un remplacement complet de TypeScript.
+Rust is gradually taking over generation responsibilities. Performance and precision still depend on calculation grids, terrain and the browser's CPU/GPU capabilities. It is not yet a complete replacement for TypeScript.
 
-L'interface actuelle doit être conservée à terme. Le rendu existant est une aide d'intégration provisoire ; le futur moteur de rendu reste à développer.
+The current interface is intended to be retained. The existing renderer is a temporary integration aid; the future rendering engine remains to be developed.
 
-## Lancer l'application TypeScript
+## Run the TypeScript application
 
-Prérequis : Node.js LTS récent et npm.
+Requirements: a recent Node.js LTS release and npm.
 
 ```sh
 cd web
@@ -56,54 +56,54 @@ npm ci
 npm run dev
 ```
 
-Ouvrir l'adresse indiquée par Vite, généralement **http://localhost:5173/**. Choisir l'environnement, puis les implantations, leur population et leur culture. Générer la carte et explorer au zoom. Une graine et les mêmes paramètres reproduisent une génération pour une même version du moteur.
+Open the address printed by Vite, usually **http://localhost:5173/**. Choose the environment, then the settlements, their populations and cultures. Generate the map and explore it by zooming. The same seed and settings reproduce a generation within the same engine version.
 
 ```sh
 npm run build
 ```
 
-Le build produit `web/dist/index.html`, une page autonome utilisable hors ligne. Le développement et le build TypeScript ne nécessitent pas Rust.
+The build produces `web/dist/index.html`, a self-contained page that can run offline. TypeScript development and builds do not require Rust.
 
-## Développer le moteur Rust
+## Develop the Rust engine
 
-Installer la toolchain définie dans `rust/rust-toolchain.toml`, la cible `wasm32-unknown-unknown` et `wasm-pack`. Sous Windows, prévoir les outils de compilation C++ de Visual Studio et le SDK Windows.
+Install the toolchain pinned in `rust/rust-toolchain.toml`, the `wasm32-unknown-unknown` target and `wasm-pack`. On Windows, install the Visual Studio C++ build tools and Windows SDK.
 
-Après installation des dépendances npm, depuis `web/` :
+After installing npm dependencies, run these commands from `web/`:
 
 ```sh
-npm run wasm:terrain   # Compiler le module WebAssembly
-npm run check:terrain  # Vérifier le code Rust et sa compilation WASM
+npm run wasm:terrain   # Compile the WebAssembly module
+npm run check:terrain  # Check Rust code and WASM compilation
 ```
 
-Les modules générés restent dans `rust/pkg/wasm/`, ignoré par Git. Voir le [README Rust](rust/README.md) pour l'organisation du moteur.
+Generated modules stay in `rust/pkg/wasm/`, which Git ignores. See the [Rust README](rust/README.md) for the engine's organization.
 
-## Organisation
+## Repository layout
 
 ```text
-web/src/gen/      Génération TypeScript
-web/src/render/   Rendu SVG et Canvas actuel
-web/src/ui/       Interface et workers
-web/tests/        Tests TypeScript
-web/scripts/      Captures et outils de vérification
-rust/crates/core/ Moteur Rust sans navigateur
-rust/crates/wasm/ Bindings WebAssembly
-rust/bridge/      Adaptateurs temporaires vers l'interface et le rendu
-rust/scripts/     Commandes Rust
-town_generator/  Ancien prototype Python, conservé comme référence
-tests/           Tests du prototype Python
-docs/images/     Captures du README et réglages de reproduction
+web/src/gen/      TypeScript generation
+web/src/render/   Current SVG and Canvas rendering
+web/src/ui/       Interface and workers
+web/tests/        TypeScript tests
+web/scripts/      Captures and verification tools
+rust/crates/core/ Rust engine without browser dependencies
+rust/crates/wasm/ WebAssembly bindings
+rust/bridge/      Temporary interface and rendering adapters
+rust/scripts/     Rust development commands
+town_generator/  Earlier Python prototype, retained as a reference
+tests/           Python prototype tests
+docs/images/     README screenshots and reproduction settings
 ```
 
-Le prototype Python est historique ; il ne constitue pas un troisième moteur actif.
+The Python prototype is historical; it is not a third active engine.
 
-## Contribuer
+## Contributing
 
-Depuis `web/`, `npm run typecheck`, `npm run test:fast` et `npm run build` permettent de vérifier les modifications. `npm test` inclut la matrice exhaustive des villes et cultures et peut prendre plusieurs dizaines de minutes.
+From `web/`, use `npm run typecheck`, `npm run test:fast` and `npm run build` to check changes. `npm test` also includes the exhaustive city and culture matrix and can take several dozen minutes.
 
-Pour signaler un problème, joindre la version, la graine, les paramètres et le lien de partage, avec une capture si possible. L'application propose des pins et la copie d'un rapport de bug. Les formats, résultats et liens peuvent évoluer pendant cette alpha.
+When reporting a problem, include the version, seed, settings and shared link, with a screenshot if possible. The application supports pins and copying a bug report. Formats, results and generation links may change during this alpha.
 
-## Crédits et licence
+## Credits and license
 
-Merci à **Watabou** pour TownGeneratorOS et Medieval Fantasy City Generator, à l'origine de ce projet et toujours une référence majeure.
+Thank you to **Watabou** for TownGeneratorOS and Medieval Fantasy City Generator, the starting point for this project and an ongoing reference.
 
-Magna Urbis est distribué sous la **GNU GPL v3** ; voir [LICENSE](LICENSE). Le prototype Python conserve sa filiation avec TownGeneratorOS. Les ressources et dépendances tierces gardent leurs propres notices de licence et de provenance.
+Magna Urbis is distributed under the **GNU GPL v3**; see [LICENSE](LICENSE). The Python prototype retains its lineage from TownGeneratorOS. Third-party resources and dependencies retain their own license and provenance notices.

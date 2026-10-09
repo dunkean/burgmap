@@ -1,20 +1,20 @@
-# Magna Urbis · moteur Rust / WASM
+# Magna Urbis - Rust / WASM engine
 
-**Alpha en cours de développement.** Ce moteur expérimental rattrape progressivement l'implémentation TypeScript. Le relief, l'érosion, les côtes et l'hydrologie sont en développement ; la génération urbaine et l'intégration complète restent à venir.
+**Alpha, under development.** This experimental engine is gradually catching up with the TypeScript implementation. Relief, erosion, coasts and hydrology are under development; urban generation and full application integration remain to come.
 
-Le [README principal](../README.md) présente le projet et les captures de l'application TypeScript. L'objectif futur est l'intégration à [Neural Earth](https://github.com/dunkean/neural-earth), développé dans Infinite Map.
+The [main README](../README.md) introduces the project and shows screenshots of the TypeScript application. The long-term goal is integration into [Neural Earth](https://github.com/dunkean/neural-earth), developed in Infinite Map.
 
-## Développement
+## Development
 
-Installer la toolchain épinglée dans `rust-toolchain.toml`, la cible `wasm32-unknown-unknown` et `wasm-pack`, puis les dépendances npm dans `web/`.
+Install the toolchain pinned in `rust-toolchain.toml`, the `wasm32-unknown-unknown` target and `wasm-pack`, then install npm dependencies in `web/`.
 
-Depuis `web/` :
+From `web/`:
 
 ```sh
-npm run wasm:terrain   # Compiler le module WebAssembly
-npm run check:terrain  # Vérifier rustfmt, Clippy et la compilation WASM
+npm run wasm:terrain   # Compile the WebAssembly module
+npm run check:terrain  # Check rustfmt, Clippy and WASM compilation
 ```
 
-Les modules générés sont placés dans `rust/pkg/wasm/`, ignoré par Git. L'application TypeScript conserve ses propres commandes de développement et de build, sans dépendance à Rust.
+Generated modules are placed in `rust/pkg/wasm/`, which Git ignores. The TypeScript application keeps its own development and build commands without depending on Rust.
 
-`crates/core/` contient le moteur sans navigateur ; `crates/wasm/` expose les bindings ; `bridge/` adapte temporairement les sorties à l'interface et au rendu existants. Le rendu actuel est provisoire, et le modèle TypeScript n'est pas imposé comme modèle permanent du moteur Rust.
+`crates/core/` contains the engine without browser dependencies; `crates/wasm/` exposes bindings; `bridge/` temporarily adapts output to the existing interface and renderer. The current renderer is provisional, and the TypeScript model is not imposed as the permanent Rust engine model.
