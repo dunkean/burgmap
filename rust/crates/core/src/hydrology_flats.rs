@@ -1,7 +1,7 @@
 //! Convergent metric drainage through exact equal-spill-level components.
 //! Positive symmetric travel costs favour the basin's buried thalwegs without
 //! modifying H or F. Settled order supplies a strict, diagnostic drainage rank.
-use super::{Drainage, HeapCell, OUT, border, drain_cardinal, neighbor};
+use super::{Drainage, HeapCell, OUT, border, fill_cardinal, neighbor};
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
@@ -24,6 +24,7 @@ pub(super) fn resolve(
     let mut rank = vec![0; len];
     let mut distance = vec![f64::INFINITY; len];
     let mut travel_cost = vec![1.0_f32; len];
+    let allowed = diagonal_masks(filled, n, bank_budget);
     // Preserve real descending slopes; CPU heap visitation and GPU flat costs no
     // longer decide which otherwise equally eligible slope can receive rainfall.
     for i in 0..len {
@@ -38,7 +39,7 @@ pub(super) fn resolve(
         let mut best = 0.0;
         for d in 0..8 {
             let Some(j) = neighbor(i, d, n) else { continue };
-            if !diagonal_open(i, j, filled, n, bank_budget) {
+            if allowed[i] & (1 << d) == 0 {
                 continue;
             }
             let slope = (filled[i] - filled[j]) / step_length(d);
@@ -77,7 +78,7 @@ pub(super) fn resolve(
                     && labels[j] == OUT
                     && !sea[j]
                     && filled[j] == level
-                    && diagonal_open(i, j, filled, n, bank_budget)
+                    && allowed[i] & (1 << d) != 0
                 {
                     labels[j] = label;
                     pool.push(j);
@@ -128,8 +129,7 @@ pub(super) fn resolve(
             &exits,
             &labels,
             &travel_cost,
-            filled,
-            bank_budget,
+            &allowed,
             n,
             receivers,
             &mut rank,
@@ -189,8 +189,7 @@ pub(super) fn resolve(
                 &exits,
                 &labels,
                 &travel_cost,
-                filled,
-                bank_budget,
+                &allowed,
                 n,
                 receivers,
                 &mut rank,
@@ -200,15 +199,7 @@ pub(super) fn resolve(
         }
     }
     consolidate_slopes(
-        filled,
-        sea,
-        n,
-        cell,
-        &labels,
-        &rank,
-        receivers,
-        None,
-        bank_budget,
+        filled, sea, n, cell, &labels, &rank, receivers, None, &allowed,
     )?;
     Ok(Mask { labels, rank })
 }
@@ -268,7 +259,7 @@ pub(super) fn capture_external(
         &rank,
         &mut drainage.receivers,
         Some(&corridor),
-        bank_budget,
+        &diagonal_masks(&drainage.filled, n, bank_budget),
     )
 }
 
@@ -310,7 +301,7 @@ fn consolidate_slopes(
     flat_rank: &[u32],
     receivers: &mut [u32],
     external: Option<&ExternalCorridor<'_>>,
-    bank_budget: f32,
+    allowed: &[u8],
 ) -> Result<(), String> {
     let len = filled.len();
     let mut flat_storage = vec![false; labels.iter().copied().max().unwrap_or(0) as usize + 1];
@@ -400,13 +391,7 @@ fn consolidate_slopes(
         })
         .collect();
     drop(influence);
-    let mut order: Vec<usize> = (0..len).collect();
-    order.sort_unstable_by(|&a, &b| {
-        filled[a]
-            .total_cmp(&filled[b])
-            .then_with(|| flat_rank[a].cmp(&flat_rank[b]))
-            .then_with(|| a.cmp(&b))
-    });
+    let order = surface_order(filled, flat_rank);
     let mut old_length = vec![0.0_f32; len];
     for &i in &order {
         let j = receivers[i];
@@ -452,9 +437,7 @@ fn consolidate_slopes(
         for d in 0..8 {
             let Some(j) = neighbor(i, d, n) else { continue };
             let gradient = (filled[i] - filled[j]) / step_length(d);
-            if gradient <= 0.0
-                || !diagonal_open(i, j, filled, n, bank_budget)
-                || crosses_diagonal(i, j, receivers, n)
+            if gradient <= 0.0 || allowed[i] & (1 << d) == 0 || crosses_diagonal(i, j, receivers, n)
             {
                 continue;
             }
@@ -480,7 +463,7 @@ fn consolidate_slopes(
             for d in 0..8 {
                 let Some(j) = neighbor(i, d, n) else { continue };
                 if filled[j] >= filled[i]
-                    || !diagonal_open(i, j, filled, n, bank_budget)
+                    || allowed[i] & (1 << d) == 0
                     || crosses_diagonal(i, j, receivers, n)
                     || length[j] + cell * step_length(d) > old_length[i] * 1.35 + capture_radius
                 {
@@ -555,7 +538,7 @@ fn consolidate_slopes(
                     let distance = first_hit[j] + cell * step_length(d);
                     let actual_length = length[j] + cell * step_length(d);
                     if gradient <= 0.0
-                        || !diagonal_open(i, j, filled, n, bank_budget)
+                        || allowed[i] & (1 << d) == 0
                         || !potential[j].is_finite()
                         || distance > corridor.bank_radius
                         || actual_length > old_length[i] * 1.35 + capture_radius
@@ -634,8 +617,7 @@ fn solve(
     exits: &[usize],
     labels: &[u32],
     travel_cost: &[f32],
-    filled: &[f32],
-    bank_budget: f32,
+    allowed: &[u8],
     n: usize,
     receivers: &mut [u32],
     rank: &mut [u32],
@@ -658,9 +640,9 @@ fn solve(
         for d in 0..8 {
             if let Some(j) = neighbor(i, d, n)
                 && labels[j] == label
-                && diagonal_open(i, j, filled, n, bank_budget)
                 && rank[j] == 0
                 && distance[j] != 0.0
+                && allowed[i] & (1 << d) != 0
                 && !crosses_fixed_diagonal(j, i, receivers, rank, distance, n)
             {
                 // Averaging endpoint costs keeps edges symmetric. Opposite
@@ -726,6 +708,7 @@ pub(super) fn aggregate_lakes(
     n: usize,
     bank_budget: f32,
 ) -> Result<(), String> {
+    let allowed = diagonal_masks(&drainage.filled, n, bank_budget);
     let count = lakes.iter().copied().max().unwrap_or(0) as usize;
     let mut outlet = vec![OUT; count];
     let mut order_at = vec![0; lakes.len()];
@@ -786,8 +769,7 @@ pub(super) fn aggregate_lakes(
                 &[root],
                 lakes,
                 &[],
-                &drainage.filled,
-                bank_budget,
+                &allowed,
                 n,
                 &mut drainage.receivers,
                 &mut rank,
@@ -882,6 +864,62 @@ pub(super) fn diagonal_open(i: usize, j: usize, filled: &[f32], n: usize, budget
     x * x / (m - lo + x) <= f64::from(budget) + 0.0001
 }
 
+/// Diagonal clearance depends only on this immutable surface and bank budget.
+/// Evaluate each undirected diagonal once; receiver crossing checks stay dynamic.
+fn diagonal_masks(filled: &[f32], n: usize, budget: f32) -> Vec<u8> {
+    let mut allowed = vec![0x55; filled.len()];
+    for i in 0..filled.len() {
+        for d in [1, 7] {
+            if let Some(j) = neighbor(i, d, n)
+                && diagonal_open(i, j, filled, n, budget)
+            {
+                allowed[i] |= 1 << d;
+                allowed[j] |= 1 << ((d + 4) & 7);
+            }
+        }
+    }
+    allowed
+}
+
+/// Stable radix ordering matches (f32::total_cmp(height), rank, cell index).
+/// Starting in cell-index order preserves the last tie-break without another key.
+fn surface_order(filled: &[f32], rank: &[u32]) -> Vec<usize> {
+    let keys: Vec<u64> = filled
+        .iter()
+        .zip(rank)
+        .map(|(&height, &rank)| {
+            let bits = height.to_bits();
+            let ordered = if bits & 0x8000_0000 != 0 {
+                !bits
+            } else {
+                bits ^ 0x8000_0000
+            };
+            (u64::from(ordered) << 32) | u64::from(rank)
+        })
+        .collect();
+    let mut order: Vec<usize> = (0..filled.len()).collect();
+    let mut next = vec![0; filled.len()];
+    for shift in (0..64).step_by(8) {
+        let mut positions = [0_usize; 256];
+        for &i in &order {
+            positions[((keys[i] >> shift) & 255) as usize] += 1;
+        }
+        let mut offset = 0;
+        for position in &mut positions {
+            let count = *position;
+            *position = offset;
+            offset += count;
+        }
+        for &i in &order {
+            let bucket = ((keys[i] >> shift) & 255) as usize;
+            next[positions[bucket]] = i;
+            positions[bucket] += 1;
+        }
+        std::mem::swap(&mut order, &mut next);
+    }
+    order
+}
+
 /// F4 is a physical upper bound. Frozen upper corners make diagonal edge costs
 /// monotone in the settled downstream level, so a single second heap flood
 /// suffices and its final surface remains below F4 even after pond filling.
@@ -891,7 +929,7 @@ pub(super) fn condition(
     height: &[f32],
     sea: &[bool],
     n: usize,
-    width: f32,
+    _width: f32,
     seed: &str,
     budget: f32,
 ) -> Drainage {
@@ -903,7 +941,7 @@ pub(super) fn condition(
     {
         return initial;
     }
-    let upper = drain_cardinal(height, sea, n, width, seed).filled;
+    let upper = fill_cardinal(height, sea, n, seed);
     let len = height.len();
     let mut filled = vec![f32::INFINITY; len];
     let mut receivers = vec![OUT; len];
@@ -933,6 +971,9 @@ pub(super) fn condition(
                 continue;
             }
             let mut level = f64::from(height[j].max(filled[i]));
+            if level >= f64::from(filled[j]) {
+                continue;
+            }
             if !d.is_multiple_of(2) {
                 let a = i / n * n + j % n;
                 let b = j / n * n + i % n;

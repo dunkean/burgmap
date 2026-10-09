@@ -1,5 +1,11 @@
 use wasm_bindgen::prelude::*;
 
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_namespace = performance, js_name = now)]
+    fn performance_now() -> f64;
+}
+
 /// Cached terrain drainage. Vector regeneration does not repeat terrain/coast preparation.
 #[wasm_bindgen]
 pub struct HydrologyEngine {
@@ -98,9 +104,21 @@ impl HydrologyEngine {
             max_breach_depth: max_breach_depth.unwrap_or(defaults.max_breach_depth),
             max_breach_length: max_breach_length.unwrap_or(defaults.max_breach_length),
         };
+        let mut previous = performance_now();
+        let mut stage_ms = Vec::new();
+        let mut stage_labels = Vec::new();
         self.engine
-            .generate(&cfg)
-            .map(|output| HydrologyOutput { output })
+            .generate_profiled(&cfg, &mut |label| {
+                let now = performance_now();
+                stage_ms.push(now - previous);
+                previous = now;
+                stage_labels.push(label);
+            })
+            .map(|output| HydrologyOutput {
+                output,
+                stage_ms,
+                stage_labels: stage_labels.join(","),
+            })
             .map_err(|e| JsValue::from_str(&e))
     }
 }
@@ -109,10 +127,20 @@ impl HydrologyEngine {
 #[wasm_bindgen]
 pub struct HydrologyOutput {
     output: magna_urbis_core::HydrologyOutput,
+    stage_ms: Vec<f64>,
+    stage_labels: String,
 }
 
 #[wasm_bindgen]
 impl HydrologyOutput {
+    #[wasm_bindgen(getter)]
+    pub fn stage_ms(&self) -> Vec<f64> {
+        self.stage_ms.clone()
+    }
+    #[wasm_bindgen(getter)]
+    pub fn stage_labels(&self) -> String {
+        self.stage_labels.clone()
+    }
     #[wasm_bindgen(getter)]
     pub fn width(&self) -> f32 {
         self.output.width

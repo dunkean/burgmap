@@ -8,7 +8,7 @@ import { PALETTES } from '../../web/src/render/styles';
 import type { TerrainData, TerrainSettings } from './terrain';
 
 export type TerrainStyle = 'parchment' | 'atlas' | 'topographic' | 'copernicus';
-export interface TerrainScene { svg: string; imageUrl: string; contourStep: number }
+export interface TerrainScene { svg: string; imageUrl: string; contourStep: number; profile?: { pixelsMs: number; imageMs: number; contoursMs: number } }
 let coastClipId = 0;
 const contourPaths = new WeakMap<TerrainData, { relief: string; mapWidth: number; step: number; thin: string; index: string }>();
 
@@ -104,6 +104,7 @@ function renderElevation(terrain: TerrainData, frame: boolean, clipNamespace: st
 /** Transitional renderer adapter. Rust never depends on the legacy World schema. */
 export function renderRustTerrain(terrain: TerrainData, style: TerrainStyle, frame = true, settings: Pick<TerrainSettings, 'relief' | 'width'> = { relief: 'mountains', width: terrain.width }, showContours = true, clipNamespace = 'main'): TerrainScene {
   if (style === 'copernicus') return renderElevation(terrain, frame, clipNamespace);
+  const started = performance.now();
   const n = terrain.resolution, width = terrain.width, cell = width / n;
   const cavern = terrain.caveMask.length > 0;
   // Stable continuous shading, without engraved bands or high-frequency paper grain.
@@ -132,7 +133,9 @@ export function renderRustTerrain(terrain: TerrainData, style: TerrainStyle, fra
   }
   // Camera PNGs are transient: fast, lossless compression keeps their pixels
   // identical while avoiding export-grade compression on the UI thread.
+  const pixelsMs = performance.now() - started, imageStarted = performance.now();
   const background = pngDataUrl(encodePng(pixels.rgb, pixels.w, pixels.h, 3, 1));
+  const imageMs = performance.now() - imageStarted, contourStarted = performance.now();
   // The engine samples a continuous physical surface for each camera region.
   // Contours use those same samples; their levels remain fixed across cameras.
   // Wider mountain spacing avoids tinting steep slopes with dense ink.
@@ -142,7 +145,7 @@ export function renderRustTerrain(terrain: TerrainData, style: TerrainStyle, fra
   let paths = contourPaths.get(terrain);
   if (!cavern && showContours && (!paths || paths.relief !== relief || paths.mapWidth !== settings.width)) {
     const height = legacyRasterInput.terrain.height;
-    const contours = contourSet({ terrain: { height, slope: slopeGrid(height) }, options: { relief } } as unknown as World, settings.width / 1600, step);
+    const contours = contourSet({ terrain: { height, slope: slopeGrid(height) }, options: { relief } } as unknown as World, settings.width / 1600, step, true);
     const pathData = (lines: typeof contours.thin): string => lines.map(path => path.pts.map((point, i) => `${i ? 'L' : 'M'}${point.x.toFixed(2)},${point.y.toFixed(2)}`).join('') + (path.closed ? 'Z' : '')).join('');
     paths = { relief, mapWidth: settings.width, step, thin: pathData(contours.thin), index: pathData(contours.index) };
     contourPaths.set(terrain, paths);
@@ -152,5 +155,5 @@ export function renderRustTerrain(terrain: TerrainData, style: TerrainStyle, fra
   svg += coastal ? coastImage(terrain, background, `<rect width="${width}" height="${width}" fill="${pal.seaFill}"/>`, clipNamespace) : `<image width="${width}" height="${width}" href="${background}"/>`;
   if (!cavern && showContours) svg += `<g class="layer-contours" fill="none" stroke="${pal.contour}" stroke-linejoin="round" stroke-linecap="round"><path d="${paths!.thin}" style="stroke-width:var(--terrain-contour-width,${weights.thin}px)" vector-effect="non-scaling-stroke" opacity="${pal.contourOpacity * 0.5}"/><path d="${paths!.index}" style="stroke-width:var(--terrain-contour-index-width,${weights.index}px)" vector-effect="non-scaling-stroke" opacity="${pal.contourOpacity * 0.75}"/></g>`;
   if (frame) svg += `<rect x="0" y="0" width="${width}" height="${width}" fill="none" stroke="${pal.frame}" stroke-width="1.2" vector-effect="non-scaling-stroke"/>`;
-  return { svg, imageUrl: background, contourStep: cavern ? 0 : step };
+  return { svg, imageUrl: background, contourStep: cavern ? 0 : step, profile: { pixelsMs, imageMs, contoursMs: performance.now() - contourStarted } };
 }

@@ -15,7 +15,7 @@ export async function gpuContext(): Promise<Context | undefined> {
   contextPromise ??= (async () => {
     const adapter = await navigator.gpu?.requestAdapter({ powerPreference: 'high-performance' });
     if (!adapter) return;
-    const device = await adapter.requestDevice();
+    const device = await adapter.requestDevice({ requiredFeatures: adapter.features.has('timestamp-query') ? ['timestamp-query'] : [] });
     const result: Context = { device, pipelines: new Map(), lost: false };
     void device.lost.then(() => { result.lost = true; contextPromise = undefined; });
     return result;

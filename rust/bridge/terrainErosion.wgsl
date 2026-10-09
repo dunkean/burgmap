@@ -12,6 +12,7 @@ struct Control {
   histogram: array<atomic<u32>,256>,
   prefix: u32, quantileIndex: u32, selected: u32, pad: u32,
   p99: f32, p1: f32,
+  solveSteps:u32, maxSolveSteps:array<u32,4>,
 }
 @group(0) @binding(0) var<uniform> p: Params;
 @group(0) @binding(1) var<storage, read> perm: array<u32>;
@@ -19,6 +20,8 @@ struct Control {
 @group(0) @binding(3) var<storage, read_write> nodes: array<Node>;
 @group(0) @binding(4) var<storage, read_write> fine: array<vec4<f32>>;
 @group(0) @binding(5) var<storage, read_write> control: Control;
+@group(0) @binding(6) var<storage, read_write> outputHeight: array<f32>;
+@group(0) @binding(7) var<storage, read_write> tileFlags: array<atomic<u32>>;
 // NOISE_KERNEL
 fn volcanicParams(i:u32)->vec4<f32>{return p.values[8u+i];}
 // VOLCANIC_KERNEL
@@ -72,76 +75,136 @@ fn initialize(@builtin(global_invocation_id) id:vec3<u32>){
 @compute @workgroup_size(256)
 fn uplift(@builtin(global_invocation_id) id:vec3<u32>){let i=id.x;if(i>=count()){return;}nodes[i].h=select(nodes[i].h+nodes[i].uplift*p.values[4].w,0.0,edge(i));}
 @compute @workgroup_size(1)
-fn start(){atomicStore(&control.flags[0],1u);atomicStore(&control.flags[1],1u);}
+fn start(){atomicStore(&control.flags[0],1u);atomicStore(&control.flags[1],1u);control.solveSteps=0u;}
 @compute @workgroup_size(1)
-fn clearNext(){atomicStore(&control.flags[1u-u32(p.values[6].x)],0u);}
+fn clearNext(){let phase=u32(p.values[6].x);if(atomicLoad(&control.flags[phase])!=0u){control.solveSteps++;}atomicStore(&control.flags[1u-phase],0u);}
+@compute @workgroup_size(1)
+fn solveStats(){let mode=u32(p.values[6].y);control.maxSolveSteps[mode]=max(control.maxSolveSteps[mode],control.solveSteps);}
 @compute @workgroup_size(256)
-fn floodInit(@builtin(global_invocation_id) id:vec3<u32>){let i=id.x;if(i>=count()){return;}nodes[i].flood[0]=select(vec2<f32>(3.4e38,1e9),vec2<f32>(nodes[i].h,0.0),edge(i));nodes[i].flood[1]=nodes[i].flood[0];}
+fn floodInit(@builtin(global_invocation_id) id:vec3<u32>){
+  let i=id.x;let tiles=(size()+15u)/16u;let tileCount=tiles*tiles;
+  if(i<tileCount){atomicStore(&tileFlags[i],1u);atomicStore(&tileFlags[tileCount+i],0u);}
+  if(i>=count()){return;}nodes[i].flood[0]=select(vec2<f32>(3.4e38,1e9),vec2<f32>(nodes[i].h,0.0),edge(i));nodes[i].flood[1]=nodes[i].flood[0];
+}
 var<workgroup> tileA:array<vec2<f32>,324>;
 var<workgroup> tileB:array<vec2<f32>,324>;
 var<workgroup> tileH:array<f32,324>;
 var<workgroup> tileCost:array<f32,324>;
 var<workgroup> tileFlow:array<vec4<f32>,324>;
 var<workgroup> tileActive:u32;
+var<workgroup> tileChanged:atomic<u32>;
+var<workgroup> roundChanged:atomic<u32>;
+override SOLVE_MODE:u32=0u;
+fn tileState(k:u32,step:u32)->vec2<f32>{if((step&1u)==0u){return tileA[k];}return tileB[k];}
 // 16x16 interior plus a one-cell halo. Halo is immutable for one dispatch.
 @compute @workgroup_size(16,16)
 fn solveTile(@builtin(local_invocation_id) local:vec3<u32>,@builtin(workgroup_id) group:vec3<u32>){
-  let lane=local.y*16u+local.x;let phase=u32(p.values[6].x);let mode=u32(p.values[6].y);
-  if(lane==0u){tileActive=atomicLoad(&control.flags[phase]);}
+  let lane=local.y*16u+local.x;let phase=u32(p.values[6].x);let mode=SOLVE_MODE;
+  let tiles=(size()+15u)/16u;let tileId=group.y*tiles+group.x;let epoch=control.solveSteps;
+  if(lane==0u){
+    tileActive=atomicLoad(&control.flags[phase]);atomicStore(&tileChanged,0u);
+    if(tileActive!=0u){
+      tileActive=select(0u,1u,atomicLoad(&tileFlags[phase*tiles*tiles+tileId])==epoch);
+    }
+  }
   let run=workgroupUniformLoad(&tileActive);if(run==0u){return;}
+  if(mode!=0u){
+    let xy=group.xy*16u+local.xy;let valid=all(xy<vec2<u32>(size()));let i=xy.y*size()+xy.x;
+    var state=vec2<f32>(0.0,1.0);if(valid){state=nodes[i].state[phase];}
+    if(state.y==0.0){atomicStore(&tileChanged,1u);}workgroupBarrier();
+    if(lane==0u){tileActive=atomicLoad(&tileChanged);}
+    let unresolved=workgroupUniformLoad(&tileActive);
+    if(unresolved==0u){
+      // A completed graph cell never changes again. Synchronize the opposite
+      // global phase before skipping this tile's halo loads and local rounds.
+      if(valid){nodes[i].state[1u-phase]=state;}return;
+    }
+    if(lane==0u){atomicStore(&tileChanged,0u);}workgroupBarrier();
+  }
   let base=vec2<i32>(group.xy*16u)-1;let n=i32(size());
   for(var k=lane;k<324u;k+=256u){
     let xy=base+vec2<i32>(i32(k%18u),i32(k/18u));
     var state=vec2<f32>(3.4e38,1e9);var h=3.4e38;var cost=1.0;var flow=vec4<f32>(-1.0);
-    if(all(xy>=vec2<i32>(0)) && all(xy<vec2<i32>(n))){let i=u32(xy.y*n+xy.x);h=nodes[i].h;cost=nodes[i].routingPriority;flow=nodes[i].flow;state=select(nodes[i].flood[phase],nodes[i].state[phase],mode!=0u);}
-    tileA[k]=state;tileB[k]=state;tileH[k]=h;tileCost[k]=cost;tileFlow[k]=flow;
+    if(all(xy>=vec2<i32>(0)) && all(xy<vec2<i32>(n))){let i=u32(xy.y*n+xy.x);if(mode==0u){h=nodes[i].h;cost=nodes[i].routingPriority;state=nodes[i].flood[phase];}else{if(mode==1u){flow=nodes[i].flow;}state=nodes[i].state[phase];}}
+    tileA[k]=state;tileB[k]=state;
+    if(mode==0u){tileH[k]=h;tileCost[k]=cost;}else if(mode==1u){tileFlow[k]=flow;}
   }
   workgroupBarrier();
   let xy=group.xy*16u+local.xy;let valid=all(xy<vec2<u32>(size()));let i=xy.y*size()+xy.x;let k=(local.y+1u)*18u+local.x+1u;
   let original=tileA[k];
+  var incisionFactor=0.0;var ownFlow=vec4<f32>(-1.0);var ownHeight=0.0;
+  if(valid && mode>=2u){incisionFactor=nodes[i].nextH;ownFlow=nodes[i].flow;ownHeight=nodes[i].h;}
+  var value=original;
   for(var step=0u;step<16u;step++){
-    var value=tileA[k];
+    if((step&3u)==0u){if(lane==0u){atomicStore(&roundChanged,0u);}workgroupBarrier();}
+    let previous=value;
     if(valid){
       if(mode==0u){
         if(!edge(i)){
-          for(var d=0u;d<8u;d++){let j=u32(i32(k)+directions[d].y*18+directions[d].x);let a=tileA[j];let level=max(tileH[k],a.x);
+          for(var d=0u;d<8u;d++){let j=u32(i32(k)+directions[d].y*18+directions[d].x);let a=tileState(j,step);let level=max(tileH[k],a.x);
+            if(level>value.x){continue;}
             // Prefer existing low terrain inside a filled basin. A positive
             // seeded cost breaks equal-level routing ties without raising h.
-            let depthCost=1.0+8.0*exp(-max(0.0,level-(tileH[k]+tileH[j])*0.5)/max(0.1,p.values[1].x*0.1));
-            let tieCost=(tileCost[k]+tileCost[j])*0.5;
-            let candidate=vec2<f32>(level,select(a.y+distances[d]*depthCost*tieCost,0.0,tileH[k]>a.x));if(lower(candidate,value)){value=candidate;}}
+            var distance=0.0;
+            if(tileH[k]<=a.x){
+              if(level==value.x && a.y>=value.y){continue;}
+              let depthCost=1.0+8.0*exp(-max(0.0,level-(tileH[k]+tileH[j])*0.5)/max(0.1,p.values[1].x*0.1));
+              let tieCost=(tileCost[k]+tileCost[j])*0.5;
+              distance=a.y+distances[d]*depthCost*tieCost;
+            }
+            let candidate=vec2<f32>(level,distance);if(lower(candidate,value)){value=candidate;}}
         }
       } else if(value.y==0.0){
         var ready=true;var result=1.0;
         if(mode==1u){
-          for(var d=0u;d<8u;d++){let j=u32(i32(k)+directions[d].y*18+directions[d].x);let f=tileFlow[j];var weight=0.0;if(f.x==f32(i)){weight+=1.0-f.z;}if(f.y==f32(i)){weight+=f.z;}if(weight>0.0){ready=ready && tileA[j].y!=0.0;result+=tileA[j].x*weight;}}
+          for(var d=0u;d<8u;d++){let j=u32(i32(k)+directions[d].y*18+directions[d].x);let f=tileFlow[j];var weight=0.0;if(f.x==f32(i)){weight+=1.0-f.z;}if(f.y==f32(i)){weight+=f.z;}if(weight>0.0){let state=tileState(j,step);if(state.y==0.0){ready=false;break;}result+=state.x*weight;}}
         } else {
-          let f=tileFlow[k];result=tileH[k];
+          let f=ownFlow;result=ownHeight;
           if(f.x>=0.0){
-            let a=u32(f.x);let offset=vec2<i32>(i32(a%size())-i32(xy.x),i32(a/size())-i32(xy.y));let j=u32(i32(k)+offset.y*18+offset.x);var low=tileA[j].x;ready=tileA[j].y!=0.0;
-            if(f.y>=0.0 && f.z>0.0){let b=u32(f.y);let off=vec2<i32>(i32(b%size())-i32(xy.x),i32(b/size())-i32(xy.y));let s=u32(i32(k)+off.y*18+off.x);low=(1.0-f.z)*low+f.z*tileA[s].x;ready=ready && tileA[s].y!=0.0;}
-            var factor=min(6.0,p.values[5].z*min(sqrt(nodes[i].acc),4.0*sqrt(0.004)*p.values[0].w*2400.0/p.values[1].x)/f.w);
-            if(mode>=2u){
-              var originalLow=nodes[u32(f.x)].h;
-              if(f.y>=0.0 && f.z>0.0){originalLow=mix(originalLow,nodes[u32(f.y)].h,f.z);}
-              let slope=max(0.0,(tileH[k]-originalLow)/(p.values[1].x*f.w));
-              let response=slope*slope/(slope*slope+0.04);
-              if(mode==3u){
-                let threshold=p.values[3].w*0.10;
-                let localResponse=0.08+0.92*slope*slope/(slope*slope+threshold*threshold);
-                factor=min(4.0,p.values[5].z*min(sqrt(nodes[i].acc),4.0*sqrt(0.004)*p.values[0].w*2400.0/p.values[1].x)*localResponse/f.w);
-              }
-              else {factor*=response;}
-            }
-            result=min(result,(result+factor*low)/(1.0+factor));
+            let a=u32(f.x);let offset=vec2<i32>(i32(a%size())-i32(xy.x),i32(a/size())-i32(xy.y));let j=u32(i32(k)+offset.y*18+offset.x);let state=tileState(j,step);var low=state.x;ready=state.y!=0.0;
+            if(f.y>=0.0 && f.z>0.0){let b=u32(f.y);let off=vec2<i32>(i32(b%size())-i32(xy.x),i32(b/size())-i32(xy.y));let s=u32(i32(k)+off.y*18+off.x);let other=tileState(s,step);low=(1.0-f.z)*low+f.z*other.x;ready=ready && other.y!=0.0;}
+            result=min(result,(result+incisionFactor*low)/(1.0+incisionFactor));
           }
         }
         if(ready){value=vec2<f32>(result,1.0);}
       }
     }
-    tileB[k]=value;workgroupBarrier();tileA[k]=tileB[k];workgroupBarrier();
+    // Identical Jacobi rounds, alternating the two shared arrays. Both halos
+    // remain immutable. A fixed point over four rounds needs no further work.
+    if(any(value!=previous)){atomicStore(&roundChanged,1u);}
+    if((step&1u)==0u){tileB[k]=value;}else{tileA[k]=value;}workgroupBarrier();
+    if((step&3u)==3u){
+      if(lane==0u){tileActive=atomicLoad(&roundChanged);}
+      let changed=workgroupUniformLoad(&tileActive);if(changed==0u){break;}
+    }
   }
-  if(valid){let value=tileA[k];if(mode==0u){nodes[i].flood[1u-phase]=value;}else{nodes[i].state[1u-phase]=value;}if(any(value!=original)){atomicStore(&control.flags[1u-phase],1u);}}
+  if(valid){
+    if(mode==0u){nodes[i].flood[1u-phase]=value;}else{nodes[i].state[1u-phase]=value;}
+    if(any(value!=original)){
+      // Wake self to continue propagation and synchronize both global phases.
+      // Only changed halo cells can affect another tile: edge/corner bits name
+      // the corresponding destinations in a row-major 3x3 neighborhood.
+      var mask=16u;
+      if(local.x==0u){mask|=8u;}if(local.x==15u){mask|=32u;}
+      if(local.y==0u){mask|=2u;}if(local.y==15u){mask|=128u;}
+      if(local.x==0u && local.y==0u){mask|=1u;}if(local.x==15u && local.y==0u){mask|=4u;}
+      if(local.x==0u && local.y==15u){mask|=64u;}if(local.x==15u && local.y==15u){mask|=256u;}
+      atomicOr(&tileChanged,mask);
+    }
+  }
+  // Convergence is a Boolean OR: one device-wide write per changed tile avoids
+  // hundreds of thousands of contenders on the same global flag.
+  workgroupBarrier();
+  if(lane==0u && atomicLoad(&tileChanged)!=0u){
+    atomicStore(&control.flags[1u-phase],1u);
+    let mask=atomicLoad(&tileChanged);
+    for(var dy=-1;dy<=1;dy++){for(var dx=-1;dx<=1;dx++){
+      let xy=vec2<i32>(group.xy)+vec2<i32>(dx,dy);let bit=u32((dy+1)*3+dx+1);
+      if((mask&(1u<<bit))!=0u && all(xy>=vec2<i32>(0)) && all(xy<vec2<i32>(i32(tiles)))){
+        atomicStore(&tileFlags[(1u-phase)*tiles*tiles+u32(xy.y)*tiles+u32(xy.x)],epoch+1u);
+      }
+    }}
+  }
 }
 // Filled height controls real slopes. A weighted outlet potential orders flats
 // without changing elevations; steepest potential and D-infinity split avoid
@@ -175,7 +238,28 @@ fn flow(@builtin(global_invocation_id) id:vec3<u32>){
   }nodes[i].flow=f;
 }
 @compute @workgroup_size(256)
-fn graphInit(@builtin(global_invocation_id) id:vec3<u32>){let i=id.x;if(i>=count()){return;}let value=select(1.0,nodes[i].h,p.values[6].y>=2.0);nodes[i].state[0]=vec2<f32>(value,0.0);nodes[i].state[1]=nodes[i].state[0];}
+fn graphInit(@builtin(global_invocation_id) id:vec3<u32>){
+  let i=id.x;let tiles=(size()+15u)/16u;let tileCount=tiles*tiles;
+  if(i<tileCount){atomicStore(&tileFlags[i],1u);atomicStore(&tileFlags[tileCount+i],0u);}
+  if(i>=count()){return;}let mode=u32(p.values[6].y);
+  let value=select(1.0,nodes[i].h,mode>=2u);nodes[i].state[0]=vec2<f32>(value,0.0);nodes[i].state[1]=nodes[i].state[0];
+  // Heights, accumulation and receivers remain fixed throughout this solve.
+  // Cache the coefficient in scratch consumed only later by thermal/diffusion.
+  var factor=0.0;let f=nodes[i].flow;
+  if(mode>=2u && f.x>=0.0){
+    factor=min(6.0,p.values[5].z*min(sqrt(nodes[i].acc),4.0*sqrt(0.004)*p.values[0].w*2400.0/p.values[1].x)/f.w);
+    var originalLow=nodes[u32(f.x)].h;
+    if(f.y>=0.0 && f.z>0.0){originalLow=mix(originalLow,nodes[u32(f.y)].h,f.z);}
+    let slope=max(0.0,(nodes[i].h-originalLow)/(p.values[1].x*f.w));
+    let response=slope*slope/(slope*slope+0.04);
+    if(mode==3u){
+      let threshold=p.values[3].w*0.10;
+      let localResponse=0.08+0.92*slope*slope/(slope*slope+threshold*threshold);
+      factor=min(4.0,p.values[5].z*min(sqrt(nodes[i].acc),4.0*sqrt(0.004)*p.values[0].w*2400.0/p.values[1].x)*localResponse/f.w);
+    }else{factor*=response;}
+  }
+  nodes[i].nextH=factor;
+}
 @compute @workgroup_size(256)
 fn graphFinish(@builtin(global_invocation_id) id:vec3<u32>){let i=id.x;if(i>=count()){return;}let s=nodes[i].state[0];if(s.y==0.0){atomicAdd(&control.errors,1u);}if(p.values[6].y==1.0){nodes[i].acc=s.x;}else{nodes[i].h=select(s.x,0.0,edge(i) && p.values[6].y==2.0);}}
 @compute @workgroup_size(1)
@@ -227,13 +311,25 @@ fn percentileInit(){control.prefix=0u;control.quantileIndex=select(u32(floor(0.9
 @compute @workgroup_size(256)
 fn histogramClear(@builtin(local_invocation_id) id:vec3<u32>){atomicStore(&control.histogram[id.x],0u);}
 @compute @workgroup_size(256)
-fn histogram(@builtin(global_invocation_id) id:vec3<u32>){let i=id.x;if(i>=1048576u){return;}if(p.values[7].x==0.0 && ((i%1024u+(i/1024u)*7u)&15u)!=0u){return;}let value=select(fine[i].x,fine[i].w,p.values[7].x==1.0);let bits=ordered(value);let shift=u32(p.values[7].y);let mask=select(0xffffffffu,0u,shift==24u)<<min(31u,shift+8u);if((bits&mask)==control.prefix){atomicAdd(&control.histogram[(bits>>shift)&255u],1u);}}
+fn histogram(@builtin(global_invocation_id) id:vec3<u32>,@builtin(local_invocation_id) local:vec3<u32>){
+  atomicStore(&localHistogram[local.x],0u);workgroupBarrier();
+  let i=id.x;
+  if(i<1048576u && (p.values[7].x!=0.0 || ((i%1024u+(i/1024u)*7u)&15u)==0u)){
+    let value=select(fine[i].x,fine[i].w,p.values[7].x==1.0);let bits=ordered(value);let shift=u32(p.values[7].y);let mask=select(0xffffffffu,0u,shift==24u)<<min(31u,shift+8u);
+    if((bits&mask)==control.prefix){atomicAdd(&localHistogram[(bits>>shift)&255u],1u);}
+  }
+  workgroupBarrier();let frequency=atomicLoad(&localHistogram[local.x]);
+  if(frequency!=0u){atomicAdd(&control.histogram[local.x],frequency);}
+}
+var<workgroup> localHistogram:array<atomic<u32>,256>;
 @compute @workgroup_size(1)
 fn percentileSelect(){let shift=u32(p.values[7].y);var quantileIndex=control.quantileIndex;var selected=0u;for(var bin=0u;bin<256u;bin++){let frequency=atomicLoad(&control.histogram[bin]);if(quantileIndex<frequency){selected=bin;break;}quantileIndex-=frequency;}control.quantileIndex=quantileIndex;control.prefix|=selected<<shift;if(shift==0u){let value=decoded(control.prefix);if(p.values[7].x==0.0){control.p99=max(0.0001,value);}else{control.p1=value;}}}
 @compute @workgroup_size(256)
 fn detail(@builtin(global_invocation_id) id:vec3<u32>){let i=id.x;if(i>=1048576u){return;}let x=i%1024u;let y=i/1024u;let gx=fine[y*1024u+min(x+1u,1023u)].x-fine[y*1024u+select(x-1u,0u,x==0u)].x;let gy=fine[min(y+1u,1023u)*1024u+x].x-fine[select(y-1u,0u,y==0u)*1024u+x].x;let amplitude=p.values[3].x*(1.0-0.2*p.values[4].z);let scale=amplitude/control.p99;let slope=length(vec2<f32>(gx,gy))*scale/(2.0*p.values[2].w);let extra=(fine[i].z-0.5)*p.values[4].x*amplitude*smooth01((slope-0.015)/0.3)*fine[i].y;fine[i].w=max(0.3,fine[i].x*scale+extra);}
 @compute @workgroup_size(256)
 fn normalize(@builtin(global_invocation_id) id:vec3<u32>){let i=id.x;if(i<1048576u){fine[i].x=max(0.3,1.0+fine[i].w-control.p1);}}
+@compute @workgroup_size(256)
+fn packHeight(@builtin(global_invocation_id) id:vec3<u32>){let i=id.x;if(i<1048576u){outputHeight[i]=fine[i].x;}}
 
 @compute @workgroup_size(256)
 fn volcanicInitial(@builtin(global_invocation_id) id:vec3<u32>){

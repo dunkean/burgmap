@@ -1,7 +1,7 @@
 import init, { TerrainEngine } from '../pkg/wasm/magna_urbis_wasm.js';
 import wasmUrl from '../pkg/wasm/magna_urbis_wasm_bg.wasm?url&inline';
 import { GpuTerrainSampler, prepareGpu, generateGpuNoise, GPU_RELIEFS, GPU_GENERATION_RELIEFS } from './terrainGpu';
-import { generateGpuTerrain, erodeGpuCoast } from './terrainErosion';
+import { generateGpuTerrain, erodeGpuCoast, type ErosionProfile } from './terrainErosion';
 import { PreparedHydrology, applyHydrologySurface, type HydrologyData, type HydrologySettings } from './hydrology';
 import type { TerrainScene, TerrainStyle } from './terrainRender';
 
@@ -24,6 +24,7 @@ export interface TerrainData {
   normalX: Float32Array; normalY: Float32Array; normalZ: Float32Array; generationMs: number;
   backend?: TerrainCompute; backendReason?: string; prepareMs?: number; samplingMs?: number; gpuSetupMs?: number;
   generationBackend?: 'cpu' | 'gpu-noise-f32' | 'gpu-noise-all-f32' | 'gpu-erosion-f32'; generationReason?: string; noiseMs?: number; erosionMs?: number; gpuSimulationMs?: number; nativeEnvironmentMs?: number;
+  erosionProfile?: ErosionProfile[];
   coastBackend?: 'cpu' | 'gpu-f32'; coastMs?: number; coastReason?: string;
   hydrology?: HydrologyData;
   hydrologySurfaceMs?: number;
@@ -65,6 +66,7 @@ async function sampleTerrain({ settings, region, kind }: TerrainRequest): Promis
   // Device loss affects sampling; it must not replace an already prepared landscape.
   const key = JSON.stringify([settings.seed, settings.width, settings.relief, settings.relief === 'cavern' ? 0 : settings.erosion, settings.motifSize, settings.relief === 'mixed' ? settings.mountainMix : 0.5, requestedGpuGeneration ? generationMode : 'cpu', environment]);
   let prepareMs = 0, noiseMs = 0, erosionMs = 0, gpuSimulationMs = 0, nativeEnvironmentMs = 0;
+  let erosionProfile: ErosionProfile[] | undefined;
   if (!engine || engineKey !== key) {
     sampler?.dispose(); sampler = undefined; samplerMode = undefined;
     engine?.free(); engine = undefined; engineKey = ''; engineCoastKey = '';
@@ -74,9 +76,10 @@ async function sampleTerrain({ settings, region, kind }: TerrainRequest): Promis
     if (gpuGeneration && readyGpu) {
       try {
         if (generationMode === 'gpu-erosion' || settings.relief === 'volcano' || settings.relief === 'caldera' || settings.relief === 'plateau' || settings.relief === 'canyon') {
-          const timing = { nativeEnvironmentMs: 0 };
+          const timing = { nativeEnvironmentMs: 0, profiles: [] as ErosionProfile[] };
           const source = await generateGpuTerrain(readyGpu.context, settings, timing);
           nativeEnvironmentMs = timing.nativeEnvironmentMs;
+          erosionProfile = timing.profiles;
           gpuSimulationMs = performance.now() - prepareStarted - nativeEnvironmentMs;
           engine = TerrainEngine.with_source(settings.seed, settings.width, settings.relief, settings.erosion, settings.motifSize, mix, source, environment);
           generationBackend = 'gpu-erosion-f32';
@@ -177,7 +180,7 @@ async function sampleTerrain({ settings, region, kind }: TerrainRequest): Promis
         }
         gpuSetupMs = performance.now() - setupStarted;
         const data = await sampler.sample(region, settings, engine.min_height, engine.max_height);
-        gpuSampled = { ...data, generationMs: performance.now() - started, prepareMs, gpuSetupMs, generationBackend, generationReason, noiseMs, erosionMs, gpuSimulationMs, nativeEnvironmentMs, coastBackend, coastMs, coastReason };
+        gpuSampled = { ...data, generationMs: performance.now() - started, prepareMs, gpuSetupMs, generationBackend, generationReason, noiseMs, erosionMs, gpuSimulationMs, nativeEnvironmentMs, erosionProfile, coastBackend, coastMs, coastReason };
       }
       if (!gpuSampled) backendReason = 'WebGPU indisponible';
     } catch (error) {
@@ -197,7 +200,7 @@ async function sampleTerrain({ settings, region, kind }: TerrainRequest): Promis
       normalX: result.normal_x, normalY: result.normal_y, normalZ: result.normal_z,
       generationMs: performance.now() - started,
       backend: 'wasm', backendReason, prepareMs, samplingMs: performance.now() - samplingStarted, gpuSetupMs,
-      generationBackend, generationReason, noiseMs, erosionMs, gpuSimulationMs, nativeEnvironmentMs,
+      generationBackend, generationReason, noiseMs, erosionMs, gpuSimulationMs, nativeEnvironmentMs, erosionProfile,
       coastBackend, coastMs, coastReason,
     });
   } finally { result.free(); }

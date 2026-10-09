@@ -275,8 +275,8 @@ fn hash(mut value: u32) -> u32 {
 fn drain(height: &[f32], sea: &[bool], n: usize, width: f32, seed: &str) -> Drainage {
     drain_neighbors(height, sea, n, width, seed, true)
 }
-fn drain_cardinal(height: &[f32], sea: &[bool], n: usize, width: f32, seed: &str) -> Drainage {
-    drain_neighbors(height, sea, n, width, seed, false)
+fn fill_cardinal(height: &[f32], sea: &[bool], n: usize, seed: &str) -> Vec<f32> {
+    flood_neighbors(height, sea, n, seed, false, false).0
 }
 fn drain_neighbors(
     height: &[f32],
@@ -286,58 +286,7 @@ fn drain_neighbors(
     seed: &str,
     diagonals: bool,
 ) -> Drainage {
-    let mut rng = Rng::new(seed).fork("hydrology-flat-order");
-    let salt = (rng.float() * u32::MAX as f64) as u32;
-    let mut filled = height.to_vec();
-    let mut receivers = vec![OUT; height.len()];
-    let mut seen = vec![false; height.len()];
-    let mut heap = BinaryHeap::new();
-    for i in 0..height.len() {
-        if border(i, n) || sea[i] {
-            seen[i] = true;
-            heap.push(HeapCell {
-                z: height[i],
-                tie: hash(i as u32 ^ salt),
-                cell: i,
-            });
-        }
-    }
-    let mut order = Vec::with_capacity(height.len());
-    let mut pond = VecDeque::new();
-    while !heap.is_empty() || !pond.is_empty() {
-        let cell = if let Some(i) = pond.pop_front() {
-            i
-        } else {
-            heap.pop().unwrap().cell
-        };
-        order.push(cell);
-        // Rotate the visit order deterministically, avoiding a preferred flat direction.
-        let first = if diagonals {
-            (hash(cell as u32 ^ salt) & 7) as usize
-        } else {
-            ((hash(cell as u32 ^ salt) & 3) * 2) as usize
-        };
-        for step in 0..if diagonals { 8 } else { 4 } {
-            let direction = (first + step * if diagonals { 1 } else { 2 }) % 8;
-            if let Some(j) = neighbor(cell, direction, n) {
-                if seen[j] {
-                    continue;
-                }
-                seen[j] = true;
-                filled[j] = height[j].max(filled[cell]);
-                receivers[j] = cell as u32;
-                if filled[j] <= filled[cell] {
-                    pond.push_back(j);
-                } else {
-                    heap.push(HeapCell {
-                        z: filled[j],
-                        tie: hash(j as u32 ^ salt),
-                        cell: j,
-                    });
-                }
-            }
-        }
-    }
+    let (filled, mut receivers, order) = flood_neighbors(height, sea, n, seed, diagonals, true);
     let mut rank = vec![0; height.len()];
     for (k, &i) in order.iter().enumerate() {
         rank[i] = k;
@@ -382,6 +331,74 @@ fn drain_neighbors(
         accumulation,
         order,
     }
+}
+
+/// Shared priority flood; fill-only callers do not build discarded graph data.
+fn flood_neighbors(
+    height: &[f32],
+    sea: &[bool],
+    n: usize,
+    seed: &str,
+    diagonals: bool,
+    graph: bool,
+) -> (Vec<f32>, Vec<u32>, Vec<usize>) {
+    let mut rng = Rng::new(seed).fork("hydrology-flat-order");
+    let salt = (rng.float() * u32::MAX as f64) as u32;
+    let mut filled = height.to_vec();
+    let mut receivers = vec![OUT; if graph { height.len() } else { 0 }];
+    let mut seen = vec![false; height.len()];
+    let mut heap = BinaryHeap::new();
+    for i in 0..height.len() {
+        if border(i, n) || sea[i] {
+            seen[i] = true;
+            heap.push(HeapCell {
+                z: height[i],
+                tie: hash(i as u32 ^ salt),
+                cell: i,
+            });
+        }
+    }
+    let mut order = Vec::with_capacity(if graph { height.len() } else { 0 });
+    let mut pond = VecDeque::new();
+    while !heap.is_empty() || !pond.is_empty() {
+        let cell = if let Some(i) = pond.pop_front() {
+            i
+        } else {
+            heap.pop().unwrap().cell
+        };
+        if graph {
+            order.push(cell);
+        }
+        // Rotate the visit order deterministically, avoiding a preferred flat direction.
+        let first = if diagonals {
+            (hash(cell as u32 ^ salt) & 7) as usize
+        } else {
+            ((hash(cell as u32 ^ salt) & 3) * 2) as usize
+        };
+        for step in 0..if diagonals { 8 } else { 4 } {
+            let direction = (first + step * if diagonals { 1 } else { 2 }) % 8;
+            if let Some(j) = neighbor(cell, direction, n) {
+                if seen[j] {
+                    continue;
+                }
+                seen[j] = true;
+                filled[j] = height[j].max(filled[cell]);
+                if graph {
+                    receivers[j] = cell as u32;
+                }
+                if filled[j] <= filled[cell] {
+                    pond.push_back(j);
+                } else {
+                    heap.push(HeapCell {
+                        z: filled[j],
+                        tie: hash(j as u32 ^ salt),
+                        cell: j,
+                    });
+                }
+            }
+        }
+    }
+    (filled, receivers, order)
 }
 
 impl HydrologyEngine {
@@ -490,6 +507,15 @@ impl HydrologyEngine {
     }
 
     pub fn generate(&self, cfg: &HydrologyConfig) -> Result<HydrologyOutput, String> {
+        self.generate_profiled(cfg, &mut |_| {})
+    }
+
+    /// Optional stage observations; timing belongs to the caller, outside the engine.
+    pub fn generate_profiled(
+        &self,
+        cfg: &HydrologyConfig,
+        profile: &mut dyn FnMut(&'static str),
+    ) -> Result<HydrologyOutput, String> {
         cfg.validate()?;
         let n = self.n;
         let cell = self.width / n as f32;
@@ -557,6 +583,7 @@ impl HydrologyEngine {
         // Condition the derived graph for the continuous terrain it will use:
         // rejected ponds later raise the dry surface to these final F levels.
         let bank_budget = channel_bank_clearance(0.0, cfg);
+        profile("snapshots");
         drainage = flats::condition(
             drainage,
             &physical,
@@ -567,6 +594,7 @@ impl HydrologyEngine {
             bank_budget,
         );
         output.filled.clone_from(&drainage.filled);
+        profile("conditioning");
         for (i, depth) in output.lake_depth.iter_mut().enumerate() {
             *depth = if self.sea[i] {
                 0.0
@@ -586,7 +614,9 @@ impl HydrologyEngine {
         output.flat_labels = mask.labels;
         output.flat_rank = mask.rank;
         rebuild_drainage(&mut drainage, &self.sea, cell)?;
+        profile("flat-routing");
         let lakes = identify_lakes(&mut output, &physical, &drainage, &self.sea, cfg);
+        profile("lake-selection");
         let plan = depressions::plan(
             &physical,
             &drainage.filled,
@@ -600,9 +630,12 @@ impl HydrologyEngine {
                 max_length_m: cfg.max_breach_length,
             },
         );
+        profile("breach-search");
         if let Some(proposal) = plan.physical {
+            let proposed = drain(&proposal, &self.sea, n, self.width, &self.seed);
+            profile("breach-drain");
             let mut candidate = flats::condition(
-                drain(&proposal, &self.sea, n, self.width, &self.seed),
+                proposed,
                 &proposal,
                 &self.sea,
                 n,
@@ -610,6 +643,7 @@ impl HydrologyEngine {
                 &self.seed,
                 bank_budget,
             );
+            profile("breach-conditioning");
             // Storage levels belong to the selected lakes. If a proposed notch
             // changes one, keep the complete previous surface and drainage.
             let preserves_lakes = output
@@ -628,6 +662,7 @@ impl HydrologyEngine {
                     bank_budget,
                 )?;
                 rebuild_drainage(&mut candidate, &self.sea, cell)?;
+                profile("breach-routing");
                 let fill_delta: f64 = (0..physical.len())
                     .filter(|&i| !self.sea[i] && output.lake_labels[i] == 0)
                     .map(|i| {
@@ -648,6 +683,7 @@ impl HydrologyEngine {
                 output.adjusted_height.clone_from(&physical);
             }
         }
+        profile("depressions");
         if !lakes.is_empty() {
             flats::aggregate_lakes(&mut drainage, &output.lake_labels, n, bank_budget)?;
             rebuild_drainage(&mut drainage, &self.sea, cell)?;
@@ -668,6 +704,7 @@ impl HydrologyEngine {
             }
         }
         let channel_ground = output.adjusted_height.clone();
+        profile("water-surfaces");
         let (main_source, external) = principal_source(
             &channel_ground,
             &self.sea,
@@ -710,6 +747,7 @@ impl HydrologyEngine {
             }
         }
         output.basins = basins(&drainage, &self.sea);
+        profile("main-river");
         rivers(
             &mut output,
             &channel_ground,
@@ -719,6 +757,7 @@ impl HydrologyEngine {
             &self.seed,
             main_source,
             external,
+            profile,
         )?;
         output.receivers = drainage.receivers;
         // rivers() adds any explicitly identified external input to this copy.
@@ -726,6 +765,7 @@ impl HydrologyEngine {
             output.accumulation = drainage.accumulation;
         }
         output.surface_height = channel_ground;
+        profile("packing");
         Ok(output)
     }
 }
@@ -1289,6 +1329,7 @@ fn rivers(
     seed: &str,
     main_source: Option<usize>,
     external: bool,
+    profile: &mut dyn FnMut(&'static str),
 ) -> Result<(), String> {
     let n = out.resolution;
     let cell = out.width / n as f32;
@@ -1611,6 +1652,7 @@ fn rivers(
             };
         }
     }
+    profile("river-graph");
     let mut curves = vec![Vec::new(); edges.len()];
     let mut geometry_index = RiverGeometryIndex::new(cell, courses.len());
     geometry_index.configure_junctions(&edges, &course_at, &effective, n, cfg, None);
@@ -1681,6 +1723,7 @@ fn rivers(
             curves[id] = points[geometry.cuts[start]..=geometry.cuts[end]].to_vec();
         }
     }
+    profile("river-curves");
     join_confluences(
         &mut curves,
         &edges,
@@ -1733,6 +1776,7 @@ fn rivers(
             points
         })
         .collect();
+    profile("confluences");
     let compact = compact_network(
         &curves,
         &references,
@@ -1746,6 +1790,7 @@ fn rivers(
         h,
         sea,
     )?;
+    profile("network-clearance");
     for (id, edge) in edges.iter().enumerate() {
         let mut points = compact[id].clone();
         if edge.flags & 4 != 0 {
@@ -2073,22 +2118,23 @@ fn profile_requirement(a: RiverPoint, b: RiverPoint, context: &RiverPatchContext
         let numerator_linear = linear - length * f64::from(b.z);
         let numerator_first = first - start * f64::from(b.z);
         let denominator_first = 1.0 - start;
-        let mut candidates = vec![0.0, 1.0];
+        let mut candidates = [0.0, 1.0, 0.0, 0.0];
+        let mut count = 2;
         let qa = -quadratic * length;
         let qb = 2.0 * quadratic * denominator_first;
         let qc = numerator_linear * denominator_first + length * numerator_first;
         if qa.abs() > 1.0e-12 {
             let discriminant = qb * qb - 4.0 * qa * qc;
             if discriminant >= 0.0 {
-                candidates.extend([
-                    (-qb - discriminant.sqrt()) / (2.0 * qa),
-                    (-qb + discriminant.sqrt()) / (2.0 * qa),
-                ]);
+                candidates[2] = (-qb - discriminant.sqrt()) / (2.0 * qa);
+                candidates[3] = (-qb + discriminant.sqrt()) / (2.0 * qa);
+                count = 4;
             }
         } else if qb.abs() > 1.0e-12 {
-            candidates.push(-qc / qb);
+            candidates[2] = -qc / qb;
+            count = 3;
         }
-        for v in candidates {
+        for &v in &candidates[..count] {
             if !(0.0..=1.0).contains(&v) {
                 continue;
             }

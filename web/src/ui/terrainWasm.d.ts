@@ -2,6 +2,7 @@
 declare module '*magna_urbis_wasm.js' {
   export default function init(options: { module_or_path: ArrayBuffer }): Promise<unknown>;
   export interface HydrologyOutput {
+    readonly stage_ms: Float64Array; readonly stage_labels: string;
     readonly width: number; readonly resolution: number;
     readonly receivers: Uint32Array; readonly accumulation: Float32Array; readonly basins: Uint32Array;
     readonly raw_receivers: Uint32Array; readonly raw_accumulation: Float32Array; readonly raw_basins: Uint32Array;

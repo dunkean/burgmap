@@ -47,6 +47,7 @@ export interface HydrologyData {
   incision: number;
   backend: 'cpu' | 'gpu-f32'; backendReason?: string;
   drainageMs: number; vectorMs: number; generationMs: number;
+  stageMs?: Record<string, number>;
   routingPotential?: Float32Array; seaMask?: Uint8Array;
   gpuComputeMs?: number; gpuReadbackMs?: number; gpuFloodPasses?: number;
 }
@@ -82,6 +83,8 @@ export class PreparedHydrology {
       settings.lakeAbundance, settings.lakeCoverage, settings.maxLakeArea,
       settings.depressionPolicy, settings.maxBreachDepth, settings.maxBreachLength);
     try {
+      const stageTimes = output.stage_ms;
+      const stageMs = output.stage_labels ? Object.fromEntries(output.stage_labels.split(',').map((label, i) => [label, stageTimes[i]])) : undefined;
       const basins = output.basins;
       let basinCount = 0;
       let landCells = 0;
@@ -120,6 +123,7 @@ export class PreparedHydrology {
           ['stream', 'river', 'major'].includes(settings.main) && !externalInflow ? 'Aucune entrée terrestre adaptée : cours principal limité à son bassin local.' : undefined,
         ].filter(Boolean).join(' · ') || undefined,
         drainageMs: this.drainageMs, vectorMs: performance.now() - start,
+        stageMs,
         generationMs: this.drainageMs + performance.now() - start,
         routingPotential: settings.lakes === 'some' ? undefined : this.gpu?.potential,
         seaMask: this.gpu?.seaMask, gpuComputeMs: this.gpu?.computeMs,

@@ -2,21 +2,47 @@ import type { Vec2 } from '../core/geom';
 
 export interface ContourPath { pts: Vec2[]; closed: boolean }
 
+/** Reusable topology and cell-block bounds for levels of one immutable FP32 field. */
+export class ContourWorkspace {
+  readonly first: Int32Array;
+  readonly second: Int32Array;
+  readonly stamps: Uint32Array;
+  readonly minimum: Float32Array;
+  readonly maximum: Float32Array;
+  readonly columns: number;
+  epoch = 0;
+  constructor(f: Float32Array, readonly w: number, readonly h: number) {
+    this.first = new Int32Array(w * h * 2); this.second = new Int32Array(w * h * 2);
+    this.stamps = new Uint32Array(w * h * 2);
+    this.columns = Math.ceil((w - 1) / 16);
+    const rows = Math.ceil((h - 1) / 16);
+    this.minimum = new Float32Array(this.columns * rows); this.maximum = new Float32Array(this.minimum.length);
+    this.minimum.fill(Infinity); this.maximum.fill(-Infinity);
+    for (let by = 0; by < rows; by++) for (let bx = 0; bx < this.columns; bx++) {
+      const block = by * this.columns + bx;
+      for (let y = by * 16; y <= Math.min(h - 1, by * 16 + 16); y++) for (let x = bx * 16; x <= Math.min(w - 1, bx * 16 + 16); x++) {
+        const value = f[y * w + x];
+        this.minimum[block] = Math.min(this.minimum[block], value); this.maximum[block] = Math.max(this.maximum[block], value);
+      }
+    }
+  }
+}
+
 /**
  * Marching squares on a scalar field. `origin` is the world position of sample (0,0),
  * `cell` the spacing. Returns chained polylines (closed if they loop).
  * Values strictly greater than `level` count as "inside".
  */
 export function marchingSquares(
-  f: ArrayLike<number>, w: number, h: number, level: number, cell: number, ox = 0, oy = 0, ix = 0, iy = 0,
+  f: ArrayLike<number>, w: number, h: number, level: number, cell: number, ox = 0, oy = 0, ix = 0, iy = 0, workspace?: ContourWorkspace,
 ): ContourPath[] {
   // (ix, iy): integer offset of this raster in a larger one (a window): points are computed exactly as there
   // segments as pairs of edge ids
   const segA: number[] = [], segB: number[] = [];
-  const pos = new Map<number, Vec2>();
+  const pos = workspace ? undefined : new Map<number, Vec2>();
 
   const edgePoint = (id: number): Vec2 => {
-    let p = pos.get(id);
+    let p = pos?.get(id);
     if (p) return p;
     const vertical = id & 1;
     const base = id >> 1;
@@ -27,12 +53,16 @@ export function marchingSquares(
     const t = a === b ? 0.5 : (level - a) / (b - a);
     const tt = t < 0 ? 0 : t > 1 ? 1 : t;
     p = { x: ox + ((x + ix) + (x2 - x) * tt) * cell, y: oy + ((y + iy) + (y2 - y) * tt) * cell };
-    pos.set(id, p);
+    pos?.set(id, p);
     return p;
   };
 
   for (let y = 0; y < h - 1; y++) {
     for (let x = 0; x < w - 1; x++) {
+      if (workspace && x % 16 === 0) {
+        const block = Math.floor(y / 16) * workspace.columns + Math.floor(x / 16);
+        if (workspace.maximum[block] <= level || workspace.minimum[block] > level) { x += 15; continue; }
+      }
       const v0 = f[y * w + x], v1 = f[y * w + x + 1], v2 = f[(y + 1) * w + x + 1], v3 = f[(y + 1) * w + x];
       const c = (v0 > level ? 1 : 0) | (v1 > level ? 2 : 0) | (v2 > level ? 4 : 0) | (v3 > level ? 8 : 0);
       if (c === 0 || c === 15) continue;
@@ -65,6 +95,39 @@ export function marchingSquares(
 
   // Chain
   const nSeg = segA.length;
+  if (workspace) {
+    // Grid edges have degree at most two. Preserve Map insertion order using
+    // touched edges, and avoid clearing the dense arrays between levels.
+    if (++workspace.epoch === 0xffffffff) { workspace.stamps.fill(0); workspace.epoch = 1; }
+    const { first, second, stamps, epoch } = workspace, touched: number[] = [];
+    const add = (id: number, segment: number) => {
+      if (stamps[id] !== epoch) { stamps[id] = epoch; first[id] = segment; second[id] = -1; touched.push(id); }
+      else second[id] = segment;
+    };
+    for (let i = 0; i < nSeg; i++) { add(segA[i], i); add(segB[i], i); }
+    const used = new Uint8Array(nSeg), out: ContourPath[] = [];
+    const walk = (startSeg: number, startId: number): number[] => {
+      const ids: number[] = []; let segment = startSeg, from = startId;
+      for (;;) {
+        used[segment] = 1;
+        const to = segA[segment] === from ? segB[segment] : segA[segment]; ids.push(to);
+        const a = first[to], b = second[to];
+        const next = !used[a] ? a : b >= 0 && !used[b] ? b : -1;
+        if (next < 0) break;
+        segment = next; from = to;
+      }
+      return ids;
+    };
+    for (const id of touched) if (second[id] < 0 && !used[first[id]]) {
+      out.push({ pts: [id, ...walk(first[id], id)].map(edgePoint), closed: false });
+    }
+    for (let segment = 0; segment < nSeg; segment++) if (!used[segment]) {
+      const start = segA[segment], ids = [start, ...walk(segment, start)];
+      if (ids.length > 1 && ids[ids.length - 1] === start) ids.pop();
+      out.push({ pts: ids.map(edgePoint), closed: true });
+    }
+    return out;
+  }
   const adj = new Map<number, number[]>();
   for (let i = 0; i < nSeg; i++) {
     for (const id of [segA[i], segB[i]]) {
