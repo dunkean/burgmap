@@ -8,7 +8,7 @@ import sys
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
-        prog="town-generator",
+        prog="magna-urbis",
         description="Generate a medieval fantasy town as SVG or PNG.",
     )
     parser.add_argument("-s", "--seed", type=int, default=-1, help="Random seed (default: random)")

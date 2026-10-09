@@ -43,7 +43,7 @@ export function townTitle(world: World): { title: string; sub: string } {
   const fam: NameFamily = world.names?.family ?? 'english';
   const pop = world.urban?.population;
   const cls = SETTLEMENT_CLASS(fam, pop ?? 0);
-  const title = world.names?.town ?? 'Burgmap';
+  const title = world.names?.town ?? 'Magna Urbis';
   const sub = pop ? `${cls} - ${fmtPop(round2(pop))} inhabitants` : cls;
   return { title, sub };
 }

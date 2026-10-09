@@ -3,8 +3,8 @@ import noiseShader from './terrainNoise.wgsl?raw';
 import generationShader from './terrainGeneration.wgsl?raw';
 import volcanicShader from './terrainFinite.wgsl?raw';
 import coastShader from './terrainCoast.wgsl?raw';
-import { GenerationNoisePlan } from '../pkg/wasm/burgmap_wasm.js';
-import type { TerrainEngine } from '../pkg/wasm/burgmap_wasm.js';
+import { GenerationNoisePlan } from '../pkg/wasm/magna_urbis_wasm.js';
+import type { TerrainEngine } from '../pkg/wasm/magna_urbis_wasm.js';
 import type { TerrainData, TerrainRegion, TerrainSettings, TerrainCompute } from './terrain';
 
 export interface Context { device: GPUDevice; pipelines: Map<string, Promise<GPUComputePipeline>>; lost: boolean }

@@ -143,8 +143,8 @@ function overlaps(w: World): { water: number; road: number; urban: number; n: nu
 }
 
 const mainView = (w: World): World => { const size = effectiveSize(w.options); return size !== w.options.size ? { ...w, options: { ...w.options, size } } : w; };
-// timing assertions only on a quiet machine: BURGMAP_PERF=1 npx vitest run tests/fields.test.ts
-const PERF = process.env.BURGMAP_PERF === '1';
+// timing assertions only on a quiet machine: MAGNA_URBIS_PERF=1 npx vitest run tests/fields.test.ts
+const PERF = process.env.MAGNA_URBIS_PERF === '1';
 const timeIt = (fn: () => void, runs = 3): number => { let best = Infinity; for (let i = 0; i < runs; i++) { const t = performance.now(); fn(); best = Math.min(best, performance.now() - t); } return best; };
 
 describe('open fields on town maps (seeds 1-4)', () => {
@@ -162,7 +162,7 @@ describe('open fields on town maps (seeds 1-4)', () => {
 
   it('the edge-share metric rejects the old Voronoi furlongs', () => {
     const w = worlds[0];
-    const old = legacyRural(mainView(w), new Rng('burgmap:' + w.options.seed), w.roads?.length);
+    const old = legacyRural(mainView(w), new Rng('magna-urbis:' + w.options.seed), w.roads?.length);
     const r = edgeShare({ ...w, landuse: old.layer });
     console.info('legacy Voronoi furlong edge share', r.share.toFixed(3));
     expect(r.share).toBeLessThan(0.8);
@@ -213,8 +213,8 @@ describe('open fields on town maps (seeds 1-4)', () => {
   it('is deterministic', () => {
     const w = worlds[0];
     const mv = mainView(w);
-    const a = generateRural(mv, new Rng('burgmap:' + w.options.seed), w.roads?.length);
-    const b = generateRural(mv, new Rng('burgmap:' + w.options.seed), w.roads?.length);
+    const a = generateRural(mv, new Rng('magna-urbis:' + w.options.seed), w.roads?.length);
+    const b = generateRural(mv, new Rng('magna-urbis:' + w.options.seed), w.roads?.length);
     expect(JSON.stringify(a.layer)).toBe(JSON.stringify(b.layer));
   });
 
@@ -224,8 +224,8 @@ describe('open fields on town maps (seeds 1-4)', () => {
     const main = w.roads?.length;
     let tn = Infinity, tl = Infinity;
     for (let i = 0; i < 3; i++) {
-      tl = Math.min(tl, timeIt(() => legacyRural(mv, new Rng('burgmap:' + w.options.seed), main), 1));
-      tn = Math.min(tn, timeIt(() => generateRural(mv, new Rng('burgmap:' + w.options.seed), main), 1));
+      tl = Math.min(tl, timeIt(() => legacyRural(mv, new Rng('magna-urbis:' + w.options.seed), main), 1));
+      tn = Math.min(tn, timeIt(() => generateRural(mv, new Rng('magna-urbis:' + w.options.seed), main), 1));
     }
     expect(tn).toBeLessThanOrEqual(1.2 * tl);
   });
@@ -237,7 +237,7 @@ describe('open fields on a 10 km multi-settlement map', () => {
 
   it.runIf(PERF)('land-use stage runs in at most 3 s', () => {
     const mv = mainView(w);
-    const t = timeIt(() => generateRural(mv, new Rng('burgmap:' + w.options.seed), w.roads?.length), 3);
+    const t = timeIt(() => generateRural(mv, new Rng('magna-urbis:' + w.options.seed), w.roads?.length), 3);
     expect(t).toBeLessThanOrEqual(3000);
   }, T);
 

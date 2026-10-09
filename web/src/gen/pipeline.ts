@@ -34,7 +34,7 @@ export function mainPopulation(o: Options, root: Rng): number {
 }
 
 /** Explicit extents, imported rasters and automatic-population links keep their scale. */
-export function generationMapSize(o: Options, root = new Rng('burgmap:' + o.seed)): number {
+export function generationMapSize(o: Options, root = new Rng('magna-urbis:' + o.seed)): number {
   const preset = mapSizeOf(o);
   if (o.workflow === 'environment') return preset;
   if (o.mapSize !== undefined || o.importedHeight || o.population <= 0) return preset;
@@ -93,7 +93,7 @@ export function generate(options: Options, onStage?: (stage: string, partial?: W
   const mainInput = optionsForMainSettlement(options);
   const t0 = performance.now();
   onStage?.('terrain');
-  const root = new Rng('burgmap:' + options.seed);
+  const root = new Rng('magna-urbis:' + options.seed);
   const mapSize = generationMapSize(mainInput, root);
   const cache = gopts.cache;
   const tk = cache ? terrainKey(options, mapSize) : null;

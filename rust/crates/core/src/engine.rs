@@ -274,7 +274,7 @@ impl TerrainGenerator {
         } else {
             Vec::new()
         };
-        let root = Rng::new(&format!("burgmap:{seed}")).fork("terrain");
+        let root = Rng::new(&format!("magna-urbis:{seed}")).fork("terrain");
         let noise = Noise::new(root.fork("noise"));
         let noise2 = Noise::new(root.fork("noise2"));
         let mut params = root.fork("params");

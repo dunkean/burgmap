@@ -506,7 +506,7 @@ export interface PreparedTerrain { height: Grid; plan: HeightPlan; ms: number }
 /** Relief only: no lake carving, drainage or river routing has run yet. */
 export function prepareTerrain(opts: Options, mapSize: number, root?: Rng): PreparedTerrain {
   const t = performance.now();
-  const { height, plan } = generateHeightfield(opts, mapSize, gridForExtent(mapSize), (root ?? new Rng('burgmap:' + opts.seed)).fork('terrain'));
+  const { height, plan } = generateHeightfield(opts, mapSize, gridForExtent(mapSize), (root ?? new Rng('magna-urbis:' + opts.seed)).fork('terrain'));
   if (opts.importedHeight || plan.relief === 'flat') resolveDepressions(height, 2, 0.35);
   return { height, plan, ms: performance.now() - t };
 }
@@ -533,7 +533,7 @@ export function emptyTerrain(prepared: PreparedTerrain): TerrainLayer {
 
 export function terrainForExtent(opts: Options, mapSize: number, root?: Rng, prepared?: PreparedTerrain): { terrain: TerrainLayer; timings: TerrainTimings } {
   const n = gridForExtent(mapSize);
-  const rng = (root ?? new Rng('burgmap:' + opts.seed)).fork('terrain');
+  const rng = (root ?? new Rng('magna-urbis:' + opts.seed)).fork('terrain');
   const lakesOpt: LakesOpt = ((opts as unknown as { lakes?: LakesOpt }).lakes) ?? 'auto';
   const t0 = performance.now();
   const { height, plan } = prepared ? { height: structuredClone(prepared.height), plan: prepared.plan } : generateHeightfield(opts, mapSize, n, rng);

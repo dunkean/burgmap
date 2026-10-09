@@ -183,7 +183,7 @@ fn generate_motif_base_with_noise(
     };
     let n = resolution;
     let cell = width / n as f64;
-    let root = Rng::new(&format!("burgmap:{seed}")).fork("terrain");
+    let root = Rng::new(&format!("magna-urbis:{seed}")).fork("terrain");
     let noise = Noise::new(root.fork("noise"));
     let noise2 = Noise::new(root.fork("noise2"));
     let mut params = root.fork("params");

@@ -1,5 +1,5 @@
 // Keep the ordinary TypeScript build independent of the generated Rust package.
-declare module '*burgmap_wasm.js' {
+declare module '*magna_urbis_wasm.js' {
   export default function init(options: { module_or_path: ArrayBuffer }): Promise<unknown>;
   export interface HydrologyOutput {
     readonly width: number; readonly resolution: number;

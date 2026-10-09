@@ -10,7 +10,7 @@ export function exportSnapshot(options: Options, world: World | null, gen: numbe
   if (gen !== presentedGen || (world && (world.options.seed !== options.seed || world.options.size !== options.size))) {
     throw new Error('the requested map has not been presented');
   }
-  return { name: `burgmap-${options.seed}-${options.size}`, gen, world, display: {
+  return { name: `magna-urbis-${options.seed}-${options.size}`, gen, world, display: {
     style: options.style as MapStyle, contours: options.contours, landuse: options.landuse, labels: options.labels, legend: options.legend,
   } };
 }

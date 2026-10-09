@@ -86,7 +86,7 @@ describe('generation workflow output', () => {
     const world = generate(options);
     for (const population of [40, 50, 60]) {
       const urban = population === 40 ? world.urban! : generateUrban({ ...world, options: { ...options, population },
-        bridges: [...(world.bridges ?? [])] }, new Rng('burgmap:1')).layer;
+        bridges: [...(world.bridges ?? [])] }, new Rng('magna-urbis:1')).layer;
       expect(urban.population).toBe(population);
       expect(urban.buildings.length, `${population} inhabitants have houses`).toBeGreaterThan(0);
       expect(urban.footprintH.length).toBeGreaterThan(0);
@@ -128,7 +128,7 @@ describe('generation workflow output', () => {
     expect(woodedVerge).toBeGreaterThan(0);
 
     const empty = { ...world, urban: { ...world.urban!, buildings: [] } };
-    const uncultivated = generateRural(empty, new Rng('burgmap:1'));
+    const uncultivated = generateRural(empty, new Rng('magna-urbis:1'));
     expect(uncultivated.layer.reserve).toEqual([]);
     expect(uncultivated.layer.farmsteads).toEqual([]);
   });
@@ -180,7 +180,7 @@ describe('generation workflow output', () => {
     const secondary = eager.settlements![1];
     const empty = { ...eager, settlements: eager.settlements!.map((s) => s.index === secondary.index
       ? { ...s, urban: { ...s.urban!, buildings: [] } } : s) };
-    const uncultivated = generateRural(empty, new Rng('burgmap:' + eager.seed));
+    const uncultivated = generateRural(empty, new Rng('magna-urbis:' + eager.seed));
     expect(uncultivated.layer.reserve.some((ring) => pointInRing(ring, secondary.center))).toBe(false);
   });
 });

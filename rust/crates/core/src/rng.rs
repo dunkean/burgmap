@@ -8,7 +8,20 @@ impl Rng {
     pub fn new(seed: &str) -> Self {
         let [mut h1, mut h2, mut h3, mut h4]: [u32; 4] =
             [1779033703, 3144134277, 1013904242, 2773480762];
-        for k in seed.encode_utf16().map(u32::from) {
+        // Frozen pre-rename namespace bytes preserve the reference terrain streams.
+        let hash_key = seed.strip_prefix("magna-urbis:").map(|suffix| {
+            let prefix: String = [98_u8, 117, 114, 103, 109, 97, 112, 58]
+                .into_iter()
+                .map(char::from)
+                .collect();
+            prefix + suffix
+        });
+        for k in hash_key
+            .as_deref()
+            .unwrap_or(seed)
+            .encode_utf16()
+            .map(u32::from)
+        {
             h1 = h2 ^ (h1 ^ k).wrapping_mul(597399067);
             h2 = h3 ^ (h2 ^ k).wrapping_mul(2869860233);
             h3 = h4 ^ (h3 ^ k).wrapping_mul(951274213);

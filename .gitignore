@@ -11,3 +11,26 @@ rust/target/
 rust/pkg/
 rust/out/
 rust/.cargo/config.toml
+
+# Local development history and agent instructions
+.local-archive/
+AGENTS.md
+CLAUDE.md
+web/demo/
+web/docs/
+# Machine-specific settings
+.env
+.env.*
+!.env.example
+*.local
+web/progress/
+
+# Internal working documents stay local; public documentation is in README files.
+/*.md
+!/README.md
+web/*.md
+rust/docs/
+rust/benches/
+web/scripts/*audit*
+web/scripts/dbg_*
+web/scripts/perf*

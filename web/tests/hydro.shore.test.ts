@@ -127,7 +127,7 @@ describe('real estuary regressions from the full suite', () => {
   for (const [seed, id, minimum] of [['2', 1, 3], ['3', 1, 3], ['4', 2, 4]] as const) {
     it(`valley seed ${seed} preserves the drowned confluence as a real sea outlet`, () => {
       const o = makeOptions({ seed, size: 'town', relief: 'valley', coast: 'random', river: 'river' });
-      const { terrain: t } = generateTerrain(o, new Rng('burgmap:' + seed));
+      const { terrain: t } = generateTerrain(o, new Rng('magna-urbis:' + seed));
       expect(t.rivers.length).toBeGreaterThanOrEqual(minimum);
       const r = t.rivers.find((r) => r.id === id)!;
       expect(r).toBeDefined(); expect(r.mouth).toBe('sea'); expect(r.host).toBeUndefined();
@@ -138,7 +138,7 @@ describe('real estuary regressions from the full suite', () => {
   }
   it('keeps the mountain seed 6 coastal road on land without inventing sea bridges', () => {
     const o = makeOptions({ seed: '6', size: 'town', relief: 'mountains', coast: 'random', river: 'river' });
-    const root = new Rng('burgmap:' + o.seed), { terrain: t } = generateTerrain(o, root);
+    const root = new Rng('magna-urbis:' + o.seed), { terrain: t } = generateTerrain(o, root);
     const site = chooseSite(t, o, 2400, root), result = routeRoads(t, site, o, 2400, root);
     expect(result.roads.length).toBeGreaterThanOrEqual(4); // Keep the real routes, rather than dropping the bad road.
     expect(result.bridges.length).toBeGreaterThanOrEqual(2); // Preserve the genuine river crossings.

@@ -42,7 +42,7 @@ export class DebugGeneration {
 
   constructor(options: Options) {
     this.options = structuredClone(options);
-    this.root = new Rng('burgmap:' + options.seed);
+    this.root = new Rng('magna-urbis:' + options.seed);
     const mapSize = generationMapSize(optionsForMainSettlement(options), this.root);
     // Cavern envelopes depend on the occupied geometry and are added at stage 4.
     const worldOptions = { ...options, ...(mapSize !== mapSizeOf(options) ? { mapSize } : {}), ...(options.biome === 'underdark-caverns' ? { biome: 'underdark' as const } : {}) };

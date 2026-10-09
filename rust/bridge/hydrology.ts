@@ -1,4 +1,4 @@
-import { HydrologyEngine } from '../pkg/wasm/burgmap_wasm.js';
+import { HydrologyEngine } from '../pkg/wasm/magna_urbis_wasm.js';
 import { prepareHydrologyGpu } from './hydrologyGpu';
 export { applyHydrologySurface } from './hydrologySurface';
 

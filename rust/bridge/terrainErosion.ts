@@ -1,7 +1,7 @@
 import shader from './terrainErosion.wgsl?raw';
 import noiseShader from './terrainNoise.wgsl?raw';
 import volcanicShader from './terrainFinite.wgsl?raw';
-import { GenerationNoisePlan, TerrainEngine } from '../pkg/wasm/burgmap_wasm.js';
+import { GenerationNoisePlan, TerrainEngine } from '../pkg/wasm/magna_urbis_wasm.js';
 import type { Context } from './terrainGpu';
 import type { TerrainSettings } from './terrain';
 

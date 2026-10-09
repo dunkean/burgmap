@@ -18,7 +18,7 @@ const run = (fn: typeof generateRural) => {
   const ts: number[] = [];
   for (let i = 0; i < 5; i++) {
     const t = performance.now();
-    const r = fn(mv, new Rng('burgmap:' + o.seed), main); if (i === 4) console.log(JSON.stringify(Object.fromEntries(Object.entries(r.stats).filter(([k]) => k.startsWith('ms')))));
+    const r = fn(mv, new Rng('magna-urbis:' + o.seed), main); if (i === 4) console.log(JSON.stringify(Object.fromEntries(Object.entries(r.stats).filter(([k]) => k.startsWith('ms')))));
     ts.push(performance.now() - t);
   }
   return Math.round(med(ts));

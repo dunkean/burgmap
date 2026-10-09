@@ -76,7 +76,7 @@ export function generateCavernMask(world: World): CavernLayer {
   const cultivationSupport = new Set<PolyH>();
   const protectedPieces: MultiPoly = [];
   const skeleton: Polyline[] = [];
-  const root = new Rng('burgmap:' + world.seed).fork('cavern-mask');
+  const root = new Rng('magna-urbis:' + world.seed).fork('cavern-mask');
   const noise = new Noise2D(root.fork('wall-noise'));
   const polygon = (ph: PolyH, room: boolean | number = false) => {
     if (ph.outer.length < 3) return;

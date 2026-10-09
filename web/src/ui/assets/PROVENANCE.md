@@ -13,7 +13,7 @@ Original: 1,742,980 bytes. SHA256:
 ## Generation prompt
 
 Use case: stylized-concept
-Asset type: single production UI icon atlas for Burgmap medieval fantasy map generator.
+Asset type: single production UI icon atlas for Magna Urbis medieval fantasy map generator.
 Primary request: one square transparent sprite atlas, exactly FIVE columns and FIVE rows, 25 clearly isolated icons, equal square cells with icon centered and generous empty padding. No borders, no labels, no text, no backdrop. Each is a crisp premium fantasy game inventory symbol, warm ivory and restrained antique brass outlines with muted natural colour interiors, gently hand painted but bold simple silhouettes readable at 22px. Not photorealistic, no tiny decorative detail. Consistent scale and visual weight, icon occupies 65% of each cell. True alpha background.
 Row 1 left to right: dice with four pips; magic sparkle; two horizontal customization sliders with round knobs; rounded broadleaf tree; conifer pine tree.
 Row 2: desert sand dune with small sun; grass tuft; tropical palm tree; six armed snowflake; glowing purple mushroom.

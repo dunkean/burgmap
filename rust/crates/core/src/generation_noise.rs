@@ -42,7 +42,7 @@ impl GenerationNoisePlan {
         let cc = width * 1.44 / nc as f64;
         let k = motif / 2400.0;
         let detail = (cell * 6.0).max(260.0 * k);
-        let root = Rng::new(&format!("burgmap:{seed}")).fork("terrain");
+        let root = Rng::new(&format!("magna-urbis:{seed}")).fork("terrain");
         let noises = [
             Noise::new(root.fork("noise")),
             Noise::new(root.fork("noise2")),
@@ -122,7 +122,7 @@ impl GenerationNoisePlan {
         };
         let cfg = crate::mountain_parameters(source_kind, width, motif, mix);
         let mut plan = Self::new(seed, width, motif)?;
-        let mut rng = Rng::new(&format!("burgmap:{seed}"))
+        let mut rng = Rng::new(&format!("magna-urbis:{seed}"))
             .fork("terrain")
             .fork("params");
         let side = [(0.0, -1.0), (1.0, 0.0), (0.0, 1.0), (-1.0, 0.0)]
@@ -172,7 +172,7 @@ impl GenerationNoisePlan {
             return Err("Configuration de forme finie GPU invalide.".into());
         }
         let mut plan = Self::new(seed, motif, motif)?;
-        let root = Rng::new(&format!("burgmap:{seed}")).fork("terrain");
+        let root = Rng::new(&format!("magna-urbis:{seed}")).fork("terrain");
         if kind == crate::Relief::Plateau {
             plan.parameters = crate::PlateauShape::new(motif, root.fork("plateau"))
                 .parameters(kind.amplitude(motif), erosion);

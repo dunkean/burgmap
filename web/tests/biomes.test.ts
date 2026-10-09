@@ -56,7 +56,7 @@ describe('biome landscapes', () => {
     world = generate(makeOptions({ seed: '42', size: 'village', settlements: 'none' }));
     for (const biome of BIOME_NAMES) {
       const w = { ...world, options: { ...world.options, biome } };
-      layers.set(biome, generateRural(w, new Rng('burgmap:' + world.seed), world.roads!.length).layer);
+      layers.set(biome, generateRural(w, new Rng('magna-urbis:' + world.seed), world.roads!.length).layer);
     }
   }, 60000);
   const hectares = (layer: LandUseLayer, kind: LandKind) => layer.areas.filter((a) => a.kind === kind)
@@ -64,7 +64,7 @@ describe('biome landscapes', () => {
   it('preserves temperate generation and produces deterministic distinct land cover', () => {
     expect(layers.get('temperate')).toEqual(world.landuse);
     const again = generateRural({ ...world, options: { ...world.options, biome: 'desert' } },
-      new Rng('burgmap:' + world.seed), world.roads!.length).layer;
+      new Rng('magna-urbis:' + world.seed), world.roads!.length).layer;
     expect(again).toEqual(layers.get('desert'));
     expect(hectares(layers.get('forest')!, 'forest')).toBeGreaterThan(hectares(layers.get('temperate')!, 'forest'));
     expect(hectares(layers.get('desert')!, 'field')).toBeLessThan(hectares(layers.get('temperate')!, 'field'));

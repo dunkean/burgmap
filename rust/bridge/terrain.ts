@@ -1,5 +1,5 @@
-import init, { TerrainEngine } from '../pkg/wasm/burgmap_wasm.js';
-import wasmUrl from '../pkg/wasm/burgmap_wasm_bg.wasm?url&inline';
+import init, { TerrainEngine } from '../pkg/wasm/magna_urbis_wasm.js';
+import wasmUrl from '../pkg/wasm/magna_urbis_wasm_bg.wasm?url&inline';
 import { GpuTerrainSampler, prepareGpu, generateGpuNoise, GPU_RELIEFS, GPU_GENERATION_RELIEFS } from './terrainGpu';
 import { generateGpuTerrain, erodeGpuCoast } from './terrainErosion';
 import { PreparedHydrology, applyHydrologySurface, type HydrologyData, type HydrologySettings } from './hydrology';

@@ -15,7 +15,7 @@ from town_generator.building.model import Model
 from town_generator.rendering.palette import PALETTES, DEFAULT
 from town_generator.rendering.svg_renderer import render_svg
 
-app = FastAPI(title="Town Generator")
+app = FastAPI(title="Magna Urbis")
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "templates")
@@ -193,7 +193,7 @@ def generate_terrain(
     return world.to_dict()
 
 
-# ── Geology (terrain v2) ────────────────────────────────────────────
+# â”€â”€ Geology (terrain v2) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @app.get("/tools/geology/", response_class=HTMLResponse)
 def geology_editor():
@@ -435,7 +435,7 @@ def _make_preset_polygon(preset: str):
             Point(-50, -40), Point(50, -40), Point(55, 0),
             Point(50, 40), Point(-50, 40), Point(-55, 0),
         ])
-    else:  # "default" — a reasonable rectangle
+    else:  # "default" â€” a reasonable rectangle
         return Polygon([
             Point(-25, -20), Point(25, -20),
             Point(25, 20), Point(-25, 20),

@@ -19,7 +19,7 @@ function audit(relief: Relief, river: RiverOpt, seeds: number[], size: SizeName,
   const out: string[] = [];
   for (const seed of seeds) for (const coast of coasts) {
     const o = makeOptions({ seed: String(seed), relief, coast, river, size });
-    const root = new Rng('burgmap:' + o.seed);
+    const root = new Rng('magna-urbis:' + o.seed);
     const S = SIZE_PRESETS[size].mapSize;
     const { terrain } = generateTerrain(o, root);
     const site = chooseSite(terrain, o, S, root);

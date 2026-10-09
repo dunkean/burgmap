@@ -58,13 +58,13 @@ describe('names on a generated world', () => {
     const streets = n.entries.filter((e) => e.kind === 'street').map((e) => e.text);
     expect(new Set(streets).size).toBe(streets.length);
     expect(streets.some((s) => /^(Grand-Rue|Rue Maîtresse|Rue Principale)$/.test(s))).toBe(true);
-    const again = generateNames(w, new Rng('burgmap:' + w.seed));
+    const again = generateNames(w, new Rng('magna-urbis:' + w.seed));
     // (the settlement labels of the M3c system are appended after generateNames)
     expect(again.entries.map((e) => e.text)).toEqual(n.entries.filter((e) => !e.sub?.startsWith('settlement:')).map((e) => e.text));
   });
   it('degrades gracefully without urban / landuse / roads layers', () => {
     const bare = { ...w, urban: undefined, landuse: undefined, roads: undefined, bridges: undefined, names: undefined } as World;
-    const n = generateNames(bare, new Rng('burgmap:7'));
+    const n = generateNames(bare, new Rng('magna-urbis:7'));
     expect(n.town.length).toBeGreaterThan(2);
     expect(n.entries.some((e) => e.kind === 'town')).toBe(true);
   });

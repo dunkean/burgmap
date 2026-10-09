@@ -16,7 +16,7 @@ export function freshMapOptions(applied: Options, seed: string): Options {
 export function mainSettlementSpec(theme: Options): SettlementSpec {
   const size = effectiveSize(theme);
   const population = theme.population > 0 ? theme.population
-    : mainPopulation({ ...theme, size }, new Rng('burgmap:' + theme.seed));
+    : mainPopulation({ ...theme, size }, new Rng('magna-urbis:' + theme.seed));
   return { population, position: theme.center, options: { size } };
 }
 

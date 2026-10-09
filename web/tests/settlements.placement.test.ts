@@ -47,7 +47,7 @@ describe('settlement centre overrides', () => {
   it('uses the exact dry centre outside the automatic central band and roots its cost there', () => {
     const terrain = flatTerrain(), center = { x: 280, y: 1472 };
     const opts = makeOptions({ size: 'hamlet', relief: 'flat', river: 'none', center, sitePrefs: { weights: { hilltop: 100 } } });
-    const site = chooseSite(terrain, opts, 2000, new Rng('burgmap:1'));
+    const site = chooseSite(terrain, opts, 2000, new Rng('magna-urbis:1'));
     expect(site.center).toEqual(center);
     expect(site.cost.data[Math.floor(center.y / 20) * 100 + Math.floor(center.x / 20)]).toBe(0);
     expect(site.warning).toBeUndefined();
@@ -73,7 +73,7 @@ describe('settlement centre overrides', () => {
   it('warns when the main requested centre moves, with a dry travel-cost origin', () => {
     const terrain = flatTerrain();
     for (let y = 40; y <= 60; y++) for (let x = 40; x <= 60; x++) terrain.water[y * 100 + x] = 1;
-    const site = chooseSite(terrain, makeOptions({ center: { x: 1010, y: 1010 }, size: 'hamlet' }), 2000, new Rng('burgmap:2'));
+    const site = chooseSite(terrain, makeOptions({ center: { x: 1010, y: 1010 }, size: 'hamlet' }), 2000, new Rng('magna-urbis:2'));
     expect(site.warning).toMatch(/Main centre moved/);
     const i = Math.floor(site.center.y / 20) * 100 + Math.floor(site.center.x / 20);
     expect(terrain.water[i]).toBe(0);
@@ -103,7 +103,7 @@ describe('settlement centre overrides', () => {
       { population: 40, position: { x: -1000, y: 450 } },
       { population: 1000, position: { x: 0, y: 0 } },
     ] } });
-    const root = new Rng('burgmap:1');
+    const root = new Rng('magna-urbis:1');
     const world: World = { options: opts, seed: opts.seed, mapSize: 2000, terrain, site: chooseSite(terrain, opts, 2000, root), stats: {} };
     const plan = planSettlements(world, opts, root);
     expect(plan.settlements).toHaveLength(1);
@@ -116,7 +116,7 @@ describe('settlement centre overrides', () => {
       { population: 40, position: { x: 450, y: 450 } },
       { population: 40, position: { x: 1000, y: 1000 } },
     ] } });
-    const root = new Rng('burgmap:1');
+    const root = new Rng('magna-urbis:1');
     const world: World = { options: opts, seed: opts.seed, mapSize: 2000, terrain, site: chooseSite(terrain, opts, 2000, root), stats: {} };
     const plan = planSettlements(world, opts, root);
     expect(plan.settlements).toHaveLength(3);
@@ -153,7 +153,7 @@ describe('settlement centre overrides', () => {
   it('honours explicit footprint clearance even below the automatic twenty-percent band', () => {
     const terrain = flatTerrain(20000), center = { x: 800, y: 10000 };
     const opts = makeOptions({ size: 'city', center, sitePrefs: { margin: 0.1, centerInset: 2000 } });
-    const site = chooseSite(terrain, opts, 20000, new Rng('burgmap:clearance'));
+    const site = chooseSite(terrain, opts, 20000, new Rng('magna-urbis:clearance'));
     expect(site.center).toEqual({ x: 2000, y: 10000 });
     expect(site.warning).toMatch(/Main centre moved/);
     expect(site.cost.data[50 * 100 + 10]).toBe(0);

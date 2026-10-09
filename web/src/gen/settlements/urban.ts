@@ -221,7 +221,7 @@ export interface SettlementUrban { urban: UrbanLayer; bridges: Bridge[]; stats: 
  */
 export function generateSettlementUrban(world: World, s: Settlement): SettlementUrban | null {
   if (s.main || s.detail === 'farmstead') return null;
-  const rng = new Rng('burgmap:' + world.seed).fork('settlement:' + s.key);
+  const rng = new Rng('magna-urbis:' + world.seed).fork('settlement:' + s.key);
   const o = world.options;
   const legacyOptions = {
     ...o, culture: s.culture, population: s.population, size: sizeForPop(s.population), siteType: 'auto' as const, sitePrefs: undefined, center: undefined,

@@ -1,158 +1,147 @@
-# Burgmap
+# Magna Urbis
 
-Procedural generator of pre-modern settlements in their landscape. From a seed (or an imported heightmap) plus options, it builds a farmstead, a village, a town or a city. Everything runs in the browser: there is no server.
+**Magna Urbis est un travail inspirÃ© de [TownGeneratorOS de Watabou (Oleg Dolya)](https://github.com/watabou/TownGeneratorOS) et de son [Medieval Fantasy City Generator](https://watabou.itch.io/medieval-fantasy-city-generator).** Le premier prototype Python est issu d'un port de TownGeneratorOS ; les moteurs TypeScript et Rust poursuivent cette exploration avec leurs propres implÃ©mentations.
 
-**Live demo:** https://dunkean.github.io/burgmap/ · **Handoff / project state:** [HANDOFF.md](HANDOFF.md)
+**Projet en cours de dÃ©veloppement Â· alpha Â· prototype.** Magna Urbis gÃ©nÃ¨re des implantations prÃ©-modernes et leurs paysages pour la cartographie et le jeu de rÃ´le. Les rÃ©sultats, les performances et les interfaces Ã©voluent encore : ce dÃ©pÃ´t prÃ©sente un travail expÃ©rimental, pas un logiciel achevÃ©.
 
-**Rust terrain prototype:** [launch commands, terrain controls and WASM integration](rust/README.md).
-From `web/`, run `npm run dev:terrain` and open `/terrainbench.html`.
-This separate bench generates terrain in Rust/WASM; the TypeScript app remains independently buildable.
+Le projet comporte **deux implÃ©mentations actives, TypeScript et Rust**. TypeScript est aujourd'hui la plus complÃ¨te. Rust est en retard sur son pÃ©rimÃ¨tre fonctionnel, mais le rattrape progressivement, en commenÃ§ant par le relief, les cÃ´tes et l'hydrologie.
 
-## House debug bench
+Ã€ terme, Magna Urbis doit Ãªtre intÃ©grÃ© Ã  **[Neural Earth](https://github.com/dunkean/neural-earth)** pour inscrire les villes et villages dans un monde procÃ©dural plus vaste. Cette intÃ©gration est un objectif de dÃ©veloppement ; elle n'est pas encore livrÃ©e.
 
-Run `npm run dev` from `web/` and open http://localhost:5173/testbench.html.
-The bench generates 3–8 quarters per ring/band with the native operators, in
-three independent steps: streets/blocks, parcels, then buildings. Parcels can
-be generated and inspected without houses. Changing the building preset or
-seed keeps the exact parcel polygons and frontage frames; **Effacer les maisons**
-also keeps parcels, seeds and pins. Visibility checkboxes hide either overlay
-or the buildings without regenerating geometry.
+## AperÃ§us du prototype
 
-Culture and recipe/phase initialize all three stage presets from the actual
-cultural configuration, including extensions, sectors, villages, hamlets and
-urban-growth recipes. Each stage can select a different cultural recipe or
-registered morphology. Operator menus expose organic/grid splitting, all five
-access variants, and the registered plot and building operators.
-**Paramètres fins par étape** exposes applicable numeric/architecture parameters
-as validated JSON overrides, with effective values for reference. Some IDs
-share a constructor (e.g. streetFrontRow/detached/longhouse); their preset
-dimensions and architecture still differ.
+Captures rÃ©elles de l'application TypeScript, avec des graines et rÃ©glages reproductibles. Les styles **Parchemin** et **Atlas** montrent aussi diffÃ©rentes morphologies urbaines. Ces images illustrent l'Ã©tat actuel du prototype, avec ses imperfections.
 
-For collective **pâtés de maisons**, select **buildPerimeterBlock** in the
-construction menu, keeping **cutPlots** for the cadastral parcels. Building
-selection does not change the parcel operator. Each street facade gets a row
-perpendicular to that street, with varied widths and depths. Corner returns
-are cropped and merged within their original parcels. The irregular shared
-court emerges from the space these buildings leave unbuilt; no court polygon
-is prescribed and no per-house corridor is carved. `blockCourtShare` is a
-depth preference (not an exact area target), `blockSolidChance` requests full
-depth and `blockInfillChance` allows deeper ranges. All plots of one block
-share that programme, subject to viable geometry and access. The
-**perimeter-block** preset is available to native phase recipes too.
+### Grande ville mÃ©diÃ©vale Â· Parchemin
 
-The default **buildPlot** method retains the original house programme on the
-new parcel cuts and axes. The complete later house work is preserved under
-**buildPlotExperimental** in the construction menu for future development.
+![Grande ville mÃ©diÃ©vale, rendu Parchemin](docs/images/medieval-city.png)
 
-Experimental `houseVariation` perturbations are retained in source but
-temporarily disabled, including saved URL overrides; the control shows zero
-and is disabled. Perimeter building sizes vary independently of that experiment.
+### MÃ©dina dans le dÃ©sert Â· Atlas
 
-Choose central sectors, **Rectangle** (the previous lateral patch), an oblique
-polygon or a concave notched polygon, with one or two rings/bands. Analytical
-**curved valley** and **hill** constraints restrict the land footprint and provide slope
-samples to native contour-following street fields, without generating a full
-landscape. Grids retain their selected orientation. A straight central river
-(vertical/horizontal/diagonal, adjustable width) cuts real dry quarters before
-blocks and parcels; bank edges are non-frontage. Road crossings are represented
-as simple bridges. Shape, zone, relief, river and monument reservation apply
-at the street/layout step.
+![MÃ©dina dans un paysage dÃ©sertique, rendu Atlas](docs/images/desert-medina.png)
 
-**Apply** uses the entered seed; **↻ Graine** changes only the relevant stage's
-seed. Applying an upstream stage clears its downstream results. Pins, notes,
-all three seeds, each applied stage's configuration, visibility and view are
-included in **Copier l’URL**. Reopening a shared URL restores the independently
-applied stages exactly. Prototype URLs remain readable, but their output is
-recomputed with the separated stages. New layout generations clear pins. Each
-pin has a visible **Supprimer** button at the top of the side panel; deletion
-also updates the shared URL, without changing the generated geometry.
-The full settlement planner, global primary-road operators (axes, walls,
-canals…), regional terrain/camp generation and final settlement-wide roof
-repairs remain outside this isolated geometry fixture.
-`npm run build` also produces a self-contained `web/dist/testbench.html`.
-Check the offline UI with `node scripts/testbench_check.mjs`; screenshots and
-check results go to ignored `web/out/testbench/`.
+### Ville chinoise planifiÃ©e Â· Atlas
 
-## What it generates
+![Ville chinoise planifiÃ©e, rendu Atlas](docs/images/chinese-city.png)
 
-- **Landscape**
-  - selectable biomes: temperate countryside, woodland, desert/oases, steppe, tropical forest and tundra;
-  - relief: plain, hills, valley or mountains;
-  - coast with bays and islands;
-  - rivers fed from outside the map, with confluences;
-  - lakes.
-- **Site**: the town is placed where a real one would be: bridge point, confluence, meander, harbour, estuary, valley terrace or hilltop.
-- **Regional roads** merging toward the town, bridges and fords. Rural land use around it: open-field strips, meadows, pasture, woodland, orchards and gardens.
-- **Urban fabric**, built as an exact hierarchical partition: phase regions → quarters → blocks → plots → buildings.
-  - The streets are the cuts.
-  - Plots are burgage strips.
-  - Built density follows the burgage cycle.
-  - Walls are polygonal, with towers and gates.
-  - Wet moats are optional (Auto / On / Off), follow the real enclosure on suitable low ground, and leave dry gate crossings.
-  - Faubourgs grow along the roads.
-  - Each town has parish churches and places.
-- **Planning cultures**, recognisable from the plan alone:
-  - 38 presets: European, Mediterranean, Asian, American, African and fantasy;
-  - Swahili stone towns with coral-stone courtyard houses, bazaars, mosques and waterfront quays;
-  - native village architecture retained as settlements grow into towns.
+### Village et campagne Â· Parchemin
 
-  Cultures can be mixed by growth phase, by sector or by continuous blend.
-- **Scale and placement**: 10 to 5 million inhabitants, regional settlements,
-  chosen centres and lazily detailed large-city quarters. Implicit maps expand
-  for large populations; explicit map limits retain capacity warnings.
-- **Output**: nine map styles, labels, legend, bug pins and SVG / PNG / JSON
-  export. Interactive Canvas uses offscreen rendering and bounded detail caches.
+![Village entourÃ© de campagne, rendu Parchemin](docs/images/village.png)
 
-## Generation workflow
+Les [rÃ©glages des captures](docs/images/screenshots.json) permettent de retrouver ces exemples. Les captures proviennent de TypeScript ; Rust ne gÃ©nÃ¨re pas encore ces villes.
 
-Start with **Environment**: choose map extent, biome, relief, coast and rivers,
-then generate a landscape without settlements, roads or farms.
+## Deux moteurs, deux niveaux d'avancement
 
-In **Settlements**, choose an automatic region (20,000 inhabitants in the main
-settlement by default), or add individual instances including the main one.
-Each instance can choose its properties, automatic placement, coordinates or
-**Place on map**. The **General theme** supplies shared defaults; changing one
-instance overrides only edited fields. **Use general theme** restores inheritance
-while retaining its population and chosen position.
+| | TypeScript Â· `web/` | Rust / WASM Â· `rust/` |
+| --- | --- | --- |
+| RÃ´le actuel | Application de rÃ©fÃ©rence et prototype complet de gÃ©nÃ©ration d'implantations | Nouveau moteur expÃ©rimental, dans un banc sÃ©parÃ© |
+| Paysage | Relief, biomes, cÃ´tes, cours d'eau, lacs et occupation rurale | Relief, Ã©rosion, cÃ´tes, lacs et rÃ©seaux de riviÃ¨res ; calcul CPU et chemins WebGPU selon les Ã©tapes |
+| Implantations | Hameaux, villages, villes ; quartiers, rues, parcelles, bÃ¢timents et monuments | GÃ©nÃ©ration urbaine encore Ã  venir |
+| Interface | Carte interactive, paramÃ¨tres, graines, liens de partage, exports SVG / PNG / JSON | Banc de terrain interactif, rÃ©glages par Ã©tape et diagnostics |
+| ExÃ©cution | Navigateur, sans serveur de gÃ©nÃ©ration | Rust compilÃ© en WebAssembly, exÃ©cutÃ© dans le navigateur |
 
-Generation controls edit a draft. Apply it with the appropriate **Generate**
-button; display controls can still update the current map. **Copy link** shares
-the generated state, including its stable generation UID, pins and view. Terrain
-image pixels require importing again after a shared-link reload.
+Le moteur TypeScript explore notamment les tracÃ©s organiques, les bastides, les mÃ©dinas, les plans chinois et japonais, ainsi que des cultures fantastiques. Plusieurs cultures peuvent se combiner au fil des phases de croissance. Les grandes populations et leur dÃ©tail progressif restent expÃ©rimentaux.
 
-## Development
+Le moteur Rust n'est pas encore un remplacement complet de TypeScript. Il rÃ©utilise temporairement une partie de l'interface et du rendu existants pour tester les Ã©tapes dÃ©jÃ  portÃ©es. L'interface actuelle doit Ãªtre conservÃ©e Ã  terme ; le rendu actuel est une aide d'intÃ©gration provisoire, et le futur moteur de rendu reste Ã  dÃ©velopper.
 
-```bash
+## Essayer l'application TypeScript
+
+PrÃ©requis : Node.js et npm. Utiliser une version LTS rÃ©cente de Node.js.
+
+```sh
 cd web
-npm install
-npm run dev        # local preview at http://localhost:5173/
-npm run typecheck  # strict TypeScript checks
-npm run test:fast  # development invariants, excluding the exhaustive city matrix
-npm run test:slow  # every culture/mix at city size
-npm test           # both projects: complete invariant suite
-npm run build      # single self-contained dist/index.html (works from file://)
-npm run preview:png -- --seed 42 --size town --out out/x.png
+npm ci
+npm run dev
 ```
 
-The full suite includes the long city matrix; allow roughly 40 minutes. Both
-projects use the same assertions and run at most two worker processes. A focused
-suite can still run with `npm test -- tests/urban.determinism.test.ts`.
+Ouvrir l'adresse indiquÃ©e par Vite, gÃ©nÃ©ralement **http://localhost:5173/**. Choisir l'environnement, puis les implantations, leur population et leur culture. GÃ©nÃ©rer la carte et explorer au zoom. Une graine et les mÃªmes paramÃ¨tres permettent de reproduire une gÃ©nÃ©ration pour une mÃªme version du moteur.
 
-Current fixes and measured performance: [ROADMAP.md](ROADMAP.md) and
-[PERFORMANCE_STUDY.md](PERFORMANCE_STUDY.md).
+Le banc isolÃ© de rues, parcelles et bÃ¢timents est accessible Ã  **`/testbench.html`**.
 
-Design documents:
-- `web/ARCHITECTURE.md`
-- `web/URBAN_GEOMETRY.md`
-- `web/URBAN_MORPHOLOGY.md`
-- `web/URBAN_LANDMARKS.md`
+```sh
+npm run build
+```
 
-The `town_generator/` folder holds the earlier Python prototype (reference only).
+Le build produit `web/dist/index.html` et `web/dist/testbench.html`, des pages autonomes utilisables hors ligne. **Le dÃ©veloppement et le build TypeScript ne nÃ©cessitent pas Rust.**
 
-## Thanks
+## Essayer le prototype Rust
 
-Many thanks to **watabou** (Oleg Dolya). His [Medieval Fantasy City Generator](https://watabou.itch.io/medieval-fantasy-city-generator) and its open-source ancestor [TownGeneratorOS](https://github.com/watabou/TownGeneratorOS) are the inspiration for this project and the benchmark it tries to live up to. The Python prototype in `town_generator/` started as a port of TownGeneratorOS. The web generator is a new implementation.
+PrÃ©requis supplÃ©mentaires : la toolchain dÃ©finie dans `rust/rust-toolchain.toml`, la cible `wasm32-unknown-unknown` et `wasm-pack` dans le PATH. Sous Windows, prÃ©voir les outils de compilation C++ de Visual Studio et le SDK Windows.
 
-## Licence
+Installer la toolchain depuis `rust/`, puis lancer le banc depuis `web/` :
 
-TownGeneratorOS is GPL-3.0, and the Python prototype derives from it. This repository is therefore distributed under the GNU GPL v3; see `LICENSE`.
+```sh
+cd rust
+rustup show
+rustup target add wasm32-unknown-unknown
+cargo install wasm-pack --locked
+cd ../web
+npm ci
+npm run dev:terrain
+```
+
+Ouvrir **http://localhost:5173/terrainbench.html** ou l'adresse indiquÃ©e par Vite. La commande compile le WASM, lance le banc et recompile les sources Rust lors des modifications.
+
+```sh
+npm run wasm:terrain   # Recompiler le module WASM
+npm run build:terrain  # Produire le banc autonome
+npm run check:terrain  # rustfmt, Clippy et compilation WASM
+```
+
+Le build Rust produit `rust/out/browser/terrainbench.html`. Les modules WASM gÃ©nÃ©rÃ©s restent dans `rust/pkg/wasm/`. Ces sorties sont ignorÃ©es par Git et sÃ©parÃ©es de `web/dist/`.
+
+Rust permet dÃ©jÃ  d'explorer plusieurs familles de relief, de sÃ©parer l'Ã©tendue de carte et la taille des motifs, de rÃ©gler l'Ã©rosion et les cÃ´tes, et d'inspecter l'hydrologie. La prÃ©cision reste bornÃ©e par les grilles de calcul ; le zoom ne remplace pas une simulation Ã  plus haute rÃ©solution. Les performances dÃ©pendent du relief, de la taille de carte et des capacitÃ©s CPU/GPU du navigateur.
+
+## Organisation du dÃ©pÃ´t
+
+```text
+web/src/gen/      Moteur TypeScript et algorithmes de gÃ©nÃ©ration
+web/src/render/   Rendu SVG et Canvas actuel
+web/src/ui/       Interface, contrÃ´les et workers
+web/tests/        Tests TypeScript
+web/scripts/      AperÃ§us, captures et vÃ©rifications de l'application
+rust/crates/core/ Moteur Rust sans dÃ©pendance au navigateur
+rust/crates/wasm/ Bindings WebAssembly
+rust/bridge/      Adaptateurs temporaires vers l'interface et le rendu
+rust/scripts/     Commandes de dÃ©veloppement et de build Rust
+town_generator/  Ancien prototype Python, conservÃ© comme rÃ©fÃ©rence
+tests/           Tests du prototype Python
+docs/images/     Captures prÃ©sentÃ©es dans ce README
+```
+
+Le prototype Python est historique ; il ne constitue pas un troisiÃ¨me moteur actif. Les notes internes de conception, documents de travail, audits et anciennes captures sont archivÃ©s localement et ne font pas partie des fichiers suivis par Git. Les licences et les crÃ©dits des dÃ©pendances et ressources restent dans le dÃ©pÃ´t.
+
+## VÃ©rifier et contribuer
+
+Depuis `web/` :
+
+```sh
+npm run typecheck
+npm run test:fast
+npx vitest run tests/urban.determinism.test.ts
+npm run build
+```
+
+`npm test` lance Ã©galement la matrice exhaustive des villes et cultures ; prÃ©voir plusieurs dizaines de minutes. `npm run test:slow` permet de lancer cette matrice sÃ©parÃ©ment.
+
+Pour produire un aperÃ§u de carte :
+
+```sh
+npm run preview:png -- --seed 42 --size town --out out/check.png
+```
+
+Pour refaire les captures du README aprÃ¨s un build :
+
+```sh
+node scripts/readme_screenshots.mjs
+```
+
+Pour vÃ©rifier le prototype Python, depuis la racine : `python -m pytest tests/ -q`.
+
+Pour signaler un problÃ¨me, joindre la version utilisÃ©e, la graine, les paramÃ¨tres et le lien de partage, avec une capture si possible. L'application propose Ã©galement des pins et la copie d'un rapport de bug. Les formats, les rÃ©sultats et les liens de gÃ©nÃ©ration peuvent Ã©voluer pendant cette alpha.
+
+## CrÃ©dits et licence
+
+Merci Ã  **Watabou** pour TownGeneratorOS et Medieval Fantasy City Generator, qui sont Ã  l'origine de ce projet et restent une rÃ©fÃ©rence majeure.
+
+Magna Urbis est distribuÃ© sous la **GNU GPL v3** ; voir [LICENSE](LICENSE). Le prototype Python conserve sa filiation avec TownGeneratorOS. Les ressources et dÃ©pendances tierces gardent leurs propres notices de licence et de provenance dans les dossiers correspondants.

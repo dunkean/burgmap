@@ -384,7 +384,7 @@ function show(world: World, stats: Record<string, number | string>, ms: number):
 
 function showStats(stats: Record<string, number | string>, ms: number): void {
   const town = stats['names.town'];
-  document.title = town ? `${town} - Burgmap` : 'Burgmap';
+  document.title = town ? `${town} - Magna Urbis` : 'Magna Urbis';
   genTimeEl.textContent = `Generated in ${(ms / 1000).toFixed(2)} s`;
   const seaPct = Math.round(Number(stats.seaFraction ?? 0) * 100);
   statusEl.textContent = `terrain ${stats['ms.terrain']} ms, urban ${stats['ms.urban'] ?? 0} ms - ${stats.rivers} rivers, ${stats.lakes} lakes, sea ${seaPct}% - ${stats.roads ?? 0} roads, ${stats.bridges ?? 0} bridges - ${stats['urban.archetype'] ?? ''} pop ${stats['urban.pop'] ?? 0}: ${stats['urban.blocks'] ?? 0} blocks, ${stats['urban.buildings'] ?? 0} buildings`
@@ -769,7 +769,7 @@ $('openIdForm').addEventListener('submit', (e) => {
   const raw = $<HTMLInputElement>('openIdInput').value.trim();
   const query = raw.includes('?') ? raw.slice(raw.indexOf('?')) : /^[a-z]+=/.test(raw) ? '?' + raw : '?id=' + encodeURIComponent(raw);
   const options = raw ? fromQuery(query) : null;
-  if (!options || !expandMapQuery(query).get('seed')) { $('openIdState').textContent = 'This is not a Burgmap ID or link.'; return; }
+  if (!options || !expandMapQuery(query).get('seed')) { $('openIdState').textContent = 'This is not a Magna Urbis ID or link.'; return; }
   location.search = query;
 });
 wireCopy($<HTMLButtonElement>('copyBug'), () => bugReport(opts, pinsUI.pins, viewer.getView(), location.origin + location.pathname, map.clientWidth, paintedTextures ? appearanceQuery(fullQuery(opts, pinsUI.pins, viewer.getView()), true) : undefined), 'Report copied');
@@ -976,7 +976,7 @@ function focusSettlement(s: SettlementMeta): void {
   });
 }
 // debug hook for scripted screenshots (scripts/ui_check.mjs)
-(window as unknown as Record<string, unknown>).__burgmap = {
+(window as unknown as Record<string, unknown>).__magnaUrbis = {
   setView: (v: { cx: number; cy: number; scale: number }) => viewer.setView(v),
   getView: () => viewer.getView(),
   fit: () => viewer.fit(),

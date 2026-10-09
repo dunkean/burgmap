@@ -183,7 +183,7 @@ describe('JSON export', () => {
     const world = generate(makeOptions({ seed: '7', size: 'hamlet' }));
     const txt = worldToJson(world);
     const doc = JSON.parse(txt);
-    expect(doc.format).toBe('burgmap-world');
+    expect(doc.format).toBe('magna-urbis-world');
     expect(doc.world.options.seed).toBe('7');
     expect(doc.world.mapSize).toBe(world.mapSize);
     expect(doc.world.urban.buildings.length).toBe(world.urban!.buildings.length);

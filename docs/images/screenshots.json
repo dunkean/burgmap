@@ -1,0 +1,113 @@
+{
+  "project": "Magna Urbis",
+  "screenshots": [
+    {
+      "image": "medieval-city.png",
+      "implementation": "typescript",
+      "settings": {
+        "seed": "42",
+        "size": "city",
+        "population": "30000",
+        "culture": "european-organic",
+        "style": "parchment",
+        "biome": "temperate",
+        "relief": "flat",
+        "river": "river",
+        "coast": "none",
+        "labels": "0",
+        "legend": "0"
+      },
+      "view": {
+        "cx": 1756.6666666666667,
+        "cy": 1583.3333333333335,
+        "scale": 0.3333333333333333
+      },
+      "viewport": {
+        "width": 1600,
+        "height": 1000
+      },
+      "capture": "Application screenshot; no retouching"
+    },
+    {
+      "image": "desert-medina.png",
+      "implementation": "typescript",
+      "settings": {
+        "seed": "73",
+        "size": "city",
+        "population": "30000",
+        "culture": "medina",
+        "style": "atlas",
+        "biome": "desert",
+        "relief": "flat",
+        "river": "none",
+        "coast": "none",
+        "labels": "0",
+        "legend": "0"
+      },
+      "view": {
+        "cx": 1876.6666666666667,
+        "cy": 2490,
+        "scale": 0.4166666666666667
+      },
+      "viewport": {
+        "width": 1600,
+        "height": 1000
+      },
+      "capture": "Application screenshot; no retouching"
+    },
+    {
+      "image": "chinese-city.png",
+      "implementation": "typescript",
+      "settings": {
+        "seed": "19",
+        "size": "city",
+        "population": "30000",
+        "culture": "chinese",
+        "style": "atlas",
+        "biome": "temperate",
+        "relief": "flat",
+        "river": "river",
+        "coast": "none",
+        "labels": "0",
+        "legend": "0"
+      },
+      "view": {
+        "cx": 1800,
+        "cy": 1483.3333333333335,
+        "scale": 0.4444444444444444
+      },
+      "viewport": {
+        "width": 1600,
+        "height": 1000
+      },
+      "capture": "Application screenshot; no retouching"
+    },
+    {
+      "image": "village.png",
+      "implementation": "typescript",
+      "settings": {
+        "seed": "7",
+        "size": "village",
+        "population": "600",
+        "culture": "european-organic",
+        "style": "parchment",
+        "biome": "temperate",
+        "relief": "hills",
+        "river": "stream",
+        "coast": "none",
+        "labels": "0",
+        "legend": "0"
+      },
+      "view": {
+        "cx": 800,
+        "cy": 500,
+        "scale": 1
+      },
+      "viewport": {
+        "width": 1600,
+        "height": 1000
+      },
+      "capture": "Application screenshot; no retouching"
+    }
+  ]
+}

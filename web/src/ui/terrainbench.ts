@@ -503,7 +503,7 @@ async function copy(text: string): Promise<void> {
 el('copy').onclick = () => void copy(link());
 el('copyReport').onclick = () => {
   const erosion = settings.relief === 'cavern' ? 'sans objet (caverne)' : `${Math.round(settings.erosion * 100)} %`;
-  const lines = ['Burgmap · prototype terrain et eaux Rust/WASM v3', link(), '', `Graine : ${settings.seed}`, `Largeur carte : ${settings.width} m · échelle relief : ${settings.motifSize} m · relief : ${settings.relief} · érosion : ${erosion}`, `Rendu : ${style} · vue : ${viewToString(view)}`, '', ...pins.pins.map((pin, i) => `Pin ${i + 1} : ${pin.x.toFixed(1)}, ${pin.y.toFixed(1)} m — ${pin.note || '(sans note)'}`)];
+  const lines = ['Magna Urbis · prototype terrain et eaux Rust/WASM v3', link(), '', `Graine : ${settings.seed}`, `Largeur carte : ${settings.width} m · échelle relief : ${settings.motifSize} m · relief : ${settings.relief} · érosion : ${erosion}`, `Rendu : ${style} · vue : ${viewToString(view)}`, '', ...pins.pins.map((pin, i) => `Pin ${i + 1} : ${pin.x.toFixed(1)}, ${pin.y.toFixed(1)} m — ${pin.note || '(sans note)'}`)];
   if (geological(settings.relief)) lines.splice(5, 0, `Relief environnant : ${settings.environment ?? 'mixed'}`);
   lines.push(`Hydrologie : ${JSON.stringify(settings.hydrology)} · diagnostic : ${hydroOverlay} · eaux : ${input('showWater').checked ? 'visibles' : 'masquées'}`);
   lines.push(`Courbes de niveau : ${map.dataset.contours === 'true' ? 'visibles' : 'masquées'}`);

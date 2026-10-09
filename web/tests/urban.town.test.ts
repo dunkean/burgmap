@@ -6,8 +6,8 @@ import { checkWorld } from './urbanCheck';
 // URBAN_GEOMETRY.md §6 invariants on seeds 1–6 × {european-organic, bastide} for size 'town'.
 const cultures: Culture[] = ['european-organic', 'bastide'];
 const SIZE: string = 'town';
-// timing assertions only on a quiet machine: BURGMAP_PERF=1 npx vitest run tests/urban.town.test.ts
-const PERF = process.env.BURGMAP_PERF === '1';
+// timing assertions only on a quiet machine: MAGNA_URBIS_PERF=1 npx vitest run tests/urban.town.test.ts
+const PERF = process.env.MAGNA_URBIS_PERF === '1';
 describe('urban invariants — town', () => {
   for (const culture of cultures) for (const seed of ['1', '2', '3', '4', '5', '6']) {
     it(`${culture} seed ${seed}`, () => {

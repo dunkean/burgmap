@@ -145,14 +145,14 @@ describe('preserving the previous displayed map', () => {
     const options = makeOptions({ seed: 'old', size: 'village', style: 'parchment', labels: true });
     const saved = exportSnapshot(options, null, 4, 4);
     options.seed = 'new'; options.style = 'atlas'; options.labels = false;
-    expect(saved.name).toBe('burgmap-old-village'); expect(saved.gen).toBe(4);
+    expect(saved.name).toBe('magna-urbis-old-village'); expect(saved.gen).toBe(4);
     expect(saved.display.style).toBe('parchment'); expect(saved.display.labels).toBe(true);
   });
   it('refuses a failed generation B instead of renaming the still-presented World A', () => {
     const a = makeOptions({ seed: 'A', size: 'village' }), b = makeOptions({ seed: 'B', size: 'village' });
     const worldA = { options: a } as World;
     // The same capture used by main receives only generations recorded by its successful draw callback.
-    expect(exportSnapshot(a, worldA, 1, 1).name).toBe('burgmap-A-village');
+    expect(exportSnapshot(a, worldA, 1, 1).name).toBe('magna-urbis-A-village');
     expect(() => exportSnapshot(b, worldA, 2, 1)).toThrow('not been presented');
     expect(() => exportSnapshot(b, worldA, 2, 2)).toThrow('not been presented');
   });

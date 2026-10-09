@@ -1,6 +1,6 @@
 /**
  * Megacity scaling (URBAN_MORPHOLOGY §3d): eager threshold, lazy quarter detail equal to the eagerly generated
- * quarter whatever the order, quarters tiling the built-up land, determinism; macro timings with BURGMAP_PERF=1.
+ * quarter whatever the order, quarters tiling the built-up land, determinism; macro timings with MAGNA_URBIS_PERF=1.
  */
 import { describe, it, expect, beforeAll } from 'vitest';
 import { generate, generateSettlementDetail, EAGER_MAIN_POP } from '../src/gen/pipeline';
@@ -66,7 +66,7 @@ describe('megacity near the threshold (60 000 inhabitants)', () => {
   it('keeps reduced-worker quarter output identical across structurally different culture families', () => {
     for (const culture of ['chinese', 'inca', 'aztec', 'russian-kremlin', 'byzantine-greek', 'venetian-lagoon', 'persian', 'ottoman', 'sahel', 'hanseatic', 'korean', 'dwarven', 'medina']) {
       const full = { ...w1, options: makeOptions({ ...opts, culture }) };
-      full.urban = generateMega(full, new Rng('burgmap:' + opts.seed), opts.population, EAGER_MAIN_POP).layer;
+      full.urban = generateMega(full, new Rng('magna-urbis:' + opts.seed), opts.population, EAGER_MAIN_POP).layer;
       const snapshot = structuredClone(worldForQuarters(full));
       const qs = full.urban!.macro!.quarters.filter((q) => q.kind === 'quarter' && q.zone === 'core').slice(0, 2);
       expect(qs.length, culture).toBe(2);
@@ -210,7 +210,7 @@ describe('a big secondary settlement is planned as a megacity', () => {
   }, T);
 });
 
-describe.runIf(!!process.env.BURGMAP_PERF)('megacity timings (BURGMAP_PERF=1)', () => {
+describe.runIf(!!process.env.MAGNA_URBIS_PERF)('megacity timings (MAGNA_URBIS_PERF=1)', () => {
   for (const [pop, map, budget] of [[1000000, 20000, 1500], [5000000, 40000, 3000]] as const) {
     it(`macro plan of ${pop} inhabitants under ${budget} ms, quarters under 300 ms`, () => {
       const w = generate(makeOptions({ seed: '3', population: pop, mapSize: map }));

@@ -28,19 +28,19 @@ describe('distinct castle names', () => {
   it('names separate nearby castle sites uniquely and shares each label with its site', () => {
     for (const family of NAME_FAMILIES) {
       const world = fixture(family);
-      const names = generateNames(world, new Rng('burgmap:castles'));
+      const names = generateNames(world, new Rng('magna-urbis:castles'));
       const castles = names.entries.filter((e) => e.kind === 'castle');
       expect(castles, family).toHaveLength(3);
       expect(new Set(castles.map((e) => e.text)).size, family).toBe(3);
       expect(castles[0].text).toBe(VOCAB[family].castle(names.town));
       expect(world.urban!.sites!.map((s) => s.name)).toEqual(castles.map((e) => e.text));
-      expect(generateNames(world, new Rng('burgmap:castles')).entries).toEqual(names.entries);
+      expect(generateNames(world, new Rng('magna-urbis:castles')).entries).toEqual(names.entries);
     }
   });
   it('keeps a user-provided site name', () => {
     const world = fixture('french');
     world.urban!.sites![1].name = 'Château du joueur';
-    const names = generateNames(world, new Rng('burgmap:castles'));
+    const names = generateNames(world, new Rng('magna-urbis:castles'));
     expect(world.urban!.sites![1].name).toBe('Château du joueur');
     expect(names.entries.find((e) => e.kind === 'castle' && e.anchor.x === 300)?.text).toBe('Château du joueur');
   });

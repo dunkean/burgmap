@@ -3,7 +3,7 @@ use wasm_bindgen::prelude::*;
 /// Cached terrain drainage. Vector regeneration does not repeat terrain/coast preparation.
 #[wasm_bindgen]
 pub struct HydrologyEngine {
-    engine: burgmap_core::HydrologyEngine,
+    engine: magna_urbis_core::HydrologyEngine,
 }
 
 #[wasm_bindgen]
@@ -16,7 +16,7 @@ impl HydrologyEngine {
         height: &[f32],
         sea_enabled: bool,
     ) -> Result<HydrologyEngine, JsValue> {
-        burgmap_core::HydrologyEngine::new(
+        magna_urbis_core::HydrologyEngine::new(
             seed,
             width,
             raster_resolution(resolution)?,
@@ -37,7 +37,7 @@ impl HydrologyEngine {
         receivers: &[u32],
         accumulation: &[f32],
     ) -> Result<HydrologyEngine, JsValue> {
-        burgmap_core::HydrologyEngine::with_drainage(
+        magna_urbis_core::HydrologyEngine::with_drainage(
             seed,
             width,
             raster_resolution(resolution)?,
@@ -79,8 +79,8 @@ impl HydrologyEngine {
         max_breach_depth: Option<f32>,
         max_breach_length: Option<f32>,
     ) -> Result<HydrologyOutput, JsValue> {
-        let defaults = burgmap_core::HydrologyConfig::default();
-        let cfg = burgmap_core::HydrologyConfig {
+        let defaults = magna_urbis_core::HydrologyConfig::default();
+        let cfg = magna_urbis_core::HydrologyConfig {
             main: main.into(),
             density,
             wetness,
@@ -108,7 +108,7 @@ impl HydrologyEngine {
 /// Batch-copy getters; JS owns arrays independently of this wrapper's lifetime.
 #[wasm_bindgen]
 pub struct HydrologyOutput {
-    output: burgmap_core::HydrologyOutput,
+    output: magna_urbis_core::HydrologyOutput,
 }
 
 #[wasm_bindgen]
@@ -243,7 +243,7 @@ impl HydrologyOutput {
 /// Array getters copy in a single batch: JS owns them independently of free().
 #[wasm_bindgen]
 pub struct TerrainOutput {
-    terrain: burgmap_core::Terrain,
+    terrain: magna_urbis_core::Terrain,
 }
 
 #[wasm_bindgen]
@@ -302,7 +302,7 @@ impl TerrainOutput {
 /// Owns the prepared physical erosion field. Retain this object across camera changes.
 #[wasm_bindgen]
 pub struct TerrainEngine {
-    generator: burgmap_core::TerrainGenerator,
+    generator: magna_urbis_core::TerrainGenerator,
 }
 
 #[wasm_bindgen]
@@ -318,7 +318,7 @@ impl TerrainEngine {
         source: &[f32],
         environment: Option<String>,
     ) -> Result<TerrainEngine, JsValue> {
-        burgmap_core::TerrainGenerator::new_mixed_with_source(
+        magna_urbis_core::TerrainGenerator::new_mixed_with_source(
             seed,
             width,
             relief,
@@ -344,14 +344,14 @@ impl TerrainEngine {
         fine: &[f32],
         environment: Option<String>,
     ) -> Result<TerrainEngine, JsValue> {
-        burgmap_core::TerrainGenerator::new_mixed_with_noise(
+        magna_urbis_core::TerrainGenerator::new_mixed_with_noise(
             seed,
             width,
             relief,
             erosion,
             motif_size,
             mountain_mix,
-            Some(&burgmap_core::GenerationNoise { coarse, fine }),
+            Some(&magna_urbis_core::GenerationNoise { coarse, fine }),
             environment.as_deref(),
         )
         .map(|generator| TerrainEngine { generator })
@@ -367,7 +367,7 @@ impl TerrainEngine {
         mountain_mix: Option<f64>,
         environment: Option<String>,
     ) -> Result<TerrainEngine, JsValue> {
-        burgmap_core::TerrainGenerator::new_with_environment(
+        magna_urbis_core::TerrainGenerator::new_with_environment(
             seed,
             width,
             relief,
@@ -391,7 +391,7 @@ impl TerrainEngine {
         erosion: f64,
         motif: f64,
     ) -> Result<Vec<f32>, JsValue> {
-        burgmap_core::TerrainGenerator::prepare_environment(seed, width, relief, erosion, motif)
+        magna_urbis_core::TerrainGenerator::prepare_environment(seed, width, relief, erosion, motif)
             .map_err(|error| JsValue::from_str(&error))
     }
     #[wasm_bindgen(getter)]
@@ -475,7 +475,7 @@ impl TerrainEngine {
 
 #[wasm_bindgen]
 pub struct GenerationNoisePlan {
-    plan: burgmap_core::GenerationNoisePlan,
+    plan: magna_urbis_core::GenerationNoisePlan,
 }
 
 #[wasm_bindgen]
@@ -486,7 +486,7 @@ impl GenerationNoisePlan {
         relief: &str,
         motif: f64,
     ) -> Result<GenerationNoisePlan, JsValue> {
-        burgmap_core::GenerationNoisePlan::generation(seed, width, relief, motif)
+        magna_urbis_core::GenerationNoisePlan::generation(seed, width, relief, motif)
             .map(|plan| GenerationNoisePlan { plan })
             .map_err(|e| JsValue::from_str(&e))
     }
@@ -497,7 +497,7 @@ impl GenerationNoisePlan {
         relief: &str,
         erosion: f64,
     ) -> Result<GenerationNoisePlan, JsValue> {
-        burgmap_core::GenerationNoisePlan::finite_shape(seed, motif, relief, erosion)
+        magna_urbis_core::GenerationNoisePlan::finite_shape(seed, motif, relief, erosion)
             .map(|plan| GenerationNoisePlan { plan })
             .map_err(|e| JsValue::from_str(&e))
     }
@@ -510,13 +510,13 @@ impl GenerationNoisePlan {
         motif: f64,
         mix: f64,
     ) -> Result<GenerationNoisePlan, JsValue> {
-        burgmap_core::GenerationNoisePlan::erosion(seed, width, relief, erosion, motif, mix)
+        magna_urbis_core::GenerationNoisePlan::erosion(seed, width, relief, erosion, motif, mix)
             .map(|plan| GenerationNoisePlan { plan })
             .map_err(|e| JsValue::from_str(&e))
     }
     #[wasm_bindgen(constructor)]
     pub fn new(seed: &str, width: f64, motif: f64) -> Result<GenerationNoisePlan, JsValue> {
-        burgmap_core::GenerationNoisePlan::new(seed, width, motif)
+        magna_urbis_core::GenerationNoisePlan::new(seed, width, motif)
             .map(|plan| GenerationNoisePlan { plan })
             .map_err(|e| JsValue::from_str(&e))
     }
@@ -551,7 +551,7 @@ pub fn generate_terrain(
     erosion: f64,
     resolution: f64,
 ) -> Result<TerrainOutput, JsValue> {
-    burgmap_core::generate_terrain(seed, width, relief, erosion, raster_resolution(resolution)?)
+    magna_urbis_core::generate_terrain(seed, width, relief, erosion, raster_resolution(resolution)?)
         .map(|terrain| TerrainOutput { terrain })
         .map_err(|error| JsValue::from_str(&error))
 }

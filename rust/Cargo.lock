@@ -9,22 +9,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72f5acc6cb2ba439de613abc23857ec3d78374d8ed5ac84e9d11336e87da8649"
 
 [[package]]
-name = "burgmap-core"
-version = "0.1.0"
-
-[[package]]
-name = "burgmap-wasm"
-version = "0.1.0"
-dependencies = [
- "burgmap-core",
- "wasm-bindgen",
-]
-
-[[package]]
 name = "cfg-if"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4e7648175b45a9a48536d676f68d918270699102aa8dab5496df06904c914600"
+
+[[package]]
+name = "magna-urbis-core"
+version = "0.1.0"
+
+[[package]]
+name = "magna-urbis-wasm"
+version = "0.1.0"
+dependencies = [
+ "magna-urbis-core",
+ "wasm-bindgen",
+]
 
 [[package]]
 name = "once_cell"

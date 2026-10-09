@@ -1,6 +1,6 @@
 // Usage: node scripts/ui_check.mjs <baseUrl> <outDir> [--set "seed=1&size=town&style=atlas"] [--name tag] [--scales 0.04,0.12,0.6] [--wait ms] [--exports]
 // (--wait: time to let lazy detail arrive after each zoom, default 500 ms; megacity quarters need several seconds)
-// Screenshots the UI at several zooms on the settlement centre (via window.__burgmap) and optionally tests the exports.
+// Screenshots the UI at several zooms on the settlement centre (via window.__magnaUrbis) and optionally tests the exports.
 import { chromium } from 'playwright';
 import fs from 'node:fs';
 const a = process.argv.slice(2);
@@ -22,7 +22,7 @@ await p.waitForTimeout(800);
 console.log('status:', await p.evaluate(() => document.getElementById('status').textContent));
 for (const sc of scales) {
   await p.evaluate((sc) => {
-    const h = window.__burgmap;
+    const h = window.__magnaUrbis;
     if (sc === 'fit') h.fit(); else { const c = h.center(); h.setView({ cx: c.x, cy: c.y, scale: Number(sc) }); }
   }, sc);
   await p.waitForTimeout(Number(opt('--wait', '500')));

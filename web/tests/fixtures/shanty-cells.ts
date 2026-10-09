@@ -9,7 +9,7 @@ export const FROZEN_SHANTY_CELLS: {
   {
     "seed": "1",
     "block": 330,
-    "rngKey": "burgmap:1\u0001urban\u0001cmp:330",
+    "rngKey": "magna-urbis:1\u0001urban\u0001cmp:330",
     "poly": [
       {
         "x": 3157.519212732158,
@@ -586,7 +586,7 @@ export const FROZEN_SHANTY_CELLS: {
   {
     "seed": "1",
     "block": 331,
-    "rngKey": "burgmap:1\u0001urban\u0001cmp:331",
+    "rngKey": "magna-urbis:1\u0001urban\u0001cmp:331",
     "poly": [
       {
         "x": 2122.801001009574,
@@ -791,7 +791,7 @@ export const FROZEN_SHANTY_CELLS: {
   {
     "seed": "1",
     "block": 332,
-    "rngKey": "burgmap:1\u0001urban\u0001cmp:332",
+    "rngKey": "magna-urbis:1\u0001urban\u0001cmp:332",
     "poly": [
       {
         "x": 2270.03,
@@ -942,7 +942,7 @@ export const FROZEN_SHANTY_CELLS: {
   {
     "seed": "2",
     "block": 467,
-    "rngKey": "burgmap:2\u0001urban\u0001cmp:467",
+    "rngKey": "magna-urbis:2\u0001urban\u0001cmp:467",
     "poly": [
       {
         "x": 1450.031,
@@ -1607,7 +1607,7 @@ export const FROZEN_SHANTY_CELLS: {
   {
     "seed": "3",
     "block": 277,
-    "rngKey": "burgmap:3\u0001urban\u0001cmp:277",
+    "rngKey": "magna-urbis:3\u0001urban\u0001cmp:277",
     "poly": [
       {
         "x": 1884.614,
@@ -1954,7 +1954,7 @@ export const FROZEN_SHANTY_CELLS: {
   {
     "seed": "4",
     "block": 324,
-    "rngKey": "burgmap:4\u0001urban\u0001cmp:324",
+    "rngKey": "magna-urbis:4\u0001urban\u0001cmp:324",
     "poly": [
       {
         "x": 183.24036106088252,
@@ -2399,7 +2399,7 @@ export const FROZEN_SHANTY_CELLS: {
   {
     "seed": "4",
     "block": 325,
-    "rngKey": "burgmap:4\u0001urban\u0001cmp:325",
+    "rngKey": "magna-urbis:4\u0001urban\u0001cmp:325",
     "poly": [
       {
         "x": 207.57,
@@ -2824,7 +2824,7 @@ export const FROZEN_SHANTY_CELLS: {
   {
     "seed": "5",
     "block": 456,
-    "rngKey": "burgmap:5\u0001urban\u0001cmp:456",
+    "rngKey": "magna-urbis:5\u0001urban\u0001cmp:456",
     "poly": [
       {
         "x": 2663.36,
@@ -3415,7 +3415,7 @@ export const FROZEN_SHANTY_CELLS: {
   {
     "seed": "5",
     "block": 457,
-    "rngKey": "burgmap:5\u0001urban\u0001cmp:457",
+    "rngKey": "magna-urbis:5\u0001urban\u0001cmp:457",
     "poly": [
       {
         "x": 2010.03,
@@ -4112,7 +4112,7 @@ export const FROZEN_SHANTY_CELLS: {
   {
     "seed": "5",
     "block": 458,
-    "rngKey": "burgmap:5\u0001urban\u0001cmp:458",
+    "rngKey": "magna-urbis:5\u0001urban\u0001cmp:458",
     "poly": [
       {
         "x": 1438.36,
@@ -4533,7 +4533,7 @@ export const FROZEN_SHANTY_CELLS: {
   {
     "seed": "6",
     "block": 524,
-    "rngKey": "burgmap:6\u0001urban\u0001cmp:524",
+    "rngKey": "magna-urbis:6\u0001urban\u0001cmp:524",
     "poly": [
       {
         "x": 730.055,
@@ -5608,7 +5608,7 @@ export const FROZEN_SHANTY_CELLS: {
   {
     "seed": "6",
     "block": 525,
-    "rngKey": "burgmap:6\u0001urban\u0001cmp:525",
+    "rngKey": "magna-urbis:6\u0001urban\u0001cmp:525",
     "poly": [
       {
         "x": 1534.1570056563064,
@@ -5923,7 +5923,7 @@ export const FROZEN_SHANTY_CELLS: {
   {
     "seed": "6",
     "block": 526,
-    "rngKey": "burgmap:6\u0001urban\u0001cmp:526",
+    "rngKey": "magna-urbis:6\u0001urban\u0001cmp:526",
     "poly": [
       {
         "x": 912.3603478910583,

@@ -15,7 +15,7 @@ export function worldToJson(world: World): string {
   const ih = options.importedHeight as { name?: string; w?: number; h?: number } | undefined;
   if (ih) options.importedHeight = { name: ih.name, w: ih.w, h: ih.h, pixels: 'omitted' };
   const doc = {
-    format: 'burgmap-world',
+    format: 'magna-urbis-world',
     version: 1,
     note: typeof world.stats['developer.stage'] === 'number'
       ? `Developer pipeline snapshot, stage ${world.stats['developer.stage']}/4. Centroids use projected reserves before roads and buildings. Units are meters, origin top-left, y down. Rasters are omitted; reproduce with DebugGeneration(seed/options).advance(stage). Shared IDs open normal generation.`

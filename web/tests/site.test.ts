@@ -14,7 +14,7 @@ describe('site archetypes (seeds 1-20 x terrain configs)', () => {
     const seen = new Set<string>();
     for (let seed = 1; seed <= 20; seed++) for (const [relief, coast] of CFG) {
       const o = makeOptions({ seed: String(seed), relief, coast, size: 'town' });
-      const root = new Rng('burgmap:' + o.seed);
+      const root = new Rng('magna-urbis:' + o.seed);
       const { terrain: t } = generateTerrain(o, root);
       const S = SIZE_PRESETS.town.mapSize;
       const s = chooseSite(t, o, S, root);
@@ -44,10 +44,10 @@ describe('site archetypes (seeds 1-20 x terrain configs)', () => {
 
   it('siteType forces an available archetype; sitePrefs weights steer the choice', () => {
     const o = makeOptions({ seed: '3', relief: 'flat', coast: 'none', size: 'town', siteType: 'plain' });
-    const root = new Rng('burgmap:' + o.seed);
+    const root = new Rng('magna-urbis:' + o.seed);
     const { terrain: t } = generateTerrain(o, root);
     expect(chooseSite(t, o, 2400, root).archetype).toBe('plain');
     const o2 = { ...o, siteType: 'auto' as const, sitePrefs: { weights: { bridge: 0, plain: 50 } } };
-    expect(chooseSite(t, o2, 2400, new Rng('burgmap:3')).archetype).toBe('plain');
+    expect(chooseSite(t, o2, 2400, new Rng('magna-urbis:3')).archetype).toBe('plain');
   }, 120000);
 });

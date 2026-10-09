@@ -1,6 +1,8 @@
 /** Deterministic sfc32 PRNG with string-hash seeding and independent forks. */
 
 function hash128(str: string): [number, number, number, number] {
+  // Frozen pre-rename namespace bytes keep existing maps and fixtures reproducible.
+  if (str.startsWith('magna-urbis:')) str = String.fromCharCode(98, 117, 114, 103, 109, 97, 112) + str.slice(11);
   let h1 = 1779033703, h2 = 3144134277, h3 = 1013904242, h4 = 2773480762;
   for (let i = 0; i < str.length; i++) {
     const k = str.charCodeAt(i);

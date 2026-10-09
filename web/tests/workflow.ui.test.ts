@@ -99,7 +99,7 @@ describe('map creation actions', () => {
 
   it('keeps a legacy implicit village population and type when Add switches to individual settlements', () => {
     const applied = fromQuery('?seed=42&size=village&culture=roman-core');
-    const expected = mainPopulation(applied, new Rng('burgmap:42'));
+    const expected = mainPopulation(applied, new Rng('magna-urbis:42'));
     const pending = appendSettlementDraft(applied, false, 300, 'barbarian');
     const composed = settlementComposition(pending, true);
     const main = optionsForMainSettlement(fromQuery(toQuery(composed)));
@@ -114,7 +114,7 @@ describe('map creation actions', () => {
 
   it('retains an automatic village without explicit population through Apply and Add', () => {
     const applied = fromQuery('?seed=42&size=village&culture=roman-core&mode=a');
-    const expected = mainPopulation(applied, new Rng('burgmap:42'));
+    const expected = mainPopulation(applied, new Rng('magna-urbis:42'));
     const automatic = settlementComposition(applied, false);
     expect(automatic.population).toBe(0);
     expect(automatic.size).toBe('village');
@@ -136,7 +136,7 @@ describe('map creation actions', () => {
     if (!composed.settlements || typeof composed.settlements !== 'object' || !('list' in composed.settlements)) throw new Error('missing list');
     const [main, existing, added] = composed.settlements.list;
     expect(composed.settlements.list).toHaveLength(3);
-    expect(main.population).toBe(mainPopulation(applied, new Rng('burgmap:42')));
+    expect(main.population).toBe(mainPopulation(applied, new Rng('magna-urbis:42')));
     expect(optionsForSettlement(composed, main).size).toBe('village');
     expect(existing).toEqual({ population: 80, culture: 'barbarian', siteType: 'hilltop', position: { x: 1500, y: 1200 } });
     expect(added.population).toBe(300);
