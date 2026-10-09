@@ -1,6 +1,6 @@
 # Magna Urbis
 
-https://dunkean.github.io/magna-urbis/
+DEMO: https://dunkean.github.io/magna-urbis/
 
 **Magna Urbis is inspired by [TownGeneratorOS by Watabou (Oleg Dolya)](https://github.com/watabou/TownGeneratorOS) and his [Medieval Fantasy City Generator](https://watabou.itch.io/medieval-fantasy-city-generator).** The original Python prototype began as a port of TownGeneratorOS; the TypeScript and Rust implementations continue that exploration.
 
