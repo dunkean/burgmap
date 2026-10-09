@@ -1,5 +1,7 @@
 # Magna Urbis
 
+https://dunkean.github.io/magna-urbis/
+
 **Magna Urbis is inspired by [TownGeneratorOS by Watabou (Oleg Dolya)](https://github.com/watabou/TownGeneratorOS) and his [Medieval Fantasy City Generator](https://watabou.itch.io/medieval-fantasy-city-generator).** The original Python prototype began as a port of TownGeneratorOS; the TypeScript and Rust implementations continue that exploration.
 
 **Work in progress. Alpha. Prototype.** Magna Urbis generates pre-modern settlements and their surrounding landscapes for maps and tabletop role-playing games. Its output, performance and interfaces are still evolving. This is an experimental project, not a finished application.
