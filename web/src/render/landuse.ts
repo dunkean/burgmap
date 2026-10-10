@@ -228,21 +228,22 @@ function bridgeShape(a: Vec2, b: Vec2, w: number, pad: number): { deck: string; 
   return { deck, rails, ends };
 }
 
-export function roadsLayer(world: World, pal: Palette, u: number, brushes?: SvgBrushes): string {
-  const roads = world.roads;
-  if (!roads || !roads.length) return '';
+export function roadsLayer(world: World, pal: Palette, u: number, brushes?: SvgBrushes, layers = { roads: true, city: true }): string {
+  const roads = world.roads ?? [];
+  if ((!layers.roads || !roads.length) && (!layers.city || !world.landuse?.farmsteads.length)) return '';
   const s = Math.max(1, u * 0.85);
   const kinds: ('track' | 'minor' | 'major')[] = ['track', 'minor', 'major'];
   const by = (k: string) => roads.filter((r) => r.kind === k).map((r) => pathD(r.path, false)).join('');
   let out = '<g class="layer-roads" fill="none" stroke-linecap="round" stroke-linejoin="round">';
   // farm drives + farmsteads first (below roads)
   const farms = world.landuse?.farmsteads ?? [];
-  if (farms.length) {
+  if ((layers.city || layers.roads) && farms.length) {
     if (isUnderdarkBiome(world.options.biome) || farms.some(f => f.cultivation === 'fungal')) out += `<defs><pattern id="p-fungal-farm" patternUnits="userSpaceOnUse" width="8" height="8">${underdarkMarkSvg('garden', 4, 4, 1.7, pal)}</pattern></defs>`;
     out += `<g class="farmsteads">`;
     for (const f of farms) {
       const dl = f.drive.length > 1 ? Math.hypot(f.drive[f.drive.length - 1].x - f.drive[0].x, f.drive[f.drive.length - 1].y - f.drive[0].y) : 0;
-      if (dl > 0.5) out += `<path d="${pathD(f.drive, false)}" stroke="${pal.trackFill}" stroke-width="${f1(Math.min(2 * s, 3.2))}" stroke-opacity="0.7" stroke-linecap="butt"/>`;
+      if (layers.roads && dl > 0.5) out += `<path d="${pathD(f.drive, false)}" stroke="${pal.trackFill}" stroke-width="${f1(Math.min(2 * s, 3.2))}" stroke-opacity="0.7" stroke-linecap="butt"/>`;
+      if (!layers.city) continue;
       if (!f.lot) {
         out += `<path d="${pathD(f.yard, true)}" fill="${pal.farmYard}" fill-opacity="0.9" stroke="${pal.farmInk}" stroke-width="${f1(0.5 * s)}" stroke-dasharray="${f1(2.5 * s)} ${f1(1.5 * s)}"/>`;
         out += `<g fill="${pal.farmRoof}" stroke="${pal.farmInk}" stroke-width="${f1(0.7 * s)}">${f.buildings.map((b) => `<path d="${pathD(b, true)}"/>`).join('')}</g>`;
@@ -252,7 +253,7 @@ export function roadsLayer(world: World, pal: Palette, u: number, brushes?: SvgB
     }
     out += '</g>';
   }
-  for (const k of kinds) {
+  for (const k of layers.roads ? kinds : []) {
     const d = by(k);
     if (!d) continue;
     // hierarchy: cased major roads, thinner minor roads, tracks as thin dashed earth lines
@@ -266,7 +267,7 @@ export function roadsLayer(world: World, pal: Palette, u: number, brushes?: SvgB
   }
   // bridges
   const br = world.bridges ?? [];
-  if (br.length) {
+  if (layers.roads && br.length) {
     out += '<g class="layer-bridges">';
     for (const b of br) {
       // (small town bridges, footbridges, arches and fords, are drawn at true size over the street space: urban.ts)

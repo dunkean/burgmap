@@ -17,6 +17,7 @@ import { plotLines } from './plotLines';
 import { underdarkMarkSvg } from './underdark';
 import { servedStreetPath } from '../gen/urban/openTails';
 import type { UrbanStreet } from '../gen/types';
+import type { ExportLayers } from './exportLayers';
 
 const phD = (p: PolyH): string => pathD(p.outer, true) + p.holes.map((h) => pathD(h, true)).join('');
 
@@ -213,13 +214,15 @@ function cultureUnderlay(ub: NonNullable<World['urban']>, pal: Palette, lw: (m: 
 }
 
 /** Plan lines (enclosure walls, ward walls, prakaras, hedges, steps) and tree canopies (drawn over the buildings). */
-function cultureOverlay(ub: NonNullable<World['urban']>, pal: Palette, lw: (m: number, px: number) => string, brushes?: SvgBrushes): string {
+const STREET_LINES = new Set(['track', 'footpath', 'footbridge']);
+function cultureOverlay(ub: NonNullable<World['urban']>, pal: Palette, lw: (m: number, px: number) => string, brushes?: SvgBrushes, streets = true): string {
   const U = pal.urban;
   const open = !!ub.renderHints?.openGround;
   let s = '';
   const byKind = new Map<string, string[]>();
   for (const l of ub.lines ?? []) {
     if (l.kind === 'moat' || l.kind === 'canal') continue;
+    if (!streets && STREET_LINES.has(l.kind)) continue;
     const k = l.kind;
     if (!byKind.has(k)) byKind.set(k, []);
     byKind.get(k)!.push(pathD(l.path, !!l.closed));
@@ -299,7 +302,7 @@ export const terraceTone = (pal: Palette): string => mixHex(pal.land.meadow, pal
  * over the terrain (the land-use tints), gardens and greens their own tints; the trampled ground round the
  * buildings and the paths are earth; plazas and compound grounds stay paved.
  */
-function openGroundSvg(ub: NonNullable<World['urban']>, pal: Palette, lw: (m: number, px: number) => string, biome?: string): string {
+function openGroundSvg(ub: NonNullable<World['urban']>, pal: Palette, lw: (m: number, px: number) => string, biome?: string, streets = true): string {
   const U = pal.urban;
   const mul = pal.landBlend === 'multiply' ? ' style="mix-blend-mode:multiply"' : '';
   let s = `<defs><pattern id="p-utuft" patternUnits="userSpaceOnUse" width="11" height="9">` + (isUnderdarkBiome(biome) ? underdarkMarkSvg('meadow', 2.5, 3.5, 1.4, pal) + underdarkMarkSvg('meadow', 8, 7, 1.4, pal) : `<path d="M2.5 4.5l-0.8-1.9M2.5 4.5v-2.1M2.5 4.5l0.8-1.9M8 8.4l-0.8-1.9M8 8.4l0.8-1.9" stroke="${pal.grass}" stroke-width="0.35" fill="none" stroke-linecap="round" opacity="0.75"/>`) + '</pattern></defs>';
@@ -334,7 +337,7 @@ function openGroundSvg(ub: NonNullable<World['urban']>, pal: Palette, lw: (m: nu
   // the trampled ground round the buildings
   const earth = ub.landmarks.filter((l) => l.kind === 'yard-earth' || l.kind === 'midden').map((l) => pathD(l.poly, true)).join('');
   if (earth) s += `<path class="u-yard-earth" d="${earth}" fill="${yardEarthTone(pal)}" fill-opacity="0.85"/>`;
-  return s + openGroundPathsSvg(ub, pal);
+  return s + (streets ? openGroundPathsSvg(ub, pal) : '');
 }
 
 function openGroundPathsSvg(ub: NonNullable<World['urban']>, pal: Palette, sand = false, sources: UrbanStreet[] = ub.streets): string {
@@ -360,25 +363,51 @@ function openGroundPathsSvg(ub: NonNullable<World['urban']>, pal: Palette, sand 
   return s;
 }
 
-export function urbanLayer(world: World, pal: Palette, u: number, debug: boolean, fringe: CountryFringe = { bands: [], ground: [], streets: [] }, raster = true, landuse = world.options.landuse, naturalGround: PolyH[] = [], contours = world.options.contours, landscapeGround: PolyH[] = [], appearance?: GroundAppearance, cover: LandArea[] = [], brushes?: SvgBrushes, forestMask = ''): string {
-  if (debug) return urbanDebugLayer(world, u);
+function boardwalksSvg(ub: NonNullable<World['urban']>, pal: Palette): string {
+  let s = '<g class="u-boardwalks" fill="none" stroke-linecap="butt" stroke-linejoin="round">';
+  for (const st of ub.streets) s += `<path d="${pathD(st.path, false)}" stroke="${pal.bridgeInk}" stroke-width="${f1(Math.max(1.6, st.width + 0.2))}"/>`;
+  for (const st of ub.streets) s += `<path d="${pathD(st.path, false)}" stroke="${pal.bridgeDeck}" stroke-width="${f1(Math.max(1, st.width - 0.7))}"/>`;
+  return s + '</g>';
+}
+
+export function urbanLayer(world: World, pal: Palette, u: number, debug: boolean, fringe: CountryFringe = { bands: [], ground: [], streets: [] }, raster = true, landuse = world.options.landuse, naturalGround: PolyH[] = [], contours = world.options.contours, landscapeGround: PolyH[] = [], appearance?: GroundAppearance, cover: LandArea[] = [], brushes?: SvgBrushes, forestMask = '', layers: Partial<ExportLayers> = {}): string {
+  if (debug) return layers.city !== false ? urbanDebugLayer(world, u) : '';
   const ub = world.urban;
   if (!ub) return '';
   const U = pal.urban;
   const material = appearance ?? groundAppearance(ub, world);
+  const city = layers.city !== false, streets = layers.streets !== false;
+  const waterKinds = new Set(['chinampa-canal', 'baray', 'pond']);
+  const waterLines = new Set(['moat', 'canal']);
+  const underlay = { ...ub,
+    parcels: city ? ub.parcels : [],
+    landmarks: ub.landmarks.filter((l) => waterKinds.has(l.kind) ? layers.water !== false : city),
+    lines: (ub.lines ?? []).filter((l) => waterLines.has(l.kind) ? layers.water !== false : city),
+    water: layers.water !== false ? ub.water : [],
+  };
   const lw = (m: number, px: number) => f1(Math.max(m, px * u)); // meters, with a floor in pixels of a 1600 px render
   let s = `<g class="layer-urban" stroke-linejoin="round">` + patterns(pal, world.options.biome);
   const stilts = !!ub.renderHints?.stilts;
   const open = !!ub.renderHints?.openGround && !stilts;
+  if (!city) {
+    if (streets) {
+      if (!open && !stilts) {
+        const space = ub.quarters.flatMap((q) => q.streetSpace);
+        if (space.length) s += `<path class="u-streets" d="${space.map(phD).join('')}" fill-rule="evenodd" fill="${U.street}"/>`;
+      }
+      s += stilts ? boardwalksSvg(ub, pal) : openGroundPathsSvg(ub, pal, material.earthStreets);
+      s += townBridgesSvg(world.bridges ?? [], pal);
+      s += cultureOverlay({ ...ub, lines: (ub.lines ?? []).filter((l) => STREET_LINES.has(l.kind)), trees: [] }, pal, lw, brushes);
+    }
+    s += cultureUnderlay(underlay, pal, lw);
+    return s + '</g>';
+  }
+
   // street space: the quarters (blocks are drawn on top, so what remains visible is exactly quarter \ blocks);
   // a stilt town has no ground: its boardwalks are drawn as planks over the water and the marsh
-  if (open) s += openGroundSvg(ub, pal, lw, world.options.biome);
-  else if (stilts) {
-    s += '<g class="u-boardwalks" fill="none" stroke-linecap="butt" stroke-linejoin="round">';
-    for (const st of ub.streets) s += `<path d="${pathD(st.path, false)}" stroke="${pal.bridgeInk}" stroke-width="${f1(Math.max(1.6, st.width + 0.2))}"/>`;
-    for (const st of ub.streets) s += `<path d="${pathD(st.path, false)}" stroke="${pal.bridgeDeck}" stroke-width="${f1(Math.max(1, st.width - 0.7))}"/>`;
-    s += '</g>';
-  } else s += `<path class="u-streets" d="${ub.quarters.map((q) => pathD(orientPos(q.poly.outer), true) + q.poly.holes.map((h) => pathD(orientPos(h).slice().reverse(), true)).join('')).join('')}" fill-rule="nonzero" fill="${U.street}"/>`;
+  if (open) s += openGroundSvg(ub, pal, lw, world.options.biome, streets);
+  else if (stilts && streets) s += boardwalksSvg(ub, pal);
+  else if (streets) s += `<path class="u-streets" d="${ub.quarters.map((q) => pathD(orientPos(q.poly.outer), true) + q.poly.holes.map((h) => pathD(orientPos(h).slice().reverse(), true)).join('')).join('')}" fill-rule="nonzero" fill="${U.street}"/>`;
   if (!open) {
   const places = ub.parcels.filter((p) => p.use === 'place' || p.use === 'market' || p.use === 'quay' || p.use === 'pier' || p.use === 'slipway' || p.use === 'timber-yard' || p.use === 'mill-yard' || p.use === 'mill' || p.use === 'tannery-yard' || p.use === 'bridge');
   if (places.length) {
@@ -408,7 +437,7 @@ export function urbanLayer(world: World, pal: Palette, u: number, debug: boolean
   }
   }
   // Restore countryside over the two urban ground fills, before parcel hairlines, water and roofs; dedicated grounds are excluded.
-  if (fringe.bands.some((b) => b.length)) {
+  if ((layers.terrain !== false || landuse) && fringe.bands.some((b) => b.length)) {
     const kind = countryKind(world.options.biome);
     s += `<defs>${countryPatternSvg(pal, world.options.biome)}<g id="country-fringe-streets" fill="none" stroke-linecap="round" stroke-linejoin="round">`;
     for (const st of fringe.streets) s += `<path d="${pathD(st.path, false)}" stroke="${U.street}" stroke-width="${f1(fringeStreetWidth(st.width))}"/>`;
@@ -419,31 +448,32 @@ export function urbanLayer(world: World, pal: Palette, u: number, debug: boolean
       const d = fringePath(pieces), id = `country-fringe-${i}`;
       s += `<defs><clipPath id="${id}"><path d="${d}" clip-rule="evenodd"/></clipPath></defs><g clip-path="url(#${id})">`;
       const alpha = FRINGE_PAINT[i];
-      s += raster ? `<use href="#terrain-ground" xlink:href="#terrain-ground" opacity="${alpha}"/>` : `<path d="${d}" fill="${pal.paper}" opacity="${alpha}" fill-rule="evenodd"/>`;
+      s += raster ? `<use href="#terrain-ground" xlink:href="#terrain-ground" opacity="${alpha}"/>` : layers.background !== false ? `<path d="${d}" fill="${pal.paper}" opacity="${alpha}" fill-rule="evenodd"/>` : '';
       if (landuse) {
         s += `<path d="${d}" fill="${pal.land[kind]}" fill-opacity="${pal.landOpacity * alpha}" fill-rule="evenodd"${pal.landBlend === 'multiply' ? ' style="mix-blend-mode:multiply"' : ''}/>`;
         if (pal.tex[kind]) s += `<path d="${d}" fill="url(#p-country-ground)" opacity="${alpha}" fill-rule="evenodd"/>`;
       }
       s += '</g>';
     });
-    s += `<defs><clipPath id="country-street-clip"><path d="${fringePath(fringe.ground)}" clip-rule="evenodd"/></clipPath></defs><use href="#country-fringe-streets" xlink:href="#country-fringe-streets" clip-path="url(#country-street-clip)"/></g>`;
+    if (streets) s += `<defs><clipPath id="country-street-clip"><path d="${fringePath(fringe.ground)}" clip-rule="evenodd"/></clipPath></defs><use href="#country-fringe-streets" xlink:href="#country-fringe-streets" clip-path="url(#country-street-clip)"/>`;
+    s += '</g>';
   }
   // An opaque replay of the actual landscape replaces uniform residential/shanty ground. Street space and
   // dedicated paving/gardens are outside this mask; a real wall is drawn afterwards over the same land material.
   const restoredGround = (landscapeGround.length ? landscapeGround : naturalGround).concat(cover.map((a) => ({ outer: a.poly, holes: a.holes ?? [] })));
-  if (restoredGround.length) {
+  if ((layers.terrain !== false || landuse || contours) && restoredGround.length) {
     const name = landscapeGround.length ? 'landscape-ground' : 'natural-ground';
     const d = restoredGround.map((p) => pathD(orientPos(p.outer), true) + p.holes.map((h) => pathD(orientPos(h).slice().reverse(), true)).join('')).join('');
     s += `<defs><clipPath id="urban-${name}"><path d="${d}" clip-rule="nonzero"/></clipPath></defs><g class="u-${name}" clip-path="url(#urban-${name})">`;
-    s += raster ? '<use href="#terrain-ground" xlink:href="#terrain-ground"/>' : `<path d="${d}" fill="${pal.paper}" fill-rule="nonzero"/>`;
+    s += raster ? '<use href="#terrain-ground" xlink:href="#terrain-ground"/>' : layers.background !== false ? `<path d="${d}" fill="${pal.paper}" fill-rule="nonzero"/>` : '';
     if (contours) s += '<use href="#terrain-contour-ground" xlink:href="#terrain-contour-ground"/>';
     if (landuse) s += naturalLanduseLayer(world, pal, u, restoredGround, cover, brushes, forestMask);
     // Regional roads retain their exact style/export width where it exceeds the physical occupation guard.
-    s += '<use href="#regional-road-ground" xlink:href="#regional-road-ground"/>';
+    if (layers.roads !== false) s += '<use href="#regional-road-ground" xlink:href="#regional-road-ground"/>';
     // Native paths were painted before the opaque landscape. Replay only their overwritten pixels under this
     // exact clip, so paths on dedicated plazas/yards retain their previous compositing and real material.
-    if (open && !material.earthStreets && landscapeGround.length) s += openGroundPathsSvg(ub, pal);
-    if (material.earthStreets && landscapeGround.length) s += openGroundPathsSvg(ub, pal, true, material.streetSources);
+    if (streets && open && !material.earthStreets && landscapeGround.length) s += openGroundPathsSvg(ub, pal);
+    if (streets && material.earthStreets && landscapeGround.length) s += openGroundPathsSvg(ub, pal, true, material.streetSources);
     s += '</g>';
   }
   if (!open) {
@@ -451,7 +481,7 @@ export function urbanLayer(world: World, pal: Palette, u: number, debug: boolean
   const plotD = plotLines(ub).map((line) => pathD(line, false)).join('');
   if (plotD) s += `<path class="u-plots" d="${plotD}" fill="none" stroke="${U.plotLine}" stroke-opacity="${f1(U.plotAlpha * 0.75)}" stroke-width="${lw(U.plotW, 0.05)}"/>`;
   }
-  s += cultureUnderlay(ub, pal, lw);
+  s += cultureUnderlay(underlay, pal, lw);
   s += buildingsSvg(ub, U, lw);
   // courtyard houses: the patio drawn as a paved court with a crisp inner edge, so the courts read at town scale
   const courts = ub.buildings.flatMap((b) => (b.kind === 'house' && !earthCourt(b, world) && b.courtyards?.length ? b.courtyards : []));
@@ -459,7 +489,7 @@ export function urbanLayer(world: World, pal: Palette, u: number, debug: boolean
     const d = courts.map((c) => pathD(c, true)).join('');
     s += `<g class="u-patios"><path d="${d}" fill="${U.place}" stroke="${U.massEdge}" stroke-width="${lw(0.45, 0.35)}"/><path d="${d}" fill="url(#p-upave)"/></g>`;
   }
-  s += cultureOverlay(ub, pal, lw, brushes);
+  s += cultureOverlay(ub, pal, lw, brushes, streets);
   // main streets keep a legible minimum width at small scales (drawn over the street space only where wider)
   // (not the village and hamlet streets: widened to the town's minimum they become long white strokes on the map)
   const secondary = new Set<unknown>();
@@ -468,14 +498,14 @@ export function urbanLayer(world: World, pal: Palette, u: number, debug: boolean
   const minW = 2.4 * u;
   const earthSources = new Set(material.streetSources);
   const wide = mains.filter((st) => st.width < minW && !earthSources.has(st));
-  if (wide.length && !open) {
+  if (streets && wide.length && !open) {
     if (!stilts) s += `<defs><clipPath id="urban-stroke-clip"><path d="${urbanStrokeSpace(ub).map(phD).join('')}" clip-rule="nonzero"/></clipPath></defs><g clip-path="url(#urban-stroke-clip)">`;
     const indices = new Map(ub.streets.map((st, i) => [st, i]));
     s += `<path class="u-main-streets"${stilts || !(world.terrain.coastline.length || world.terrain.lakes.some((l) => l.length >= 3)) ? '' : ' clip-path="url(#landclip)"'} d="${wide.map((st) => pathD(servedStreetPath(ub, indices.get(st)!), false)).join('')}" fill="none" stroke="${U.street}" stroke-width="${f1(minW)}" stroke-linecap="round" stroke-linejoin="round"/>`;
     if (!stilts) s += '</g>';
   }
   // small bridges over the streams (true size, by kind: footbridges, arches, fords), over the street space
-  s += townBridgesSvg(world.bridges ?? [], pal);
+  if (streets) s += townBridgesSvg(world.bridges ?? [], pal);
   for (const w of ub.walls ?? []) s += wallSvg(w, U.wall, U.wallFill, U.wallScale, U.towerScale);
   s += '</g>';
   if (brushes) s = s.replaceAll('url(#p-ugarden)', 'url(#' + brushes.pattern('garden') + ')');

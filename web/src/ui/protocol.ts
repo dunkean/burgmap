@@ -1,3 +1,4 @@
+import type { ExportLayers } from '../render/exportLayers';
 /**
  * Messages between the main thread (M), the generation worker (G) and the render worker (R).
  *
@@ -17,7 +18,7 @@ import type { MapInformation } from '../render/legend';
 import type { DebugStage } from '../gen/debugPipeline';
 
 /** Display-only options (changing them never regenerates the world). */
-export interface DisplayOpts { style: MapStyle; contours?: boolean; landuse?: boolean; labels?: boolean; legend?: boolean; painted?: boolean }
+export interface DisplayOpts { layers?: Partial<ExportLayers>; style: MapStyle; contours?: boolean; landuse?: boolean; labels?: boolean; legend?: boolean; painted?: boolean }
 
 // ---- M -> G ----
 export interface GRun { type: 'run'; id: number; options: Options; debugStage?: DebugStage; /** snapshot channel to the render worker */ port: MessagePort }

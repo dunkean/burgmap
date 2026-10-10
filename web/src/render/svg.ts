@@ -27,8 +27,11 @@ import { svgBrushes } from './brushSvg';
 import type { BrushSources } from './brushes';
 import { supportsPaintedBiome } from './brushes';
 import type { Measure } from './mapLabels';
+import type { ExportLayers } from './exportLayers';
 
 export interface RenderOptions {
+  /** Independent export layers; omitted flags stay visible. */
+  layers?: Partial<ExportLayers>;
   /** Actual export width in pixels; sets decorative hairline weight. Defaults to the 1600 px design size, matching the default bounded hairline scale. */
   width?: number;
   style?: MapStyle; contours?: boolean; raster?: boolean; landuse?: boolean; debug?: boolean;
@@ -89,6 +92,10 @@ export function renderSvg(world0: World, opts: RenderOptions = {}): string {
   const width = opts.width !== undefined && Number.isFinite(opts.width) ? Math.max(1, opts.width) : 1600;
   const scale = width / S;
   const t = world.terrain;
+  const layers = opts.layers ?? {};
+  const raster = layers.terrain !== false && opts.raster !== false;
+  const contours = layers.terrain !== false && (opts.contours ?? world.options.contours);
+  const landuse = layers.landuse !== false && (opts.landuse ?? world.options.landuse);
   const painted = opts.brushes && supportsPaintedBiome(world.options.biome) ? svgBrushes(world, pal, opts.brushes) : undefined;
   const parts: string[] = [];
   const clearings = opts.debug ? [] : worldForestClearings(world0);
@@ -97,18 +104,18 @@ export function renderSvg(world0: World, opts: RenderOptions = {}): string {
   if (clearings.length) parts.push(`<defs><mask id="forest-clearance" maskUnits="userSpaceOnUse" x="0" y="0" width="${S}" height="${S}" style="mask-type:luminance"><rect width="${S}" height="${S}" fill="white"/>${clearings.map((p) => `<path d="${pathD(orientPos(p.outer), true) + p.holes.map((h) => pathD(orientPos(h).slice().reverse(), true)).join('')}" fill="black" fill-rule="nonzero"/>`).join('')}</mask></defs>`);
   parts.push(`<defs><clipPath id="mapclip"><rect x="0" y="0" width="${S}" height="${S}"/></clipPath></defs>`);
   if (painted) parts.push(painted.defs);
-  parts.push(`<rect x="0" y="0" width="${S}" height="${S}" fill="${pal.paper}"/>`);
+  if (layers.background !== false) parts.push(`<rect x="0" y="0" width="${S}" height="${S}" fill="${pal.paper}"/>`);
   parts.push('<g clip-path="url(#mapclip)">');
 
-  if (opts.raster !== false) {
+  if (raster) {
     const r = renderTerrainRaster(world, pal);
     parts.push(`<g class="layer-terrain"><image id="terrain-ground" x="0" y="0" width="${S}" height="${S}" preserveAspectRatio="none" xlink:href="${pngDataUrl(r.png)}"/></g>`);
   }
   if (t.caverns) parts.push(`<defs><clipPath id="cavern-floor"><path d="${cavernPathD(t.caverns.floor)}" clip-rule="evenodd"/></clipPath></defs><g clip-path="url(#cavern-floor)">`);
-  if (pal.grid) parts.push(gridSvg(world, pal, u));
-  if (opts.contours ?? world.options.contours) parts.push(contourLayer(world, pal, u, scale));
+  if (layers.decor !== false && pal.grid) parts.push(gridSvg(world, pal, u));
+  if (contours) parts.push(contourLayer(world, pal, u, scale));
 
-  if (opts.landuse ?? world.options.landuse) parts.push(landuseLayer(world, pal, u, scale, painted?.brushes, forestMask));
+  if (landuse) parts.push(landuseLayer(world, pal, u, scale, painted?.brushes, forestMask));
 
   // rivers: casing first, then fill so confluences merge cleanly
   const minW = 1.1 * u;
@@ -121,7 +128,7 @@ export function renderSvg(world0: World, opts: RenderOptions = {}): string {
     });
     ribbons.push(pathD(offsetRibbon(r.path, w), true));
   }
-  if (ribbons.length) {
+  if (layers.water !== false && ribbons.length) {
     parts.push(`<g class="layer-rivers">` +
       `<g fill="${pal.riverEdge}" stroke="${pal.riverEdge}" stroke-width="${f1(1.7 * u)}" stroke-linejoin="round">${ribbons.map((d) => `<path d="${d}"/>`).join('')}</g>` +
       `<g fill="${pal.riverFill}">${ribbons.map((d) => `<path d="${d}"/>`).join('')}</g></g>`);
@@ -140,28 +147,28 @@ export function renderSvg(world0: World, opts: RenderOptions = {}): string {
   }
   water += waterLinesSvg(world, pal);
   water += '</g>';
-  parts.push(water);
+  if (layers.water !== false) parts.push(water);
 
   // roads and tracks never spill over the sea or the lakes (bridges over rivers are not masked)
   const lakeD = t.lakes.filter((p) => p.length >= 3).map((p) => pathD(p, true)).join('');
   const masked = seaD.length > 0 || lakeD.length > 0;
   if (masked) parts.push(`<clipPath id="landclip"><path d="M-50 -50H${S + 50}V${S + 50}H-50Z${seaD.join('')}${lakeD}" clip-rule="evenodd"/></clipPath>`);
-  parts.push(`<g id="regional-road-ground"${masked ? ' clip-path="url(#landclip)"' : ''}>${roadsLayer(world, pal, u, painted?.brushes)}</g>`);
-  if (world.urban) {
+  parts.push(`<g id="regional-road-ground"${masked ? ' clip-path="url(#landclip)"' : ''}>${roadsLayer(world, pal, u, painted?.brushes, { roads: layers.roads !== false, city: layers.city !== false })}</g>`);
+  if (world.urban && (layers.city !== false || layers.streets !== false || layers.water !== false)) {
     const landscape = world0.landuse?.landscapeGround !== undefined;
-    parts.push(urbanLayer(world, pal, u, !!opts.debug, opts.debug || landscape ? { bands: [], ground: [], streets: [] } : countrysideFringe(world0), opts.raster !== false, opts.landuse ?? world.options.landuse, opts.debug || landscape ? [] : (world0.landuse?.naturalGround ?? []), opts.contours ?? world.options.contours, opts.debug ? [] : currentLandscapeGround(world0, true), worldGroundAppearance(world0), opts.debug ? [] : worldCampCover(world0), painted?.brushes, forestMask));
-    if (!opts.debug) { parts.push(shadowSvg(world, pal, u)); parts.push(litSvg(world, pal, u)); }
-  } else parts.push(siteLayer(world, pal, u, !!opts.debug));
+    parts.push(urbanLayer(world, pal, u, !!opts.debug, opts.debug || landscape ? { bands: [], ground: [], streets: [] } : countrysideFringe(world0), raster, landuse, opts.debug || landscape ? [] : (world0.landuse?.naturalGround ?? []), contours, opts.debug ? [] : currentLandscapeGround(world0, true), worldGroundAppearance(world0), opts.debug ? [] : worldCampCover(world0), painted?.brushes, forestMask, layers));
+    if (!opts.debug && layers.city !== false) { parts.push(shadowSvg(world, pal, u)); parts.push(litSvg(world, pal, u)); }
+  } else if (layers.city !== false) parts.push(siteLayer(world, pal, u, !!opts.debug));
 
-  if (t.caverns && (opts.landuse ?? world.options.landuse)) parts.push(cavernFungalRoomsSvg(world, pal));
-  if (t.caverns) { parts.push('</g>'); parts.push(cavernWallsSvg(world, pal, opts.raster !== false)); }
+  if (t.caverns && landuse) parts.push(cavernFungalRoomsSvg(world, pal));
+  if (t.caverns) { parts.push('</g>'); if (layers.terrain !== false) parts.push(cavernWallsSvg(world, pal, raster)); }
   parts.push('</g>');
-  if (opts.labels ?? world.options.labels !== false) parts.push(labelsSvg(world, pal, opts.measure, !!(opts.legend ?? world.options.legend)));
-  parts.push(decor(world, pal, u));
+  if (layers.labels !== false && (opts.labels ?? world.options.labels !== false)) parts.push(labelsSvg(world, pal, opts.measure, !!(opts.legend ?? world.options.legend)));
+  if (layers.decor !== false) parts.push(decor(world, pal, u));
   const fam = FONT_STACKS[style] ?? pal.fontFamily;
   const pm = panelMargin(pal) * u;
-  if (opts.cartouche !== false) parts.push(panelSvg(cartoucheModel(world, pal, 1 / u), pm, pm, u, fam, 'cartouche'));
-  if (opts.legend ?? !!world.options.legend) {
+  if (layers.decor !== false && opts.cartouche !== false) parts.push(panelSvg(cartoucheModel(world, pal, 1 / u), pm, pm, u, fam, 'cartouche'));
+  if (layers.decor !== false && (opts.legend ?? !!world.options.legend)) {
     const lg = legendModel(world, pal);
     parts.push(panelSvg(lg, pm, S - pm - lg.h * u, u, fam, 'legend'));
   }

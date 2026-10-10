@@ -37,6 +37,7 @@ import { FrameHandoff } from './frameHandoff';
 import { canWorkerExport, legacyGenerationResponse } from './generationMessages';
 import { exportPng } from './pngExport';
 import { exportSnapshot, type ExportSnapshot } from './exportSnapshot';
+import { createExportLayerControls } from './exportLayers';
 import { initSettlementsUI, showSettlementWarnings } from './settlementsPanel';
 import { initPlanEditor } from './planEditor';
 import { initConfiguration } from './configuration';
@@ -999,6 +1000,7 @@ function focusSettlement(s: SettlementMeta): void {
 // CANVAS-VIEWER (end viewer)
 
 // ---------- export ----------
+const selectedExportLayers = createExportLayerControls($('exportLayers'));
 /** Save through the Artifact viewer's downloads capability when present, else a plain download. */
 async function exportFile(name: string, data: Blob | string, mime: string): Promise<void> {
   try {
@@ -1013,7 +1015,7 @@ function captureExport(): ExportSnapshot {
   if (busyEl.classList.contains('on') || currentKey !== lastGenKey) throw new Error('the map is still being generated');
   if (renderFailedGen === reqId || (backend && !finalFrame.ready)) throw new Error('the requested map has not been presented');
   if (paintedTextures && brushStatus === 'loading') throw new Error('painted textures are still loading');
-  const snapshot = exportSnapshot(opts, backend ? null : presentedWorld, reqId, backend ? handoff.displayedGen : mainPresentedGen);
+  const snapshot = exportSnapshot(opts, backend ? null : presentedWorld, reqId, backend ? handoff.displayedGen : mainPresentedGen, selectedExportLayers());
   if (paintedTextures && brushStatus === 'ready') { snapshot.brushes = BRUSH_SOURCES; snapshot.display.painted = true; }
   return snapshot;
 }
@@ -1047,7 +1049,7 @@ async function buildExport(snapshot: ExportSnapshot, kind: 'svg' | 'json', full 
       return measureCtx.measureText(text).width;
     };
     blob = kind === 'svg'
-      ? new Blob([renderSvg(world, { width, style: d.style, contours: d.contours, landuse: d.landuse, labels: d.labels !== false, legend: !!d.legend, measure, brushes: d.painted ? snapshot.brushes : undefined })], { type: 'image/svg+xml' })
+      ? new Blob([renderSvg(world, { width, style: d.style, layers: d.layers, contours: d.contours, landuse: d.landuse, labels: d.labels !== false, legend: !!d.legend, measure, brushes: d.painted ? snapshot.brushes : undefined })], { type: 'image/svg+xml' })
       : new Blob([worldToJson(world)], { type: 'application/json' });
   }
   rec(kind === 'svg' ? 'exportSvg' : 'exportJson', pnow() - t);

@@ -289,7 +289,15 @@
         <form id="openIdForm" class="row" style="margin-top:8px"><input id="openIdInput" type="text" spellcheck="false" placeholder="Paste a map ID or link" aria-label="Map ID or link to open"><button id="openId" type="submit">Open</button></form>
         <div id="openIdState" class="hint"></div>
         <div id="shareState" class="hint"></div>
-        <h3>Download</h3><div class="btns"><button id="exportSvg">Export SVG</button><button id="exportPng">Export PNG</button><button id="exportJson" class="secondary" title="World data (options + vector layers, no rasters) for other tools">Export JSON</button><button id="exportSvgFull" class="secondary" hidden title="Megacity: generate the detail of every quarter, then export the SVG (slow)">SVG, all quarters (slow)</button></div>
+        <h3>Download</h3>
+        <fieldset id="exportLayers" style="border:0;padding:0;margin:0 0 10px;min-width:0">
+          <legend>SVG / PNG layers</legend>
+          <label for="exportPreset">Selection</label>
+          <select id="exportPreset"><option value="all">Complete map</option><option value="city">Town only</option><option value="terrain">Relief only</option><option value="roads">Roads &amp; streets only</option><option value="custom">Custom layers</option></select>
+          <div class="g2" style="margin-top:6px"></div>
+          <div class="hint">Combine layers freely. Turn off Paper background for transparency. Relief includes a filled terrain image. JSON always contains all world data.</div>
+        </fieldset>
+        <div class="btns"><button id="exportSvg">Export SVG</button><button id="exportPng">Export PNG</button><button id="exportJson" class="secondary" title="World data (options + vector layers, no rasters) for other tools">Export JSON</button><button id="exportSvgFull" class="secondary" hidden title="Megacity: generate the detail of every quarter, then export the SVG (slow)">SVG, all quarters (slow)</button></div>
       </div></div></details>
     </div>
     <nav id="rail" class="hud glass" aria-label="Map actions">
